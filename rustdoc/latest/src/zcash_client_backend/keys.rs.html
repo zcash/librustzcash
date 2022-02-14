@@ -208,6 +208,7 @@
 <span id="203">203</span>
 <span id="204">204</span>
 <span id="205">205</span>
+<span id="206">206</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Helper functions for managing light client key material.</span>
 <span class="kw">use</span> <span class="ident">zcash_primitives</span>::{<span class="ident">consensus</span>, <span class="ident">zip32::AccountId</span>};
 
@@ -236,7 +237,7 @@
     <span class="doccomment">///     keys::sapling,</span>
     <span class="doccomment">/// };</span>
     <span class="doccomment">///</span>
-    <span class="doccomment">/// let extsk = sapling::spending_key(&amp;[0; 32][..], COIN_TYPE, AccountId(0));</span>
+    <span class="doccomment">/// let extsk = sapling::spending_key(&amp;[0; 32][..], COIN_TYPE, AccountId::from(0));</span>
     <span class="doccomment">/// ```</span>
     <span class="doccomment">/// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">spending_key</span>(<span class="ident">seed</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">coin_type</span>: <span class="ident">u32</span>, <span class="ident">account</span>: <span class="ident">AccountId</span>) -&gt; <span class="ident">ExtendedSpendingKey</span> {
@@ -245,11 +246,11 @@
         }
 
         <span class="ident">ExtendedSpendingKey::from_path</span>(
-            <span class="kw-2">&amp;</span><span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span><span class="ident">seed</span>),
+            <span class="kw-2">&amp;</span><span class="ident">ExtendedSpendingKey::master</span>(<span class="ident">seed</span>),
             <span class="kw-2">&amp;</span>[
                 <span class="ident">ChildIndex::Hardened</span>(<span class="number">32</span>),
                 <span class="ident">ChildIndex::Hardened</span>(<span class="ident">coin_type</span>),
-                <span class="ident">ChildIndex::Hardened</span>(<span class="ident">account</span>.<span class="number">0</span>),
+                <span class="ident">ChildIndex::Hardened</span>(<span class="ident">account</span>.<span class="ident">into</span>()),
             ],
         )
     }
@@ -396,20 +397,21 @@
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="attribute">#[<span class="ident">should_panic</span>]</span>
     <span class="kw">fn</span> <span class="ident">spending_key_panics_on_short_seed</span>() {
-        <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">31</span>][..], <span class="number">0</span>, <span class="ident">AccountId</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="kw">_</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">31</span>][..], <span class="number">0</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>));
     }
 
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
     <span class="attribute">#[<span class="ident">test</span>]</span>
     <span class="kw">fn</span> <span class="ident">pk_to_taddr</span>() {
-        <span class="kw">let</span> <span class="ident">taddr</span> <span class="op">=</span> <span class="ident">legacy::keys::AccountPrivKey::from_seed</span>(<span class="kw-2">&amp;</span><span class="ident">MAIN_NETWORK</span>, <span class="kw-2">&amp;</span><span class="ident">seed</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>))
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">to_account_pubkey</span>()
-            .<span class="ident">derive_external_ivk</span>()
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">derive_address</span>(<span class="number">0</span>)
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="ident">MAIN_NETWORK</span>);
+        <span class="kw">let</span> <span class="ident">taddr</span> <span class="op">=</span>
+            <span class="ident">legacy::keys::AccountPrivKey::from_seed</span>(<span class="kw-2">&amp;</span><span class="ident">MAIN_NETWORK</span>, <span class="kw-2">&amp;</span><span class="ident">seed</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>))
+                .<span class="ident">unwrap</span>()
+                .<span class="ident">to_account_pubkey</span>()
+                .<span class="ident">derive_external_ivk</span>()
+                .<span class="ident">unwrap</span>()
+                .<span class="ident">derive_address</span>(<span class="number">0</span>)
+                .<span class="ident">unwrap</span>()
+                .<span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="ident">MAIN_NETWORK</span>);
         <span class="macro">assert_eq!</span>(<span class="ident">taddr</span>, <span class="string">&quot;t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4&quot;</span>.<span class="ident">to_string</span>());
     }
 }

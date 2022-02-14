@@ -1730,7 +1730,7 @@
         <span class="ident">ivk</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::IncomingViewingKey</span>,
         <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
     ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span> {
-        <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">plaintext</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
+        <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="self">self</span>, <span class="ident">plaintext</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
             <span class="prelude-val">Some</span>(<span class="ident">diversifier</span>.<span class="ident">g_d</span>()<span class="question-mark">?</span> <span class="op">*</span> <span class="ident">ivk</span>.<span class="number">0</span>)
         })
     }
@@ -1742,7 +1742,7 @@
         <span class="ident">ephemeral_key</span>: <span class="kw-2">&amp;</span><span class="ident">EphemeralKeyBytes</span>,
         <span class="ident">plaintext</span>: <span class="kw-2">&amp;</span><span class="ident">NotePlaintextBytes</span>,
     ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident"><span class="self">Self</span>::Note</span>, <span class="ident"><span class="self">Self</span>::Recipient</span>)<span class="op">&gt;</span> {
-        <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">&amp;</span><span class="ident">plaintext</span>.<span class="number">0</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
+        <span class="ident">sapling_parse_note_plaintext_without_memo</span>(<span class="self">self</span>, <span class="kw-2">&amp;</span><span class="ident">plaintext</span>.<span class="number">0</span>, <span class="op">|</span><span class="ident">diversifier</span><span class="op">|</span> {
             <span class="kw">if</span> (<span class="ident">diversifier</span>.<span class="ident">g_d</span>()<span class="question-mark">?</span> <span class="op">*</span> <span class="ident">esk</span>).<span class="ident">to_bytes</span>() <span class="op">==</span> <span class="ident">ephemeral_key</span>.<span class="number">0</span> {
                 <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">pk_d</span>)
             } <span class="kw">else</span> {
@@ -2072,7 +2072,7 @@
         <span class="ident">out_ciphertext</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>; <span class="ident">OUT_CIPHERTEXT_SIZE</span>],
         <span class="ident">modify_plaintext</span>: <span class="kw">impl</span> <span class="ident">Fn</span>(<span class="kw-2">&amp;mut</span> [<span class="ident">u8</span>; <span class="ident">NOTE_PLAINTEXT_SIZE</span>]),
     ) {
-        <span class="kw">let</span> <span class="ident">ock</span> <span class="op">=</span> <span class="ident">prf_ock</span>(<span class="kw-2">&amp;</span><span class="ident">ovk</span>, <span class="kw-2">&amp;</span><span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>.<span class="ident">to_repr</span>(), <span class="ident">ephemeral_key</span>);
+        <span class="kw">let</span> <span class="ident">ock</span> <span class="op">=</span> <span class="ident">prf_ock</span>(<span class="ident">ovk</span>, <span class="ident">cv</span>, <span class="kw-2">&amp;</span><span class="ident">cmu</span>.<span class="ident">to_repr</span>(), <span class="ident">ephemeral_key</span>);
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">op</span> <span class="op">=</span> [<span class="number">0</span>; <span class="ident">OUT_PLAINTEXT_SIZE</span>];
         <span class="ident">op</span>.<span class="ident">copy_from_slice</span>(<span class="kw-2">&amp;</span><span class="ident">out_ciphertext</span>[..<span class="ident">OUT_PLAINTEXT_SIZE</span>]);

@@ -206,6 +206,16 @@
 <span id="201">201</span>
 <span id="202">202</span>
 <span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Core traits and structs for Transparent Zcash Extensions.</span>
 
 <span class="kw">use</span> <span class="ident">std::fmt</span>;
@@ -282,6 +292,16 @@
     <span class="kw">pub</span> <span class="ident">extension_id</span>: <span class="ident">u32</span>,
     <span class="kw">pub</span> <span class="ident">mode</span>: <span class="ident">u32</span>,
     <span class="kw">pub</span> <span class="ident">payload</span>: <span class="ident">T</span>,
+}
+
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">Witness</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">map_payload</span><span class="op">&lt;</span><span class="ident">U</span>, <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="ident">T</span>) -&gt; <span class="ident">U</span><span class="op">&gt;</span>(<span class="self">self</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; <span class="ident">Witness</span><span class="op">&lt;</span><span class="ident">U</span><span class="op">&gt;</span> {
+        <span class="ident">Witness</span> {
+            <span class="ident">extension_id</span>: <span class="self">self</span>.<span class="ident">extension_id</span>,
+            <span class="ident">mode</span>: <span class="self">self</span>.<span class="ident">mode</span>,
+            <span class="ident">payload</span>: <span class="ident">f</span>(<span class="self">self</span>.<span class="ident">payload</span>),
+        }
+    }
 }
 
 <span class="kw">impl</span> <span class="ident">Witness</span><span class="op">&lt;</span><span class="ident">AuthData</span><span class="op">&gt;</span> {
@@ -363,7 +383,7 @@
         <span class="self">self</span>.<span class="ident">verify_inner</span>(
             <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Precondition::from_payload</span>(<span class="ident">precondition</span>.<span class="ident">mode</span>, <span class="kw-2">&amp;</span><span class="ident">precondition</span>.<span class="ident">payload</span>)<span class="question-mark">?</span>,
             <span class="kw-2">&amp;</span><span class="ident"><span class="self">Self</span>::Witness::from_payload</span>(<span class="ident">witness</span>.<span class="ident">mode</span>, <span class="kw-2">&amp;</span><span class="ident">witness</span>.<span class="ident">payload</span>.<span class="number">0</span>)<span class="question-mark">?</span>,
-            <span class="kw-2">&amp;</span><span class="ident">context</span>,
+            <span class="ident">context</span>,
         )
     }
 }

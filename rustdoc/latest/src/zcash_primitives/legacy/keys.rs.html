@@ -536,10 +536,10 @@
         <span class="ident">seed</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
         <span class="ident">account</span>: <span class="ident">AccountId</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">AccountPrivKey</span>, <span class="ident">hdwallet::error::Error</span><span class="op">&gt;</span> {
-        <span class="ident">ExtendedPrivKey::with_seed</span>(<span class="kw-2">&amp;</span><span class="ident">seed</span>)<span class="question-mark">?</span>
+        <span class="ident">ExtendedPrivKey::with_seed</span>(<span class="ident">seed</span>)<span class="question-mark">?</span>
             .<span class="ident">derive_private_key</span>(<span class="ident">KeyIndex::hardened_from_normalize_index</span>(<span class="number">44</span>)<span class="question-mark">?</span>)<span class="question-mark">?</span>
             .<span class="ident">derive_private_key</span>(<span class="ident">KeyIndex::hardened_from_normalize_index</span>(<span class="ident">params</span>.<span class="ident">coin_type</span>())<span class="question-mark">?</span>)<span class="question-mark">?</span>
-            .<span class="ident">derive_private_key</span>(<span class="ident">KeyIndex::hardened_from_normalize_index</span>(<span class="ident">account</span>.<span class="number">0</span>)<span class="question-mark">?</span>)
+            .<span class="ident">derive_private_key</span>(<span class="ident">KeyIndex::hardened_from_normalize_index</span>(<span class="ident">account</span>.<span class="ident">into</span>())<span class="question-mark">?</span>)
             .<span class="ident">map</span>(<span class="ident">AccountPrivKey</span>)
     }
 

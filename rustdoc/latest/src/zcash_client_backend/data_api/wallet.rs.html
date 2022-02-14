@@ -660,7 +660,7 @@
 <span class="doccomment">///     }</span>
 <span class="doccomment">/// };</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// let account = AccountId(0);</span>
+<span class="doccomment">/// let account = AccountId::from(0);</span>
 <span class="doccomment">/// let extsk = sapling::spending_key(&amp;[0; 32][..], COIN_TYPE, account);</span>
 <span class="doccomment">/// let to = extsk.default_address().1.into();</span>
 <span class="doccomment">///</span>
@@ -865,7 +865,7 @@
                     <span class="prelude-val">Err</span>(<span class="ident">Error::MemoForbidden</span>)
                 } <span class="kw">else</span> {
                     <span class="ident">builder</span>
-                        .<span class="ident">add_transparent_output</span>(<span class="kw-2">&amp;</span><span class="ident">to</span>, <span class="ident">payment</span>.<span class="ident">amount</span>)
+                        .<span class="ident">add_transparent_output</span>(<span class="ident">to</span>, <span class="ident">payment</span>.<span class="ident">amount</span>)
                         .<span class="ident">map_err</span>(<span class="ident">Error::Builder</span>)
                 }
             }
@@ -957,7 +957,7 @@
 {
     <span class="comment">// Check that the ExtendedSpendingKey we have been given corresponds to the</span>
     <span class="comment">// ExtendedFullViewingKey for the account we are spending from.</span>
-    <span class="kw">if</span> <span class="op">!</span><span class="ident">wallet_db</span>.<span class="ident">is_valid_account_extfvk</span>(<span class="ident">account</span>, <span class="kw-2">&amp;</span><span class="ident">extfvk</span>)<span class="question-mark">?</span> {
+    <span class="kw">if</span> <span class="op">!</span><span class="ident">wallet_db</span>.<span class="ident">is_valid_account_extfvk</span>(<span class="ident">account</span>, <span class="ident">extfvk</span>)<span class="question-mark">?</span> {
         <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">E::from</span>(<span class="ident">Error::InvalidExtSk</span>(<span class="ident">account</span>)));
     }
 

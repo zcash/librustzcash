@@ -580,7 +580,7 @@
 {
     <span class="kw">match</span> <span class="ident">bech32::decode</span>(<span class="ident">s</span>)<span class="question-mark">?</span> {
         (<span class="ident">decoded_hrp</span>, <span class="ident">data</span>, <span class="ident">Variant::Bech32</span>) <span class="kw">if</span> <span class="ident">decoded_hrp</span> <span class="op">==</span> <span class="ident">hrp</span> =&gt; {
-            <span class="ident">Vec</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="ident">::from_base32</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>).<span class="ident">map</span>(<span class="op">|</span><span class="ident">data</span><span class="op">|</span> <span class="ident">read</span>(<span class="ident">data</span>))
+            <span class="ident">Vec</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="ident">::from_base32</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>).<span class="ident">map</span>(<span class="ident">read</span>)
         }
         <span class="kw">_</span> =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
     }
@@ -655,7 +655,7 @@
 <span class="doccomment">///     keys::sapling,</span>
 <span class="doccomment">/// };</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// let extsk = sapling::spending_key(&amp;[0; 32][..], COIN_TYPE, AccountId(0));</span>
+<span class="doccomment">/// let extsk = sapling::spending_key(&amp;[0; 32][..], COIN_TYPE, AccountId::from(0));</span>
 <span class="doccomment">/// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &amp;extsk);</span>
 <span class="doccomment">/// ```</span>
 <span class="doccomment">/// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey</span>
@@ -688,7 +688,7 @@
 <span class="doccomment">/// };</span>
 <span class="doccomment">/// use zcash_primitives::zip32::ExtendedFullViewingKey;</span>
 <span class="doccomment">///</span>
-<span class="doccomment">/// let extsk = sapling::spending_key(&amp;[0; 32][..], COIN_TYPE, AccountId(0));</span>
+<span class="doccomment">/// let extsk = sapling::spending_key(&amp;[0; 32][..], COIN_TYPE, AccountId::from(0));</span>
 <span class="doccomment">/// let extfvk = ExtendedFullViewingKey::from(&amp;extsk);</span>
 <span class="doccomment">/// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &amp;extfvk);</span>
 <span class="doccomment">/// ```</span>

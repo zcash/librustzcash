@@ -1099,6 +1099,72 @@
 <span id="1094">1094</span>
 <span id="1095">1095</span>
 <span id="1096">1096</span>
+<span id="1097">1097</span>
+<span id="1098">1098</span>
+<span id="1099">1099</span>
+<span id="1100">1100</span>
+<span id="1101">1101</span>
+<span id="1102">1102</span>
+<span id="1103">1103</span>
+<span id="1104">1104</span>
+<span id="1105">1105</span>
+<span id="1106">1106</span>
+<span id="1107">1107</span>
+<span id="1108">1108</span>
+<span id="1109">1109</span>
+<span id="1110">1110</span>
+<span id="1111">1111</span>
+<span id="1112">1112</span>
+<span id="1113">1113</span>
+<span id="1114">1114</span>
+<span id="1115">1115</span>
+<span id="1116">1116</span>
+<span id="1117">1117</span>
+<span id="1118">1118</span>
+<span id="1119">1119</span>
+<span id="1120">1120</span>
+<span id="1121">1121</span>
+<span id="1122">1122</span>
+<span id="1123">1123</span>
+<span id="1124">1124</span>
+<span id="1125">1125</span>
+<span id="1126">1126</span>
+<span id="1127">1127</span>
+<span id="1128">1128</span>
+<span id="1129">1129</span>
+<span id="1130">1130</span>
+<span id="1131">1131</span>
+<span id="1132">1132</span>
+<span id="1133">1133</span>
+<span id="1134">1134</span>
+<span id="1135">1135</span>
+<span id="1136">1136</span>
+<span id="1137">1137</span>
+<span id="1138">1138</span>
+<span id="1139">1139</span>
+<span id="1140">1140</span>
+<span id="1141">1141</span>
+<span id="1142">1142</span>
+<span id="1143">1143</span>
+<span id="1144">1144</span>
+<span id="1145">1145</span>
+<span id="1146">1146</span>
+<span id="1147">1147</span>
+<span id="1148">1148</span>
+<span id="1149">1149</span>
+<span id="1150">1150</span>
+<span id="1151">1151</span>
+<span id="1152">1152</span>
+<span id="1153">1153</span>
+<span id="1154">1154</span>
+<span id="1155">1155</span>
+<span id="1156">1156</span>
+<span id="1157">1157</span>
+<span id="1158">1158</span>
+<span id="1159">1159</span>
+<span id="1160">1160</span>
+<span id="1161">1161</span>
+<span id="1162">1162</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Structs and methods for handling Zcash transactions.</span>
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">builder</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">components</span>;
@@ -1475,6 +1541,68 @@
             <span class="ident">digester</span>.<span class="ident">digest_tze</span>(<span class="self">self</span>.<span class="ident">tze_bundle</span>.<span class="ident">as_ref</span>()),
         )
     }
+
+    <span class="doccomment">/// Maps the bundles from one type to another.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// This shouldn&#39;t be necessary for most use cases; it is provided for handling the</span>
+    <span class="doccomment">/// cross-FFI builder logic in `zcashd`.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">map_bundles</span><span class="op">&lt;</span><span class="ident">B</span>: <span class="ident">Authorization</span><span class="op">&gt;</span>(
+        <span class="self">self</span>,
+        <span class="ident">f_transparent</span>: <span class="kw">impl</span> <span class="ident">FnOnce</span>(
+            <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">A::TransparentAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">transparent::Bundle</span><span class="op">&lt;</span><span class="ident">B::TransparentAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="ident">f_sapling</span>: <span class="kw">impl</span> <span class="ident">FnOnce</span>(
+            <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">A::SaplingAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">sapling::Bundle</span><span class="op">&lt;</span><span class="ident">B::SaplingAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="ident">f_orchard</span>: <span class="kw">impl</span> <span class="ident">FnOnce</span>(
+            <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">orchard::bundle::Bundle</span><span class="op">&lt;</span><span class="ident">A::OrchardAuth</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">orchard::bundle::Bundle</span><span class="op">&lt;</span><span class="ident">B::OrchardAuth</span>, <span class="ident">Amount</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">f_tze</span>: <span class="kw">impl</span> <span class="ident">FnOnce</span>(
+            <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+        ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">tze::Bundle</span><span class="op">&lt;</span><span class="ident">B::TzeAuth</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    ) -&gt; <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">B</span><span class="op">&gt;</span> {
+        <span class="ident">TransactionData</span> {
+            <span class="ident">version</span>: <span class="self">self</span>.<span class="ident">version</span>,
+            <span class="ident">consensus_branch_id</span>: <span class="self">self</span>.<span class="ident">consensus_branch_id</span>,
+            <span class="ident">lock_time</span>: <span class="self">self</span>.<span class="ident">lock_time</span>,
+            <span class="ident">expiry_height</span>: <span class="self">self</span>.<span class="ident">expiry_height</span>,
+            <span class="ident">transparent_bundle</span>: <span class="ident">f_transparent</span>(<span class="self">self</span>.<span class="ident">transparent_bundle</span>),
+            <span class="ident">sprout_bundle</span>: <span class="self">self</span>.<span class="ident">sprout_bundle</span>,
+            <span class="ident">sapling_bundle</span>: <span class="ident">f_sapling</span>(<span class="self">self</span>.<span class="ident">sapling_bundle</span>),
+            <span class="ident">orchard_bundle</span>: <span class="ident">f_orchard</span>(<span class="self">self</span>.<span class="ident">orchard_bundle</span>),
+            <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
+            <span class="ident">tze_bundle</span>: <span class="ident">f_tze</span>(<span class="self">self</span>.<span class="ident">tze_bundle</span>),
+        }
+    }
+
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">map_authorization</span><span class="op">&lt;</span><span class="ident">B</span>: <span class="ident">Authorization</span><span class="op">&gt;</span>(
+        <span class="self">self</span>,
+        <span class="ident">f_transparent</span>: <span class="kw">impl</span> <span class="ident">transparent::MapAuth</span><span class="op">&lt;</span><span class="ident">A::TransparentAuth</span>, <span class="ident">B::TransparentAuth</span><span class="op">&gt;</span>,
+        <span class="ident">f_sapling</span>: <span class="kw">impl</span> <span class="ident">sapling::MapAuth</span><span class="op">&lt;</span><span class="ident">A::SaplingAuth</span>, <span class="ident">B::SaplingAuth</span><span class="op">&gt;</span>,
+        <span class="kw-2">mut</span> <span class="ident">f_orchard</span>: <span class="kw">impl</span> <span class="ident">orchard_serialization::MapAuth</span><span class="op">&lt;</span><span class="ident">A::OrchardAuth</span>, <span class="ident">B::OrchardAuth</span><span class="op">&gt;</span>,
+        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span> <span class="ident">f_tze</span>: <span class="kw">impl</span> <span class="ident">tze::MapAuth</span><span class="op">&lt;</span><span class="ident">A::TzeAuth</span>, <span class="ident">B::TzeAuth</span><span class="op">&gt;</span>,
+    ) -&gt; <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">B</span><span class="op">&gt;</span> {
+        <span class="ident">TransactionData</span> {
+            <span class="ident">version</span>: <span class="self">self</span>.<span class="ident">version</span>,
+            <span class="ident">consensus_branch_id</span>: <span class="self">self</span>.<span class="ident">consensus_branch_id</span>,
+            <span class="ident">lock_time</span>: <span class="self">self</span>.<span class="ident">lock_time</span>,
+            <span class="ident">expiry_height</span>: <span class="self">self</span>.<span class="ident">expiry_height</span>,
+            <span class="ident">transparent_bundle</span>: <span class="self">self</span>
+                .<span class="ident">transparent_bundle</span>
+                .<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="ident">map_authorization</span>(<span class="ident">f_transparent</span>)),
+            <span class="ident">sprout_bundle</span>: <span class="self">self</span>.<span class="ident">sprout_bundle</span>,
+            <span class="ident">sapling_bundle</span>: <span class="self">self</span>.<span class="ident">sapling_bundle</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="ident">map_authorization</span>(<span class="ident">f_sapling</span>)),
+            <span class="ident">orchard_bundle</span>: <span class="self">self</span>.<span class="ident">orchard_bundle</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> {
+                <span class="ident">b</span>.<span class="ident">authorize</span>(
+                    <span class="kw-2">&amp;mut</span> <span class="ident">f_orchard</span>,
+                    <span class="op">|</span><span class="ident">f</span>, <span class="kw">_</span>, <span class="ident">s</span><span class="op">|</span> <span class="ident">f</span>.<span class="ident">map_spend_auth</span>(<span class="ident">s</span>),
+                    <span class="op">|</span><span class="ident">f</span>, <span class="ident">a</span><span class="op">|</span> <span class="ident">f</span>.<span class="ident">map_authorization</span>(<span class="ident">a</span>),
+                )
+            }),
+            <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
+            <span class="ident">tze_bundle</span>: <span class="self">self</span>.<span class="ident">tze_bundle</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="ident">map_authorization</span>(<span class="ident">f_tze</span>)),
+        }
+    }
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
@@ -1608,6 +1736,10 @@
         );
 
         <span class="ident">Transaction</span> { <span class="ident">txid</span>, <span class="ident">data</span> }
+    }
+
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_data</span>(<span class="self">self</span>) -&gt; <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">Authorized</span><span class="op">&gt;</span> {
+        <span class="self">self</span>.<span class="ident">data</span>
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">txid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">TxId</span> {

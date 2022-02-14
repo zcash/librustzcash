@@ -63,7 +63,7 @@ spent. A value of 10 confirmations is recommended.</li>
     }
 };
 
-<span class="kw">let</span> <span class="ident">account</span> <span class="op">=</span> <span class="ident">AccountId</span>(<span class="number">0</span>);
+<span class="kw">let</span> <span class="ident">account</span> <span class="op">=</span> <span class="ident">AccountId::from</span>(<span class="number">0</span>);
 <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0</span>; <span class="number">32</span>][..], <span class="ident">COIN_TYPE</span>, <span class="ident">account</span>);
 <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
 

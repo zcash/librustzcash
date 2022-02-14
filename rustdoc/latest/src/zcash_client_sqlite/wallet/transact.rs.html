@@ -805,6 +805,15 @@
 <span id="800">800</span>
 <span id="801">801</span>
 <span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Functions for creating transactions.</span>
 <span class="doccomment">//!</span>
 <span class="kw">use</span> <span class="ident">rusqlite</span>::{<span class="ident">named_params</span>, <span class="ident">Row</span>};
@@ -889,7 +898,7 @@
     <span class="comment">// Select notes</span>
     <span class="kw">let</span> <span class="ident">notes</span> <span class="op">=</span> <span class="ident">stmt_select_notes</span>.<span class="ident">query_and_then_named</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">SqliteClientError</span>, <span class="kw">_</span><span class="op">&gt;</span>(
         <span class="macro">named_params!</span>[
-            <span class="string">&quot;:account&quot;</span>: <span class="kw-2">&amp;</span><span class="ident">i64::from</span>(<span class="ident">account</span>.<span class="number">0</span>),
+            <span class="string">&quot;:account&quot;</span>: <span class="kw-2">&amp;</span><span class="ident">u32::from</span>(<span class="ident">account</span>),
             <span class="string">&quot;:anchor_height&quot;</span>: <span class="kw-2">&amp;</span><span class="ident">u32::from</span>(<span class="ident">anchor_height</span>),
         ],
         <span class="ident">to_spendable_note</span>,
@@ -950,7 +959,7 @@
     <span class="comment">// Select notes</span>
     <span class="kw">let</span> <span class="ident">notes</span> <span class="op">=</span> <span class="ident">stmt_select_notes</span>.<span class="ident">query_and_then_named</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">SqliteClientError</span>, <span class="kw">_</span><span class="op">&gt;</span>(
         <span class="macro">named_params!</span>[
-            <span class="string">&quot;:account&quot;</span>: <span class="kw-2">&amp;</span><span class="ident">i64::from</span>(<span class="ident">account</span>.<span class="number">0</span>),
+            <span class="string">&quot;:account&quot;</span>: <span class="kw-2">&amp;</span><span class="ident">u32::from</span>(<span class="ident">account</span>),
             <span class="string">&quot;:anchor_height&quot;</span>: <span class="kw-2">&amp;</span><span class="ident">u32::from</span>(<span class="ident">anchor_height</span>),
             <span class="string">&quot;:target_value&quot;</span>: <span class="kw-2">&amp;</span><span class="ident">i64::from</span>(<span class="ident">target_value</span>),
         ],
@@ -1012,26 +1021,28 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add two accounts to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk0</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>));
-        <span class="kw">let</span> <span class="ident">extsk1</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">1u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">1</span>));
+        <span class="kw">let</span> <span class="ident">extsk0</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="ident">extsk1</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">1u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">1</span>));
         <span class="kw">let</span> <span class="ident">extfvk0</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk0</span>);
         <span class="kw">let</span> <span class="ident">extfvk1</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk1</span>);
 
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
         <span class="kw">let</span> <span class="ident">ufvks</span> <span class="op">=</span> {
-            <span class="kw">let</span> <span class="ident">tsk0</span> <span class="op">=</span> <span class="ident">transparent::AccountPrivKey::from_seed</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>(), <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">AccountId</span>(<span class="number">0</span>))
-                .<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="ident">tsk1</span> <span class="op">=</span> <span class="ident">transparent::AccountPrivKey::from_seed</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>(), <span class="kw-2">&amp;</span>[<span class="number">1u8</span>; <span class="number">32</span>], <span class="ident">AccountId</span>(<span class="number">1</span>))
-                .<span class="ident">unwrap</span>();
+            <span class="kw">let</span> <span class="ident">tsk0</span> <span class="op">=</span>
+                <span class="ident">transparent::AccountPrivKey::from_seed</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>(), <span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">AccountId::from</span>(<span class="number">0</span>))
+                    .<span class="ident">unwrap</span>();
+            <span class="kw">let</span> <span class="ident">tsk1</span> <span class="op">=</span>
+                <span class="ident">transparent::AccountPrivKey::from_seed</span>(<span class="kw-2">&amp;</span><span class="ident">network</span>(), <span class="kw-2">&amp;</span>[<span class="number">1u8</span>; <span class="number">32</span>], <span class="ident">AccountId::from</span>(<span class="number">1</span>))
+                    .<span class="ident">unwrap</span>();
             [
                 <span class="ident">UnifiedFullViewingKey::new</span>(
-                    <span class="ident">AccountId</span>(<span class="number">0</span>),
+                    <span class="ident">AccountId::from</span>(<span class="number">0</span>),
                     <span class="prelude-val">Some</span>(<span class="ident">tsk0</span>.<span class="ident">to_account_pubkey</span>()),
                     <span class="prelude-val">Some</span>(<span class="ident">extfvk0</span>),
                 )
                 .<span class="ident">unwrap</span>(),
                 <span class="ident">UnifiedFullViewingKey::new</span>(
-                    <span class="ident">AccountId</span>(<span class="number">1</span>),
+                    <span class="ident">AccountId::from</span>(<span class="number">1</span>),
                     <span class="prelude-val">Some</span>(<span class="ident">tsk1</span>.<span class="ident">to_account_pubkey</span>()),
                     <span class="prelude-val">Some</span>(<span class="ident">extfvk1</span>),
                 )
@@ -1040,8 +1051,8 @@
         };
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>))]</span>
         <span class="kw">let</span> <span class="ident">ufvks</span> <span class="op">=</span> [
-            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk0</span>)).<span class="ident">unwrap</span>(),
-            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">1</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk1</span>)).<span class="ident">unwrap</span>(),
+            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk0</span>)).<span class="ident">unwrap</span>(),
+            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">1</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk1</span>)).<span class="ident">unwrap</span>(),
         ];
 
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span><span class="ident">ufvks</span>).<span class="ident">unwrap</span>();
@@ -1053,7 +1064,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk1</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">1</span>).<span class="ident">unwrap</span>(),
@@ -1069,7 +1080,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">1</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">1</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk0</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">1</span>).<span class="ident">unwrap</span>(),
@@ -1089,13 +1100,13 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>));
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
 
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>))]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">ufvk</span>]).<span class="ident">unwrap</span>();
         <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
 
@@ -1105,7 +1116,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">1</span>).<span class="ident">unwrap</span>(),
@@ -1133,17 +1144,20 @@
         .<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>));
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>))]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>)).<span class="ident">unwrap</span>();
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">ufvk</span>]).<span class="ident">unwrap</span>();
         <span class="kw">let</span> <span class="ident">to</span> <span class="op">=</span> <span class="ident">extsk</span>.<span class="ident">default_address</span>().<span class="number">1</span>.<span class="ident">into</span>();
 
         <span class="comment">// Account balance should be zero</span>
-        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">Amount::zero</span>());
+        <span class="macro">assert_eq!</span>(
+            <span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(),
+            <span class="ident">Amount::zero</span>()
+        );
 
         <span class="comment">// We cannot spend anything</span>
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">db_write</span> <span class="op">=</span> <span class="ident">db_data</span>.<span class="ident">get_update_ops</span>().<span class="ident">unwrap</span>();
@@ -1151,7 +1165,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">1</span>).<span class="ident">unwrap</span>(),
@@ -1178,12 +1192,13 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>));
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span>
+            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>))]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">ufvk</span>]).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add funds to the wallet in a single note</span>
@@ -1203,9 +1218,9 @@
             .<span class="ident">get_target_and_anchor_heights</span>(<span class="number">10</span>)
             .<span class="ident">unwrap</span>()
             .<span class="ident">unwrap</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
+        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
         <span class="macro">assert_eq!</span>(
-            <span class="ident">get_balance_at</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>), <span class="ident">anchor_height</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">get_balance_at</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="ident">anchor_height</span>).<span class="ident">unwrap</span>(),
             <span class="ident">value</span>
         );
 
@@ -1225,11 +1240,11 @@
             .<span class="ident">unwrap</span>()
             .<span class="ident">unwrap</span>();
         <span class="macro">assert_eq!</span>(
-            <span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(),
+            <span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(),
             (<span class="ident">value</span> <span class="op">+</span> <span class="ident">value</span>).<span class="ident">unwrap</span>()
         );
         <span class="macro">assert_eq!</span>(
-            <span class="ident">get_balance_at</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>), <span class="ident">anchor_height2</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">get_balance_at</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="ident">anchor_height2</span>).<span class="ident">unwrap</span>(),
             <span class="ident">value</span>
         );
 
@@ -1240,7 +1255,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">70000</span>).<span class="ident">unwrap</span>(),
@@ -1273,7 +1288,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">70000</span>).<span class="ident">unwrap</span>(),
@@ -1299,7 +1314,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">70000</span>).<span class="ident">unwrap</span>(),
@@ -1321,12 +1336,13 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>));
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span>
+            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>))]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">ufvk</span>]).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add funds to the wallet in a single note</span>
@@ -1340,7 +1356,7 @@
         <span class="ident">insert_into_cache</span>(<span class="kw-2">&amp;</span><span class="ident">db_cache</span>, <span class="kw-2">&amp;</span><span class="ident">cb</span>);
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">db_write</span> <span class="op">=</span> <span class="ident">db_data</span>.<span class="ident">get_update_ops</span>().<span class="ident">unwrap</span>();
         <span class="ident">scan_cached_blocks</span>(<span class="kw-2">&amp;</span><span class="ident">tests::network</span>(), <span class="kw-2">&amp;</span><span class="ident">db_cache</span>, <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>, <span class="prelude-val">None</span>).<span class="ident">unwrap</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
+        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
 
         <span class="comment">// Send some of the funds to another address</span>
         <span class="kw">let</span> <span class="ident">extsk2</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
@@ -1349,7 +1365,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">15000</span>).<span class="ident">unwrap</span>(),
@@ -1364,7 +1380,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">2000</span>).<span class="ident">unwrap</span>(),
@@ -1397,7 +1413,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">2000</span>).<span class="ident">unwrap</span>(),
@@ -1427,7 +1443,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">2000</span>).<span class="ident">unwrap</span>(),
@@ -1450,12 +1466,13 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>.<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>.<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>));
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span>
+            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>))]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">ufvk</span>]).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add funds to the wallet in a single note</span>
@@ -1469,7 +1486,7 @@
         <span class="ident">insert_into_cache</span>(<span class="kw-2">&amp;</span><span class="ident">db_cache</span>, <span class="kw-2">&amp;</span><span class="ident">cb</span>);
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">db_write</span> <span class="op">=</span> <span class="ident">db_data</span>.<span class="ident">get_update_ops</span>().<span class="ident">unwrap</span>();
         <span class="ident">scan_cached_blocks</span>(<span class="kw-2">&amp;</span><span class="ident">tests::network</span>(), <span class="kw-2">&amp;</span><span class="ident">db_cache</span>, <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>, <span class="prelude-val">None</span>).<span class="ident">unwrap</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
+        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
 
         <span class="kw">let</span> <span class="ident">extsk2</span> <span class="op">=</span> <span class="ident">ExtendedSpendingKey::master</span>(<span class="kw-2">&amp;</span>[]);
         <span class="kw">let</span> <span class="ident">addr2</span> <span class="op">=</span> <span class="ident">extsk2</span>.<span class="ident">default_address</span>().<span class="number">1</span>;
@@ -1480,7 +1497,7 @@
                 <span class="ident">db_write</span>,
                 <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
                 <span class="ident">test_prover</span>(),
-                <span class="ident">AccountId</span>(<span class="number">0</span>),
+                <span class="ident">AccountId::from</span>(<span class="number">0</span>),
                 <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
                 <span class="kw-2">&amp;</span><span class="ident">to</span>,
                 <span class="ident">Amount::from_u64</span>(<span class="number">15000</span>).<span class="ident">unwrap</span>(),
@@ -1560,12 +1577,13 @@
         <span class="ident">init_wallet_db</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add an account to the wallet</span>
-        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId</span>(<span class="number">0</span>));
+        <span class="kw">let</span> <span class="ident">extsk</span> <span class="op">=</span> <span class="ident">sapling::spending_key</span>(<span class="kw-2">&amp;</span>[<span class="number">0u8</span>; <span class="number">32</span>], <span class="ident">network</span>().<span class="ident">coin_type</span>(), <span class="ident">AccountId::from</span>(<span class="number">0</span>));
         <span class="kw">let</span> <span class="ident">extfvk</span> <span class="op">=</span> <span class="ident">ExtendedFullViewingKey::from</span>(<span class="kw-2">&amp;</span><span class="ident">extsk</span>);
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>)]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span>
+            <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;transparent-inputs&quot;</span>))]</span>
-        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
+        <span class="kw">let</span> <span class="ident">ufvk</span> <span class="op">=</span> <span class="ident">UnifiedFullViewingKey::new</span>(<span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">extfvk</span>.<span class="ident">clone</span>())).<span class="ident">unwrap</span>();
         <span class="ident">init_accounts_table</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="kw-2">&amp;</span>[<span class="ident">ufvk</span>]).<span class="ident">unwrap</span>();
 
         <span class="comment">// Add funds to the wallet in a single note</span>
@@ -1585,9 +1603,9 @@
             .<span class="ident">get_target_and_anchor_heights</span>(<span class="number">10</span>)
             .<span class="ident">unwrap</span>()
             .<span class="ident">unwrap</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
+        <span class="macro">assert_eq!</span>(<span class="ident">get_balance</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>)).<span class="ident">unwrap</span>(), <span class="ident">value</span>);
         <span class="macro">assert_eq!</span>(
-            <span class="ident">get_balance_at</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId</span>(<span class="number">0</span>), <span class="ident">anchor_height</span>).<span class="ident">unwrap</span>(),
+            <span class="ident">get_balance_at</span>(<span class="kw-2">&amp;</span><span class="ident">db_data</span>, <span class="ident">AccountId::from</span>(<span class="number">0</span>), <span class="ident">anchor_height</span>).<span class="ident">unwrap</span>(),
             <span class="ident">value</span>
         );
 
@@ -1596,7 +1614,7 @@
             <span class="kw-2">&amp;mut</span> <span class="ident">db_write</span>,
             <span class="kw-2">&amp;</span><span class="ident">tests::network</span>(),
             <span class="ident">test_prover</span>(),
-            <span class="ident">AccountId</span>(<span class="number">0</span>),
+            <span class="ident">AccountId::from</span>(<span class="number">0</span>),
             <span class="kw-2">&amp;</span><span class="ident">extsk</span>,
             <span class="kw-2">&amp;</span><span class="ident">to</span>,
             <span class="ident">Amount::from_u64</span>(<span class="number">50000</span>).<span class="ident">unwrap</span>(),

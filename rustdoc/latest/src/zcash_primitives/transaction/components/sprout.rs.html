@@ -198,9 +198,9 @@
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
+<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::upper_case_acronyms</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">SproutProof</span> {
     <span class="ident">Groth</span>([<span class="ident">u8</span>; <span class="ident">GROTH_PROOF_SIZE</span>]),
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::upper_case_acronyms</span>)]</span>
     <span class="ident">PHGR</span>([<span class="ident">u8</span>; <span class="ident">PHGR_PROOF_SIZE</span>]),
 }
 

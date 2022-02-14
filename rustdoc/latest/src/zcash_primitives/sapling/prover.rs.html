@@ -255,8 +255,8 @@
             .<span class="ident">commitment</span>()
             .<span class="ident">into</span>();
 
-            <span class="kw">let</span> <span class="ident">rk</span> <span class="op">=</span> <span class="ident">PublicKey</span>(<span class="ident">proof_generation_key</span>.<span class="ident">ak</span>.<span class="ident">clone</span>().<span class="ident">into</span>())
-                .<span class="ident">randomize</span>(<span class="ident">ar</span>, <span class="ident">SPENDING_KEY_GENERATOR</span>);
+            <span class="kw">let</span> <span class="ident">rk</span> <span class="op">=</span>
+                <span class="ident">PublicKey</span>(<span class="ident">proof_generation_key</span>.<span class="ident">ak</span>.<span class="ident">into</span>()).<span class="ident">randomize</span>(<span class="ident">ar</span>, <span class="ident">SPENDING_KEY_GENERATOR</span>);
 
             <span class="prelude-val">Ok</span>(([<span class="number">0u8</span>; <span class="ident">GROTH_PROOF_SIZE</span>], <span class="ident">cv</span>, <span class="ident">rk</span>))
         }

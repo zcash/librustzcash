@@ -233,7 +233,7 @@
                 <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Invalid chain (upper bound: {}): {:?}&quot;</span>, <span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">upper_bound</span>), <span class="ident">cause</span>)
             }
             <span class="ident">Error::InvalidExtSk</span>(<span class="ident">account</span>) =&gt; {
-                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Incorrect ExtendedSpendingKey for account {}&quot;</span>, <span class="ident">account</span>.<span class="number">0</span>)
+                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Incorrect ExtendedSpendingKey for account {}&quot;</span>, <span class="ident">u32::from</span>(<span class="kw-2">*</span><span class="ident">account</span>))
             }
             <span class="ident">Error::InvalidNewWitnessAnchor</span>(<span class="ident">output</span>, <span class="ident">txid</span>, <span class="ident">last_height</span>, <span class="ident">anchor</span>) =&gt; <span class="macro">write!</span>(
                 <span class="ident">f</span>,
