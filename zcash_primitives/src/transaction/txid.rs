@@ -146,7 +146,7 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
         let mut nh = hasher(ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION);
         for s_spend in shielded_spends {
             // we build the hash of nullifiers separately for compact blocks.
-            ch.write_all(&s_spend.nullifier.as_ref()).unwrap();
+            ch.write_all(s_spend.nullifier.as_ref()).unwrap();
 
             nh.write_all(&s_spend.cv.to_bytes()).unwrap();
             nh.write_all(&s_spend.anchor.to_repr()).unwrap();
@@ -154,9 +154,9 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
         }
 
         let compact_digest = ch.finalize();
-        h.write_all(&compact_digest.as_bytes()).unwrap();
+        h.write_all(compact_digest.as_bytes()).unwrap();
         let noncompact_digest = nh.finalize();
-        h.write_all(&noncompact_digest.as_bytes()).unwrap();
+        h.write_all(noncompact_digest.as_bytes()).unwrap();
     }
     h.finalize()
 }
@@ -176,7 +176,7 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
         let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
         let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
         for s_out in shielded_outputs {
-            ch.write_all(&s_out.cmu.to_repr().as_ref()).unwrap();
+            ch.write_all(s_out.cmu.to_repr().as_ref()).unwrap();
             ch.write_all(s_out.ephemeral_key.as_ref()).unwrap();
             ch.write_all(&s_out.enc_ciphertext[..52]).unwrap();
 
@@ -187,9 +187,9 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
             nh.write_all(&s_out.out_ciphertext).unwrap();
         }
 
-        h.write_all(&ch.finalize().as_bytes()).unwrap();
-        h.write_all(&mh.finalize().as_bytes()).unwrap();
-        h.write_all(&nh.finalize().as_bytes()).unwrap();
+        h.write_all(ch.finalize().as_bytes()).unwrap();
+        h.write_all(mh.finalize().as_bytes()).unwrap();
+        h.write_all(nh.finalize().as_bytes()).unwrap();
     }
     h.finalize()
 }

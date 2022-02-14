@@ -92,7 +92,7 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
                 write!(f, "Invalid chain (upper bound: {}): {:?}", u32::from(*upper_bound), cause)
             }
             Error::InvalidExtSk(account) => {
-                write!(f, "Incorrect ExtendedSpendingKey for account {}", account.0)
+                write!(f, "Incorrect ExtendedSpendingKey for account {}", u32::from(*account))
             }
             Error::InvalidNewWitnessAnchor(output, txid, last_height, anchor) => write!(
                 f,

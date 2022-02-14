@@ -314,7 +314,7 @@ fn tree_validator(p: &Params, state: &Blake2bState, indices: &[u32]) -> Result<N
         validate_subtrees(p, &a, &b).map_err(Error)?;
         Ok(Node::from_children(a, b, p.collision_byte_length()))
     } else {
-        Ok(Node::new(&p, &state, indices[0]))
+        Ok(Node::new(p, state, indices[0]))
     }
 }
 
@@ -486,13 +486,13 @@ mod tests {
     fn invalid_test_vectors() {
         for tv in INVALID_TEST_VECTORS {
             assert_eq!(
-                is_valid_solution_iterative(tv.params, tv.input, &tv.nonce, &tv.solution)
+                is_valid_solution_iterative(tv.params, tv.input, &tv.nonce, tv.solution)
                     .unwrap_err()
                     .0,
                 tv.error
             );
             assert_eq!(
-                is_valid_solution_recursive(tv.params, tv.input, &tv.nonce, &tv.solution)
+                is_valid_solution_recursive(tv.params, tv.input, &tv.nonce, tv.solution)
                     .unwrap_err()
                     .0,
                 tv.error

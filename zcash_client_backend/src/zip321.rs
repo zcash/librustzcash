@@ -173,32 +173,32 @@ impl TransactionRequest {
                     payment
                         .memo
                         .as_ref()
-                        .map(|m| render::memo_param(&m, payment_index)),
+                        .map(|m| render::memo_param(m, payment_index)),
                 )
                 .chain(
                     payment
                         .label
                         .as_ref()
-                        .map(|m| render::str_param("label", &m, payment_index)),
+                        .map(|m| render::str_param("label", m, payment_index)),
                 )
                 .chain(
                     payment
                         .message
                         .as_ref()
-                        .map(|m| render::str_param("message", &m, payment_index)),
+                        .map(|m| render::str_param("message", m, payment_index)),
                 )
                 .chain(
                     payment
                         .other_params
                         .iter()
-                        .map(move |(name, value)| render::str_param(&name, &value, payment_index)),
+                        .map(move |(name, value)| render::str_param(name, value, payment_index)),
                 )
         }
 
         match &self.payments[..] {
             [] => None,
             [payment] => {
-                let query_params = payment_params(&payment, None)
+                let query_params = payment_params(payment, None)
                     .into_iter()
                     .collect::<Vec<String>>();
 
@@ -217,7 +217,7 @@ impl TransactionRequest {
                         let primary_address = payment.recipient_address.clone();
                         std::iter::empty()
                             .chain(Some(render::addr_param(params, &primary_address, Some(i))))
-                            .chain(payment_params(&payment, Some(i)))
+                            .chain(payment_params(payment, Some(i)))
                     })
                     .collect::<Vec<String>>();
 
@@ -255,7 +255,7 @@ impl TransactionRequest {
                 }
 
                 Some(current) => {
-                    if parse::has_duplicate_param(&current, &p.param) {
+                    if parse::has_duplicate_param(current, &p.param) {
                         return Err(Zip321Error::DuplicateParameter(p.param, p.payment_index));
                     } else {
                         current.push(p.param);
@@ -775,12 +775,12 @@ mod tests {
     #[test]
     fn test_zip321_parse_simple() {
         let uri = "zcash:ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k?amount=3768769.02796286&message=";
-        let parse_result = TransactionRequest::from_uri(&TEST_NETWORK, &uri).unwrap();
+        let parse_result = TransactionRequest::from_uri(&TEST_NETWORK, uri).unwrap();
 
         let expected = TransactionRequest {
             payments: vec![
                 Payment {
-                    recipient_address: RecipientAddress::Shielded(decode_payment_address(&TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
+                    recipient_address: RecipientAddress::Shielded(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap().unwrap()),
                     amount: Amount::from_u64(376876902796286).unwrap(),
                     memo: None,
                     label: None,
@@ -833,14 +833,14 @@ mod tests {
     #[test]
     fn test_zip321_spec_valid_examples() {
         let valid_1 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=1&memo=VGhpcyBpcyBhIHNpbXBsZSBtZW1vLg&message=Thank%20you%20for%20your%20purchase";
-        let v1r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_1).unwrap();
+        let v1r = TransactionRequest::from_uri(&TEST_NETWORK, valid_1).unwrap();
         assert_eq!(
             v1r.payments.get(0).map(|p| p.amount),
             Some(Amount::from_u64(100000000).unwrap())
         );
 
         let valid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
-        let mut v2r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_2).unwrap();
+        let mut v2r = TransactionRequest::from_uri(&TEST_NETWORK, valid_2).unwrap();
         v2r.normalize(&TEST_NETWORK);
         assert_eq!(
             v2r.payments.get(0).map(|p| p.amount),
@@ -854,7 +854,7 @@ mod tests {
         // valid; amount just less than MAX_MONEY
         // 20999999.99999999
         let valid_3 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=20999999.99999999";
-        let v3r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_3).unwrap();
+        let v3r = TransactionRequest::from_uri(&TEST_NETWORK, valid_3).unwrap();
         assert_eq!(
             v3r.payments.get(0).map(|p| p.amount),
             Some(Amount::from_u64(2099999999999999u64).unwrap())
@@ -863,7 +863,7 @@ mod tests {
         // valid; MAX_MONEY
         // 21000000
         let valid_4 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000";
-        let v4r = TransactionRequest::from_uri(&TEST_NETWORK, &valid_4).unwrap();
+        let v4r = TransactionRequest::from_uri(&TEST_NETWORK, valid_4).unwrap();
         assert_eq!(
             v4r.payments.get(0).map(|p| p.amount),
             Some(Amount::from_u64(2100000000000000u64).unwrap())
@@ -874,63 +874,63 @@ mod tests {
     fn test_zip321_spec_invalid_examples() {
         // invalid; missing `address=`
         let invalid_1 = "zcash:?amount=3491405.05201255&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=5740296.87793245";
-        let i1r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_1);
+        let i1r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_1);
         assert!(i1r.is_err());
 
         // invalid; missing `address.1=`
         let invalid_2 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=1&amount.1=2&address.2=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez";
-        let i2r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_2);
+        let i2r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_2);
         assert!(i2r.is_err());
 
         // invalid; `address.0=` and `amount.0=` are not permitted (leading 0s).
         let invalid_3 = "zcash:?address.0=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.0=2";
-        let i3r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_3);
+        let i3r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_3);
         assert!(i3r.is_err());
 
         // invalid; duplicate `amount=` field
         let invalid_4 =
             "zcash:?amount=1.234&amount=2.345&address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
-        let i4r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_4);
+        let i4r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_4);
         assert!(i4r.is_err());
 
         // invalid; duplicate `amount.1=` field
         let invalid_5 =
             "zcash:?amount.1=1.234&amount.1=2.345&address.1=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
-        let i5r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_5);
+        let i5r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_5);
         assert!(i5r.is_err());
 
         //invalid; memo associated with t-addr
         let invalid_6 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.456&memo=eyAia2V5IjogIlRoaXMgaXMgYSBKU09OLXN0cnVjdHVyZWQgbWVtby4iIH0&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=0.789&memo.1=VGhpcyBpcyBhIHVuaWNvZGUgbWVtbyDinKjwn6aE8J-PhvCfjok";
-        let i6r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_6);
+        let i6r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_6);
         assert!(i6r.is_err());
 
         // invalid; amount component exceeds an i64
         // 9223372036854775808 = i64::MAX + 1
         let invalid_7 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=9223372036854775808";
-        let i7r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_7);
+        let i7r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_7);
         assert!(i7r.is_err());
 
         // invalid; amount component wraps into a valid small positive i64
         // 18446744073709551624
         let invalid_7a = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=18446744073709551624";
-        let i7ar = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_7a);
+        let i7ar = TransactionRequest::from_uri(&TEST_NETWORK, invalid_7a);
         assert!(i7ar.is_err());
 
         // invalid; amount component is MAX_MONEY
         // 21000000.00000001
         let invalid_8 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=21000000.00000001";
-        let i8r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_8);
+        let i8r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_8);
         assert!(i8r.is_err());
 
         // invalid; negative amount
         let invalid_9 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=-1";
-        let i9r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_9);
+        let i9r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_9);
         assert!(i9r.is_err());
 
         // invalid; parameter index too large
         let invalid_10 =
             "zcash:?amount.10000=1.23&address.10000=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
-        let i10r = TransactionRequest::from_uri(&TEST_NETWORK, &invalid_10);
+        let i10r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_10);
         assert!(i10r.is_err());
     }
 

@@ -94,7 +94,7 @@ impl<'a> State<'a> {
         let hash = Blake2bParams::new()
             .hash_length(self.left.len())
             .personal(&H_PERS!(i))
-            .hash(&self.right);
+            .hash(self.right);
         xor(self.left, hash.as_bytes())
     }
 
@@ -103,7 +103,7 @@ impl<'a> State<'a> {
             let hash = Blake2bParams::new()
                 .hash_length(OUTBYTES)
                 .personal(&G_PERS!(i, j as u16))
-                .hash(&self.left);
+                .hash(self.left);
             xor(&mut self.right[j * OUTBYTES..], hash.as_bytes());
         }
     }
@@ -155,25 +155,15 @@ pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
 }
 
 #[cfg(feature = "std")]
-pub fn f4jumble(message: &[u8]) -> Option<Vec<u8>> {
+pub fn f4jumble(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
-    let res = f4jumble_mut(&mut result);
-    if res.is_ok() {
-        Some(result)
-    } else {
-        None
-    }
+    f4jumble_mut(&mut result).map(|()| result)
 }
 
 #[cfg(feature = "std")]
-pub fn f4jumble_inv(message: &[u8]) -> Option<Vec<u8>> {
+pub fn f4jumble_inv(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
-    let res = f4jumble_inv_mut(&mut result);
-    if res.is_ok() {
-        Some(result)
-    } else {
-        None
-    }
+    f4jumble_inv_mut(&mut result).map(|()| result)
 }
 
 #[cfg(test)]
@@ -198,11 +188,11 @@ mod common_tests {
         #[cfg(feature = "std")]
         let mut cache = vec![0u8; test_vectors::MAX_VECTOR_LENGTH];
         for v in test_vectors::TEST_VECTORS {
-            let mut data = &mut cache[..v.normal.len()];
-            data.clone_from_slice(&v.normal);
-            f4jumble_mut(&mut data).unwrap();
+            let data = &mut cache[..v.normal.len()];
+            data.clone_from_slice(v.normal);
+            f4jumble_mut(data).unwrap();
             assert_eq!(data, v.jumbled);
-            f4jumble_inv_mut(&mut data).unwrap();
+            f4jumble_inv_mut(data).unwrap();
             assert_eq!(data, v.normal);
         }
     }
@@ -246,9 +236,9 @@ mod std_tests {
     #[test]
     fn f4jumble_check_vectors() {
         for v in test_vectors::TEST_VECTORS {
-            let jumbled = f4jumble(&v.normal).unwrap();
+            let jumbled = f4jumble(v.normal).unwrap();
             assert_eq!(jumbled, v.jumbled);
-            let unjumbled = f4jumble_inv(&v.jumbled).unwrap();
+            let unjumbled = f4jumble_inv(v.jumbled).unwrap();
             assert_eq!(unjumbled, v.normal);
         }
     }
