@@ -106,8 +106,8 @@ pub mod mock {
             .commitment()
             .into();
 
-            let rk = PublicKey(proof_generation_key.ak.clone().into())
-                .randomize(ar, SPENDING_KEY_GENERATOR);
+            let rk =
+                PublicKey(proof_generation_key.ak.into()).randomize(ar, SPENDING_KEY_GENERATOR);
 
             Ok(([0u8; GROTH_PROOF_SIZE], cv, rk))
         }

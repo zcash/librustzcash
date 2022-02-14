@@ -55,6 +55,7 @@ impl Signature {
 }
 
 impl PrivateKey {
+    #[must_use]
     pub fn randomize(&self, alpha: jubjub::Fr) -> Self {
         let mut tmp = self.0;
         tmp.add_assign(&alpha);
@@ -100,6 +101,7 @@ impl PublicKey {
         PublicKey((p_g * privkey.0).into())
     }
 
+    #[must_use]
     pub fn randomize(&self, alpha: jubjub::Fr, p_g: SubgroupPoint) -> Self {
         PublicKey(ExtendedPoint::from(p_g * alpha) + self.0)
     }

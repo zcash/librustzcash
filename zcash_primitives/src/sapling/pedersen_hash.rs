@@ -87,7 +87,7 @@ where
         }
 
         let mut table: &[Vec<jubjub::SubgroupPoint>] =
-            &generators.next().expect("we don't have enough generators");
+            generators.next().expect("we don't have enough generators");
         let window = PEDERSEN_HASH_EXP_WINDOW_SIZE as usize;
         let window_mask = (1u64 << window) - 1;
 

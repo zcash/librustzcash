@@ -1,6 +1,5 @@
 //! Structs for building transactions.
 
-use std::array;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
@@ -267,7 +266,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 .ok_or(Error::InvalidAmount)?,
         ];
 
-        array::IntoIter::new(value_balances)
+        IntoIterator::into_iter(&value_balances)
             .sum::<Option<_>>()
             .ok_or(Error::InvalidAmount)
     }

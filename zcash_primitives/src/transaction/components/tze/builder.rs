@@ -70,7 +70,7 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         self.vin.push(TzeIn::new(outpoint, extension_id, mode));
         self.signers.push(TzeSigner {
             prevout,
-            builder: Box::new(move |ctx| witness_builder(&ctx).map(|x| x.to_payload())),
+            builder: Box::new(move |ctx| witness_builder(ctx).map(|x| x.to_payload())),
         });
     }
 

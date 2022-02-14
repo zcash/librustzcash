@@ -29,7 +29,7 @@ impl BlockHash {
     pub fn from_slice(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), 32);
         let mut hash = [0; 32];
-        hash.copy_from_slice(&bytes);
+        hash.copy_from_slice(bytes);
         BlockHash(hash)
     }
 }

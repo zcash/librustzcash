@@ -374,6 +374,68 @@ impl<A: Authorization> TransactionData<A> {
             digester.digest_tze(self.tze_bundle.as_ref()),
         )
     }
+
+    /// Maps the bundles from one type to another.
+    ///
+    /// This shouldn't be necessary for most use cases; it is provided for handling the
+    /// cross-FFI builder logic in `zcashd`.
+    pub fn map_bundles<B: Authorization>(
+        self,
+        f_transparent: impl FnOnce(
+            Option<transparent::Bundle<A::TransparentAuth>>,
+        ) -> Option<transparent::Bundle<B::TransparentAuth>>,
+        f_sapling: impl FnOnce(
+            Option<sapling::Bundle<A::SaplingAuth>>,
+        ) -> Option<sapling::Bundle<B::SaplingAuth>>,
+        f_orchard: impl FnOnce(
+            Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
+        ) -> Option<orchard::bundle::Bundle<B::OrchardAuth, Amount>>,
+        #[cfg(feature = "zfuture")] f_tze: impl FnOnce(
+            Option<tze::Bundle<A::TzeAuth>>,
+        ) -> Option<tze::Bundle<B::TzeAuth>>,
+    ) -> TransactionData<B> {
+        TransactionData {
+            version: self.version,
+            consensus_branch_id: self.consensus_branch_id,
+            lock_time: self.lock_time,
+            expiry_height: self.expiry_height,
+            transparent_bundle: f_transparent(self.transparent_bundle),
+            sprout_bundle: self.sprout_bundle,
+            sapling_bundle: f_sapling(self.sapling_bundle),
+            orchard_bundle: f_orchard(self.orchard_bundle),
+            #[cfg(feature = "zfuture")]
+            tze_bundle: f_tze(self.tze_bundle),
+        }
+    }
+
+    pub fn map_authorization<B: Authorization>(
+        self,
+        f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
+        f_sapling: impl sapling::MapAuth<A::SaplingAuth, B::SaplingAuth>,
+        mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
+        #[cfg(feature = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
+    ) -> TransactionData<B> {
+        TransactionData {
+            version: self.version,
+            consensus_branch_id: self.consensus_branch_id,
+            lock_time: self.lock_time,
+            expiry_height: self.expiry_height,
+            transparent_bundle: self
+                .transparent_bundle
+                .map(|b| b.map_authorization(f_transparent)),
+            sprout_bundle: self.sprout_bundle,
+            sapling_bundle: self.sapling_bundle.map(|b| b.map_authorization(f_sapling)),
+            orchard_bundle: self.orchard_bundle.map(|b| {
+                b.authorize(
+                    &mut f_orchard,
+                    |f, _, s| f.map_spend_auth(s),
+                    |f, a| f.map_authorization(a),
+                )
+            }),
+            #[cfg(feature = "zfuture")]
+            tze_bundle: self.tze_bundle.map(|b| b.map_authorization(f_tze)),
+        }
+    }
 }
 
 impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
@@ -507,6 +569,10 @@ impl Transaction {
         );
 
         Transaction { txid, data }
+    }
+
+    pub fn into_data(self) -> TransactionData<Authorized> {
+        self.data
     }
 
     pub fn txid(&self) -> TxId {

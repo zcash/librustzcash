@@ -200,6 +200,12 @@ impl Sum<Amount> for Option<Amount> {
     }
 }
 
+impl<'a> Sum<&'a Amount> for Option<Amount> {
+    fn sum<I: Iterator<Item = &'a Amount>>(iter: I) -> Self {
+        iter.fold(Some(Amount::zero()), |acc, a| acc? + *a)
+    }
+}
+
 impl Neg for Amount {
     type Output = Self;
 

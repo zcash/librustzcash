@@ -142,7 +142,7 @@ where
 ///     }
 /// };
 ///
-/// let account = AccountId(0);
+/// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().1.into();
 ///
@@ -347,7 +347,7 @@ where
                     Err(Error::MemoForbidden)
                 } else {
                     builder
-                        .add_transparent_output(&to, payment.amount)
+                        .add_transparent_output(to, payment.amount)
                         .map_err(Error::Builder)
                 }
             }
@@ -439,7 +439,7 @@ where
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.
-    if !wallet_db.is_valid_account_extfvk(account, &extfvk)? {
+    if !wallet_db.is_valid_account_extfvk(account, extfvk)? {
         return Err(E::from(Error::InvalidExtSk(account)));
     }
 
