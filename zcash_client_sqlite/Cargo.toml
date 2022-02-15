@@ -18,7 +18,7 @@ bs58 = { version = "0.4", features = ["check"] }
 ff = "0.8"
 group = "0.8"
 jubjub = "0.5.1"
-protobuf = "2.20"
+protobuf = "~2.27.1" # MSRV 1.52.1
 rand_core = "0.5.1"
 rusqlite = { version = "0.24", features = ["bundled", "time"] }
 secp256k1 = { version = "0.19" }
