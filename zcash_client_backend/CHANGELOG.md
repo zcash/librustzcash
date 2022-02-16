@@ -38,7 +38,7 @@ and this library adheres to Rust's notion of
   - `zcash_client_backend::encoding::encode_transparent_address`
 
 ### Changed
-- MSRV is now 1.51.0.
+- MSRV is now 1.54.0.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `bls12_381 0.6`, `jubjub 0.8`.
 - `epk: jubjub::ExtendedPoint` has been replaced by
   `ephemeral_key: zcash_note_encryption::EphemeralKeyBytes` in various places:

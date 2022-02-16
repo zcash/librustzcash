@@ -19,6 +19,7 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "f1795f8068c8c83af89af8a061131759f973d656" }
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
 hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "576683b9f2865f1118c309017ff36e01f84420c9" }
