@@ -1114,6 +1114,7 @@
 <span id="1109">1109</span>
 <span id="1110">1110</span>
 <span id="1111">1111</span>
+<span id="1112">1112</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Gadgets implementing Jubjub elliptic curve operations.</span>
 
 <span class="kw">use</span> <span class="ident">std::ops</span>::{<span class="ident">AddAssign</span>, <span class="ident">MulAssign</span>, <span class="ident">Neg</span>, <span class="ident">SubAssign</span>};
@@ -1971,6 +1972,7 @@
 
             <span class="macro">assert!</span>(<span class="ident">cs</span>.<span class="ident">is_satisfied</span>());
 
+            <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::branches_sharing_code</span>)]</span>
             <span class="kw">if</span> <span class="ident">should_we_select</span> {
                 <span class="macro">assert_eq!</span>(<span class="ident">q</span>.<span class="ident">u</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>(), <span class="ident">u0</span>);
                 <span class="macro">assert_eq!</span>(<span class="ident">q</span>.<span class="ident">v</span>.<span class="ident">get_value</span>().<span class="ident">unwrap</span>(), <span class="ident">v0</span>);
@@ -2226,5 +2228,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_proofs" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (1e12aef3f 2022-02-13)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_proofs" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (09cb29c64 2022-02-15)" ></div>
 </body></html>
