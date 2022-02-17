@@ -728,7 +728,9 @@ mod tests {
 
     use zcash_client_backend::{
         keys::{sapling, UnifiedFullViewingKey},
-        proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx},
+        proto::compact_formats::{
+            CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+        },
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -840,7 +842,7 @@ mod tests {
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
-        let mut cout = CompactOutput::new();
+        let mut cout = CompactSaplingOutput::new();
         cout.set_cmu(cmu);
         cout.set_epk(epk);
         cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
@@ -872,7 +874,7 @@ mod tests {
         let rseed = generate_random_rseed(&network(), height, &mut rng);
 
         // Create a fake CompactBlock containing the note
-        let mut cspend = CompactSpend::new();
+        let mut cspend = CompactSaplingSpend::new();
         cspend.set_nf(nf.to_vec());
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];
@@ -899,7 +901,7 @@ mod tests {
             let epk = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-            let mut cout = CompactOutput::new();
+            let mut cout = CompactSaplingOutput::new();
             cout.set_cmu(cmu);
             cout.set_epk(epk);
             cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
@@ -927,7 +929,7 @@ mod tests {
             let epk = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-            let mut cout = CompactOutput::new();
+            let mut cout = CompactSaplingOutput::new();
             cout.set_cmu(cmu);
             cout.set_epk(epk);
             cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
