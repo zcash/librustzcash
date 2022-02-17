@@ -844,7 +844,7 @@ mod tests {
         // Create a fake CompactBlock containing the note
         let mut cout = CompactSaplingOutput::new();
         cout.set_cmu(cmu);
-        cout.set_epk(epk);
+        cout.set_ephemeralKey(epk);
         cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];
@@ -903,7 +903,7 @@ mod tests {
 
             let mut cout = CompactSaplingOutput::new();
             cout.set_cmu(cmu);
-            cout.set_epk(epk);
+            cout.set_ephemeralKey(epk);
             cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
             cout
         });
@@ -931,7 +931,7 @@ mod tests {
 
             let mut cout = CompactSaplingOutput::new();
             cout.set_cmu(cmu);
-            cout.set_epk(epk);
+            cout.set_ephemeralKey(epk);
             cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
             cout
         });

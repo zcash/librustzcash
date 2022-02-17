@@ -346,7 +346,7 @@ mod tests {
         cspend.set_nf(fake_nf);
         let mut cout = CompactSaplingOutput::new();
         cout.set_cmu(fake_cmu);
-        cout.set_epk(fake_epk);
+        cout.set_ephemeralKey(fake_epk);
         cout.set_ciphertext(vec![0; 52]);
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];
@@ -404,7 +404,7 @@ mod tests {
         cspend.set_nf(nf.0.to_vec());
         let mut cout = CompactSaplingOutput::new();
         cout.set_cmu(cmu);
-        cout.set_epk(epk);
+        cout.set_ephemeralKey(epk);
         cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];

@@ -37,8 +37,8 @@ message CompactTx {
     // The transaction fee: present if server can provide. In the case of a
     // stateless server and a transaction with transparent inputs, this will be
     // unset because the calculation requires reference to prior transactions.
-    // in a pure-Sapling context, the fee will be calculable as:
-    //    valueBalance + (sum(vPubNew) - sum(vPubOld) - sum(tOut))
+    // If there are no transparent inputs, the fee will be calculable as:
+    //    valueBalanceSapling + valueBalanceOrchard + sum(vPubNew) - sum(vPubOld) - sum(tOut)
     uint32 fee = 3;
 
     repeated CompactSaplingSpend spends = 4;
@@ -52,11 +52,14 @@ message CompactSaplingSpend {
     bytes nf = 1;   // nullifier (see the Zcash protocol specification)
 }
 
-// output is a Sapling Output Description as described in section 7.4 of the
-// Zcash protocol spec. Total size is 948.
+// output encodes the `cmu` field, `ephemeralKey` field, and a 52-byte prefix of the
+// `encCiphertext` field of a Sapling Output Description. These fields are described in
+// section 7.4 of the Zcash protocol spec:
+// https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
+// Total size is 116 bytes.
 message CompactSaplingOutput {
     bytes cmu = 1;          // note commitment u-coordinate
-    bytes epk = 2;          // ephemeral public key
+    bytes ephemeralKey = 2; // ephemeral public key
     bytes ciphertext = 3;   // first 52 bytes of ciphertext
 }
 
@@ -66,5 +69,5 @@ message CompactOrchardAction {
     bytes nullifier = 1;        // [32] The nullifier of the input note
     bytes cmx = 2;              // [32] The x-coordinate of the note commitment for the output note
     bytes ephemeralKey = 3;     // [32] An encoding of an ephemeral Pallas public key
-    bytes encCiphertext = 4;    // [580] The encrypted contents of the note plaintext
+    bytes ciphertext = 4;       // [52] The first 52 bytes of the encCiphertext field
 }
