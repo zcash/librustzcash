@@ -1,14 +1,11 @@
 //! Implementations of serialization and parsing for Orchard note commitment trees.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::convert::TryFrom;
-use std::hash::Hash;
+use std::convert::{TryFrom, TryInto};
 use std::io::{self, Read, Write};
 
 use incrementalmerkletree::{
-    bridgetree::{
-        AuthFragment, BridgeTree, Checkpoint, Frontier, Leaf, MerkleBridge, NonEmptyFrontier,
-    },
+    bridgetree::{AuthFragment, Frontier, Leaf, MerkleBridge, NonEmptyFrontier},
     Hashable, Position,
 };
 use orchard::tree::MerkleHashOrchard;
@@ -17,14 +14,6 @@ use zcash_encoding::{Optional, Vector};
 use super::{CommitmentTree, HashSer};
 
 pub const SER_V1: u8 = 1;
-
-pub fn read_frontier_v0<H: Hashable + super::Hashable, R: Read>(
-    mut reader: R,
-) -> io::Result<Frontier<H, 32>> {
-    let tree = CommitmentTree::read(&mut reader)?;
-
-    Ok(tree.to_frontier())
-}
 
 impl HashSer for MerkleHashOrchard {
     fn read<R: Read>(mut reader: R) -> io::Result<Self>
@@ -44,6 +33,14 @@ impl HashSer for MerkleHashOrchard {
     fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.to_bytes())
     }
+}
+
+pub fn read_frontier_v0<H: Hashable + super::Hashable, R: Read>(
+    mut reader: R,
+) -> io::Result<Frontier<H, 32>> {
+    let tree = CommitmentTree::read(&mut reader)?;
+
+    Ok(tree.to_frontier())
 }
 
 pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
@@ -108,17 +105,30 @@ pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(reader: R) -> io::Result<Fr
     }
 }
 
+pub fn write_position<W: Write>(mut writer: W, position: Position) -> io::Result<()> {
+    writer.write_u64::<LittleEndian>(position.try_into().unwrap())
+}
+
+pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
+    let p = reader.read_u64::<LittleEndian>()?;
+    <usize>::try_from(p).map(Position::from).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "usize could not be decoded to a 64-bit value on this platform: {:?}",
+                err
+            ),
+        )
+    })
+}
+
 pub fn write_auth_fragment_v1<H: HashSer, W: Write>(
     mut writer: W,
     fragment: &AuthFragment<H>,
 ) -> io::Result<()> {
-    writer.write_u64::<LittleEndian>(<u64>::from(fragment.position()))?;
-    writer.write_u64::<LittleEndian>(fragment.altitudes_observed() as u64)?;
+    write_position(&mut writer, fragment.position())?;
+    writer.write_u64::<LittleEndian>(fragment.altitudes_observed().try_into().unwrap())?;
     Vector::write(&mut writer, fragment.values(), |w, a| a.write(w))
-}
-
-pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
-    Ok(Position::from(reader.read_u64::<LittleEndian>()? as usize))
 }
 
 #[allow(clippy::redundant_closure)]
@@ -130,7 +140,7 @@ pub fn read_auth_fragment_v1<H: HashSer, R: Read>(mut reader: R) -> io::Result<A
     Ok(AuthFragment::from_parts(position, alts_observed, values))
 }
 
-pub fn write_bridge_v1<H: HashSer, W: Write>(
+pub fn write_bridge_v1<H: HashSer + Ord, W: Write>(
     mut writer: W,
     bridge: &MerkleBridge<H>,
 ) -> io::Result<()> {
@@ -143,7 +153,7 @@ pub fn write_bridge_v1<H: HashSer, W: Write>(
         &mut writer,
         &bridge.auth_fragments().iter().collect::<Vec<_>>(),
         |w, (i, a)| {
-            w.write_u64::<LittleEndian>(**i as u64)?;
+            w.write_u64::<LittleEndian>(u64::from(**i))?;
             write_auth_fragment_v1(w, a)
         },
     )?;
@@ -152,13 +162,12 @@ pub fn write_bridge_v1<H: HashSer, W: Write>(
     Ok(())
 }
 
-pub fn read_bridge_v1<H: HashSer + Clone, R: Read>(mut reader: R) -> io::Result<MerkleBridge<H>> {
+pub fn read_bridge_v1<H: HashSer + Ord + Clone, R: Read>(
+    mut reader: R,
+) -> io::Result<MerkleBridge<H>> {
     let prior_position = Optional::read(&mut reader, read_position)?;
-    let auth_fragments = Vector::read(&mut reader, |r| {
-        Ok((
-            r.read_u64::<LittleEndian>()? as usize,
-            read_auth_fragment_v1(r)?,
-        ))
+    let auth_fragments = Vector::read(&mut reader, |mut r| {
+        Ok((read_position(&mut r)?, read_auth_fragment_v1(r)?))
     })?
     .into_iter()
     .collect();
@@ -171,99 +180,22 @@ pub fn read_bridge_v1<H: HashSer + Clone, R: Read>(mut reader: R) -> io::Result<
     ))
 }
 
-pub const EMPTY_CHECKPOINT: u8 = 0;
-pub const BRIDGE_CHECKPOINT: u8 = 1;
-
-pub fn write_checkpoint_v1<W: Write>(mut writer: W, checkpoint: &Checkpoint) -> io::Result<()> {
-    match checkpoint {
-        Checkpoint::Empty => {
-            writer.write_u8(EMPTY_CHECKPOINT)?;
-        }
-        Checkpoint::AtIndex(i) => {
-            writer.write_u8(BRIDGE_CHECKPOINT)?;
-            writer.write_u64::<LittleEndian>(*i as u64)?;
-        }
-    }
-
-    Ok(())
-}
-
-pub fn read_checkpoint_v1<R: Read>(mut reader: R) -> io::Result<Checkpoint> {
-    match reader.read_u8()? {
-        EMPTY_CHECKPOINT => Ok(Checkpoint::Empty),
-        BRIDGE_CHECKPOINT => Ok(Checkpoint::AtIndex(
-            reader.read_u64::<LittleEndian>()? as usize
-        )),
-        flag => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("Unrecognized checkpoint variant identifier: {:?}", flag),
-        )),
-    }
-}
-
-pub fn write_tree_v1<H: HashSer + Hash + Eq, W: Write>(
+pub fn write_bridge<H: HashSer + Ord, W: Write>(
     mut writer: W,
-    tree: &BridgeTree<H, 32>,
-) -> io::Result<()> {
-    Vector::write(&mut writer, tree.bridges(), |w, b| write_bridge_v1(w, b))?;
-    Vector::write(
-        &mut writer,
-        &tree.witnessable_leaves().iter().collect::<Vec<_>>(),
-        |mut w, (a, i)| {
-            a.write(&mut w)?;
-            w.write_u64::<LittleEndian>(**i as u64)?;
-            Ok(())
-        },
-    )?;
-    Vector::write(&mut writer, tree.checkpoints(), |w, c| {
-        write_checkpoint_v1(w, c)
-    })?;
-    writer.write_u64::<LittleEndian>(tree.max_checkpoints() as u64)?;
-
-    Ok(())
-}
-
-#[allow(clippy::redundant_closure)]
-pub fn read_tree_v1<H: Hashable + HashSer + Hash + Eq + Clone, R: Read>(
-    mut reader: R,
-) -> io::Result<BridgeTree<H, 32>> {
-    BridgeTree::from_parts(
-        Vector::read(&mut reader, |r| read_bridge_v1(r))?,
-        Vector::read(&mut reader, |mut r| {
-            Ok((H::read(&mut r)?, r.read_u64::<LittleEndian>()? as usize))
-        })?
-        .into_iter()
-        .collect(),
-        Vector::read(&mut reader, |r| read_checkpoint_v1(r))?,
-        reader.read_u64::<LittleEndian>()? as usize,
-    )
-    .map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "Consistency violation found when attempting to deserialize Merkle tree: {:?}",
-                err
-            ),
-        )
-    })
-}
-
-pub fn write_tree<H: HashSer + Hash + Eq, W: Write>(
-    mut writer: W,
-    tree: &BridgeTree<H, 32>,
+    bridge: &MerkleBridge<H>,
 ) -> io::Result<()> {
     writer.write_u8(SER_V1)?;
-    write_tree_v1(&mut writer, tree)
+    write_bridge_v1(writer, bridge)
 }
 
-pub fn read_tree<H: Hashable + HashSer + Hash + Eq + Clone, R: Read>(
+pub fn read_bridge<H: HashSer + Ord + Clone, R: Read>(
     mut reader: R,
-) -> io::Result<BridgeTree<H, 32>> {
+) -> io::Result<MerkleBridge<H>> {
     match reader.read_u8()? {
-        SER_V1 => read_tree_v1(&mut reader),
+        SER_V1 => read_bridge_v1(&mut reader),
         flag => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("Unrecognized tree serialization version: {:?}", flag),
+            format!("Unrecognized serialization version: {:?}", flag),
         )),
     }
 }
