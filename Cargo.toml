@@ -21,6 +21,6 @@ codegen-units = 1
 [patch.crates-io]
 hdwallet = { git = "https://github.com/nuttycom/hdwallet", rev = "576683b9f2865f1118c309017ff36e01f84420c9" }
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "dd57b430dee7c0b163f4035fef2280cd1935036c" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "8449fd133c002a349869c09c529a4d214b20c0c0" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "a5f701f3186fb619b40f2dee9939e64e4c9eb7cc" }
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
