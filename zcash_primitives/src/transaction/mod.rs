@@ -239,6 +239,7 @@ pub trait Authorization {
     type TzeAuth: tze::Authorization;
 }
 
+#[derive(Debug)]
 pub struct Authorized;
 
 impl Authorization for Authorized {
@@ -282,6 +283,7 @@ impl PartialEq for Transaction {
     }
 }
 
+#[derive(Debug)]
 pub struct TransactionData<A: Authorization> {
     version: TxVersion,
     consensus_branch_id: BranchId,
@@ -431,92 +433,6 @@ impl<A: Authorization> TransactionData<A> {
             #[cfg(feature = "zfuture")]
             tze_bundle: self.tze_bundle.map(|b| b.map_authorization(f_tze)),
         }
-    }
-}
-
-impl<A: Authorization> std::fmt::Debug for TransactionData<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "TransactionData(
-                version = {:?},
-                consensus_branch_id = {:?},
-                lock_time = {:?},
-                expiry_height = {:?},
-                transparent_fields = {{{}}}
-                sprout = {{{}}},
-                sapling = {{{}}},
-                orchard = {{{}}},
-                tze = {{{}}}
-            )",
-            self.version,
-            self.consensus_branch_id,
-            self.lock_time,
-            self.expiry_height,
-            if let Some(b) = &self.transparent_bundle {
-                format!(
-                    "
-                    vin = {:?},
-                    vout = {:?},
-                    ",
-                    b.vin, b.vout
-                )
-            } else {
-                "".to_string()
-            },
-            if let Some(b) = &self.sprout_bundle {
-                format!(
-                    "
-                    joinsplits = {:?},
-                    joinsplit_pubkey = {:?},
-                    ",
-                    b.joinsplits, b.joinsplit_pubkey
-                )
-            } else {
-                "".to_string()
-            },
-            if let Some(b) = &self.sapling_bundle {
-                format!(
-                    "
-                    value_balance = {:?},
-                    shielded_spends = {:?},
-                    shielded_outputs = {:?},
-                    binding_sig = {:?},
-                    ",
-                    b.value_balance, b.shielded_spends, b.shielded_outputs, b.authorization
-                )
-            } else {
-                "".to_string()
-            },
-            if let Some(b) = &self.orchard_bundle {
-                format!(
-                    "
-                    value_balance = {:?},
-                    actions = {:?},
-                    ",
-                    b.value_balance(),
-                    b.actions().len()
-                )
-            } else {
-                "".to_string()
-            },
-            {
-                #[cfg(feature = "zfuture")]
-                if let Some(b) = &self.tze_bundle {
-                    format!(
-                        "
-                    tze_inputs = {:?},
-                    tze_outputs = {:?},
-                    ",
-                        b.vin, b.vout
-                    )
-                } else {
-                    "".to_string()
-                }
-                #[cfg(not(feature = "zfuture"))]
-                ""
-            }
-        )
     }
 }
 
@@ -988,7 +904,7 @@ impl Transaction {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TransparentDigests<A> {
     pub prevout_digest: A,
     pub sequence_digest: A,
@@ -996,14 +912,14 @@ pub struct TransparentDigests<A> {
     pub per_input_digest: Option<A>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TzeDigests<A> {
     pub inputs_digest: A,
     pub outputs_digest: A,
     pub per_input_digest: Option<A>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TxDigests<A> {
     pub header_digest: A,
     pub transparent_digests: Option<TransparentDigests<A>>,
