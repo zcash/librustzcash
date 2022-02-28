@@ -1081,90 +1081,6 @@
 <span id="1076">1076</span>
 <span id="1077">1077</span>
 <span id="1078">1078</span>
-<span id="1079">1079</span>
-<span id="1080">1080</span>
-<span id="1081">1081</span>
-<span id="1082">1082</span>
-<span id="1083">1083</span>
-<span id="1084">1084</span>
-<span id="1085">1085</span>
-<span id="1086">1086</span>
-<span id="1087">1087</span>
-<span id="1088">1088</span>
-<span id="1089">1089</span>
-<span id="1090">1090</span>
-<span id="1091">1091</span>
-<span id="1092">1092</span>
-<span id="1093">1093</span>
-<span id="1094">1094</span>
-<span id="1095">1095</span>
-<span id="1096">1096</span>
-<span id="1097">1097</span>
-<span id="1098">1098</span>
-<span id="1099">1099</span>
-<span id="1100">1100</span>
-<span id="1101">1101</span>
-<span id="1102">1102</span>
-<span id="1103">1103</span>
-<span id="1104">1104</span>
-<span id="1105">1105</span>
-<span id="1106">1106</span>
-<span id="1107">1107</span>
-<span id="1108">1108</span>
-<span id="1109">1109</span>
-<span id="1110">1110</span>
-<span id="1111">1111</span>
-<span id="1112">1112</span>
-<span id="1113">1113</span>
-<span id="1114">1114</span>
-<span id="1115">1115</span>
-<span id="1116">1116</span>
-<span id="1117">1117</span>
-<span id="1118">1118</span>
-<span id="1119">1119</span>
-<span id="1120">1120</span>
-<span id="1121">1121</span>
-<span id="1122">1122</span>
-<span id="1123">1123</span>
-<span id="1124">1124</span>
-<span id="1125">1125</span>
-<span id="1126">1126</span>
-<span id="1127">1127</span>
-<span id="1128">1128</span>
-<span id="1129">1129</span>
-<span id="1130">1130</span>
-<span id="1131">1131</span>
-<span id="1132">1132</span>
-<span id="1133">1133</span>
-<span id="1134">1134</span>
-<span id="1135">1135</span>
-<span id="1136">1136</span>
-<span id="1137">1137</span>
-<span id="1138">1138</span>
-<span id="1139">1139</span>
-<span id="1140">1140</span>
-<span id="1141">1141</span>
-<span id="1142">1142</span>
-<span id="1143">1143</span>
-<span id="1144">1144</span>
-<span id="1145">1145</span>
-<span id="1146">1146</span>
-<span id="1147">1147</span>
-<span id="1148">1148</span>
-<span id="1149">1149</span>
-<span id="1150">1150</span>
-<span id="1151">1151</span>
-<span id="1152">1152</span>
-<span id="1153">1153</span>
-<span id="1154">1154</span>
-<span id="1155">1155</span>
-<span id="1156">1156</span>
-<span id="1157">1157</span>
-<span id="1158">1158</span>
-<span id="1159">1159</span>
-<span id="1160">1160</span>
-<span id="1161">1161</span>
-<span id="1162">1162</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Structs and methods for handling Zcash transactions.</span>
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">builder</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">components</span>;
@@ -1406,6 +1322,7 @@
     <span class="kw">type</span> <span class="ident">TzeAuth</span>: <span class="ident">tze::Authorization</span>;
 }
 
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Authorized</span>;
 
 <span class="kw">impl</span> <span class="ident">Authorization</span> <span class="kw">for</span> <span class="ident">Authorized</span> {
@@ -1449,6 +1366,7 @@
     }
 }
 
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> {
     <span class="ident">version</span>: <span class="ident">TxVersion</span>,
     <span class="ident">consensus_branch_id</span>: <span class="ident">BranchId</span>,
@@ -1602,92 +1520,6 @@
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
             <span class="ident">tze_bundle</span>: <span class="self">self</span>.<span class="ident">tze_bundle</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="ident">map_authorization</span>(<span class="ident">f_tze</span>)),
         }
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Authorization</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">TransactionData</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
-        <span class="macro">write!</span>(
-            <span class="ident">f</span>,
-            <span class="string">&quot;TransactionData(
-                version = {:?},
-                consensus_branch_id = {:?},
-                lock_time = {:?},
-                expiry_height = {:?},
-                transparent_fields = {{{}}}
-                sprout = {{{}}},
-                sapling = {{{}}},
-                orchard = {{{}}},
-                tze = {{{}}}
-            )&quot;</span>,
-            <span class="self">self</span>.<span class="ident">version</span>,
-            <span class="self">self</span>.<span class="ident">consensus_branch_id</span>,
-            <span class="self">self</span>.<span class="ident">lock_time</span>,
-            <span class="self">self</span>.<span class="ident">expiry_height</span>,
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">b</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">transparent_bundle</span> {
-                <span class="macro">format!</span>(
-                    <span class="string">&quot;
-                    vin = {:?},
-                    vout = {:?},
-                    &quot;</span>,
-                    <span class="ident">b</span>.<span class="ident">vin</span>, <span class="ident">b</span>.<span class="ident">vout</span>
-                )
-            } <span class="kw">else</span> {
-                <span class="string">&quot;&quot;</span>.<span class="ident">to_string</span>()
-            },
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">b</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">sprout_bundle</span> {
-                <span class="macro">format!</span>(
-                    <span class="string">&quot;
-                    joinsplits = {:?},
-                    joinsplit_pubkey = {:?},
-                    &quot;</span>,
-                    <span class="ident">b</span>.<span class="ident">joinsplits</span>, <span class="ident">b</span>.<span class="ident">joinsplit_pubkey</span>
-                )
-            } <span class="kw">else</span> {
-                <span class="string">&quot;&quot;</span>.<span class="ident">to_string</span>()
-            },
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">b</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">sapling_bundle</span> {
-                <span class="macro">format!</span>(
-                    <span class="string">&quot;
-                    value_balance = {:?},
-                    shielded_spends = {:?},
-                    shielded_outputs = {:?},
-                    binding_sig = {:?},
-                    &quot;</span>,
-                    <span class="ident">b</span>.<span class="ident">value_balance</span>, <span class="ident">b</span>.<span class="ident">shielded_spends</span>, <span class="ident">b</span>.<span class="ident">shielded_outputs</span>, <span class="ident">b</span>.<span class="ident">authorization</span>
-                )
-            } <span class="kw">else</span> {
-                <span class="string">&quot;&quot;</span>.<span class="ident">to_string</span>()
-            },
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">b</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">orchard_bundle</span> {
-                <span class="macro">format!</span>(
-                    <span class="string">&quot;
-                    value_balance = {:?},
-                    actions = {:?},
-                    &quot;</span>,
-                    <span class="ident">b</span>.<span class="ident">value_balance</span>(),
-                    <span class="ident">b</span>.<span class="ident">actions</span>().<span class="ident">len</span>()
-                )
-            } <span class="kw">else</span> {
-                <span class="string">&quot;&quot;</span>.<span class="ident">to_string</span>()
-            },
-            {
-                <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">b</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">tze_bundle</span> {
-                    <span class="macro">format!</span>(
-                        <span class="string">&quot;
-                    tze_inputs = {:?},
-                    tze_outputs = {:?},
-                    &quot;</span>,
-                        <span class="ident">b</span>.<span class="ident">vin</span>, <span class="ident">b</span>.<span class="ident">vout</span>
-                    )
-                } <span class="kw">else</span> {
-                    <span class="string">&quot;&quot;</span>.<span class="ident">to_string</span>()
-                }
-                <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>))]</span>
-                <span class="string">&quot;&quot;</span>
-            }
-        )
     }
 }
 
@@ -2159,21 +1991,21 @@
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
     <span class="kw">pub</span> <span class="ident">prevouts_digest</span>: <span class="ident">A</span>,
     <span class="kw">pub</span> <span class="ident">sequence_digest</span>: <span class="ident">A</span>,
     <span class="kw">pub</span> <span class="ident">outputs_digest</span>: <span class="ident">A</span>,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TzeDigests</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
     <span class="kw">pub</span> <span class="ident">inputs_digest</span>: <span class="ident">A</span>,
     <span class="kw">pub</span> <span class="ident">outputs_digest</span>: <span class="ident">A</span>,
     <span class="kw">pub</span> <span class="ident">per_input_digest</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">TxDigests</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
     <span class="kw">pub</span> <span class="ident">header_digest</span>: <span class="ident">A</span>,
     <span class="kw">pub</span> <span class="ident">transparent_digests</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">TransparentDigests</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span><span class="op">&gt;</span>,
@@ -2328,5 +2160,5 @@
     }
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.60.0-nightly (30b3f35c4 2022-02-17)" ></div>
+</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.61.0-nightly (6a7055661 2022-02-27)" ></div>
 </body></html>
