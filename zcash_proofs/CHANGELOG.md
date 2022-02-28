@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
-- MSRV is now 1.54.0.
+- MSRV is now 1.56.1.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `bellman 0.11.1`,
   `bls12_381 0.6`, `jubjub 0.8`.
 - `zcash_proofs::sapling::SaplingVerificationContext::new` now takes a

@@ -41,7 +41,7 @@ and this library adheres to Rust's notion of
   - `zcash_client_backend::encoding::encode_transparent_address`
 
 ### Changed
-- MSRV is now 1.54.0.
+- MSRV is now 1.56.1.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `bls12_381 0.6`, `jubjub 0.8`.
 - `zcash_client_backend::proto`:
   - `compact_formats::CompactSpend` has been renamed to `CompactSaplingSpend`,

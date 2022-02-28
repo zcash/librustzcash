@@ -18,7 +18,7 @@ and this library adheres to Rust's notion of
     rewinds exceed supported bounds.
 
 ### Changed
-- MSRV is now 1.54.0.
+- MSRV is now 1.56.1.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `jubjub 0.8`.
 - Renamed the following to use lower-case abbreviations (matching Rust
   naming conventions):
