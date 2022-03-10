@@ -59,8 +59,6 @@ pub fn read_leu64_usize<R: Read>(mut reader: R) -> io::Result<usize> {
 }
 
 pub fn write_position<W: Write>(mut writer: W, position: Position) -> io::Result<()> {
-    // The following `unwrap` is safe because we should never encounter
-    // a position that can't fit into a u64.
     write_usize_leu64(&mut writer, position.into())
 }
 
