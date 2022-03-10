@@ -35,6 +35,39 @@ impl HashSer for MerkleHashOrchard {
     }
 }
 
+/// Writes a usize value encoded as a u64 in little-endian order. Since usize
+/// is platform-dependent, we consistently represent it as u64 in serialized
+/// formats.
+pub fn write_usize_leu64<W: Write>(mut writer: W, value: usize) -> io::Result<()> {
+    // Panic if we get a usize value that can't fit into a u64.
+    writer.write_u64::<LittleEndian>(value.try_into().unwrap())
+}
+
+/// Reads a usize value encoded as a u64 in little-endian order. Since usize
+/// is platform-dependent, we consistently represent it as u64 in serialized
+/// formats.
+pub fn read_leu64_usize<R: Read>(mut reader: R) -> io::Result<usize> {
+    reader.read_u64::<LittleEndian>()?.try_into().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "usize could not be decoded from a 64-bit value on this platform: {:?}",
+                e
+            ),
+        )
+    })
+}
+
+pub fn write_position<W: Write>(mut writer: W, position: Position) -> io::Result<()> {
+    // The following `unwrap` is safe because we should never encounter
+    // a position that can't fit into a u64.
+    write_usize_leu64(&mut writer, position.into())
+}
+
+pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
+    read_leu64_usize(&mut reader).map(Position::from)
+}
+
 pub fn read_frontier_v0<H: Hashable + super::Hashable, R: Read>(
     mut reader: R,
 ) -> io::Result<Frontier<H, 32>> {
@@ -47,7 +80,7 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
     mut writer: W,
     frontier: &NonEmptyFrontier<H>,
 ) -> io::Result<()> {
-    writer.write_u64::<LittleEndian>(<u64>::from(frontier.position()))?;
+    write_position(&mut writer, frontier.position())?;
     match frontier.leaf() {
         Leaf::Left(a) => {
             a.write(&mut writer)?;
@@ -105,36 +138,19 @@ pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(reader: R) -> io::Result<Fr
     }
 }
 
-pub fn write_position<W: Write>(mut writer: W, position: Position) -> io::Result<()> {
-    writer.write_u64::<LittleEndian>(position.try_into().unwrap())
-}
-
-pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
-    let p = reader.read_u64::<LittleEndian>()?;
-    <usize>::try_from(p).map(Position::from).map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::Unsupported,
-            format!(
-                "usize could not be decoded to a 64-bit value on this platform: {:?}",
-                err
-            ),
-        )
-    })
-}
-
 pub fn write_auth_fragment_v1<H: HashSer, W: Write>(
     mut writer: W,
     fragment: &AuthFragment<H>,
 ) -> io::Result<()> {
     write_position(&mut writer, fragment.position())?;
-    writer.write_u64::<LittleEndian>(fragment.altitudes_observed().try_into().unwrap())?;
+    write_usize_leu64(&mut writer, fragment.altitudes_observed())?;
     Vector::write(&mut writer, fragment.values(), |w, a| a.write(w))
 }
 
 #[allow(clippy::redundant_closure)]
 pub fn read_auth_fragment_v1<H: HashSer, R: Read>(mut reader: R) -> io::Result<AuthFragment<H>> {
     let position = read_position(&mut reader)?;
-    let alts_observed = reader.read_u64::<LittleEndian>()? as usize;
+    let alts_observed = read_leu64_usize(&mut reader)?;
     let values = Vector::read(&mut reader, |r| H::read(r))?;
 
     Ok(AuthFragment::from_parts(position, alts_observed, values))
@@ -144,16 +160,14 @@ pub fn write_bridge_v1<H: HashSer + Ord, W: Write>(
     mut writer: W,
     bridge: &MerkleBridge<H>,
 ) -> io::Result<()> {
-    Optional::write(
-        &mut writer,
-        bridge.prior_position().map(<u64>::from),
-        |w, n| w.write_u64::<LittleEndian>(n),
-    )?;
+    Optional::write(&mut writer, bridge.prior_position(), |w, pos| {
+        write_position(w, pos)
+    })?;
     Vector::write(
         &mut writer,
         &bridge.auth_fragments().iter().collect::<Vec<_>>(),
-        |w, (i, a)| {
-            w.write_u64::<LittleEndian>(u64::from(**i))?;
+        |mut w, (pos, a)| {
+            write_position(&mut w, **pos)?;
             write_auth_fragment_v1(w, a)
         },
     )?;
