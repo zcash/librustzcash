@@ -149,27 +149,19 @@ impl Vector {
         vec.iter().try_for_each(|e| func(&mut writer, e))
     }
 
-    /// Writes at most `items_to_write` values from the provided iterator to the stream
-    /// in [`CompactSize`]-prefixed format.
-    ///
-    /// If not enough items are available, this will return an error; all available
-    /// elements will already have been written to the stream but the [`CompactSize`]
-    /// prefix that was written will be incorrect, and so the data written will not be
-    /// able to be correctly decoded as a vector.
-    pub fn write_sized<'a, W: Write, E: 'a, F, I: Iterator<Item = E> + ExactSizeIterator>(
+    /// Writes an iterator of values by writing [`CompactSize`]-encoded integer specifying
+    /// the length of the iterator to the stream, followed by the encoding of each element
+    /// of the iterator as performed by the provided function.
+    pub fn write_sized<W: Write, E, F, I: Iterator<Item = E> + ExactSizeIterator>(
         mut writer: W,
-        items: I,
+        mut items: I,
         func: F,
     ) -> io::Result<()>
     where
         F: Fn(&mut W, E) -> io::Result<()>,
     {
         CompactSize::write(&mut writer, items.len())?;
-        for item in items {
-            func(&mut writer, item)?;
-        }
-
-        Ok(())
+        items.try_for_each(|e| func(&mut writer, e))
     }
 }
 
