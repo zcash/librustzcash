@@ -12,6 +12,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
+use std::iter::FromIterator;
 
 /// The maximum allowed value representable as a `[CompactSize]`
 pub const MAX_COMPACT_SIZE: u32 = 0x02000000;
@@ -104,23 +105,34 @@ pub struct Vector;
 impl Vector {
     /// Reads a vector, assuming the encoding written by [`Vector::write`], using the provided
     /// function to decode each element of the vector.
-    pub fn read<R: Read, E, F>(mut reader: R, func: F) -> io::Result<Vec<E>>
+    pub fn read<R: Read, E, F>(reader: R, func: F) -> io::Result<Vec<E>>
+    where
+        F: Fn(&mut R) -> io::Result<E>,
+    {
+        Self::read_collected(reader, func)
+    }
+
+    /// Reads a CompactSize-prefixed series of elements into a collection, assuming the encoding
+    /// written by [`Vector::write`], using the provided function to decode each element.
+    pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(
+        mut reader: R,
+        func: F,
+    ) -> io::Result<O>
     where
         F: Fn(&mut R) -> io::Result<E>,
     {
         let count: usize = CompactSize::read_t(&mut reader)?;
-        Array::read(reader, count, func)
+        Array::read_collected(reader, count, func)
     }
 
-    /// Writes a slice of values by writing [`CompactSize`]-encoded integer specifying the length of
-    /// the slice to the stream, followed by the encoding of each element of the slice as performed
-    /// by the provided function.
-    pub fn write<W: Write, E, F>(mut writer: W, vec: &[E], func: F) -> io::Result<()>
+    /// Writes a slice of values by writing [`CompactSize`]-encoded integer specifying the length
+    /// of the slice to the stream, followed by the encoding of each element of the slice as
+    /// performed by the provided function.
+    pub fn write<W: Write, E, F>(writer: W, vec: &[E], func: F) -> io::Result<()>
     where
         F: Fn(&mut W, &E) -> io::Result<()>,
     {
-        CompactSize::write(&mut writer, vec.len())?;
-        vec.iter().try_for_each(|e| func(&mut writer, e))
+        Self::write_sized(writer, vec.iter(), func)
     }
 
     /// Writes a NonEmpty container of values to the stream using the same encoding as
@@ -136,6 +148,21 @@ impl Vector {
         CompactSize::write(&mut writer, vec.len())?;
         vec.iter().try_for_each(|e| func(&mut writer, e))
     }
+
+    /// Writes an iterator of values by writing [`CompactSize`]-encoded integer specifying
+    /// the length of the iterator to the stream, followed by the encoding of each element
+    /// of the iterator as performed by the provided function.
+    pub fn write_sized<W: Write, E, F, I: Iterator<Item = E> + ExactSizeIterator>(
+        mut writer: W,
+        mut items: I,
+        func: F,
+    ) -> io::Result<()>
+    where
+        F: Fn(&mut W, E) -> io::Result<()>,
+    {
+        CompactSize::write(&mut writer, items.len())?;
+        items.try_for_each(|e| func(&mut writer, e))
+    }
 }
 
 /// Namespace for functions that perform encoding of array contents.
@@ -146,9 +173,22 @@ impl Vector {
 pub struct Array;
 
 impl Array {
-    /// Reads a vector, assuming the encoding written by [`Array::write`], using the provided
-    /// function to decode each element of the vector.
-    pub fn read<R: Read, E, F>(mut reader: R, count: usize, func: F) -> io::Result<Vec<E>>
+    /// Reads `count` elements from a stream into a vector, assuming the encoding written by
+    /// [`Array::write`], using the provided function to decode each element.
+    pub fn read<R: Read, E, F>(reader: R, count: usize, func: F) -> io::Result<Vec<E>>
+    where
+        F: Fn(&mut R) -> io::Result<E>,
+    {
+        Self::read_collected(reader, count, func)
+    }
+
+    /// Reads `count` elements into a collection, assuming the encoding written by
+    /// [`Array::write`], using the provided function to decode each element.
+    pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(
+        mut reader: R,
+        count: usize,
+        func: F,
+    ) -> io::Result<O>
     where
         F: Fn(&mut R) -> io::Result<E>,
     {
