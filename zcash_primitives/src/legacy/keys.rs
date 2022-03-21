@@ -46,7 +46,7 @@ impl AccountPrivKey {
     pub fn derive_external_secret_key(
         &self,
         child_index: u32,
-    ) -> Result<secp256k1::key::SecretKey, hdwallet::error::Error> {
+    ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
         self.0
             .derive_private_key(KeyIndex::Normal(0))?
             .derive_private_key(KeyIndex::Normal(child_index))
@@ -58,7 +58,7 @@ impl AccountPrivKey {
     pub fn derive_internal_secret_key(
         &self,
         child_index: u32,
-    ) -> Result<secp256k1::key::SecretKey, hdwallet::error::Error> {
+    ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
         self.0
             .derive_private_key(KeyIndex::Normal(1))?
             .derive_private_key(KeyIndex::Normal(child_index))
@@ -135,7 +135,7 @@ impl AccountPubKey {
 
 /// Derives the P2PKH transparent address corresponding to the given pubkey.
 #[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
-pub fn pubkey_to_address(pubkey: &secp256k1::key::PublicKey) -> TransparentAddress {
+pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
     TransparentAddress::PublicKey(
         *ripemd::Ripemd160::digest(Sha256::digest(&pubkey.serialize())).as_ref(),
     )
