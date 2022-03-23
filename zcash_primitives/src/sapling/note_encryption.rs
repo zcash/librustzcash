@@ -159,7 +159,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     ) -> Self::EphemeralPublicKey {
         // epk is an element of jubjub's prime-order subgroup,
         // but Self::EphemeralPublicKey is a full group element
-        // for efficency of encryption. The conversion here is fine
+        // for efficiency of encryption. The conversion here is fine
         // because the output of this function is only used for
         // encoding and the byte encoding is unaffected by the conversion.
         (note.g_d * esk).into()

@@ -26,7 +26,7 @@ log = "0.4"
 nom = "7"
 percent-encoding = "2.1.0"
 proptest = { version = "1.0.0", optional = true }
-protobuf = ">=2.20,<2.26" # protobuf 2.26 bumped MSRV to 1.52.1
+protobuf = "~2.27.1" # MSRV 1.52.1
 rand_core = "0.6"
 ripemd = { version = "0.1", optional = true }
 secp256k1 = { version = "0.20", optional = true }
@@ -37,7 +37,7 @@ zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encr
 zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
 
 [build-dependencies]
-protobuf-codegen-pure = ">=2.20,<2.26" # protobuf 2.26 bumped MSRV to 1.52.1
+protobuf-codegen-pure = "~2.27.1" # MSRV 1.52.1
 
 [dev-dependencies]
 gumdrop = "0.8"

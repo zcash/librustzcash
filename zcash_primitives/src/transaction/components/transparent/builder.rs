@@ -4,9 +4,12 @@ use std::fmt;
 
 use crate::{
     legacy::{Script, TransparentAddress},
-    transaction::components::{
-        amount::Amount,
-        transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
+    transaction::{
+        components::{
+            amount::Amount,
+            transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
+        },
+        sighash::TransparentAuthorizingContext,
     },
 };
 
@@ -186,6 +189,32 @@ impl TxIn<Unauthorized> {
     }
 }
 
+#[cfg(not(feature = "transparent-inputs"))]
+impl TransparentAuthorizingContext for Unauthorized {
+    fn input_amounts(&self) -> Vec<Amount> {
+        vec![]
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        vec![]
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentAuthorizingContext for Unauthorized {
+    fn input_amounts(&self) -> Vec<Amount> {
+        return self.inputs.iter().map(|txin| txin.coin.value).collect();
+    }
+
+    fn input_scriptpubkeys(&self) -> Vec<Script> {
+        return self
+            .inputs
+            .iter()
+            .map(|txin| txin.coin.script_pubkey.clone())
+            .collect();
+    }
+}
+
 impl Bundle<Unauthorized> {
     pub fn apply_signatures(
         self,
@@ -198,11 +227,16 @@ impl Bundle<Unauthorized> {
             .inputs
             .iter()
             .enumerate()
-            .map(|(i, info)| {
+            .map(|(index, info)| {
                 let sighash = signature_hash(
                     mtx,
-                    SIGHASH_ALL,
-                    &SignableInput::transparent(i, &info.coin.script_pubkey, info.coin.value),
+                    &SignableInput::Transparent {
+                        hash_type: SIGHASH_ALL,
+                        index,
+                        script_code: &info.coin.script_pubkey, // for p2pkh, always the same as script_pubkey
+                        script_pubkey: &info.coin.script_pubkey,
+                        value: info.coin.value,
+                    },
                     txid_parts_cache,
                 );
 

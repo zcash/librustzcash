@@ -16,10 +16,10 @@ use zcash_primitives::{
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
-use crate::proto::compact_formats::{CompactBlock, CompactOutput};
+use crate::proto::compact_formats::{CompactBlock, CompactSaplingOutput};
 use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
-/// Scans a [`CompactOutput`] with a set of [`ScanningKey`]s.
+/// Scans a [`CompactSaplingOutput`] with a set of [`ScanningKey`]s.
 ///
 /// Returns a [`WalletShieldedOutput`] and corresponding [`IncrementalWitness`] if this
 /// output belongs to any of the given [`ScanningKey`]s.
@@ -33,7 +33,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
     height: BlockHeight,
     index: usize,
-    output: CompactOutput,
+    output: CompactSaplingOutput,
     vks: &[(&AccountId, &K)],
     spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
@@ -90,7 +90,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
 }
 
 /// A key that can be used to perform trial decryption and nullifier
-/// computation for a Sapling [`CompactOutput`]
+/// computation for a Sapling [`CompactSaplingOutput`]
 ///
 /// The purpose of this trait is to enable [`scan_block`]
 /// and related methods to be used with either incoming viewing keys
@@ -100,7 +100,7 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
 /// will be returned; in the case of a full viewing key, the
 /// nullifier for the note can also be obtained.
 ///
-/// [`CompactOutput`]: crate::proto::compact_formats::CompactOutput
+/// [`CompactSaplingOutput`]: crate::proto::compact_formats::CompactSaplingOutput
 /// [`scan_block`]: crate::welding_rig::scan_block
 pub trait ScanningKey {
     /// The type of nullifier extracted when a note is successfully
@@ -321,7 +321,9 @@ mod tests {
     };
 
     use super::scan_block;
-    use crate::proto::compact_formats::{CompactBlock, CompactOutput, CompactSpend, CompactTx};
+    use crate::proto::compact_formats::{
+        CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+    };
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -340,11 +342,11 @@ mod tests {
             let fake_epk = SPENDING_KEY_GENERATOR * fake_esk;
             fake_epk.to_bytes().to_vec()
         };
-        let mut cspend = CompactSpend::new();
+        let mut cspend = CompactSaplingSpend::new();
         cspend.set_nf(fake_nf);
-        let mut cout = CompactOutput::new();
+        let mut cout = CompactSaplingOutput::new();
         cout.set_cmu(fake_cmu);
-        cout.set_epk(fake_epk);
+        cout.set_ephemeralKey(fake_epk);
         cout.set_ciphertext(vec![0; 52]);
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];
@@ -398,11 +400,11 @@ mod tests {
             cb.vtx.push(tx);
         }
 
-        let mut cspend = CompactSpend::new();
+        let mut cspend = CompactSaplingSpend::new();
         cspend.set_nf(nf.0.to_vec());
-        let mut cout = CompactOutput::new();
+        let mut cout = CompactSaplingOutput::new();
         cout.set_cmu(cmu);
-        cout.set_epk(epk);
+        cout.set_ephemeralKey(epk);
         cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
         let mut ctx = CompactTx::new();
         let mut txid = vec![0; 32];

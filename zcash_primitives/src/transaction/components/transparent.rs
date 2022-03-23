@@ -35,6 +35,18 @@ pub struct Bundle<A: Authorization> {
 }
 
 impl<A: Authorization> Bundle<A> {
+    /// Returns `true` if this bundle matches the definition of a coinbase transaction.
+    ///
+    /// Note that this is defined purely in terms of the transparent transaction part. The
+    /// consensus rules enforce additional rules on the shielded parts (namely, that they
+    /// don't have any inputs) of transactions with a transparent part that matches this
+    /// definition.
+    pub fn is_coinbase(&self) -> bool {
+        // From `CTransaction::IsCoinBase()` in zcashd:
+        //   return (vin.size() == 1 && vin[0].prevout.IsNull());
+        matches!(&self.vin[..], [input] if input.prevout.is_null())
+    }
+
     pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
         Bundle {
             vin: self
@@ -73,6 +85,14 @@ impl OutPoint {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.hash)?;
         writer.write_u32::<LittleEndian>(self.n)
+    }
+
+    /// Returns `true` if this `OutPoint` is "null" in the Bitcoin sense: it points to the
+    /// `u32::MAX`th output of the transaction with the all-zeroes txid.
+    fn is_null(&self) -> bool {
+        // From `BaseOutPoint::IsNull()` in zcashd:
+        //   return (hash.IsNull() && n == (uint32_t) -1);
+        self.hash == [0; 32] && self.n == u32::MAX
     }
 
     pub fn n(&self) -> u32 {

@@ -25,7 +25,7 @@ use crate::{
             },
             transparent::{self, builder::TransparentBuilder},
         },
-        sighash::{signature_hash, SignableInput, SIGHASH_ALL},
+        sighash::{signature_hash, SignableInput},
         txid::TxIdDigester,
         Transaction, TransactionData, TxVersion, Unauthorized,
     },
@@ -372,12 +372,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         // the commitment being signed is shared across all Sapling inputs; once
         // V4 transactions are deprecated this should just be the txid, but
         // for now we need to continue to compute it here.
-        let shielded_sig_commitment = signature_hash(
-            &unauthed_tx,
-            SIGHASH_ALL,
-            &SignableInput::Shielded,
-            &txid_parts,
-        );
+        let shielded_sig_commitment =
+            signature_hash(&unauthed_tx, &SignableInput::Shielded, &txid_parts);
 
         let (sapling_bundle, tx_metadata) = match unauthed_tx
             .sapling_bundle

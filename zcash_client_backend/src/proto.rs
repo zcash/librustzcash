@@ -7,10 +7,7 @@ use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
     sapling::Nullifier,
-    transaction::{
-        components::sapling::{self, CompactOutputDescription, OutputDescription},
-        TxId,
-    },
+    transaction::{components::sapling, TxId},
 };
 
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
@@ -85,7 +82,7 @@ impl compact_formats::CompactTx {
     }
 }
 
-impl compact_formats::CompactOutput {
+impl compact_formats::CompactSaplingOutput {
     /// Returns the note commitment for this output.
     ///
     /// A convenience method that parses [`CompactOutput.cmu`].
@@ -103,28 +100,30 @@ impl compact_formats::CompactOutput {
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
     pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
-        self.epk[..]
+        self.ephemeralKey[..]
             .try_into()
             .map(EphemeralKeyBytes)
             .map_err(|_| ())
     }
 }
 
-impl<A: sapling::Authorization> From<OutputDescription<A>> for compact_formats::CompactOutput {
-    fn from(out: OutputDescription<A>) -> compact_formats::CompactOutput {
-        let mut result = compact_formats::CompactOutput::new();
+impl<A: sapling::Authorization> From<sapling::OutputDescription<A>>
+    for compact_formats::CompactSaplingOutput
+{
+    fn from(out: sapling::OutputDescription<A>) -> compact_formats::CompactSaplingOutput {
+        let mut result = compact_formats::CompactSaplingOutput::new();
         result.set_cmu(out.cmu.to_repr().to_vec());
-        result.set_epk(out.ephemeral_key.as_ref().to_vec());
+        result.set_ephemeralKey(out.ephemeral_key.as_ref().to_vec());
         result.set_ciphertext(out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec());
         result
     }
 }
 
-impl TryFrom<compact_formats::CompactOutput> for CompactOutputDescription {
+impl TryFrom<compact_formats::CompactSaplingOutput> for sapling::CompactOutputDescription {
     type Error = ();
 
-    fn try_from(value: compact_formats::CompactOutput) -> Result<Self, Self::Error> {
-        Ok(CompactOutputDescription {
+    fn try_from(value: compact_formats::CompactSaplingOutput) -> Result<Self, Self::Error> {
+        Ok(sapling::CompactOutputDescription {
             cmu: value.cmu()?,
             ephemeral_key: value.ephemeral_key()?,
             enc_ciphertext: value.ciphertext.try_into().map_err(|_| ())?,
@@ -132,7 +131,7 @@ impl TryFrom<compact_formats::CompactOutput> for CompactOutputDescription {
     }
 }
 
-impl compact_formats::CompactSpend {
+impl compact_formats::CompactSaplingSpend {
     pub fn nf(&self) -> Result<Nullifier, ()> {
         Nullifier::from_slice(&self.nf).map_err(|_| ())
     }

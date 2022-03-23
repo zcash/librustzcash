@@ -25,6 +25,9 @@ and this library adheres to Rust's notion of
   of a `zcash_client_backend::zip321::TransactionRequest` value.
   This facilitates the implementation of ZIP 321 support in wallets and
   provides substantially greater flexibility in transaction creation.
+- `zcash_client_backend::proto`:
+  - `actions` field on `compact_formats::CompactTx`
+  - `compact_formats::CompactOrchardAction`
 - `zcash_client_backend::zip321::TransactionRequest` methods:
   - `TransactionRequest::new` for constructing a request from `Vec<Payment>`.
   - `TransactionRequest::payments` for accessing the `Payments` that make up a
@@ -40,12 +43,17 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.56.1.
 - Bumped dependencies to `ff 0.11`, `group 0.11`, `bls12_381 0.6`, `jubjub 0.8`.
+- `zcash_client_backend::proto`:
+  - `compact_formats::CompactSpend` has been renamed to `CompactSaplingSpend`,
+    and its `epk` field (and associated `set_epk` method) has been renamed to
+    `ephemeralKey` (and `set_ephemeralKey`).
+  - `compact_formats::CompactOutput` has been renamed to `CompactSaplingOutput`.
 - `epk: jubjub::ExtendedPoint` has been replaced by
   `ephemeral_key: zcash_note_encryption::EphemeralKeyBytes` in various places:
   - `zcash_client_backend::wallet::WalletShieldedOutput`: the `epk` field has
     been replaced by `ephemeral_key`.
-  - `zcash_client_backend::proto::compact_formats::CompactOutput`: the `epk`
-    method has been replaced by `ephemeral_key`.
+  - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput`: the
+    `epk` method has been replaced by `ephemeral_key`.
 - `data_api::wallet::spend_to_address` now takes a `min_confirmations` 
   parameter, which the caller can provide to specify the minimum number of
   confirmations required for notes being selected. A default value of 10

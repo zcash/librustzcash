@@ -855,6 +855,7 @@ mod test {
 
             assert!(cs.is_satisfied());
 
+            #[allow(clippy::branches_sharing_code)]
             if should_we_select {
                 assert_eq!(q.u.get_value().unwrap(), u0);
                 assert_eq!(q.v.get_value().unwrap(), v0);
