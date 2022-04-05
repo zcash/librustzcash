@@ -9,8 +9,17 @@ use zcash_encoding::Vector;
 
 pub use equihash;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
+
+impl fmt::Debug for BlockHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The (byte-flipped) hex string is more useful than the raw bytes, because we can
+        // look that up in RPC methods and block explorers.
+        let block_hash_str = self.to_string();
+        f.debug_tuple("BlockHash").field(&block_hash_str).finish()
+    }
+}
 
 impl fmt::Display for BlockHash {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
