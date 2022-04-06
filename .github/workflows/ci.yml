@@ -163,7 +163,7 @@ jobs:
           command: tarpaulin
           args: --all-features --release --timeout 600 --out Xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v2.1.0
+        uses: codecov/codecov-action@v3
 
   doc-links:
     name: Intra-doc links
