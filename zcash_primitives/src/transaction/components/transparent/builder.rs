@@ -241,7 +241,7 @@ impl Bundle<Unauthorized> {
                 );
 
                 let msg = secp256k1::Message::from_slice(sighash.as_ref()).expect("32 bytes");
-                let sig = self.authorization.secp.sign(&msg, &info.sk);
+                let sig = self.authorization.secp.sign_ecdsa(&msg, &info.sk);
 
                 // Signature has to have "SIGHASH_ALL" appended to it
                 let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
