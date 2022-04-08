@@ -78,7 +78,7 @@ fn leaf(height: u32) -> NodeData {
         end_target: 100 + (height + 1) * 10,
         start_sapling_root: [0u8; 32],
         end_sapling_root: [0u8; 32],
-        subtree_total_work: 0.into(),
+        subtree_total_work: [0u8; 32],
         start_height: height as u64,
         end_height: height as u64,
         sapling_tx: 5 + height as u64,

@@ -343,7 +343,7 @@ mod tests {
                 end_target: 0,
                 start_sapling_root: [0u8; 32],
                 end_sapling_root: [0u8; 32],
-                subtree_total_work: 0.into(),
+                subtree_total_work: [0u8; 32],
                 start_height: height as u64,
                 end_height: height as u64,
                 sapling_tx: 7,

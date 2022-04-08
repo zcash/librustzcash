@@ -1,5 +1,5 @@
-use bigint::U256;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use uint::construct_uint;
 
 use crate::Version;
 
@@ -42,7 +42,7 @@ pub struct NodeData {
     /// End sapling tree root.
     pub end_sapling_root: [u8; 32],
     /// Part of tree total work.
-    pub subtree_total_work: U256,
+    pub subtree_total_work: [u8; 32],
     /// Start height.
     pub start_height: u64,
     /// End height
@@ -62,6 +62,18 @@ impl NodeData {
         left: &NodeData,
         right: &NodeData,
     ) -> NodeData {
+        let subtree_total_work = {
+            construct_uint! {
+                struct U256(4);
+            }
+            let left = U256::from_little_endian(&left.subtree_total_work);
+            let right = U256::from_little_endian(&right.subtree_total_work);
+
+            let mut sum = [0u8; 32];
+            (left + right).to_little_endian(&mut sum);
+            sum
+        };
+
         NodeData {
             consensus_branch_id: left.consensus_branch_id,
             subtree_commitment,
@@ -71,7 +83,7 @@ impl NodeData {
             end_target: right.end_target,
             start_sapling_root: left.start_sapling_root,
             end_sapling_root: right.end_sapling_root,
-            subtree_total_work: left.subtree_total_work + right.subtree_total_work,
+            subtree_total_work,
             start_height: left.start_height,
             end_height: right.end_height,
             sapling_tx: left.sapling_tx + right.sapling_tx,
@@ -117,10 +129,7 @@ impl NodeData {
         w.write_u32::<LittleEndian>(self.end_target)?;
         w.write_all(&self.start_sapling_root)?;
         w.write_all(&self.end_sapling_root)?;
-
-        let mut work_buf = [0u8; 32];
-        self.subtree_total_work.to_little_endian(&mut work_buf[..]);
-        w.write_all(&work_buf)?;
+        w.write_all(&self.subtree_total_work)?;
 
         Self::write_compact(w, self.start_height)?;
         Self::write_compact(w, self.end_height)?;
@@ -141,10 +150,7 @@ impl NodeData {
         data.end_target = r.read_u32::<LittleEndian>()?;
         r.read_exact(&mut data.start_sapling_root)?;
         r.read_exact(&mut data.end_sapling_root)?;
-
-        let mut work_buf = [0u8; 32];
-        r.read_exact(&mut work_buf)?;
-        data.subtree_total_work = U256::from_little_endian(&work_buf);
+        r.read_exact(&mut data.subtree_total_work)?;
 
         data.start_height = Self::read_compact(r)?;
         data.end_height = Self::read_compact(r)?;
@@ -230,9 +236,7 @@ impl quickcheck::Arbitrary for NodeData {
         node_data.end_target = gen.next_u32();
         gen.fill_bytes(&mut node_data.start_sapling_root[..]);
         gen.fill_bytes(&mut node_data.end_sapling_root[..]);
-        let mut number = [0u8; 32];
-        gen.fill_bytes(&mut number[..]);
-        node_data.subtree_total_work = U256::from_little_endian(&number[..]);
+        gen.fill_bytes(&mut node_data.subtree_total_work[..]);
         node_data.start_height = gen.next_u64();
         node_data.end_height = gen.next_u64();
         node_data.sapling_tx = gen.next_u64();
