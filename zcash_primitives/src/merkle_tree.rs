@@ -1,13 +1,17 @@
 //! Implementation of a Merkle tree of commitments used to prove the existence of notes.
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use incrementalmerkletree::{self, bridgetree, Altitude};
+use incrementalmerkletree::{
+    self,
+    bridgetree::{self, Leaf},
+    Altitude,
+};
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 use zcash_encoding::{Optional, Vector};
 
-use crate::sapling::{SAPLING_COMMITMENT_TREE_DEPTH, SAPLING_COMMITMENT_TREE_DEPTH_U8};
+use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
 
 pub mod incremental;
 
@@ -100,7 +104,7 @@ impl<Node: Hashable> PathFiller<Node> {
 ///
 /// The depth of the Merkle tree is fixed at 32, equal to the depth of the Sapling
 /// commitment tree.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentTree<Node> {
     pub(crate) left: Option<Node>,
     pub(crate) right: Option<Node>,
@@ -117,7 +121,35 @@ impl<Node> CommitmentTree<Node> {
         }
     }
 
-    pub fn to_frontier(&self) -> bridgetree::Frontier<Node, SAPLING_COMMITMENT_TREE_DEPTH_U8>
+    pub fn from_frontier<const DEPTH: u8>(frontier: &bridgetree::Frontier<Node, DEPTH>) -> Self
+    where
+        Node: Clone,
+    {
+        frontier.value().map_or_else(Self::empty, |f| {
+            let (left, right) = match f.leaf() {
+                Leaf::Left(v) => (Some(v.clone()), None),
+                Leaf::Right(l, r) => (Some(l.clone()), Some(r.clone())),
+            };
+            let mut ommers_iter = f.ommers().iter().cloned();
+            let upos: usize = f.position().into();
+            Self {
+                left,
+                right,
+                parents: (1..DEPTH)
+                    .into_iter()
+                    .map(|i| {
+                        if upos & (1 << i) == 0 {
+                            None
+                        } else {
+                            ommers_iter.next()
+                        }
+                    })
+                    .collect(),
+            }
+        })
+    }
+
+    pub fn to_frontier<const DEPTH: u8>(&self) -> bridgetree::Frontier<Node, DEPTH>
     where
         Node: incrementalmerkletree::Hashable + Clone,
     {
@@ -576,11 +608,17 @@ impl<Node: Hashable> MerklePath<Node> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommitmentTree, Hashable, IncrementalWitness, MerklePath, PathFiller};
-    use crate::sapling::Node;
-
+    use incrementalmerkletree::bridgetree::Frontier;
+    use proptest::prelude::*;
     use std::convert::TryInto;
     use std::io::{self, Read, Write};
+
+    use crate::sapling::{testing::arb_node, Node};
+
+    use super::{
+        testing::arb_commitment_tree, CommitmentTree, Hashable, IncrementalWitness, MerklePath,
+        PathFiller,
+    };
 
     const HEX_EMPTY_ROOTS: [&str; 33] = [
         "0100000000000000000000000000000000000000000000000000000000000000",
@@ -1137,6 +1175,17 @@ mod tests {
             assert!(witness.append(node).is_err());
         }
     }
+
+    proptest! {
+        #[test]
+        fn prop_commitment_tree_roundtrip(ct in arb_commitment_tree(32, arb_node(), 8)) {
+            let frontier: Frontier<Node, 8> = ct.to_frontier();
+            let ct0 = CommitmentTree::from_frontier(&frontier);
+            assert_eq!(ct, ct0);
+            let frontier0: Frontier<Node, 8> = ct0.to_frontier();
+            assert_eq!(frontier, frontier0);
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -1150,12 +1199,15 @@ pub mod testing {
     pub fn arb_commitment_tree<Node: Hashable + Debug, T: Strategy<Value = Node>>(
         min_size: usize,
         arb_node: T,
+        depth: u8,
     ) -> impl Strategy<Value = CommitmentTree<Node>> {
-        vec(arb_node, min_size..(min_size + 100)).prop_map(|v| {
+        assert!((1 << depth) >= min_size + 100);
+        vec(arb_node, min_size..(min_size + 100)).prop_map(move |v| {
             let mut tree = CommitmentTree::empty();
             for node in v.into_iter() {
                 tree.append(node).unwrap();
             }
+            tree.parents.resize_with((depth - 1).into(), || None);
             tree
         })
     }

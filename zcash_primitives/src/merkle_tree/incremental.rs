@@ -226,7 +226,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn frontier_serialization_v0(t in arb_commitment_tree(0, sapling::arb_node()))
+        fn frontier_serialization_v0(t in arb_commitment_tree(0, sapling::arb_node(), 32))
         {
             let mut buffer = vec![];
             t.write(&mut buffer).unwrap();
@@ -237,7 +237,7 @@ mod tests {
         }
 
         #[test]
-        fn frontier_serialization_v1(t in arb_commitment_tree(1, sapling::arb_node()))
+        fn frontier_serialization_v1(t in arb_commitment_tree(1, sapling::arb_node(), 32))
         {
             let original: Frontier<Node, 32> = t.to_frontier();
 
