@@ -581,7 +581,7 @@ pub mod testing {
                 n_notes
             ),
             commitment_trees in vec(
-                arb_commitment_tree(n_notes, arb_node()).prop_map(
+                arb_commitment_tree(n_notes, arb_node(), 32).prop_map(
                     |t| IncrementalWitness::from_tree(&t).path().unwrap()
                 ),
                 n_notes
