@@ -41,6 +41,19 @@ enum AddressKind {
 }
 
 impl ZcashAddress {
+    /// Encodes this Zcash address in its canonical string representation.
+    ///
+    /// This provides the encoded string representation of the address as defined by the
+    /// [Zcash protocol specification](https://zips.z.cash/protocol.pdf) and/or
+    /// [ZIP 316](https://zips.z.cash/zip-0316). The [`Display` implementation] can also
+    /// be used to produce this encoding using [`address.to_string()`].
+    ///
+    /// [`Display` implementation]: std::fmt::Display
+    /// [`address.to_string()`]: std::string::ToString
+    pub fn encode(&self) -> String {
+        format!("{}", self)
+    }
+
     /// Attempts to parse the given string as a Zcash address.
     ///
     /// This simply calls [`s.parse()`], leveraging the [`FromStr` implementation].
@@ -76,10 +89,11 @@ impl ZcashAddress {
     /// interface for Zcash addresses, while delegating operations on those addresses
     /// (such as constructing transactions) to downstream crates.
     ///
-    /// If you want to get the encoded string for this address, use the [`Display`]
-    /// implementation instead via [`address.to_string()`].
+    /// If you want to get the encoded string for this address, use the [`encode`]
+    /// method or the [`Display` implementation] via [`address.to_string()`] instead.
     ///
-    /// [`Display`]: std::fmt::Display
+    /// [`encode`]: Self::encode
+    /// [`Display` implementation]: std::fmt::Display
     /// [`address.to_string()`]: std::string::ToString
     pub fn convert<T: FromAddress>(self) -> Result<T, UnsupportedAddress> {
         match self.kind {
