@@ -1,5 +1,5 @@
-use bigint::U256;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use primitive_types::U256;
 
 use crate::Version;
 
