@@ -96,6 +96,20 @@
 <span id="91">91</span>
 <span id="92">92</span>
 <span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
 </pre><pre class="rust"><code><span class="kw">mod</span> <span class="ident">convert</span>;
 <span class="kw">mod</span> <span class="ident">encoding</span>;
 <span class="kw">mod</span> <span class="ident">kind</span>;
@@ -139,6 +153,19 @@
 }
 
 <span class="kw">impl</span> <span class="ident">ZcashAddress</span> {
+    <span class="doccomment">/// Encodes this Zcash address in its canonical string representation.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// This provides the encoded string representation of the address as defined by the</span>
+    <span class="doccomment">/// [Zcash protocol specification](https://zips.z.cash/protocol.pdf) and/or</span>
+    <span class="doccomment">/// [ZIP 316](https://zips.z.cash/zip-0316). The [`Display` implementation] can also</span>
+    <span class="doccomment">/// be used to produce this encoding using [`address.to_string()`].</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// [`Display` implementation]: std::fmt::Display</span>
+    <span class="doccomment">/// [`address.to_string()`]: std::string::ToString</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
+        <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, <span class="self">self</span>)
+    }
+
     <span class="doccomment">/// Attempts to parse the given string as a Zcash address.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// This simply calls [`s.parse()`], leveraging the [`FromStr` implementation].</span>
@@ -174,10 +201,11 @@
     <span class="doccomment">/// interface for Zcash addresses, while delegating operations on those addresses</span>
     <span class="doccomment">/// (such as constructing transactions) to downstream crates.</span>
     <span class="doccomment">///</span>
-    <span class="doccomment">/// If you want to get the encoded string for this address, use the [`Display`]</span>
-    <span class="doccomment">/// implementation instead via [`address.to_string()`].</span>
+    <span class="doccomment">/// If you want to get the encoded string for this address, use the [`encode`]</span>
+    <span class="doccomment">/// method or the [`Display` implementation] via [`address.to_string()`] instead.</span>
     <span class="doccomment">///</span>
-    <span class="doccomment">/// [`Display`]: std::fmt::Display</span>
+    <span class="doccomment">/// [`encode`]: Self::encode</span>
+    <span class="doccomment">/// [`Display` implementation]: std::fmt::Display</span>
     <span class="doccomment">/// [`address.to_string()`]: std::string::ToString</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">convert</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">FromAddress</span><span class="op">&gt;</span>(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">UnsupportedAddress</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="self">self</span>.<span class="ident">kind</span> {
