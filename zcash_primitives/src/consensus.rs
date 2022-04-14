@@ -240,7 +240,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(584_000)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_800)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
-            NetworkUpgrade::Nu5 => None,
+            NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
             #[cfg(feature = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
