@@ -17,6 +17,7 @@ edition = "2018"
 blake2b_simd = { version = "1", default-features = false }
 
 [dev-dependencies]
+hex = "0.4"
 proptest = "1"
 
 [features]

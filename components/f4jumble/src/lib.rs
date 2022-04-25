@@ -181,6 +181,28 @@ fn ceildiv(num: usize, den: usize) -> usize {
     (num + den - 1) / den
 }
 
+/// Encodes the given message in-place using F4Jumble.
+///
+/// Returns an error if the message is an invalid length. `message` will be unmodified in
+/// this case.
+///
+/// # Examples
+///
+/// ```
+/// let mut message_a = *b"The package from Alice arrives tomorrow morning.";
+/// f4jumble::f4jumble_mut(&mut message_a[..]).unwrap();
+/// assert_eq!(
+///     hex::encode(message_a),
+///     "861c51ee746b0313476967a3483e7e1ff77a2952a17d3ed9e0ab0f502e1179430322da9967b613545b1c36353046ca27",
+/// );
+///
+/// let mut message_b = *b"The package from Sarah arrives tomorrow morning.";
+/// f4jumble::f4jumble_mut(&mut message_b[..]).unwrap();
+/// assert_eq!(
+///     hex::encode(message_b),
+///     "af1d55f2695aea02440867bbbfae3b08e8da55b625de3fa91432ab7b2c0a7dff9033ee666db1513ba5761ef482919fb8",
+/// );
+/// ```
 pub fn f4jumble_mut(message: &mut [u8]) -> Result<(), Error> {
     if VALID_LENGTH.contains(&message.len()) {
         State::new(message).apply_f4jumble();
@@ -190,6 +212,26 @@ pub fn f4jumble_mut(message: &mut [u8]) -> Result<(), Error> {
     }
 }
 
+/// Decodes the given message in-place using F4Jumble⁻¹.
+///
+/// Returns an error if the message is an invalid length. `message` will be unmodified in
+/// this case.
+///
+/// # Examples
+///
+/// ```
+/// let mut message_a = hex::decode(
+///     "861c51ee746b0313476967a3483e7e1ff77a2952a17d3ed9e0ab0f502e1179430322da9967b613545b1c36353046ca27")
+///     .unwrap();
+/// f4jumble::f4jumble_inv_mut(&mut message_a).unwrap();
+/// assert_eq!(message_a, b"The package from Alice arrives tomorrow morning.");
+///
+/// let mut message_b = hex::decode(
+///     "af1d55f2695aea02440867bbbfae3b08e8da55b625de3fa91432ab7b2c0a7dff9033ee666db1513ba5761ef482919fb8")
+///     .unwrap();
+/// f4jumble::f4jumble_inv_mut(&mut message_b).unwrap();
+/// assert_eq!(message_b, b"The package from Sarah arrives tomorrow morning.");
+/// ```
 pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
     if VALID_LENGTH.contains(&message.len()) {
         State::new(message).apply_f4jumble_inv();
@@ -199,12 +241,54 @@ pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
     }
 }
 
+/// Encodes the given message using F4Jumble, and returns the encoded message as a vector
+/// of bytes.
+///
+/// Returns an error if the message is an invalid length.
+///
+/// # Examples
+///
+/// ```
+/// let message_a = b"The package from Alice arrives tomorrow morning.";
+/// let encoded_a = f4jumble::f4jumble(message_a).unwrap();
+/// assert_eq!(
+///     hex::encode(encoded_a),
+///     "861c51ee746b0313476967a3483e7e1ff77a2952a17d3ed9e0ab0f502e1179430322da9967b613545b1c36353046ca27",
+/// );
+///
+/// let message_b = b"The package from Sarah arrives tomorrow morning.";
+/// let encoded_b = f4jumble::f4jumble(message_b).unwrap();
+/// assert_eq!(
+///     hex::encode(encoded_b),
+///     "af1d55f2695aea02440867bbbfae3b08e8da55b625de3fa91432ab7b2c0a7dff9033ee666db1513ba5761ef482919fb8",
+/// );
+/// ```
 #[cfg(feature = "std")]
 pub fn f4jumble(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
     f4jumble_mut(&mut result).map(|()| result)
 }
 
+/// Decodes the given message using F4Jumble⁻¹, and returns the decoded message as a
+/// vector of bytes.
+///
+/// Returns an error if the message is an invalid length.
+///
+/// # Examples
+///
+/// ```
+/// let encoded_a = hex::decode(
+///     "861c51ee746b0313476967a3483e7e1ff77a2952a17d3ed9e0ab0f502e1179430322da9967b613545b1c36353046ca27")
+///     .unwrap();
+/// let message_a = f4jumble::f4jumble_inv(&encoded_a).unwrap();
+/// assert_eq!(message_a, b"The package from Alice arrives tomorrow morning.");
+///
+/// let encoded_b = hex::decode(
+///     "af1d55f2695aea02440867bbbfae3b08e8da55b625de3fa91432ab7b2c0a7dff9033ee666db1513ba5761ef482919fb8")
+///     .unwrap();
+/// let message_b = f4jumble::f4jumble_inv(&encoded_b).unwrap();
+/// assert_eq!(message_b, b"The package from Sarah arrives tomorrow morning.");
+/// ```
 #[cfg(feature = "std")]
 pub fn f4jumble_inv(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
