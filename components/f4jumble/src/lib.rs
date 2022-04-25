@@ -44,6 +44,7 @@
 //! states.
 
 #![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
 
@@ -264,6 +265,7 @@ pub fn f4jumble_inv_mut(message: &mut [u8]) -> Result<(), Error> {
 /// );
 /// ```
 #[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn f4jumble(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
     f4jumble_mut(&mut result).map(|()| result)
@@ -290,6 +292,7 @@ pub fn f4jumble(message: &[u8]) -> Result<Vec<u8>, Error> {
 /// assert_eq!(message_b, b"The package from Sarah arrives tomorrow morning.");
 /// ```
 #[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub fn f4jumble_inv(message: &[u8]) -> Result<Vec<u8>, Error> {
     let mut result = message.to_vec();
     f4jumble_inv_mut(&mut result).map(|()| result)
