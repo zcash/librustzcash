@@ -1,3 +1,48 @@
+//! This crate provides a mechanism for "jumbling" byte slices in a reversible way.
+//!
+//! Many byte encodings such as [Base64] and [Bech32] do not have "cascading" behaviour:
+//! changing an input byte at one position has no effect on the encoding of bytes at
+//! distant positions. This can be a problem if users generally check the correctness of
+//! encoded strings by eye, as they will tend to only check the first and/or last few
+//! characters of the encoded string. In some situations (for example, a hardware device
+//! displaying on its screen an encoded string provided by an untrusted computer), it is
+//! potentially feasible for an adversary to change some internal portion of the encoded
+//! string in a way that is beneficial to them, without the user noticing.
+//!
+//! [Base64]: https://en.wikipedia.org/wiki/Base64
+//! [Bech32]: https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki#Bech32
+//!
+//! The function F4Jumble (and its inverse function, F4Jumble⁻¹) are length-preserving
+//! transformations can be used to trivially introduce cascading behaviour to existing
+//! encodings:
+//! - Prepare the raw `message` bytes as usual.
+//! - Pass `message` through [`f4jumble`] or [`f4jumble_mut`] to obtain the jumbled bytes.
+//! - Encode the jumbled bytes with the encoding scheme.
+//!
+//! Changing any byte of `message` will result in a completely different sequence of
+//! jumbled bytes. Specifically, F4Jumble uses an unkeyed 4-round Feistel construction to
+//! approximate a random permutation.
+//!
+//! ![Diagram of 4-round unkeyed Feistel construction](https://zips.z.cash/zip-0316-f4.png)
+//!
+//! ## Efficiency
+//!
+//! The cost is dominated by 4 BLAKE2b compressions for message lengths up to 128 bytes.
+//! For longer messages, the cost increases to 6 BLAKE2b compressions for 128 < lₘ ≤ 192,
+//! and 10 BLAKE2b compressions for 192 < lₘ ≤ 256, for example. The maximum cost for
+//! which the algorithm is defined would be 196608 BLAKE2b compressions at lₘ = 4194368.
+//!
+//! The implementations in this crate require memory of roughly lₘ bytes plus the size of
+//! a BLAKE2b hash state. It is possible to reduce this by (for example, with F4Jumble⁻¹)
+//! streaming the `d` part of the jumbled encoding three times from a less
+//! memory-constrained device. It is essential that the streamed value of `d` is the same
+//! on each pass, which can be verified using a Message Authentication Code (with key held
+//! only by the Consumer) or collision-resistant hash function. After the first pass of
+//! `d`, the implementation is able to compute `y`; after the second pass it is able to
+//! compute `a`; and the third allows it to compute and incrementally parse `b`. The
+//! maximum memory usage during this process would be 128 bytes plus two BLAKE2b hash
+//! states.
+
 #![no_std]
 
 use blake2b_simd::{Params as Blake2bParams, OUTBYTES};
