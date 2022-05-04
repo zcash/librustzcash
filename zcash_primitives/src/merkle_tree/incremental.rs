@@ -14,6 +14,7 @@ use zcash_encoding::{Optional, Vector};
 use super::{CommitmentTree, HashSer};
 
 pub const SER_V1: u8 = 1;
+pub const SER_V2: u8 = 2;
 
 impl HashSer for MerkleHashOrchard {
     fn read<R: Read>(mut reader: R) -> io::Result<Self>

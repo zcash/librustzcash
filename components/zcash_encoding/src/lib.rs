@@ -114,15 +114,24 @@ impl Vector {
 
     /// Reads a CompactSize-prefixed series of elements into a collection, assuming the encoding
     /// written by [`Vector::write`], using the provided function to decode each element.
-    pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(
+    pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(reader: R, func: F) -> io::Result<O>
+    where
+        F: Fn(&mut R) -> io::Result<E>,
+    {
+        Self::read_collected_mut(reader, func)
+    }
+
+    /// Reads a CompactSize-prefixed series of elements into a collection, assuming the encoding
+    /// written by [`Vector::write`], using the provided function to decode each element.
+    pub fn read_collected_mut<R: Read, E, F, O: FromIterator<E>>(
         mut reader: R,
         func: F,
     ) -> io::Result<O>
     where
-        F: Fn(&mut R) -> io::Result<E>,
+        F: FnMut(&mut R) -> io::Result<E>,
     {
         let count: usize = CompactSize::read_t(&mut reader)?;
-        Array::read_collected(reader, count, func)
+        Array::read_collected_mut(reader, count, func)
     }
 
     /// Writes a slice of values by writing [`CompactSize`]-encoded integer specifying the length
@@ -185,12 +194,25 @@ impl Array {
     /// Reads `count` elements into a collection, assuming the encoding written by
     /// [`Array::write`], using the provided function to decode each element.
     pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(
-        mut reader: R,
+        reader: R,
         count: usize,
         func: F,
     ) -> io::Result<O>
     where
         F: Fn(&mut R) -> io::Result<E>,
+    {
+        Self::read_collected_mut(reader, count, func)
+    }
+
+    /// Reads `count` elements into a collection, assuming the encoding written by
+    /// [`Array::write`], using the provided function to decode each element.
+    pub fn read_collected_mut<R: Read, E, F, O: FromIterator<E>>(
+        mut reader: R,
+        count: usize,
+        mut func: F,
+    ) -> io::Result<O>
+    where
+        F: FnMut(&mut R) -> io::Result<E>,
     {
         (0..count).map(|_| func(&mut reader)).collect()
     }

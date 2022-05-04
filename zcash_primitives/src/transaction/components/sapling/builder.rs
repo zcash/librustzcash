@@ -1,6 +1,6 @@
 //! Types and functions for building Sapling transaction components.
 
-use std::fmt;
+use core::fmt;
 use std::sync::mpsc::Sender;
 
 use ff::Field;

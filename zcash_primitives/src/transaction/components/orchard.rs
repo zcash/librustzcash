@@ -5,11 +5,11 @@ use std::io::{self, Read, Write};
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use orchard::{
-    bundle::{Action, Authorization, Authorized, Flags},
+    bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
-    Anchor,
+    Action, Anchor,
 };
 use zcash_encoding::{Array, CompactSize, Vector};
 
@@ -156,7 +156,12 @@ pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>
 pub fn read_flags<R: Read>(mut reader: R) -> io::Result<Flags> {
     let mut byte = [0u8; 1];
     reader.read_exact(&mut byte)?;
-    Flags::from_byte(byte[0])
+    Flags::from_byte(byte[0]).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid Orchard flags".to_owned(),
+        )
+    })
 }
 
 pub fn read_anchor<R: Read>(mut reader: R) -> io::Result<Anchor> {

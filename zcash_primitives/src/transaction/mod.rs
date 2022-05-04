@@ -437,7 +437,7 @@ impl<A: Authorization> TransactionData<A> {
             sprout_bundle: self.sprout_bundle,
             sapling_bundle: self.sapling_bundle.map(|b| b.map_authorization(f_sapling)),
             orchard_bundle: self.orchard_bundle.map(|b| {
-                b.authorize(
+                b.map_authorization(
                     &mut f_orchard,
                     |f, _, s| f.map_spend_auth(s),
                     |f, a| f.map_authorization(a),
