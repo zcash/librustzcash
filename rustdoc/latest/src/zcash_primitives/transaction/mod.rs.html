@@ -1529,7 +1529,7 @@
             <span class="ident">sprout_bundle</span>: <span class="self">self</span>.<span class="ident">sprout_bundle</span>,
             <span class="ident">sapling_bundle</span>: <span class="self">self</span>.<span class="ident">sapling_bundle</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> <span class="ident">b</span>.<span class="ident">map_authorization</span>(<span class="ident">f_sapling</span>)),
             <span class="ident">orchard_bundle</span>: <span class="self">self</span>.<span class="ident">orchard_bundle</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">b</span><span class="op">|</span> {
-                <span class="ident">b</span>.<span class="ident">authorize</span>(
+                <span class="ident">b</span>.<span class="ident">map_authorization</span>(
                     <span class="kw-2">&amp;mut</span> <span class="ident">f_orchard</span>,
                     <span class="op">|</span><span class="ident">f</span>, <span class="kw">_</span>, <span class="ident">s</span><span class="op">|</span> <span class="ident">f</span>.<span class="ident">map_spend_auth</span>(<span class="ident">s</span>),
                     <span class="op">|</span><span class="ident">f</span>, <span class="ident">a</span><span class="op">|</span> <span class="ident">f</span>.<span class="ident">map_authorization</span>(<span class="ident">a</span>),

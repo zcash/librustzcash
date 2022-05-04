@@ -289,6 +289,11 @@
 <span id="284">284</span>
 <span id="285">285</span>
 <span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
 </pre><pre class="rust"><code><span class="doccomment">/// Functions for parsing &amp; serialization of Orchard transaction components.</span>
 <span class="kw">use</span> <span class="ident">std::convert::TryFrom</span>;
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
@@ -296,11 +301,11 @@
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">ReadBytesExt</span>, <span class="ident">WriteBytesExt</span>};
 <span class="kw">use</span> <span class="ident">nonempty::NonEmpty</span>;
 <span class="kw">use</span> <span class="ident">orchard</span>::{
-    <span class="ident">bundle</span>::{<span class="ident">Action</span>, <span class="ident">Authorization</span>, <span class="ident">Authorized</span>, <span class="ident">Flags</span>},
+    <span class="ident">bundle</span>::{<span class="ident">Authorization</span>, <span class="ident">Authorized</span>, <span class="ident">Flags</span>},
     <span class="ident">note</span>::{<span class="ident">ExtractedNoteCommitment</span>, <span class="ident">Nullifier</span>, <span class="ident">TransmittedNoteCiphertext</span>},
     <span class="ident">primitives::redpallas</span>::{<span class="self">self</span>, <span class="ident">SigType</span>, <span class="ident">Signature</span>, <span class="ident">SpendAuth</span>, <span class="ident">VerificationKey</span>},
     <span class="ident">value::ValueCommitment</span>,
-    <span class="ident">Anchor</span>,
+    <span class="ident">Action</span>, <span class="ident">Anchor</span>,
 };
 <span class="kw">use</span> <span class="ident">zcash_encoding</span>::{<span class="ident">Array</span>, <span class="ident">CompactSize</span>, <span class="ident">Vector</span>};
 
@@ -447,7 +452,12 @@
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_flags</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Flags</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">byte</span> <span class="op">=</span> [<span class="number">0u8</span>; <span class="number">1</span>];
     <span class="ident">reader</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">byte</span>)<span class="question-mark">?</span>;
-    <span class="ident">Flags::from_byte</span>(<span class="ident">byte</span>[<span class="number">0</span>])
+    <span class="ident">Flags::from_byte</span>(<span class="ident">byte</span>[<span class="number">0</span>]).<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> {
+        <span class="ident">io::Error::new</span>(
+            <span class="ident">io::ErrorKind::InvalidInput</span>,
+            <span class="string">&quot;invalid Orchard flags&quot;</span>.<span class="ident">to_owned</span>(),
+        )
+    })
 }
 
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_anchor</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">Anchor</span><span class="op">&gt;</span> {

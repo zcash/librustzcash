@@ -371,6 +371,28 @@
 <span id="366">366</span>
 <span id="367">367</span>
 <span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
 </pre><pre class="rust"><code><span class="doccomment">//! *Zcash binary encodings.*</span>
 <span class="doccomment">//!</span>
 <span class="doccomment">//! `zcash_encoding` is a library that provides common encoding and decoding operations</span>
@@ -487,15 +509,24 @@
 
     <span class="doccomment">/// Reads a CompactSize-prefixed series of elements into a collection, assuming the encoding</span>
     <span class="doccomment">/// written by [`Vector::write`], using the provided function to decode each element.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_collected</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">E</span>, <span class="ident">F</span>, <span class="ident">O</span>: <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_collected</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">E</span>, <span class="ident">F</span>, <span class="ident">O</span>: <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">reader</span>: <span class="ident">R</span>, <span class="ident">func</span>: <span class="ident">F</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>
+    <span class="kw">where</span>
+        <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>,
+    {
+        <span class="ident"><span class="self">Self</span>::read_collected_mut</span>(<span class="ident">reader</span>, <span class="ident">func</span>)
+    }
+
+    <span class="doccomment">/// Reads a CompactSize-prefixed series of elements into a collection, assuming the encoding</span>
+    <span class="doccomment">/// written by [`Vector::write`], using the provided function to decode each element.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_collected_mut</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">E</span>, <span class="ident">F</span>, <span class="ident">O</span>: <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
         <span class="ident">func</span>: <span class="ident">F</span>,
     ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>
     <span class="kw">where</span>
-        <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>,
+        <span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>,
     {
         <span class="kw">let</span> <span class="ident">count</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="ident">CompactSize::read_t</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)<span class="question-mark">?</span>;
-        <span class="ident">Array::read_collected</span>(<span class="ident">reader</span>, <span class="ident">count</span>, <span class="ident">func</span>)
+        <span class="ident">Array::read_collected_mut</span>(<span class="ident">reader</span>, <span class="ident">count</span>, <span class="ident">func</span>)
     }
 
     <span class="doccomment">/// Writes a slice of values by writing [`CompactSize`]-encoded integer specifying the length</span>
@@ -558,12 +589,25 @@
     <span class="doccomment">/// Reads `count` elements into a collection, assuming the encoding written by</span>
     <span class="doccomment">/// [`Array::write`], using the provided function to decode each element.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_collected</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">E</span>, <span class="ident">F</span>, <span class="ident">O</span>: <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
+        <span class="ident">reader</span>: <span class="ident">R</span>,
         <span class="ident">count</span>: <span class="ident">usize</span>,
         <span class="ident">func</span>: <span class="ident">F</span>,
     ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>
     <span class="kw">where</span>
         <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>,
+    {
+        <span class="ident"><span class="self">Self</span>::read_collected_mut</span>(<span class="ident">reader</span>, <span class="ident">count</span>, <span class="ident">func</span>)
+    }
+
+    <span class="doccomment">/// Reads `count` elements into a collection, assuming the encoding written by</span>
+    <span class="doccomment">/// [`Array::write`], using the provided function to decode each element.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">read_collected_mut</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span>, <span class="ident">E</span>, <span class="ident">F</span>, <span class="ident">O</span>: <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+        <span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>,
+        <span class="ident">count</span>: <span class="ident">usize</span>,
+        <span class="kw-2">mut</span> <span class="ident">func</span>: <span class="ident">F</span>,
+    ) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>
+    <span class="kw">where</span>
+        <span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>,
     {
         (<span class="number">0</span>..<span class="ident">count</span>).<span class="ident">map</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">func</span>(<span class="kw-2">&amp;mut</span> <span class="ident">reader</span>)).<span class="ident">collect</span>()
     }
