@@ -9,6 +9,7 @@ use incrementalmerkletree::{
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
+use std::iter::repeat;
 use zcash_encoding::{Optional, Vector};
 
 use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
@@ -199,8 +200,12 @@ impl<Node> CommitmentTree<Node> {
         } else {
             self.left.is_some()
                 && self.right.is_some()
-                && self.parents.len() == depth - 1
-                && self.parents.iter().all(|p| p.is_some())
+                && self
+                    .parents
+                    .iter()
+                    .chain(repeat(&None))
+                    .take(depth - 1)
+                    .all(|p| p.is_some())
         }
     }
 }
@@ -285,20 +290,17 @@ impl<Node: Hashable> CommitmentTree<Node> {
             &self.right.unwrap_or_else(|| filler.next(0)),
         );
 
-        // 2) Hash in parents up to the currently-filled depth.
-        //    - Roots of the empty subtrees are used as needed.
-        let mid_root = self
-            .parents
+        // 2) Extend the parents to the desired depth with None values, then hash from leaf to
+        //    root. Roots of the empty subtrees are used as needed.
+        self.parents
             .iter()
+            .chain(repeat(&None))
+            .take(depth - 1)
             .enumerate()
             .fold(leaf_root, |root, (i, p)| match p {
                 Some(node) => Node::combine(i + 1, node, &root),
                 None => Node::combine(i + 1, &root, &filler.next(i + 1)),
-            });
-
-        // 3) Hash in roots of the empty subtrees up to the final depth.
-        ((self.parents.len() + 1)..depth)
-            .fold(mid_root, |root, d| Node::combine(d, &root, &filler.next(d)))
+            })
     }
 }
 
@@ -498,16 +500,20 @@ impl<Node: Hashable> IncrementalWitness<Node> {
             return None;
         }
 
-        for (i, p) in self.tree.parents.iter().enumerate() {
+        for (i, p) in self
+            .tree
+            .parents
+            .iter()
+            .chain(repeat(&None))
+            .take(depth - 1)
+            .enumerate()
+        {
             auth_path.push(match p {
                 Some(node) => (*node, true),
                 None => (filler.next(i + 1), false),
             });
         }
 
-        for i in self.tree.parents.len()..(depth - 1) {
-            auth_path.push((filler.next(i + 1), false));
-        }
         assert_eq!(auth_path.len(), depth);
 
         Some(MerklePath::from_path(auth_path, self.position() as u64))
