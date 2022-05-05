@@ -141,6 +141,7 @@ impl PublicKey {
         // Signature checks:
         // R != invalid
         let r = {
+            // *TCR:jubjub-canonical-encoding
             let r = if zip216_enabled {
                 ExtendedPoint::from_bytes(&sig.rbar)
             } else {
