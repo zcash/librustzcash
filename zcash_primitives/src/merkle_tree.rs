@@ -9,6 +9,7 @@ use incrementalmerkletree::{
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
+use std::iter::repeat;
 use zcash_encoding::{Optional, Vector};
 
 use crate::sapling::SAPLING_COMMITMENT_TREE_DEPTH;
@@ -194,10 +195,18 @@ impl<Node> CommitmentTree<Node> {
     }
 
     fn is_complete(&self, depth: usize) -> bool {
-        self.left.is_some()
-            && self.right.is_some()
-            && self.parents.len() == depth - 1
-            && self.parents.iter().all(|p| p.is_some())
+        if depth == 0 {
+            self.left.is_some() && self.right.is_none() && self.parents.is_empty()
+        } else {
+            self.left.is_some()
+                && self.right.is_some()
+                && self
+                    .parents
+                    .iter()
+                    .chain(repeat(&None))
+                    .take(depth - 1)
+                    .all(|p| p.is_some())
+        }
     }
 }
 
@@ -281,20 +290,17 @@ impl<Node: Hashable> CommitmentTree<Node> {
             &self.right.unwrap_or_else(|| filler.next(0)),
         );
 
-        // 2) Hash in parents up to the currently-filled depth.
-        //    - Roots of the empty subtrees are used as needed.
-        let mid_root = self
-            .parents
+        // 2) Extend the parents to the desired depth with None values, then hash from leaf to
+        //    root. Roots of the empty subtrees are used as needed.
+        self.parents
             .iter()
+            .chain(repeat(&None))
+            .take(depth - 1)
             .enumerate()
             .fold(leaf_root, |root, (i, p)| match p {
                 Some(node) => Node::combine(i + 1, node, &root),
                 None => Node::combine(i + 1, &root, &filler.next(i + 1)),
-            });
-
-        // 3) Hash in roots of the empty subtrees up to the final depth.
-        ((self.parents.len() + 1)..depth)
-            .fold(mid_root, |root, d| Node::combine(d, &root, &filler.next(d)))
+            })
     }
 }
 
@@ -494,16 +500,20 @@ impl<Node: Hashable> IncrementalWitness<Node> {
             return None;
         }
 
-        for (i, p) in self.tree.parents.iter().enumerate() {
+        for (i, p) in self
+            .tree
+            .parents
+            .iter()
+            .chain(repeat(&None))
+            .take(depth - 1)
+            .enumerate()
+        {
             auth_path.push(match p {
                 Some(node) => (*node, true),
                 None => (filler.next(i + 1), false),
             });
         }
 
-        for i in self.tree.parents.len()..(depth - 1) {
-            auth_path.push((filler.next(i + 1), false));
-        }
         assert_eq!(auth_path.len(), depth);
 
         Some(MerklePath::from_path(auth_path, self.position() as u64))
@@ -616,8 +626,8 @@ mod tests {
     use crate::sapling::{testing::arb_node, Node};
 
     use super::{
-        testing::arb_commitment_tree, CommitmentTree, Hashable, IncrementalWitness, MerklePath,
-        PathFiller,
+        testing::{arb_commitment_tree, TestNode},
+        CommitmentTree, Hashable, IncrementalWitness, MerklePath, PathFiller,
     };
 
     const HEX_EMPTY_ROOTS: [&str; 33] = [
@@ -1186,13 +1196,40 @@ mod tests {
             assert_eq!(frontier, frontier0);
         }
     }
+
+    #[test]
+    fn test_commitment_tree_complete() {
+        let mut t: CommitmentTree<TestNode> = CommitmentTree::empty();
+        for n in 1u64..=32 {
+            t.append(TestNode(n)).unwrap();
+            // every tree of a power-of-two height is complete
+            let is_complete = n.count_ones() == 1;
+            let level = 63 - n.leading_zeros(); //log2
+            assert_eq!(
+                is_complete,
+                t.is_complete(level.try_into().unwrap()),
+                "Tree {:?} {} complete at height {}",
+                t,
+                if is_complete {
+                    "should be"
+                } else {
+                    "should not be"
+                },
+                n
+            );
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
+    use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
     use core::fmt::Debug;
     use proptest::collection::vec;
     use proptest::prelude::*;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
+    use std::io::{self, Read, Write};
 
     use super::{CommitmentTree, Hashable};
 
@@ -1210,5 +1247,33 @@ pub mod testing {
             tree.parents.resize_with((depth - 1).into(), || None);
             tree
         })
+    }
+
+    #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub(crate) struct TestNode(pub(crate) u64);
+
+    impl Hashable for TestNode {
+        fn read<R: Read>(mut reader: R) -> io::Result<TestNode> {
+            reader.read_u64::<LittleEndian>().map(TestNode)
+        }
+
+        fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+            writer.write_u64::<LittleEndian>(self.0)
+        }
+
+        fn combine(_: usize, a: &TestNode, b: &TestNode) -> TestNode {
+            let mut hasher = DefaultHasher::new();
+            hasher.write_u64(a.0);
+            hasher.write_u64(b.0);
+            TestNode(hasher.finish())
+        }
+
+        fn blank() -> TestNode {
+            TestNode(0)
+        }
+
+        fn empty_root(alt: usize) -> TestNode {
+            (0..alt).fold(Self::blank(), |v, lvl| Self::combine(lvl, &v, &v))
+        }
     }
 }
