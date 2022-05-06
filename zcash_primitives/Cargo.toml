@@ -17,22 +17,22 @@ all-features = true
 
 [dependencies]
 aes = "0.7"
-bitvec = "0.22"
+bitvec = "1"
 bip0039 = { version = "0.9", features = ["std", "all-languages"] }
 blake2b_simd = "1"
 blake2s_simd = "1"
-bls12_381 = "0.6"
+bls12_381 = "0.7"
 bs58 = { version = "0.4", features = ["check"], optional = true }
 byteorder = "1"
 chacha20poly1305 = "0.9"
 equihash = { version = "0.1", path = "../components/equihash" }
-ff = "0.11"
+ff = "0.12"
 fpe = "0.5"
-group = "0.11"
+group = "0.12"
 hdwallet = { version = "0.3.0", optional = true }
 hex = "0.4"
 incrementalmerkletree = "=0.3.0-beta.2"
-jubjub = "0.8"
+jubjub = "0.9"
 lazy_static = "1"
 memuse = "0.2"
 nonempty = "0.7"
