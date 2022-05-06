@@ -738,7 +738,7 @@ mod test {
             let s_bits = s
                 .to_le_bits()
                 .iter()
-                .by_val()
+                .by_vals()
                 .take(jubjub::Fr::NUM_BITS as usize)
                 .enumerate()
                 .map(|(i, b)| {
@@ -789,7 +789,7 @@ mod test {
             let s_bits = s
                 .to_le_bits()
                 .iter()
-                .by_val()
+                .by_vals()
                 .take(jubjub::Fr::NUM_BITS as usize)
                 .enumerate()
                 .map(|(i, b)| {

@@ -102,7 +102,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.56.1.
-- Bumped dependencies to `ff 0.11`, `group 0.11`, `bls12_381 0.6`, `jubjub 0.8`.
+- Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`, `jubjub 0.9`,
+  `bitvec 1`.
 - The following modules and helpers have been moved into
   `zcash_primitives::sapling`:
   - `zcash_primitives::group_hash`
