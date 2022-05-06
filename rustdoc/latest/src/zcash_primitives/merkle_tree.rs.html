@@ -1217,6 +1217,71 @@
 <span id="1212">1212</span>
 <span id="1213">1213</span>
 <span id="1214">1214</span>
+<span id="1215">1215</span>
+<span id="1216">1216</span>
+<span id="1217">1217</span>
+<span id="1218">1218</span>
+<span id="1219">1219</span>
+<span id="1220">1220</span>
+<span id="1221">1221</span>
+<span id="1222">1222</span>
+<span id="1223">1223</span>
+<span id="1224">1224</span>
+<span id="1225">1225</span>
+<span id="1226">1226</span>
+<span id="1227">1227</span>
+<span id="1228">1228</span>
+<span id="1229">1229</span>
+<span id="1230">1230</span>
+<span id="1231">1231</span>
+<span id="1232">1232</span>
+<span id="1233">1233</span>
+<span id="1234">1234</span>
+<span id="1235">1235</span>
+<span id="1236">1236</span>
+<span id="1237">1237</span>
+<span id="1238">1238</span>
+<span id="1239">1239</span>
+<span id="1240">1240</span>
+<span id="1241">1241</span>
+<span id="1242">1242</span>
+<span id="1243">1243</span>
+<span id="1244">1244</span>
+<span id="1245">1245</span>
+<span id="1246">1246</span>
+<span id="1247">1247</span>
+<span id="1248">1248</span>
+<span id="1249">1249</span>
+<span id="1250">1250</span>
+<span id="1251">1251</span>
+<span id="1252">1252</span>
+<span id="1253">1253</span>
+<span id="1254">1254</span>
+<span id="1255">1255</span>
+<span id="1256">1256</span>
+<span id="1257">1257</span>
+<span id="1258">1258</span>
+<span id="1259">1259</span>
+<span id="1260">1260</span>
+<span id="1261">1261</span>
+<span id="1262">1262</span>
+<span id="1263">1263</span>
+<span id="1264">1264</span>
+<span id="1265">1265</span>
+<span id="1266">1266</span>
+<span id="1267">1267</span>
+<span id="1268">1268</span>
+<span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Implementation of a Merkle tree of commitments used to prove the existence of notes.</span>
 
 <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">LittleEndian</span>, <span class="ident">ReadBytesExt</span>};
@@ -1228,6 +1293,7 @@
 <span class="kw">use</span> <span class="ident">std::collections::VecDeque</span>;
 <span class="kw">use</span> <span class="ident">std::convert::TryFrom</span>;
 <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
+<span class="kw">use</span> <span class="ident">std::iter::repeat</span>;
 <span class="kw">use</span> <span class="ident">zcash_encoding</span>::{<span class="ident">Optional</span>, <span class="ident">Vector</span>};
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::sapling::SAPLING_COMMITMENT_TREE_DEPTH</span>;
@@ -1413,10 +1479,18 @@
     }
 
     <span class="kw">fn</span> <span class="ident">is_complete</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">depth</span>: <span class="ident">usize</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">left</span>.<span class="ident">is_some</span>()
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">right</span>.<span class="ident">is_some</span>()
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">parents</span>.<span class="ident">len</span>() <span class="op">==</span> <span class="ident">depth</span> <span class="op">-</span> <span class="number">1</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">parents</span>.<span class="ident">iter</span>().<span class="ident">all</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="ident">p</span>.<span class="ident">is_some</span>())
+        <span class="kw">if</span> <span class="ident">depth</span> <span class="op">==</span> <span class="number">0</span> {
+            <span class="self">self</span>.<span class="ident">left</span>.<span class="ident">is_some</span>() <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">right</span>.<span class="ident">is_none</span>() <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">parents</span>.<span class="ident">is_empty</span>()
+        } <span class="kw">else</span> {
+            <span class="self">self</span>.<span class="ident">left</span>.<span class="ident">is_some</span>()
+                <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">right</span>.<span class="ident">is_some</span>()
+                <span class="op">&amp;&amp;</span> <span class="self">self</span>
+                    .<span class="ident">parents</span>
+                    .<span class="ident">iter</span>()
+                    .<span class="ident">chain</span>(<span class="ident">repeat</span>(<span class="kw-2">&amp;</span><span class="prelude-val">None</span>))
+                    .<span class="ident">take</span>(<span class="ident">depth</span> <span class="op">-</span> <span class="number">1</span>)
+                    .<span class="ident">all</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="ident">p</span>.<span class="ident">is_some</span>())
+        }
     }
 }
 
@@ -1500,20 +1574,17 @@
             <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">right</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">filler</span>.<span class="ident">next</span>(<span class="number">0</span>)),
         );
 
-        <span class="comment">// 2) Hash in parents up to the currently-filled depth.</span>
-        <span class="comment">//    - Roots of the empty subtrees are used as needed.</span>
-        <span class="kw">let</span> <span class="ident">mid_root</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">parents</span>
+        <span class="comment">// 2) Extend the parents to the desired depth with None values, then hash from leaf to</span>
+        <span class="comment">//    root. Roots of the empty subtrees are used as needed.</span>
+        <span class="self">self</span>.<span class="ident">parents</span>
             .<span class="ident">iter</span>()
+            .<span class="ident">chain</span>(<span class="ident">repeat</span>(<span class="kw-2">&amp;</span><span class="prelude-val">None</span>))
+            .<span class="ident">take</span>(<span class="ident">depth</span> <span class="op">-</span> <span class="number">1</span>)
             .<span class="ident">enumerate</span>()
             .<span class="ident">fold</span>(<span class="ident">leaf_root</span>, <span class="op">|</span><span class="ident">root</span>, (<span class="ident">i</span>, <span class="ident">p</span>)<span class="op">|</span> <span class="kw">match</span> <span class="ident">p</span> {
                 <span class="prelude-val">Some</span>(<span class="ident">node</span>) =&gt; <span class="ident">Node::combine</span>(<span class="ident">i</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">node</span>, <span class="kw-2">&amp;</span><span class="ident">root</span>),
                 <span class="prelude-val">None</span> =&gt; <span class="ident">Node::combine</span>(<span class="ident">i</span> <span class="op">+</span> <span class="number">1</span>, <span class="kw-2">&amp;</span><span class="ident">root</span>, <span class="kw-2">&amp;</span><span class="ident">filler</span>.<span class="ident">next</span>(<span class="ident">i</span> <span class="op">+</span> <span class="number">1</span>)),
-            });
-
-        <span class="comment">// 3) Hash in roots of the empty subtrees up to the final depth.</span>
-        ((<span class="self">self</span>.<span class="ident">parents</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="number">1</span>)..<span class="ident">depth</span>)
-            .<span class="ident">fold</span>(<span class="ident">mid_root</span>, <span class="op">|</span><span class="ident">root</span>, <span class="ident">d</span><span class="op">|</span> <span class="ident">Node::combine</span>(<span class="ident">d</span>, <span class="kw-2">&amp;</span><span class="ident">root</span>, <span class="kw-2">&amp;</span><span class="ident">filler</span>.<span class="ident">next</span>(<span class="ident">d</span>)))
+            })
     }
 }
 
@@ -1713,16 +1784,20 @@
             <span class="kw">return</span> <span class="prelude-val">None</span>;
         }
 
-        <span class="kw">for</span> (<span class="ident">i</span>, <span class="ident">p</span>) <span class="kw">in</span> <span class="self">self</span>.<span class="ident">tree</span>.<span class="ident">parents</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
+        <span class="kw">for</span> (<span class="ident">i</span>, <span class="ident">p</span>) <span class="kw">in</span> <span class="self">self</span>
+            .<span class="ident">tree</span>
+            .<span class="ident">parents</span>
+            .<span class="ident">iter</span>()
+            .<span class="ident">chain</span>(<span class="ident">repeat</span>(<span class="kw-2">&amp;</span><span class="prelude-val">None</span>))
+            .<span class="ident">take</span>(<span class="ident">depth</span> <span class="op">-</span> <span class="number">1</span>)
+            .<span class="ident">enumerate</span>()
+        {
             <span class="ident">auth_path</span>.<span class="ident">push</span>(<span class="kw">match</span> <span class="ident">p</span> {
                 <span class="prelude-val">Some</span>(<span class="ident">node</span>) =&gt; (<span class="kw-2">*</span><span class="ident">node</span>, <span class="bool-val">true</span>),
                 <span class="prelude-val">None</span> =&gt; (<span class="ident">filler</span>.<span class="ident">next</span>(<span class="ident">i</span> <span class="op">+</span> <span class="number">1</span>), <span class="bool-val">false</span>),
             });
         }
 
-        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">tree</span>.<span class="ident">parents</span>.<span class="ident">len</span>()..(<span class="ident">depth</span> <span class="op">-</span> <span class="number">1</span>) {
-            <span class="ident">auth_path</span>.<span class="ident">push</span>((<span class="ident">filler</span>.<span class="ident">next</span>(<span class="ident">i</span> <span class="op">+</span> <span class="number">1</span>), <span class="bool-val">false</span>));
-        }
         <span class="macro">assert_eq!</span>(<span class="ident">auth_path</span>.<span class="ident">len</span>(), <span class="ident">depth</span>);
 
         <span class="prelude-val">Some</span>(<span class="ident">MerklePath::from_path</span>(<span class="ident">auth_path</span>, <span class="self">self</span>.<span class="ident">position</span>() <span class="kw">as</span> <span class="ident">u64</span>))
@@ -1835,8 +1910,8 @@
     <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::sapling</span>::{<span class="ident">testing::arb_node</span>, <span class="ident">Node</span>};
 
     <span class="kw">use</span> <span class="kw">super</span>::{
-        <span class="ident">testing::arb_commitment_tree</span>, <span class="ident">CommitmentTree</span>, <span class="ident">Hashable</span>, <span class="ident">IncrementalWitness</span>, <span class="ident">MerklePath</span>,
-        <span class="ident">PathFiller</span>,
+        <span class="ident">testing</span>::{<span class="ident">arb_commitment_tree</span>, <span class="ident">TestNode</span>},
+        <span class="ident">CommitmentTree</span>, <span class="ident">Hashable</span>, <span class="ident">IncrementalWitness</span>, <span class="ident">MerklePath</span>, <span class="ident">PathFiller</span>,
     };
 
     <span class="kw">const</span> <span class="ident">HEX_EMPTY_ROOTS</span>: [<span class="kw-2">&amp;</span><span class="ident">str</span>; <span class="number">33</span>] <span class="op">=</span> [
@@ -2405,13 +2480,40 @@
             <span class="macro">assert_eq!</span>(<span class="ident">frontier</span>, <span class="ident">frontier0</span>);
         }
     }
+
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">test_commitment_tree_complete</span>() {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">t</span>: <span class="ident">CommitmentTree</span><span class="op">&lt;</span><span class="ident">TestNode</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">CommitmentTree::empty</span>();
+        <span class="kw">for</span> <span class="ident">n</span> <span class="kw">in</span> <span class="number">1u64</span>..<span class="op">=</span><span class="number">32</span> {
+            <span class="ident">t</span>.<span class="ident">append</span>(<span class="ident">TestNode</span>(<span class="ident">n</span>)).<span class="ident">unwrap</span>();
+            <span class="comment">// every tree of a power-of-two height is complete</span>
+            <span class="kw">let</span> <span class="ident">is_complete</span> <span class="op">=</span> <span class="ident">n</span>.<span class="ident">count_ones</span>() <span class="op">==</span> <span class="number">1</span>;
+            <span class="kw">let</span> <span class="ident">level</span> <span class="op">=</span> <span class="number">63</span> <span class="op">-</span> <span class="ident">n</span>.<span class="ident">leading_zeros</span>(); <span class="comment">//log2</span>
+            <span class="macro">assert_eq!</span>(
+                <span class="ident">is_complete</span>,
+                <span class="ident">t</span>.<span class="ident">is_complete</span>(<span class="ident">level</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>()),
+                <span class="string">&quot;Tree {:?} {} complete at height {}&quot;</span>,
+                <span class="ident">t</span>,
+                <span class="kw">if</span> <span class="ident">is_complete</span> {
+                    <span class="string">&quot;should be&quot;</span>
+                } <span class="kw">else</span> {
+                    <span class="string">&quot;should not be&quot;</span>
+                },
+                <span class="ident">n</span>
+            );
+        }
+    }
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">any</span>(<span class="ident">test</span>, <span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;test-dependencies&quot;</span>))]</span>
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">testing</span> {
+    <span class="kw">use</span> <span class="ident">byteorder</span>::{<span class="ident">LittleEndian</span>, <span class="ident">ReadBytesExt</span>, <span class="ident">WriteBytesExt</span>};
     <span class="kw">use</span> <span class="ident">core::fmt::Debug</span>;
     <span class="kw">use</span> <span class="ident">proptest::collection::vec</span>;
     <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
+    <span class="kw">use</span> <span class="ident">std::collections::hash_map::DefaultHasher</span>;
+    <span class="kw">use</span> <span class="ident">std::hash::Hasher</span>;
+    <span class="kw">use</span> <span class="ident">std::io</span>::{<span class="self">self</span>, <span class="ident">Read</span>, <span class="ident">Write</span>};
 
     <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">CommitmentTree</span>, <span class="ident">Hashable</span>};
 
@@ -2429,6 +2531,34 @@
             <span class="ident">tree</span>.<span class="ident">parents</span>.<span class="ident">resize_with</span>((<span class="ident">depth</span> <span class="op">-</span> <span class="number">1</span>).<span class="ident">into</span>(), <span class="op">|</span><span class="op">|</span> <span class="prelude-val">None</span>);
             <span class="ident">tree</span>
         })
+    }
+
+    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Copy</span>, <span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>)]</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">TestNode</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">u64</span>);
+
+    <span class="kw">impl</span> <span class="ident">Hashable</span> <span class="kw">for</span> <span class="ident">TestNode</span> {
+        <span class="kw">fn</span> <span class="ident">read</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Read</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">reader</span>: <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">TestNode</span><span class="op">&gt;</span> {
+            <span class="ident">reader</span>.<span class="ident">read_u64</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>().<span class="ident">map</span>(<span class="ident">TestNode</span>)
+        }
+
+        <span class="kw">fn</span> <span class="ident">write</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">writer</span>: <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span>()<span class="op">&gt;</span> {
+            <span class="ident">writer</span>.<span class="ident">write_u64</span>::<span class="op">&lt;</span><span class="ident">LittleEndian</span><span class="op">&gt;</span>(<span class="self">self</span>.<span class="number">0</span>)
+        }
+
+        <span class="kw">fn</span> <span class="ident">combine</span>(<span class="kw">_</span>: <span class="ident">usize</span>, <span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="ident">TestNode</span>, <span class="ident">b</span>: <span class="kw-2">&amp;</span><span class="ident">TestNode</span>) -&gt; <span class="ident">TestNode</span> {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hasher</span> <span class="op">=</span> <span class="ident">DefaultHasher::new</span>();
+            <span class="ident">hasher</span>.<span class="ident">write_u64</span>(<span class="ident">a</span>.<span class="number">0</span>);
+            <span class="ident">hasher</span>.<span class="ident">write_u64</span>(<span class="ident">b</span>.<span class="number">0</span>);
+            <span class="ident">TestNode</span>(<span class="ident">hasher</span>.<span class="ident">finish</span>())
+        }
+
+        <span class="kw">fn</span> <span class="ident">blank</span>() -&gt; <span class="ident">TestNode</span> {
+            <span class="ident">TestNode</span>(<span class="number">0</span>)
+        }
+
+        <span class="kw">fn</span> <span class="ident">empty_root</span>(<span class="ident">alt</span>: <span class="ident">usize</span>) -&gt; <span class="ident">TestNode</span> {
+            (<span class="number">0</span>..<span class="ident">alt</span>).<span class="ident">fold</span>(<span class="ident"><span class="self">Self</span>::blank</span>(), <span class="op">|</span><span class="ident">v</span>, <span class="ident">lvl</span><span class="op">|</span> <span class="ident"><span class="self">Self</span>::combine</span>(<span class="ident">lvl</span>, <span class="kw-2">&amp;</span><span class="ident">v</span>, <span class="kw-2">&amp;</span><span class="ident">v</span>))
+        }
     }
 }
 </code></pre></div>
