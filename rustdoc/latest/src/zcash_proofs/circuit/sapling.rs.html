@@ -1539,11 +1539,11 @@
                 <span class="ident">cur</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::from</span>(<span class="ident">pedersen_hash::pedersen_hash</span>(
                     <span class="ident">pedersen_hash::Personalization::MerkleTree</span>(<span class="ident">i</span>),
                     <span class="ident">lhs</span>.<span class="ident">iter</span>()
-                        .<span class="ident">by_val</span>()
+                        .<span class="ident">by_vals</span>()
                         .<span class="ident">take</span>(<span class="ident">bls12_381::Scalar::NUM_BITS</span> <span class="kw">as</span> <span class="ident">usize</span>)
                         .<span class="ident">chain</span>(
                             <span class="ident">rhs</span>.<span class="ident">iter</span>()
-                                .<span class="ident">by_val</span>()
+                                .<span class="ident">by_vals</span>()
                                 .<span class="ident">take</span>(<span class="ident">bls12_381::Scalar::NUM_BITS</span> <span class="kw">as</span> <span class="ident">usize</span>),
                         ),
                 ))
@@ -1717,11 +1717,11 @@
                 <span class="ident">cur</span> <span class="op">=</span> <span class="ident">jubjub::ExtendedPoint::from</span>(<span class="ident">pedersen_hash::pedersen_hash</span>(
                     <span class="ident">pedersen_hash::Personalization::MerkleTree</span>(<span class="ident">i</span>),
                     <span class="ident">lhs</span>.<span class="ident">iter</span>()
-                        .<span class="ident">by_val</span>()
+                        .<span class="ident">by_vals</span>()
                         .<span class="ident">take</span>(<span class="ident">bls12_381::Scalar::NUM_BITS</span> <span class="kw">as</span> <span class="ident">usize</span>)
                         .<span class="ident">chain</span>(
                             <span class="ident">rhs</span>.<span class="ident">iter</span>()
-                                .<span class="ident">by_val</span>()
+                                .<span class="ident">by_vals</span>()
                                 .<span class="ident">take</span>(<span class="ident">bls12_381::Scalar::NUM_BITS</span> <span class="kw">as</span> <span class="ident">usize</span>),
                         ),
                 ))
