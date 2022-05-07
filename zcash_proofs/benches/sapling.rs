@@ -11,6 +11,9 @@ use rand_xorshift::XorShiftRng;
 use zcash_primitives::sapling::{Diversifier, ProofGenerationKey, ValueCommitment};
 use zcash_proofs::circuit::sapling::Spend;
 
+#[cfg(unix)]
+use pprof::criterion::{Output, PProfProfiler};
+
 const TREE_DEPTH: usize = 32;
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -33,7 +36,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     )
     .unwrap();
 
-    c.bench_function("sapling", |b| {
+    c.bench_function("sapling-spend-prove", |b| {
         let value_commitment = ValueCommitment {
             value: 1,
             randomness: jubjub::Fr::random(&mut rng),
@@ -85,8 +88,18 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
+#[cfg(unix)]
+criterion_group! {
+    name = benches;
+    config = Criterion::default()
+        .sample_size(10)
+        .with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = criterion_benchmark
+}
+#[cfg(windows)]
+criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(10);
-    targets = criterion_benchmark);
+    targets = criterion_benchmark
+}
 criterion_main!(benches);

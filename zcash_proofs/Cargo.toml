@@ -33,6 +33,9 @@ zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
 criterion = "0.3"
 rand_xorshift = "0.3"
 
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { version = "0.8", features = ["criterion", "flamegraph"] } # MSRV 1.56
+
 [features]
 default = ["local-prover", "multicore"]
 bundled-prover = ["wagyu-zcash-parameters"]
