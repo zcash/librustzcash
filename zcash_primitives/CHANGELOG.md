@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.6.0] - 2022-05-11
 ### Added
 - `zcash_primitives::sapling::redjubjub::PublicKey::verify_with_zip216`, for
   controlling how RedJubjub signatures are validated. `PublicKey::verify` has
