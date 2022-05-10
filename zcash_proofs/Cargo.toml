@@ -27,7 +27,7 @@ lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
 rand_core = "0.6"
 wagyu-zcash-parameters = { version = "0.2", optional = true }
-zcash_primitives = { version = "0.5", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.6", path = "../zcash_primitives" }
 
 [dev-dependencies]
 criterion = "0.3"
