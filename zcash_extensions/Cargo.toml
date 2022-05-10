@@ -16,7 +16,7 @@ zcash_primitives = { version = "0.6", path = "../zcash_primitives", features = [
 ff = "0.12"
 jubjub = "0.9"
 rand_core = "0.6"
-zcash_proofs = { version = "0.5", path = "../zcash_proofs" }
+zcash_proofs = { version = "0.6", path = "../zcash_proofs" }
 
 [features]
 transparent-inputs = []
