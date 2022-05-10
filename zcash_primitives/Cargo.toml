@@ -58,7 +58,7 @@ rand_xorshift = "0.3"
 orchard = { version = "=0.1.0-beta.3", features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "=0.6.1", features = ["criterion", "flamegraph"] }
+pprof = { version = "0.8", features = ["criterion", "flamegraph"] } # MSRV 1.56
 
 [features]
 transparent-inputs = ["bs58", "hdwallet", "ripemd", "secp256k1"]
