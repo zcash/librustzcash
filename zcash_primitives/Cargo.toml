@@ -44,7 +44,7 @@ ripemd = { version = "0.1", optional = true }
 secp256k1 = { version = "0.21", optional = true }
 sha2 = "0.9"
 subtle = "2.2.3"
-zcash_encoding = { version = "0.0", path = "../components/zcash_encoding" }
+zcash_encoding = { version = "0.1", path = "../components/zcash_encoding" }
 
 [dependencies.zcash_note_encryption]
 version = "0.1"
