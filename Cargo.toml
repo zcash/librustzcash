@@ -19,10 +19,5 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-halo2_gadgets = { git = "https://github.com/zcash/halo2.git", rev = "30f92f3f4b785ea2a32392bf65c1b08f0411567c" }
-halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "30f92f3f4b785ea2a32392bf65c1b08f0411567c" }
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "f23e3d89507849a24543121839eea6f40b141aff" }
-orchard = { git = "https://github.com/zcash/orchard", rev = "15007026b1181b14f45c5c8cbf32e4fe86bc8d6b" }
-reddsa = { git = "https://github.com/ZcashFoundation/reddsa.git", rev = "0e912de3000fe165daf58ad98d1a22f1a66e7f18" }
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
