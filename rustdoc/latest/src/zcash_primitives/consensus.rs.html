@@ -670,6 +670,10 @@
 <span id="665">665</span>
 <span id="666">666</span>
 <span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
 </pre><pre class="rust"><code><span class="doccomment">//! Consensus logic and parameters.</span>
 
 <span class="kw">use</span> <span class="ident">std::cmp</span>::{<span class="ident">Ord</span>, <span class="ident">Ordering</span>};
@@ -867,7 +871,7 @@
             <span class="ident">NetworkUpgrade::Blossom</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight</span>(<span class="number">653_600</span>)),
             <span class="ident">NetworkUpgrade::Heartwood</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight</span>(<span class="number">903_000</span>)),
             <span class="ident">NetworkUpgrade::Canopy</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight</span>(<span class="number">1_046_400</span>)),
-            <span class="ident">NetworkUpgrade::Nu5</span> =&gt; <span class="prelude-val">None</span>,
+            <span class="ident">NetworkUpgrade::Nu5</span> =&gt; <span class="prelude-val">Some</span>(<span class="ident">BlockHeight</span>(<span class="number">1_687_104</span>)),
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;zfuture&quot;</span>)]</span>
             <span class="ident">NetworkUpgrade::ZFuture</span> =&gt; <span class="prelude-val">None</span>,
         }
@@ -1332,11 +1336,15 @@
             <span class="ident">BranchId::Canopy</span>,
         );
         <span class="macro">assert_eq!</span>(
+            <span class="ident">BranchId::for_height</span>(<span class="kw-2">&amp;</span><span class="ident">MAIN_NETWORK</span>, <span class="ident">BlockHeight</span>(<span class="number">1_687_104</span>)),
+            <span class="ident">BranchId::Nu5</span>,
+        );
+        <span class="macro">assert_eq!</span>(
             <span class="ident">BranchId::for_height</span>(<span class="kw-2">&amp;</span><span class="ident">MAIN_NETWORK</span>, <span class="ident">BlockHeight</span>(<span class="number">5_000_000</span>)),
-            <span class="ident">BranchId::Canopy</span>,
+            <span class="ident">BranchId::Nu5</span>,
         );
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.62.0-nightly (88860d547 2022-05-09)" ></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="zcash_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.62.0-nightly (ecd44958e 2022-05-10)" ></div>
 </body></html>
