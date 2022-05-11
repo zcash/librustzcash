@@ -195,7 +195,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Blossom => Some(BlockHeight(653_600)),
             NetworkUpgrade::Heartwood => Some(BlockHeight(903_000)),
             NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
-            NetworkUpgrade::Nu5 => None,
+            NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             #[cfg(feature = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -660,8 +660,12 @@ mod tests {
             BranchId::Canopy,
         );
         assert_eq!(
+            BranchId::for_height(&MAIN_NETWORK, BlockHeight(1_687_104)),
+            BranchId::Nu5,
+        );
+        assert_eq!(
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
-            BranchId::Canopy,
+            BranchId::Nu5,
         );
     }
 }
