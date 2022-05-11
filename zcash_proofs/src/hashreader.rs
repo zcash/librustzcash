@@ -1,5 +1,9 @@
+use std::{
+    fmt::Write,
+    io::{self, Read},
+};
+
 use blake2b_simd::State;
-use std::io::{self, Read};
 
 /// Abstraction over a reader which hashes the data being read.
 pub struct HashReader<R: Read> {
@@ -24,7 +28,7 @@ impl<R: Read> HashReader<R> {
 
         let mut s = String::new();
         for c in hash.as_bytes().iter() {
-            s += &format!("{:02x}", c);
+            write!(&mut s, "{:02x}", c).expect("writing to a string never fails");
         }
 
         s
