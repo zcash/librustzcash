@@ -1,4 +1,4 @@
-var N = null;var sourcesIndex = {};
+var sourcesIndex = {};
 sourcesIndex["equihash"] = {"name":"","files":["lib.rs","verify.rs"]};
 sourcesIndex["f4jumble"] = {"name":"","files":["lib.rs"]};
 sourcesIndex["zcash_address"] = {"name":"","dirs":[{"name":"kind","dirs":[{"name":"unified","files":["address.rs","fvk.rs","ivk.rs"]}],"files":["p2pkh.rs","p2sh.rs","sapling.rs","sprout.rs","unified.rs"]}],"files":["convert.rs","encoding.rs","kind.rs","lib.rs"]};
