@@ -16,17 +16,14 @@ use zcash_encoding::{Array, CompactSize, Vector};
 use super::Amount;
 use crate::transaction::Transaction;
 
+pub mod builder;
+
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
 pub const FLAGS_EXPECTED_UNSET: u8 = !(FLAG_SPENDS_ENABLED | FLAG_OUTPUTS_ENABLED);
 
 /// Marker for a bundle with no proofs or signatures.
-#[derive(Debug)]
-pub struct Unauthorized;
-
-impl Authorization for Unauthorized {
-    type SpendAuth = ();
-}
+pub type Unauthorized = orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
 
 pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_spend_auth(&self, s: A::SpendAuth) -> B::SpendAuth;
