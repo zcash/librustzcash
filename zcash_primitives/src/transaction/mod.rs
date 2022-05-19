@@ -12,11 +12,15 @@ use crate::{
     serialize::{Array, CompactSize, Vector},
 };
 
-use self::util::sha256d::{HashReader, HashWriter};
+use self::{
+    txid::to_txid,
+    util::sha256d::{HashReader, HashWriter},
+};
 
 pub mod builder;
 pub mod components;
 mod sighash;
+mod txid;
 pub mod util;
 
 #[cfg(test)]
@@ -486,7 +490,8 @@ impl Transaction {
     }
 
     fn read_v5<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
-        let (_, lock_time, expiry_height) = Self::read_v5_header_fragment(&mut reader)?;
+        let (consensus_branch_id, lock_time, expiry_height) =
+            Self::read_v5_header_fragment(&mut reader)?;
         let vin = Vector::read(&mut reader, TxIn::read)?;
         let vout = Vector::read(&mut reader, TxOut::read)?;
         let (value_balance, shielded_spends, shielded_outputs, binding_sig) =
@@ -524,12 +529,7 @@ impl Transaction {
             binding_sig,
         };
 
-        let txid = TxId([0u8; 32]);
-        //let txid = to_txid(
-        //    data.version,
-        //    data.consensus_branch_id,
-        //    &data.digest(TxIdDigester),
-        //);
+        let txid = to_txid(&data, consensus_branch_id);
 
         Ok(Transaction { txid, data })
     }
