@@ -754,6 +754,9 @@ and `zcash_encoding`.
   now takes its `MemoBytes` argument as a required field rather than an
   optional one. If the empty memo is desired, use
   `MemoBytes::from(Memo::Empty)` explicitly.
+- `zcash_primitives::zip32`:
+  - `ExtendedSpendingKey::default_address` no longer returns `Option<_>`.
+  - `ExtendedFullViewingKey::default_address` no longer returns `Option<_>`.
 
 ## [0.5.0] - 2021-03-26
 ### Added
