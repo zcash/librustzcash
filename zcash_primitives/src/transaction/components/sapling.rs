@@ -18,6 +18,8 @@ use zcash_note_encryption::COMPACT_NOTE_SIZE;
 
 use super::GROTH_PROOF_SIZE;
 
+pub type GrothProofBytes = [u8; GROTH_PROOF_SIZE];
+
 #[derive(Clone)]
 pub struct SpendDescription {
     pub cv: jubjub::ExtendedPoint,
@@ -38,7 +40,71 @@ impl std::fmt::Debug for SpendDescription {
     }
 }
 
+/// Consensus rules (§4.4) & (§4.5):
+/// - Canonical encoding is enforced here.
+/// - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
+///   (located in zcash_proofs::sapling::verifier).
+pub fn read_point<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::ExtendedPoint> {
+    let mut bytes = [0u8; 32];
+    reader.read_exact(&mut bytes)?;
+    let point = jubjub::ExtendedPoint::from_bytes(&bytes);
+
+    if point.is_none().into() {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid {}", field),
+        ))
+    } else {
+        Ok(point.unwrap())
+    }
+}
+
+/// Consensus rules (§7.3) & (§7.4):
+/// - Canonical encoding is enforced here
+pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<bls12_381::Scalar> {
+    let mut f = [0u8; 32];
+    reader.read_exact(&mut f)?;
+    Option::from(bls12_381::Scalar::from_repr(f)).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} not in field", field),
+        )
+    })
+}
+
+/// Consensus rules (§4.4) & (§4.5):
+/// - Canonical encoding is enforced by the API of SaplingVerificationContext::check_spend()
+///   and SaplingVerificationContext::check_output() due to the need to parse this into a
+///   bellman::groth16::Proof.
+/// - Proof validity is enforced in SaplingVerificationContext::check_spend()
+///   and SaplingVerificationContext::check_output()
+pub fn read_zkproof<R: Read>(mut reader: R) -> io::Result<GrothProofBytes> {
+    let mut zkproof = [0u8; GROTH_PROOF_SIZE];
+    reader.read_exact(&mut zkproof)?;
+    Ok(zkproof)
+}
+
 impl SpendDescription {
+    pub fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
+        let mut nullifier = Nullifier([0u8; 32]);
+        reader.read_exact(&mut nullifier.0)?;
+        Ok(nullifier)
+    }
+
+    /// Consensus rules (§4.4):
+    /// - Canonical encoding is enforced here.
+    /// - "Not small order" is enforced in SaplingVerificationContext::check_spend()
+    pub fn read_rk<R: Read>(mut reader: R) -> io::Result<PublicKey> {
+        PublicKey::read(&mut reader)
+    }
+
+    /// Consensus rules (§4.4):
+    /// - Canonical encoding is enforced here.
+    /// - Signature validity is enforced in SaplingVerificationContext::check_spend()
+    pub fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
+        Signature::read(&mut reader)
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         // Consensus rules (§4.4):
         // - Canonical encoding is enforced here.
@@ -109,6 +175,39 @@ impl SpendDescription {
 }
 
 #[derive(Clone)]
+pub struct SpendDescriptionV5 {
+    pub cv: jubjub::ExtendedPoint,
+    pub nullifier: Nullifier,
+    pub rk: PublicKey,
+}
+
+impl SpendDescriptionV5 {
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        let cv = read_point(&mut reader, "cv")?;
+        let nullifier = SpendDescription::read_nullifier(&mut reader)?;
+        let rk = SpendDescription::read_rk(&mut reader)?;
+
+        Ok(SpendDescriptionV5 { cv, nullifier, rk })
+    }
+
+    pub fn into_spend_description(
+        self,
+        anchor: bls12_381::Scalar,
+        zkproof: GrothProofBytes,
+        spend_auth_sig: Signature,
+    ) -> SpendDescription {
+        SpendDescription {
+            cv: self.cv,
+            anchor,
+            nullifier: self.nullifier,
+            rk: self.rk,
+            zkproof,
+            spend_auth_sig: Some(spend_auth_sig),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct OutputDescription {
     pub cv: jubjub::ExtendedPoint,
     pub cmu: bls12_381::Scalar,
@@ -143,7 +242,7 @@ impl std::fmt::Debug for OutputDescription {
 }
 
 impl OutputDescription {
-    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
@@ -169,18 +268,7 @@ impl OutputDescription {
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let ephemeral_key = {
-            let mut bytes = [0u8; 32];
-            reader.read_exact(&mut bytes)?;
-            let ephemeral_key = jubjub::ExtendedPoint::from_bytes(&bytes);
-            if ephemeral_key.is_none().into() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "invalid ephemeral_key",
-                ));
-            }
-            ephemeral_key.unwrap()
-        };
+        let ephemeral_key = read_point(&mut reader, "ephemeral_key")?;
 
         let mut enc_ciphertext = [0u8; 580];
         let mut out_ciphertext = [0u8; 80];
@@ -211,6 +299,47 @@ impl OutputDescription {
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)?;
         writer.write_all(&self.zkproof)
+    }
+}
+
+#[derive(Clone)]
+pub struct OutputDescriptionV5 {
+    pub cv: jubjub::ExtendedPoint,
+    pub cmu: bls12_381::Scalar,
+    pub ephemeral_key: jubjub::ExtendedPoint,
+    pub enc_ciphertext: [u8; 580],
+    pub out_ciphertext: [u8; 80],
+}
+
+impl OutputDescriptionV5 {
+    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
+        let cv = read_point(&mut reader, "cv")?;
+        let cmu = read_base(&mut reader, "cmu")?;
+        let ephemeral_key = read_point(&mut reader, "ephemeral_key")?;
+
+        let mut enc_ciphertext = [0u8; 580];
+        let mut out_ciphertext = [0u8; 80];
+        reader.read_exact(&mut enc_ciphertext)?;
+        reader.read_exact(&mut out_ciphertext)?;
+
+        Ok(OutputDescriptionV5 {
+            cv,
+            cmu,
+            ephemeral_key,
+            enc_ciphertext,
+            out_ciphertext,
+        })
+    }
+
+    pub fn into_output_description(self, zkproof: GrothProofBytes) -> OutputDescription {
+        OutputDescription {
+            cv: self.cv,
+            cmu: self.cmu,
+            ephemeral_key: self.ephemeral_key,
+            enc_ciphertext: self.enc_ciphertext,
+            out_ciphertext: self.out_ciphertext,
+            zkproof,
+        }
     }
 }
 

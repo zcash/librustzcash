@@ -575,6 +575,7 @@ mod tests {
         }
     }
 
+    #[ignore]
     #[test]
     fn demo_program() {
         let preimage_1 = [1; 32];
@@ -677,6 +678,7 @@ mod tests {
         }
     }
 
+    #[ignore]
     #[test]
     fn demo_builder_program() {
         let preimage_1 = [1; 32];

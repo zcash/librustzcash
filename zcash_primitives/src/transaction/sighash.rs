@@ -127,7 +127,7 @@ fn joinsplits_hash(
 ) -> Blake2bHash {
     let mut data = Vec::with_capacity(
         joinsplits.len()
-            * if txversion.uses_groth_proofs() {
+            * if txversion.has_sapling() {
                 1698 // JSDescription with Groth16 proof
             } else {
                 1802 // JSDescription with PHGR13 proof

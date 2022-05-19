@@ -1,5 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Write};
+use std::iter::FromIterator;
 
 const MAX_SIZE: usize = 0x02000000;
 
@@ -79,6 +80,50 @@ impl Vector {
     {
         CompactSize::write(&mut writer, vec.len())?;
         vec.iter().try_for_each(|e| func(&mut writer, e))
+    }
+}
+
+/// Namespace for functions that perform encoding of array contents.
+///
+/// This is similar to the [`Vector`] encoding except that no length information is
+/// written as part of the encoding, so length must be statically known or obtained from
+/// other parts of the input stream.
+pub struct Array;
+
+impl Array {
+    /// Reads `count` elements from a stream into a vector, assuming the encoding written by
+    /// [`Array::write`], using the provided function to decode each element.
+    pub fn read<R: Read, E, F>(reader: R, count: usize, func: F) -> io::Result<Vec<E>>
+    where
+        F: Fn(&mut R) -> io::Result<E>,
+    {
+        Self::read_collected(reader, count, func)
+    }
+
+    /// Reads `count` elements into a collection, assuming the encoding written by
+    /// [`Array::write`], using the provided function to decode each element.
+    pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(
+        reader: R,
+        count: usize,
+        func: F,
+    ) -> io::Result<O>
+    where
+        F: Fn(&mut R) -> io::Result<E>,
+    {
+        Self::read_collected_mut(reader, count, func)
+    }
+
+    /// Reads `count` elements into a collection, assuming the encoding written by
+    /// [`Array::write`], using the provided function to decode each element.
+    pub fn read_collected_mut<R: Read, E, F, O: FromIterator<E>>(
+        mut reader: R,
+        count: usize,
+        mut func: F,
+    ) -> io::Result<O>
+    where
+        F: FnMut(&mut R) -> io::Result<E>,
+    {
+        (0..count).map(|_| func(&mut reader)).collect()
     }
 }
 

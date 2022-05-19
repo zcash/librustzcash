@@ -1,11 +1,16 @@
 //! Structs and methods for handling Zcash transactions.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::convert::TryFrom;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 
-use crate::{consensus::BlockHeight, sapling::redjubjub::Signature, serialize::Vector};
+use crate::{
+    consensus::{BlockHeight, BranchId},
+    sapling::redjubjub::Signature,
+    serialize::{Array, CompactSize, Vector},
+};
 
 use self::util::sha256d::{HashReader, HashWriter};
 
@@ -19,7 +24,10 @@ mod tests;
 
 pub use self::sighash::{signature_hash, signature_hash_data, SignableInput, SIGHASH_ALL};
 
-use self::components::{Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut};
+use self::components::{
+    sapling::{self, OutputDescriptionV5, SpendDescriptionV5},
+    Amount, JsDescription, OutputDescription, SpendDescription, TxIn, TxOut,
+};
 
 #[cfg(feature = "zfuture")]
 use self::components::{TzeIn, TzeOut};
@@ -28,6 +36,9 @@ const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
 const SAPLING_VERSION_GROUP_ID: u32 = 0x892F2085;
 const SAPLING_TX_VERSION: u32 = 4;
+
+const V5_TX_VERSION: u32 = 5;
+const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
 /// These versions are used exclusively for in-development transaction
 /// serialization, and will never be active under the consensus rules.
@@ -63,6 +74,7 @@ pub enum TxVersion {
     Sprout(u32),
     Overwinter,
     Sapling,
+    Zip225,
     #[cfg(feature = "zfuture")]
     ZFuture,
 }
@@ -77,6 +89,7 @@ impl TxVersion {
             match (version, reader.read_u32::<LittleEndian>()?) {
                 (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
                 (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
+                (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
                 #[cfg(feature = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
@@ -106,6 +119,7 @@ impl TxVersion {
                 TxVersion::Sprout(v) => *v,
                 TxVersion::Overwinter => OVERWINTER_TX_VERSION,
                 TxVersion::Sapling => SAPLING_TX_VERSION,
+                TxVersion::Zip225 => V5_TX_VERSION,
                 #[cfg(feature = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
@@ -116,6 +130,7 @@ impl TxVersion {
             TxVersion::Sprout(_) => 0,
             TxVersion::Overwinter => OVERWINTER_VERSION_GROUP_ID,
             TxVersion::Sapling => SAPLING_VERSION_GROUP_ID,
+            TxVersion::Zip225 => V5_VERSION_GROUP_ID,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
@@ -133,17 +148,50 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::Overwinter | TxVersion::Sapling => true,
+            TxVersion::Zip225 => false,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
         }
     }
 
-    pub fn uses_groth_proofs(&self) -> bool {
+    pub fn has_overwinter(&self) -> bool {
+        !matches!(self, TxVersion::Sprout(_))
+    }
+
+    pub fn has_sapling(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
             TxVersion::Sapling => true,
+            TxVersion::Zip225 => true,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
+        }
+    }
+
+    pub fn has_orchard(&self) -> bool {
+        match self {
+            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
+            TxVersion::Zip225 => true,
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => true,
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    pub fn has_tze(&self) -> bool {
+        matches!(self, TxVersion::ZFuture)
+    }
+
+    pub fn suggested_for_branch(consensus_branch_id: BranchId) -> Self {
+        match consensus_branch_id {
+            BranchId::Sprout => TxVersion::Sprout(2),
+            BranchId::Overwinter => TxVersion::Overwinter,
+            BranchId::Sapling | BranchId::Blossom | BranchId::Heartwood | BranchId::Canopy => {
+                TxVersion::Sapling
+            }
+            BranchId::Nu5 => TxVersion::Zip225,
+            #[cfg(feature = "zfuture")]
+            BranchId::ZFuture => TxVersion::ZFuture,
         }
     }
 }
@@ -288,6 +336,23 @@ impl TransactionData {
 
 impl Transaction {
     fn from_data(data: TransactionData) -> io::Result<Self> {
+        match data.version {
+            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+                Self::from_data_v4(data)
+            }
+            TxVersion::Zip225 => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "V5 transaction construction not yet supported.",
+            )),
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "V5 transaction construction not yet supported.",
+            )),
+        }
+    }
+
+    fn from_data_v4(data: TransactionData) -> io::Result<Self> {
         let mut tx = Transaction {
             txid: TxId([0; 32]),
             data,
@@ -306,6 +371,20 @@ impl Transaction {
         let mut reader = HashReader::new(reader);
 
         let version = TxVersion::read(&mut reader)?;
+        match version {
+            TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
+                Self::read_v4(&mut reader, version)
+            }
+            TxVersion::Zip225 => Self::read_v5(reader.into_base_reader(), version),
+            #[cfg(feature = "zfuture")]
+            TxVersion::ZFuture => Self::read_v5(reader.into_base_reader(), version),
+        }
+    }
+
+    #[allow(clippy::redundant_closure)]
+    fn read_v4<R: Read>(reader: R, version: TxVersion) -> io::Result<Self> {
+        let mut reader = HashReader::new(reader);
+
         let is_overwinter_v3 = version == TxVersion::Overwinter;
         let is_sapling_v4 = version == TxVersion::Sapling;
 
@@ -349,7 +428,7 @@ impl Transaction {
 
         let (joinsplits, joinsplit_pubkey, joinsplit_sig) = if version.has_sprout() {
             let jss = Vector::read(&mut reader, |r| {
-                JsDescription::read(r, version.uses_groth_proofs())
+                JsDescription::read(r, version.has_sapling())
             })?;
             let (pubkey, sig) = if !jss.is_empty() {
                 let mut joinsplit_pubkey = [0; 32];
@@ -397,6 +476,140 @@ impl Transaction {
                 binding_sig,
             },
         })
+    }
+
+    fn read_amount<R: Read>(mut reader: R) -> io::Result<Amount> {
+        let mut tmp = [0; 8];
+        reader.read_exact(&mut tmp)?;
+        Amount::from_i64_le_bytes(tmp)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "valueBalance out of range"))
+    }
+
+    fn read_v5<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
+        let (_, lock_time, expiry_height) = Self::read_v5_header_fragment(&mut reader)?;
+        let vin = Vector::read(&mut reader, TxIn::read)?;
+        let vout = Vector::read(&mut reader, TxOut::read)?;
+        let (value_balance, shielded_spends, shielded_outputs, binding_sig) =
+            Self::read_v5_sapling(&mut reader)?;
+
+        // we do not attempt to parse the Orchard bundle, but we validate its
+        // presence
+        let _ = CompactSize::read(&mut reader)?;
+
+        #[cfg(feature = "zfuture")]
+        let (tze_inputs, tze_outputs) = if version.has_tze() {
+            let vin = Vector::read(&mut reader, TzeIn::read)?;
+            let vout = Vector::read(&mut reader, TzeOut::read)?;
+            (vin, vout)
+        } else {
+            (vec![], vec![])
+        };
+
+        let data = TransactionData {
+            version,
+            vin,
+            vout,
+            #[cfg(feature = "zfuture")]
+            tze_inputs,
+            #[cfg(feature = "zfuture")]
+            tze_outputs,
+            lock_time,
+            expiry_height,
+            value_balance,
+            shielded_spends,
+            shielded_outputs,
+            joinsplits: vec![],
+            joinsplit_pubkey: None,
+            joinsplit_sig: None,
+            binding_sig,
+        };
+
+        let txid = TxId([0u8; 32]);
+        //let txid = to_txid(
+        //    data.version,
+        //    data.consensus_branch_id,
+        //    &data.digest(TxIdDigester),
+        //);
+
+        Ok(Transaction { txid, data })
+    }
+
+    fn read_v5_header_fragment<R: Read>(mut reader: R) -> io::Result<(BranchId, u32, BlockHeight)> {
+        let consensus_branch_id = reader.read_u32::<LittleEndian>().and_then(|value| {
+            BranchId::try_from(value).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid consensus branch id: ".to_owned() + e,
+                )
+            })
+        })?;
+        let lock_time = reader.read_u32::<LittleEndian>()?;
+        let expiry_height: BlockHeight = reader.read_u32::<LittleEndian>()?.into();
+        Ok((consensus_branch_id, lock_time, expiry_height))
+    }
+
+    #[allow(clippy::redundant_closure)]
+    fn read_v5_sapling<R: Read>(
+        mut reader: R,
+    ) -> io::Result<(
+        Amount,
+        Vec<SpendDescription>,
+        Vec<OutputDescription>,
+        Option<Signature>,
+    )> {
+        let sd_v5s = Vector::read(&mut reader, SpendDescriptionV5::read)?;
+        let od_v5s = Vector::read(&mut reader, OutputDescriptionV5::read)?;
+        let n_spends = sd_v5s.len();
+        let n_outputs = od_v5s.len();
+        let value_balance = if n_spends > 0 || n_outputs > 0 {
+            Self::read_amount(&mut reader)?
+        } else {
+            Amount::zero()
+        };
+
+        let anchor = if n_spends > 0 {
+            Some(sapling::read_base(&mut reader, "anchor")?)
+        } else {
+            None
+        };
+
+        let v_spend_proofs = Array::read(&mut reader, n_spends, |r| sapling::read_zkproof(r))?;
+        let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| {
+            SpendDescription::read_spend_auth_sig(r)
+        })?;
+        let v_output_proofs = Array::read(&mut reader, n_outputs, |r| sapling::read_zkproof(r))?;
+
+        let binding_sig = if n_spends > 0 || n_outputs > 0 {
+            Some(Signature::read(&mut reader)?)
+        } else {
+            None
+        };
+
+        let shielded_spends = sd_v5s
+            .into_iter()
+            .zip(
+                v_spend_proofs
+                    .into_iter()
+                    .zip(v_spend_auth_sigs.into_iter()),
+            )
+            .map(|(sd_5, (zkproof, spend_auth_sig))| {
+                // the following `unwrap` is safe because we know n_spends > 0.
+                sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
+            })
+            .collect();
+
+        let shielded_outputs = od_v5s
+            .into_iter()
+            .zip(v_output_proofs.into_iter())
+            .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
+            .collect();
+
+        Ok((
+            value_balance,
+            shielded_spends,
+            shielded_outputs,
+            binding_sig,
+        ))
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
