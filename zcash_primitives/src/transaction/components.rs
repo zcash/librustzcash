@@ -1,6 +1,7 @@
 //! Structs representing the components within Zcash transactions.
 
 pub mod amount;
+pub(crate) mod orchard;
 pub mod sapling;
 pub mod sprout;
 pub mod transparent;

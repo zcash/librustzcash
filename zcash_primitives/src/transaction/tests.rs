@@ -28,6 +28,14 @@ fn tx_read_write() {
 }
 
 #[test]
+fn read_v5_txid() {
+    for v5_tv in &self::data::tx_read_write::v5_test_vectors() {
+        let tx = Transaction::read(&v5_tv.tx[..]).unwrap();
+        assert_eq!(v5_tv.txid, tx.txid().0);
+    }
+}
+
+#[test]
 fn tx_write_rejects_unexpected_joinsplit_pubkey() {
     // Succeeds without a JoinSplit pubkey
     assert!(TransactionData::new().freeze().is_ok());

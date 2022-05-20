@@ -9,10 +9,11 @@ use std::ops::Deref;
 use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::redjubjub::Signature,
-    serialize::{Array, CompactSize, Vector},
+    serialize::{Array, Vector},
 };
 
 use self::{
+    components::orchard,
     txid::to_txid,
     util::sha256d::{HashReader, HashWriter},
 };
@@ -184,19 +185,6 @@ impl TxVersion {
     #[cfg(feature = "zfuture")]
     pub fn has_tze(&self) -> bool {
         matches!(self, TxVersion::ZFuture)
-    }
-
-    pub fn suggested_for_branch(consensus_branch_id: BranchId) -> Self {
-        match consensus_branch_id {
-            BranchId::Sprout => TxVersion::Sprout(2),
-            BranchId::Overwinter => TxVersion::Overwinter,
-            BranchId::Sapling | BranchId::Blossom | BranchId::Heartwood | BranchId::Canopy => {
-                TxVersion::Sapling
-            }
-            BranchId::Nu5 => TxVersion::Zip225,
-            #[cfg(feature = "zfuture")]
-            BranchId::ZFuture => TxVersion::ZFuture,
-        }
     }
 }
 
@@ -377,7 +365,7 @@ impl Transaction {
         let version = TxVersion::read(&mut reader)?;
         match version {
             TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
-                Self::read_v4(&mut reader, version)
+                Self::read_v4(reader, version)
             }
             TxVersion::Zip225 => Self::read_v5(reader.into_base_reader(), version),
             #[cfg(feature = "zfuture")]
@@ -386,9 +374,7 @@ impl Transaction {
     }
 
     #[allow(clippy::redundant_closure)]
-    fn read_v4<R: Read>(reader: R, version: TxVersion) -> io::Result<Self> {
-        let mut reader = HashReader::new(reader);
-
+    fn read_v4<R: Read>(mut reader: HashReader<R>, version: TxVersion) -> io::Result<Self> {
         let is_overwinter_v3 = version == TxVersion::Overwinter;
         let is_sapling_v4 = version == TxVersion::Sapling;
 
@@ -497,9 +483,7 @@ impl Transaction {
         let (value_balance, shielded_spends, shielded_outputs, binding_sig) =
             Self::read_v5_sapling(&mut reader)?;
 
-        // we do not attempt to parse the Orchard bundle, but we validate its
-        // presence
-        let _ = CompactSize::read(&mut reader)?;
+        let orchard_bundle = orchard::read_v5_bundle(&mut reader)?;
 
         #[cfg(feature = "zfuture")]
         let (tze_inputs, tze_outputs) = if version.has_tze() {
@@ -529,7 +513,7 @@ impl Transaction {
             binding_sig,
         };
 
-        let txid = to_txid(&data, consensus_branch_id);
+        let txid = to_txid(&data, orchard_bundle.as_ref(), consensus_branch_id);
 
         Ok(Transaction { txid, data })
     }

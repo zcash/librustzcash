@@ -11,6 +11,7 @@ use crate::consensus::{BlockHeight, BranchId};
 
 use super::{
     components::{
+        orchard,
         sapling::{OutputDescription, SpendDescription},
         transparent::{TxIn, TxOut},
     },
@@ -27,7 +28,6 @@ const ZCASH_TX_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashTxHash_";
 const ZCASH_HEADERS_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdHeadersHash";
 pub(crate) const ZCASH_TRANSPARENT_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTranspaHash";
 const ZCASH_SAPLING_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdSaplingHash";
-const ZCASH_ORCHARD_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdOrchardHash";
 #[cfg(feature = "zfuture")]
 const ZCASH_TZE_HASH_PERSONALIZATION: &[u8; 16] = b"ZTxIdTZE____Hash";
 
@@ -246,6 +246,7 @@ pub(crate) fn to_hash(
     header_digest: Blake2bHash,
     transparent_digest: Blake2bHash,
     sapling_digest: Blake2bHash,
+    orchard_digest: Blake2bHash,
     #[cfg(feature = "zfuture")] tze_digest: Option<Blake2bHash>,
 ) -> Blake2bHash {
     let mut personal = [0; 16];
@@ -258,12 +259,7 @@ pub(crate) fn to_hash(
     h.write_all(header_digest.as_bytes()).unwrap();
     h.write_all(transparent_digest.as_bytes()).unwrap();
     h.write_all(sapling_digest.as_bytes()).unwrap();
-    h.write_all(
-        hasher(ZCASH_ORCHARD_HASH_PERSONALIZATION)
-            .finalize()
-            .as_bytes(),
-    )
-    .unwrap();
+    h.write_all(orchard_digest.as_bytes()).unwrap();
 
     #[cfg(feature = "zfuture")]
     if let Some(digest) = tze_digest {
@@ -273,7 +269,11 @@ pub(crate) fn to_hash(
     h.finalize()
 }
 
-pub fn to_txid(txdata: &TransactionData, consensus_branch_id: BranchId) -> TxId {
+pub(crate) fn to_txid(
+    txdata: &TransactionData,
+    orchard_bundle: Option<&orchard::Bundle>,
+    consensus_branch_id: BranchId,
+) -> TxId {
     let txid_digest = to_hash(
         consensus_branch_id,
         hash_header_txid_data(
@@ -284,6 +284,10 @@ pub fn to_txid(txdata: &TransactionData, consensus_branch_id: BranchId) -> TxId 
         ),
         hash_transparent_txid_data(&txdata),
         hash_sapling_txid_data(&txdata),
+        orchard_bundle.map_or_else(
+            || orchard::hash_bundle_txid_empty(),
+            orchard::hash_bundle_txid_data,
+        ),
         #[cfg(feature = "zfuture")]
         if txdata.version.has_tze() {
             Some(hash_tze_txid_data(&txdata))
