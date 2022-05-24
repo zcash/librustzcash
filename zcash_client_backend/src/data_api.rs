@@ -207,6 +207,7 @@ pub struct PrunedBlock<'a> {
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
 pub struct DecryptedTransaction<'a> {
+    pub tx_bytes: &'a[u8],
     pub tx: &'a Transaction,
     pub sapling_outputs: &'a Vec<DecryptedOutput>,
 }

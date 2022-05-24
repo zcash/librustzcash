@@ -796,17 +796,15 @@ pub fn put_tx_meta<'a, P, N>(
 /// Inserts full transaction data into the database.
 pub fn put_tx_data<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
+    tx_bytes: &[u8],
     tx: &Transaction,
     created_at: Option<time::OffsetDateTime>,
 ) -> Result<i64, SqliteClientError> {
     let txid = tx.txid().0.to_vec();
 
-    let mut raw_tx = vec![];
-    tx.write(&mut raw_tx)?;
-
     if stmts
         .stmt_update_tx_data
-        .execute(params![u32::from(tx.expiry_height), raw_tx, txid,])?
+        .execute(params![u32::from(tx.expiry_height), tx_bytes, txid,])?
         == 0
     {
         // It isn't there, so insert our transaction into the database.
@@ -814,7 +812,7 @@ pub fn put_tx_data<'a, P>(
             txid,
             created_at,
             u32::from(tx.expiry_height),
-            raw_tx
+            tx_bytes
         ])?;
 
         Ok(stmts.wallet_db.conn.last_insert_rowid())

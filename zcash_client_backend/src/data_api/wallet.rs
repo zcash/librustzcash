@@ -34,6 +34,7 @@ pub const ANCHOR_OFFSET: u32 = 10;
 pub fn decrypt_and_store_transaction<N, E, P, D>(
     params: &P,
     data: &mut D,
+    tx_bytes: &[u8],
     tx: &Transaction,
 ) -> Result<(), E>
 where
@@ -62,6 +63,7 @@ where
         let nullifiers = data.get_all_nullifiers()?;
         data.store_decrypted_tx(
             &DecryptedTransaction {
+                tx_bytes,
                 tx,
                 sapling_outputs: &sapling_outputs,
             },
