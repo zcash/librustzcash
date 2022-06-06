@@ -33,6 +33,7 @@ secp256k1 = { version = "0.21", optional = true }
 sha2 = { version = "0.10.1", optional = true }
 subtle = "2.2.3"
 time = "0.2"
+zcash_address = { version = "0.1", path = "../components/zcash_address" }
 zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption" }
 zcash_primitives = { version = "0.6", path = "../zcash_primitives" }
 
