@@ -316,7 +316,7 @@ pub struct ExtendedFullViewingKey {
     child_index: ChildIndex,
     chain_code: ChainCode,
     pub fvk: FullViewingKey,
-    dk: DiversifierKey,
+    pub(crate) dk: DiversifierKey,
 }
 
 impl std::cmp::PartialEq for ExtendedSpendingKey {

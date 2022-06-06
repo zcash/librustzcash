@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::sapling::keys::DiversifiableFullViewingKey`
+- `zcash_primitives::sapling::keys::Scope`
 
 ## [0.6.0] - 2022-05-11
 ### Added
