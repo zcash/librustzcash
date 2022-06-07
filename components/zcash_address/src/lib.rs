@@ -5,7 +5,7 @@ mod kind;
 #[cfg(test)]
 mod test_vectors;
 
-pub use convert::{FromAddress, ToAddress, UnsupportedAddress};
+pub use convert::{ConversionError, ToAddress, TryFromAddress, UnsupportedAddress};
 pub use encoding::ParseError;
 pub use kind::unified;
 
@@ -84,7 +84,7 @@ impl ZcashAddress {
 
     /// Converts this address into another type.
     ///
-    /// `convert` can convert into any type that implements the [`FromAddress`] trait.
+    /// `convert` can convert into any type that implements the [`TryFromAddress`] trait.
     /// This enables `ZcashAddress` to be used as a common parsing and serialization
     /// interface for Zcash addresses, while delegating operations on those addresses
     /// (such as constructing transactions) to downstream crates.
@@ -95,13 +95,13 @@ impl ZcashAddress {
     /// [`encode`]: Self::encode
     /// [`Display` implementation]: std::fmt::Display
     /// [`address.to_string()`]: std::string::ToString
-    pub fn convert<T: FromAddress>(self) -> Result<T, UnsupportedAddress> {
+    pub fn convert<T: TryFromAddress>(self) -> Result<T, ConversionError<T::Error>> {
         match self.kind {
-            AddressKind::Sprout(data) => T::from_sprout(self.net, data),
-            AddressKind::Sapling(data) => T::from_sapling(self.net, data),
-            AddressKind::Unified(data) => T::from_unified(self.net, data),
-            AddressKind::P2pkh(data) => T::from_transparent_p2pkh(self.net, data),
-            AddressKind::P2sh(data) => T::from_transparent_p2sh(self.net, data),
+            AddressKind::Sprout(data) => T::try_from_sprout(self.net, data),
+            AddressKind::Sapling(data) => T::try_from_sapling(self.net, data),
+            AddressKind::Unified(data) => T::try_from_unified(self.net, data),
+            AddressKind::P2pkh(data) => T::try_from_transparent_p2pkh(self.net, data),
+            AddressKind::P2sh(data) => T::try_from_transparent_p2sh(self.net, data),
         }
     }
 }

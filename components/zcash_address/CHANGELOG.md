@@ -6,6 +6,12 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_address::ConversionError`
+- `zcash_address::TryFromAddress`
+
+### Removed
+- `zcash_address::FromAddress` (use `TryFromAddress` instead).
 
 ## [0.1.0] - 2022-05-11
 Initial release.
