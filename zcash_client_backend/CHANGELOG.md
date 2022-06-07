@@ -25,6 +25,8 @@ and this library adheres to Rust's notion of
   of a `zcash_client_backend::zip321::TransactionRequest` value.
   This facilitates the implementation of ZIP 321 support in wallets and
   provides substantially greater flexibility in transaction creation.
+- `zcash_client_backend::address`:
+  - `RecipientAddress::Unified`
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`
@@ -35,6 +37,7 @@ and this library adheres to Rust's notion of
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:
+  - `zcash_client_backend::address::UnifiedAddress`
   - `zcash_client_backend::keys::{UnifiedSpendingKey`, `UnifiedFullViewingKey`}
   - `zcash_client_backend::encoding::AddressCodec`
   - `zcash_client_backend::encoding::encode_payment_address`

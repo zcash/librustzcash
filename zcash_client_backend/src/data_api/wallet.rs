@@ -334,6 +334,16 @@ where
 
     for payment in request.payments() {
         match &payment.recipient_address {
+            RecipientAddress::Unified(ua) => builder
+                .add_sapling_output(
+                    ovk,
+                    ua.sapling()
+                        .expect("TODO: Add Orchard support to builder")
+                        .clone(),
+                    payment.amount,
+                    payment.memo.clone().unwrap_or_else(MemoBytes::empty),
+                )
+                .map_err(Error::Builder),
             RecipientAddress::Shielded(to) => builder
                 .add_sapling_output(
                     ovk,
@@ -359,7 +369,8 @@ where
     let sent_outputs = request.payments().iter().enumerate().map(|(i, payment)| {
         let idx = match &payment.recipient_address {
             // Sapling outputs are shuffled, so we need to look up where the output ended up.
-            RecipientAddress::Shielded(_) =>
+            // TODO: When we add Orchard support, we will need to trial-decrypt to find them.
+            RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) =>
                 tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment."),
             RecipientAddress::Transparent(addr) => {
                 let script = addr.script();

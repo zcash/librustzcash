@@ -452,7 +452,9 @@ mod parse {
             match v {
                 Param::Amount(a) => payment.amount = a,
                 Param::Memo(m) => match payment.recipient_address {
-                    RecipientAddress::Shielded(_) => payment.memo = Some(m),
+                    RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) => {
+                        payment.memo = Some(m)
+                    }
                     RecipientAddress::Transparent(_) => {
                         return Err(Zip321Error::TransparentMemo(i))
                     }
@@ -646,14 +648,24 @@ pub mod testing {
         transaction::components::amount::testing::arb_nonnegative_amount,
     };
 
-    use crate::address::RecipientAddress;
+    use crate::address::{RecipientAddress, UnifiedAddress};
 
     use super::{MemoBytes, Payment, TransactionRequest};
+
+    prop_compose! {
+        fn arb_unified_addr()(
+            sapling in arb_shielded_addr(),
+            transparent in option::of(arb_transparent_addr()),
+        ) -> UnifiedAddress {
+            UnifiedAddress::from_receivers(None, Some(sapling), transparent).unwrap()
+        }
+    }
 
     pub fn arb_addr() -> impl Strategy<Value = RecipientAddress> {
         prop_oneof![
             arb_shielded_addr().prop_map(RecipientAddress::Shielded),
             arb_transparent_addr().prop_map(RecipientAddress::Transparent),
+            arb_unified_addr().prop_map(RecipientAddress::Unified),
         ]
     }
 
@@ -676,15 +688,15 @@ pub mod testing {
             other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
             ) -> Payment {
 
-            let is_sapling = match recipient_address {
+            let is_shielded = match recipient_address {
                 RecipientAddress::Transparent(_) => false,
-                RecipientAddress::Shielded(_) => true,
+                RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) => true,
             };
 
             Payment {
                 recipient_address,
                 amount,
-                memo: memo.filter(|_| is_sapling),
+                memo: memo.filter(|_| is_shielded),
                 label,
                 message,
                 other_params: other_params.into_iter().collect(),
