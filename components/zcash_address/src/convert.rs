@@ -12,7 +12,39 @@ impl fmt::Display for UnsupportedAddress {
     }
 }
 
+/// An error encountered while converting a parsed [`ZcashAddress`] into another type.
+#[derive(Debug)]
+pub enum ConversionError<E> {
+    /// The address type is not supported by the target type.
+    Unsupported(UnsupportedAddress),
+    /// A conversion error returned by the target type.
+    User(E),
+}
+
+impl<E> From<E> for ConversionError<E> {
+    fn from(e: E) -> Self {
+        ConversionError::User(e)
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for ConversionError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsupported(e) => e.fmt(f),
+            Self::User(e) => e.fmt(f),
+        }
+    }
+}
+
 impl Error for UnsupportedAddress {}
+impl<E: Error + 'static> Error for ConversionError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            ConversionError::Unsupported(_) => None,
+            ConversionError::User(e) => Some(e),
+        }
+    }
+}
 
 /// A helper trait for converting a [`ZcashAddress`] into another type.
 ///
@@ -21,15 +53,22 @@ impl Error for UnsupportedAddress {}
 /// # Examples
 ///
 /// ```
-/// use zcash_address::{FromAddress, Network, UnsupportedAddress, ZcashAddress};
+/// use zcash_address::{ConversionError, Network, TryFromAddress, UnsupportedAddress, ZcashAddress};
 ///
 /// #[derive(Debug)]
 /// struct MySapling([u8; 43]);
 ///
 /// // Implement the FromAddress trait, overriding whichever conversion methods match your
 /// // requirements for the resulting type.
-/// impl FromAddress for MySapling {
-///     fn from_sapling(net: Network, data: [u8; 43]) -> Result<Self, UnsupportedAddress> {
+/// impl TryFromAddress for MySapling {
+///     // In this example we aren't checking the validity of the inner Sapling address,
+///     // but your code should do so!
+///     type Error = &'static str;
+///
+///     fn try_from_sapling(
+///         net: Network,
+///         data: [u8; 43],
+///     ) -> Result<Self, ConversionError<Self::Error>> {
 ///         Ok(MySapling(data))
 ///     }
 /// }
@@ -48,30 +87,53 @@ impl Error for UnsupportedAddress {}
 ///     "Zcash transparent P2PKH addresses are not supported",
 /// );
 /// ```
-pub trait FromAddress: Sized {
-    fn from_sprout(net: Network, data: sprout::Data) -> Result<Self, UnsupportedAddress> {
+pub trait TryFromAddress: Sized {
+    /// Conversion errors for the user type (e.g. failing to parse the data passed to
+    /// [`Self::try_from_sapling`] as a valid Sapling address).
+    type Error;
+
+    fn try_from_sprout(
+        net: Network,
+        data: sprout::Data,
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
-        Err(UnsupportedAddress("Sprout"))
+        Err(ConversionError::Unsupported(UnsupportedAddress("Sprout")))
     }
 
-    fn from_sapling(net: Network, data: sapling::Data) -> Result<Self, UnsupportedAddress> {
+    fn try_from_sapling(
+        net: Network,
+        data: sapling::Data,
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
-        Err(UnsupportedAddress("Sapling"))
+        Err(ConversionError::Unsupported(UnsupportedAddress("Sapling")))
     }
 
-    fn from_unified(net: Network, data: unified::Address) -> Result<Self, UnsupportedAddress> {
+    fn try_from_unified(
+        net: Network,
+        data: unified::Address,
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
-        Err(UnsupportedAddress("Unified"))
+        Err(ConversionError::Unsupported(UnsupportedAddress("Unified")))
     }
 
-    fn from_transparent_p2pkh(net: Network, data: p2pkh::Data) -> Result<Self, UnsupportedAddress> {
+    fn try_from_transparent_p2pkh(
+        net: Network,
+        data: p2pkh::Data,
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
-        Err(UnsupportedAddress("transparent P2PKH"))
+        Err(ConversionError::Unsupported(UnsupportedAddress(
+            "transparent P2PKH",
+        )))
     }
 
-    fn from_transparent_p2sh(net: Network, data: p2sh::Data) -> Result<Self, UnsupportedAddress> {
+    fn try_from_transparent_p2sh(
+        net: Network,
+        data: p2sh::Data,
+    ) -> Result<Self, ConversionError<Self::Error>> {
         let _ = (net, data);
-        Err(UnsupportedAddress("transparent P2SH"))
+        Err(ConversionError::Unsupported(UnsupportedAddress(
+            "transparent P2SH",
+        )))
     }
 }
 
