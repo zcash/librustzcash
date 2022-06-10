@@ -393,7 +393,7 @@ mod parse {
     /// ZIP 321 URI.
     #[derive(Debug, PartialEq)]
     pub enum Param {
-        Addr(RecipientAddress),
+        Addr(Box<RecipientAddress>),
         Amount(Amount),
         Memo(MemoBytes),
         Label(String),
@@ -440,7 +440,7 @@ mod parse {
         });
 
         let mut payment = Payment {
-            recipient_address: addr.ok_or(Zip321Error::RecipientMissing(i))?,
+            recipient_address: *addr.ok_or(Zip321Error::RecipientMissing(i))?,
             amount: Amount::zero(),
             memo: None,
             label: None,
@@ -485,7 +485,7 @@ mod parse {
                         // then cause `map_opt` to fail.
                         RecipientAddress::decode(params, addr_str).map(|a| {
                             Some(IndexedParam {
-                                param: Param::Addr(a),
+                                param: Param::Addr(Box::new(a)),
                                 payment_index: 0,
                             })
                         })
@@ -589,6 +589,7 @@ mod parse {
     ) -> Result<IndexedParam, String> {
         let param = match name {
             "address" => RecipientAddress::decode(params, value)
+                .map(Box::new)
                 .map(Param::Addr)
                 .ok_or(format!(
                     "Could not interpret {} as a valid Zcash address.",
