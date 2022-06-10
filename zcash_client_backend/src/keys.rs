@@ -165,6 +165,68 @@ impl UnifiedFullViewingKey {
         }
     }
 
+    /// Attempts to decode the given string as an encoding of a `UnifiedFullViewingKey`
+    /// for the given network.
+    pub fn decode<P: consensus::Parameters>(
+        params: &P,
+        encoding: &str,
+        account: AccountId,
+    ) -> Result<Self, String> {
+        encoding
+            .strip_prefix("DONOTUSEUFVK")
+            .and_then(|data| hex::decode(data).ok())
+            .as_ref()
+            .and_then(|data| data.split_first())
+            .and_then(|(flag, data)| {
+                #[cfg(feature = "transparent-inputs")]
+                let (transparent, data) = if flag & 1 != 0 {
+                    if data.len() < 65 {
+                        return None;
+                    }
+                    let (tfvk, data) = data.split_at(65);
+                    (
+                        Some(legacy::AccountPubKey::deserialize(tfvk.try_into().unwrap()).ok()?),
+                        data,
+                    )
+                } else {
+                    (None, data)
+                };
+
+                let sapling = if flag & 2 != 0 {
+                    Some(sapling::ExtendedFullViewingKey::read(data).ok()?)
+                } else {
+                    None
+                };
+
+                Some(Self {
+                    account,
+                    #[cfg(feature = "transparent-inputs")]
+                    transparent,
+                    sapling,
+                })
+            })
+            .ok_or("TODO Implement real UFVK encoding after fixing struct".to_string())
+    }
+
+    /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        let flag = if self.sapling.is_some() { 2 } else { 0 };
+        #[cfg(feature = "transparent-inputs")]
+        let flag = flag | if self.transparent.is_some() { 1 } else { 0 };
+        let mut ufvk = vec![flag];
+
+        #[cfg(feature = "transparent-inputs")]
+        if let Some(transparent) = self.transparent.as_ref() {
+            ufvk.append(&mut transparent.serialize());
+        };
+
+        if let Some(sapling) = self.sapling.as_ref() {
+            sapling.write(&mut ufvk).unwrap();
+        }
+
+        format!("DONOTUSEUFVK{}", hex::encode(&ufvk))
+    }
+
     /// Returns the ZIP32 account identifier to which all component
     /// keys are related.
     pub fn account(&self) -> AccountId {
@@ -256,13 +318,16 @@ impl UnifiedFullViewingKey {
 
 #[cfg(test)]
 mod tests {
-    use super::sapling;
-    use zcash_primitives::zip32::AccountId;
+    use super::{sapling, UnifiedFullViewingKey};
+    use zcash_primitives::{
+        consensus::MAIN_NETWORK,
+        zip32::{AccountId, ExtendedFullViewingKey},
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::encoding::AddressCodec,
-        zcash_primitives::{consensus::MAIN_NETWORK, legacy, legacy::keys::IncomingViewingKey},
+        zcash_primitives::{legacy, legacy::keys::IncomingViewingKey},
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -290,5 +355,36 @@ mod tests {
                 .unwrap()
                 .encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
+    }
+
+    #[test]
+    fn ufvk_round_trip() {
+        let account = 0.into();
+
+        let sapling = {
+            let extsk = sapling::spending_key(&[0; 32], 0, account);
+            Some(ExtendedFullViewingKey::from(&extsk))
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        let transparent = { None };
+
+        let ufvk = UnifiedFullViewingKey::new(
+            account,
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            sapling,
+        )
+        .unwrap();
+
+        let encoding = ufvk.encode(&MAIN_NETWORK);
+        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoding, account).unwrap();
+        assert_eq!(decoded.account, ufvk.account);
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(
+            decoded.transparent.map(|t| t.serialize()),
+            ufvk.transparent.map(|t| t.serialize()),
+        );
+        assert_eq!(decoded.sapling, ufvk.sapling);
     }
 }
