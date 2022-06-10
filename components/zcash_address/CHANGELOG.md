@@ -9,6 +9,8 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_address::ConversionError`
 - `zcash_address::TryFromAddress`
+- `zcash_address::TryFromRawAddress`
+- `zcash_address::ZcashAddress::convert_if_network`
 
 ### Removed
 - `zcash_address::FromAddress` (use `TryFromAddress` instead).
