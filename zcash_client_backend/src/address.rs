@@ -108,6 +108,11 @@ impl UnifiedAddress {
         self.sapling.as_ref()
     }
 
+    /// Returns the transparent receiver within this Unified Address, if any.
+    pub fn transparent(&self) -> Option<&TransparentAddress> {
+        self.transparent.as_ref()
+    }
+
     fn to_address(&self, net: Network) -> ZcashAddress {
         let ua = unified::Address::try_from_items(
             self.unknown
@@ -136,6 +141,11 @@ impl UnifiedAddress {
         )
         .expect("UnifiedAddress should only be constructed safely");
         ZcashAddress::from_unified(net, ua)
+    }
+
+    /// Returns the string encoding of this `UnifiedAddress` for the given network.
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        self.to_address(params_to_network(params)).to_string()
     }
 }
 

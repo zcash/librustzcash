@@ -18,6 +18,16 @@ and this library adheres to Rust's notion of
     rewinds exceed supported bounds.
 
 ### Changed
+- Various **BREAKING CHANGES** have been made to the database tables. These will
+  require migrations, which may need to be performed in multiple steps.
+  - The `extfvk` column in the `accounts` table has been replaced by a `ufvk`
+    column. Values for this column should be derived from the wallet's seed and
+    the account number; the Sapling component of the resulting Unified Full
+    Viewing Key should match the old value in the `extfvk` column.
+  - A new non-null column, `output_pool` has been added to the `sent_notes`
+    table to enable distinguishing between Sapling and transparent outputs
+    (and in the future, outputs to other pools). Values for this column should
+    be assigned by inference from the address type in the stored data.
 - MSRV is now 1.56.1.
 - Bumped dependencies to `ff 0.12`, `group 0.12`, `jubjub 0.9`.
 - Renamed the following to use lower-case abbreviations (matching Rust
@@ -38,11 +48,6 @@ and this library adheres to Rust's notion of
   method to be used in contexts where a transaction has just been
   constructed, rather than only in the case that a transaction has
   been decrypted after being retrieved from the network.
-- A new non-null column, `output_pool` has been added to the `sent_notes` 
-  table to enable distinguishing between Sapling and transparent outputs
-  (and in the future, outputs to other pools). This will require a migration,
-  which may need to be performed in multiple steps. Values for this column 
-  should be assigned by inference from the address type in the stored data.
 
 ### Deprecated
 - A number of public API methods that are used internally to support the

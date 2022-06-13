@@ -115,6 +115,7 @@ pub trait WalletRead {
     ///
     /// This will return `Ok(None)` if the account identifier does not correspond
     /// to a known account.
+    // TODO: This does not appear to be the case.
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
 
     /// Returns all extended full viewing keys known about by this wallet.

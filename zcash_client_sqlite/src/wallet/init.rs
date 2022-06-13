@@ -7,11 +7,9 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
 };
 
-use zcash_client_backend::{
-    encoding::encode_extended_full_viewing_key, keys::UnifiedFullViewingKey,
-};
+use zcash_client_backend::keys::UnifiedFullViewingKey;
 
-use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
+use crate::{error::SqliteClientError, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -44,10 +42,12 @@ use {
 /// init_wallet_db(&db).unwrap();
 /// ```
 pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
+    // TODO: Add migrations (https://github.com/zcash/librustzcash/issues/489)
+    // - extfvk column -> ufvk column
     wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS accounts (
             account INTEGER PRIMARY KEY,
-            extfvk TEXT,
+            ufvk TEXT,
             address TEXT,
             transparent_address TEXT
         )",
@@ -200,16 +200,8 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
     for key in keys.iter() {
-        let extfvk_str: Option<String> = key.sapling().map(|extfvk| {
-            encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
-                extfvk,
-            )
-        });
-
-        let address_str: Option<String> = key
-            .sapling()
-            .map(|extfvk| address_from_extfvk(&wdb.params, extfvk));
+        let ufvk_str: String = key.encode(&wdb.params);
+        let address_str: String = key.default_address().0.encode(&wdb.params);
         #[cfg(feature = "transparent-inputs")]
         let taddress_str: Option<String> = key.transparent().and_then(|k| {
             k.derive_external_ivk()
@@ -220,11 +212,11 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         let taddress_str: Option<String> = None;
 
         wdb.conn.execute(
-            "INSERT INTO accounts (account, extfvk, address, transparent_address)
+            "INSERT INTO accounts (account, ufvk, address, transparent_address)
             VALUES (?, ?, ?, ?)",
             params![
                 u32::from(key.account()),
-                extfvk_str,
+                ufvk_str,
                 address_str,
                 taddress_str,
             ],

@@ -53,7 +53,6 @@ use zcash_client_backend::{
     data_api::{
         BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
     },
-    encoding::encode_payment_address,
     proto::compact_formats::CompactBlock,
     wallet::SpendableNote,
 };
@@ -719,14 +718,6 @@ impl BlockSource for BlockDb {
     {
         chain::with_blocks(self, from_height, limit, with_row)
     }
-}
-
-fn address_from_extfvk<P: consensus::Parameters>(
-    params: &P,
-    extfvk: &ExtendedFullViewingKey,
-) -> String {
-    let addr = extfvk.default_address().1;
-    encode_payment_address(params.hrp_sapling_payment_address(), &addr)
 }
 
 #[cfg(test)]
