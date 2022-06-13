@@ -642,6 +642,17 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             for output in &sent_tx.outputs {
                 match output.recipient_address {
+                    // TODO: Store the entire UA, not just the Sapling component.
+                    // This will require more info about the output index.
+                    RecipientAddress::Unified(ua) => wallet::insert_sent_note(
+                        up,
+                        tx_ref,
+                        output.output_index,
+                        sent_tx.account,
+                        ua.sapling().expect("TODO: Add Orchard support"),
+                        output.value,
+                        output.memo.as_ref(),
+                    )?,
                     RecipientAddress::Shielded(addr) => wallet::insert_sent_note(
                         up,
                         tx_ref,
