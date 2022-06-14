@@ -84,7 +84,6 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
     sapling::Nullifier,
-    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
@@ -214,7 +213,7 @@ where
     let ufvks = data.get_unified_full_viewing_keys()?;
     // TODO: Change `scan_block` to also scan Orchard.
     // https://github.com/zcash/librustzcash/issues/403
-    let extfvks: Vec<(&AccountId, &ExtendedFullViewingKey)> = ufvks
+    let dfvks: Vec<_> = ufvks
         .iter()
         .map(|(account, ufvk)| (account, ufvk.sapling().expect("TODO Add Orchard support")))
         .collect();
@@ -249,7 +248,7 @@ where
             scan_block(
                 params,
                 block,
-                &extfvks,
+                &dfvks,
                 &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],

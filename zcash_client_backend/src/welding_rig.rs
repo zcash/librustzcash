@@ -9,6 +9,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{
+        keys::DiversifiableFullViewingKey,
         note_encryption::{try_sapling_compact_note_decryption, SaplingDomain},
         Node, Note, Nullifier, PaymentAddress, SaplingIvk,
     },
@@ -125,6 +126,26 @@ pub trait ScanningKey {
     /// nullifiers, in which case `Self::Nf` should be set to the unit type
     /// and this function is a no-op.
     fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf;
+}
+
+impl ScanningKey for DiversifiableFullViewingKey {
+    type Nf = Nullifier;
+
+    fn try_decryption<
+        P: consensus::Parameters,
+        Output: ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>,
+    >(
+        &self,
+        params: &P,
+        height: BlockHeight,
+        output: &Output,
+    ) -> Option<(Note, PaymentAddress)> {
+        try_sapling_compact_note_decryption(params, height, &self.fvk().vk.ivk(), output)
+    }
+
+    fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf {
+        note.nf(&self.fvk().vk, witness.position() as u64)
+    }
 }
 
 /// The [`ScanningKey`] implementation for [`ExtendedFullViewingKey`]s.

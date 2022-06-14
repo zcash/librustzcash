@@ -49,6 +49,12 @@ and this library adheres to Rust's notion of
   constructed, rather than only in the case that a transaction has
   been decrypted after being retrieved from the network.
 
+### Removed
+- `zcash_client_sqlite::wallet`:
+  - `get_extended_full_viewing_keys` (use
+    `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
+    instead).
+
 ### Deprecated
 - A number of public API methods that are used internally to support the
   `zcash_client_backend::data_api::{WalletRead, WalletWrite}` interfaces have

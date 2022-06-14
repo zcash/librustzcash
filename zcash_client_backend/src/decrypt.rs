@@ -46,9 +46,9 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
 
     if let Some(bundle) = tx.sapling_bundle() {
         for (account, ufvk) in ufvks.iter() {
-            let extfvk = ufvk.sapling().expect("TODO: Add Orchard support");
-            let ivk = extfvk.fvk.vk.ivk();
-            let ovk = extfvk.fvk.ovk;
+            let dfvk = ufvk.sapling().expect("TODO: Add Orchard support");
+            let ivk = dfvk.fvk().vk.ivk();
+            let ovk = dfvk.fvk().ovk;
 
             for (index, output) in bundle.shielded_outputs.iter().enumerate() {
                 let ((note, to, memo), outgoing) =

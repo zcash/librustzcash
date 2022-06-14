@@ -17,7 +17,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Note, Nullifier, PaymentAddress},
+    sapling::{keys::DiversifiableFullViewingKey, Node, Note, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
@@ -172,28 +172,6 @@ pub fn get_address<P: consensus::Parameters>(
         })
 }
 
-/// Returns the [`ExtendedFullViewingKey`]s for the wallet.
-///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-#[deprecated(
-    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys instead."
-)]
-pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
-    wdb: &WalletDb<P>,
-) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, SqliteClientError> {
-    get_unified_full_viewing_keys(wdb).map(|ufvks| {
-        ufvks
-            .into_iter()
-            .map(|(account, ufvk)| {
-                (
-                    account,
-                    ufvk.sapling().cloned().expect("TODO: Add Orchard support"),
-                )
-            })
-            .collect()
-    })
-}
-
 /// Returns the [`UnifiedFullViewingKey`]s for the wallet.
 pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
@@ -248,7 +226,10 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
         .map_err(SqliteClientError::from)
         .and_then(|row| {
             if let Some(ufvk) = row {
-                ufvk.map(|ufvk| ufvk.sapling() == Some(extfvk))
+                ufvk.map(|ufvk| {
+                    ufvk.sapling().map(|dfvk| dfvk.to_bytes())
+                        == Some(DiversifiableFullViewingKey::from(extfvk.clone()).to_bytes())
+                })
             } else {
                 Ok(false)
             }

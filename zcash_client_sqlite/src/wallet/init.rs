@@ -179,8 +179,8 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
-/// let extfvk = ExtendedFullViewingKey::from(&extsk);
-/// let ufvk = UnifiedFullViewingKey::new(None, Some(extfvk)).unwrap();
+/// let dfvk = ExtendedFullViewingKey::from(&extsk).into();
+/// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk)).unwrap();
 /// init_accounts_table(&db_data, &[ufvk]).unwrap();
 /// # }
 /// ```
@@ -293,6 +293,7 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Parameters},
+        sapling::keys::DiversifiableFullViewingKey,
         zip32::ExtendedFullViewingKey,
     };
 
@@ -319,7 +320,7 @@ mod tests {
 
         // First call with data should initialise the accounts table
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
 
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(
@@ -328,12 +329,12 @@ mod tests {
                     .unwrap()
                     .to_account_pubkey(),
             ),
-            Some(extfvk),
+            Some(dfvk),
         )
         .unwrap();
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(Some(extfvk)).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
 
         init_accounts_table(&db_data, &[ufvk.clone()]).unwrap();
 

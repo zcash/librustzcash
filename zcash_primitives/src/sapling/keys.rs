@@ -276,6 +276,13 @@ impl DiversifiableFullViewingKey {
         zip32::sapling_find_address(&self.fvk, &self.dk, j)
     }
 
+    /// Returns the payment address corresponding to the smallest valid diversifier index,
+    /// along with that index.
+    // TODO: See if this is only used in tests.
+    pub fn default_address(&self) -> (zip32::DiversifierIndex, PaymentAddress) {
+        zip32::sapling_default_address(&self.fvk, &self.dk)
+    }
+
     /// Attempts to decrypt the given address's diversifier with this full viewing key.
     ///
     /// This method extracts the diversifier from the given address and decrypts it as a

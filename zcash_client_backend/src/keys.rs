@@ -1,12 +1,12 @@
 //! Helper functions for managing light client key material.
 use zcash_primitives::{
     consensus,
+    sapling::keys as sapling_keys,
     zip32::{AccountId, DiversifierIndex},
 };
 
 use crate::address::UnifiedAddress;
 
-#[cfg(feature = "transparent-inputs")]
 use std::convert::TryInto;
 
 #[cfg(feature = "transparent-inputs")]
@@ -109,7 +109,7 @@ impl UnifiedSpendingKey {
         UnifiedFullViewingKey {
             #[cfg(feature = "transparent-inputs")]
             transparent: Some(self.transparent.to_account_pubkey()),
-            sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling)),
+            sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling).into()),
         }
     }
 
@@ -138,9 +138,7 @@ impl UnifiedSpendingKey {
 pub struct UnifiedFullViewingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<legacy::AccountPubKey>,
-    // TODO: This type is invalid for a UFVK; create a `sapling::DiversifiableFullViewingKey`
-    // to replace it.
-    sapling: Option<sapling::ExtendedFullViewingKey>,
+    sapling: Option<sapling_keys::DiversifiableFullViewingKey>,
 }
 
 #[doc(hidden)]
@@ -148,7 +146,7 @@ impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key, if the required components are present.
     pub fn new(
         #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
-        sapling: Option<sapling::ExtendedFullViewingKey>,
+        sapling: Option<sapling_keys::DiversifiableFullViewingKey>,
     ) -> Option<UnifiedFullViewingKey> {
         if sapling.is_none() {
             None
@@ -185,7 +183,12 @@ impl UnifiedFullViewingKey {
                 };
 
                 let sapling = if flag & 2 != 0 {
-                    Some(sapling::ExtendedFullViewingKey::read(data).ok()?)
+                    if data.len() != 128 {
+                        return None;
+                    }
+                    Some(sapling_keys::DiversifiableFullViewingKey::from_bytes(
+                        data.try_into().unwrap(),
+                    )?)
                 } else {
                     None
                 };
@@ -212,7 +215,7 @@ impl UnifiedFullViewingKey {
         };
 
         if let Some(sapling) = self.sapling.as_ref() {
-            sapling.write(&mut ufvk).unwrap();
+            ufvk.extend_from_slice(&sapling.to_bytes());
         }
 
         format!("DONOTUSEUFVK{}", hex::encode(&ufvk))
@@ -225,9 +228,8 @@ impl UnifiedFullViewingKey {
         self.transparent.as_ref()
     }
 
-    /// Returns the Sapling extended full viewing key component of this
-    /// unified key.
-    pub fn sapling(&self) -> Option<&sapling::ExtendedFullViewingKey> {
+    /// Returns the Sapling diversifiable full viewing key component of this unified key.
+    pub fn sapling(&self) -> Option<&sapling_keys::DiversifiableFullViewingKey> {
         self.sapling.as_ref()
     }
 
@@ -348,7 +350,7 @@ mod tests {
 
         let sapling = {
             let extsk = sapling::spending_key(&[0; 32], 0, account);
-            Some(ExtendedFullViewingKey::from(&extsk))
+            Some(ExtendedFullViewingKey::from(&extsk).into())
         };
 
         #[cfg(feature = "transparent-inputs")]
@@ -368,6 +370,9 @@ mod tests {
             decoded.transparent.map(|t| t.serialize()),
             ufvk.transparent.map(|t| t.serialize()),
         );
-        assert_eq!(decoded.sapling, ufvk.sapling);
+        assert_eq!(
+            decoded.sapling.map(|s| s.to_bytes()),
+            ufvk.sapling.map(|s| s.to_bytes()),
+        );
     }
 }
