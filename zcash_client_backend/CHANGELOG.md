@@ -90,6 +90,9 @@ and this library adheres to Rust's notion of
 - An `Error::MemoForbidden` error has been added to the
   `data_api::error::Error` enum to report the condition where a memo was
   specified to be sent to a transparent recipient.
+- `zcash_client_backend::decrypt`:
+  - `decrypt_transaction` now takes a `HashMap<_, UnifiedFullViewingKey>`
+    instead of `HashMap<_, ExtendedFullViewingKey>`.
 - If no memo is provided when sending to a shielded recipient, the
   empty memo will be used
 - `zcash_client_backend::keys::spending_key` has been moved to the

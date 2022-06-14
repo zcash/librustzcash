@@ -43,15 +43,6 @@ where
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data.get_unified_full_viewing_keys()?;
-    let extfvks = ufvks
-        .into_iter()
-        .map(|(account, ufvk)| {
-            (
-                account,
-                ufvk.sapling().cloned().expect("TODO Add Orchard support"),
-            )
-        })
-        .collect();
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
     // for mempool transactions.
@@ -63,7 +54,7 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .ok_or(Error::SaplingNotActive)?;
 
-    let sapling_outputs = decrypt_transaction(params, height, tx, &extfvks);
+    let sapling_outputs = decrypt_transaction(params, height, tx, &ufvks);
 
     if !(sapling_outputs.is_empty() && tx.transparent_bundle().iter().all(|b| b.vout.is_empty())) {
         data.store_decrypted_tx(&DecryptedTransaction {

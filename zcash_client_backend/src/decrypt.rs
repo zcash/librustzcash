@@ -8,8 +8,10 @@ use zcash_primitives::{
         Note, PaymentAddress,
     },
     transaction::Transaction,
-    zip32::{AccountId, ExtendedFullViewingKey},
+    zip32::AccountId,
 };
+
+use crate::keys::UnifiedFullViewingKey;
 
 /// A decrypted shielded output.
 pub struct DecryptedOutput {
@@ -33,17 +35,18 @@ pub struct DecryptedOutput {
 }
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
-/// [`ExtendedFullViewingKey`]s.
+/// [`UnifiedFullViewingKey`]s.
 pub fn decrypt_transaction<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     tx: &Transaction,
-    extfvks: &HashMap<AccountId, ExtendedFullViewingKey>,
+    ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Vec<DecryptedOutput> {
     let mut decrypted = vec![];
 
     if let Some(bundle) = tx.sapling_bundle() {
-        for (account, extfvk) in extfvks.iter() {
+        for (account, ufvk) in ufvks.iter() {
+            let extfvk = ufvk.sapling().expect("TODO: Add Orchard support");
             let ivk = extfvk.fvk.vk.ivk();
             let ovk = extfvk.fvk.ovk;
 
