@@ -8,7 +8,7 @@ use zcash_address::{
 };
 use zcash_primitives::{consensus, constants, legacy::TransparentAddress, sapling::PaymentAddress};
 
-fn params_to_network<P: consensus::Parameters>(params: &P) -> Network {
+pub(crate) fn params_to_network<P: consensus::Parameters>(params: &P) -> Network {
     // Use the Sapling HRP as an indicator of network.
     match params.hrp_sapling_payment_address() {
         constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS => Network::Main,

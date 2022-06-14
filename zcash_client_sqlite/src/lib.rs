@@ -805,6 +805,7 @@ mod tests {
             #[cfg(feature = "transparent-inputs")]
             tkey,
             Some(dfvk.clone()),
+            None,
         )
         .unwrap();
 

@@ -180,7 +180,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
 /// let dfvk = ExtendedFullViewingKey::from(&extsk).into();
-/// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk)).unwrap();
+/// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
 /// init_accounts_table(&db_data, &[ufvk]).unwrap();
 /// # }
 /// ```
@@ -330,6 +330,7 @@ mod tests {
                     .to_account_pubkey(),
             ),
             Some(dfvk),
+            None,
         )
         .unwrap();
 
