@@ -208,7 +208,7 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
             let acct: u32 = row.get(0)?;
             let account = AccountId::from(acct);
             let ufvk_str: String = row.get(1)?;
-            let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str, account)
+            let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
                 .map_err(SqliteClientError::CorruptedData);
 
             Ok((account, ufvk))
@@ -240,7 +240,7 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
         .prepare("SELECT ufvk FROM accounts WHERE account = ?")?
         .query_row(&[u32::from(account).to_sql()?], |row| {
             row.get(0).map(|ufvk_str: String| {
-                UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str, account)
+                UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
                     .map_err(SqliteClientError::CorruptedData)
             })
         })

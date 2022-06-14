@@ -802,7 +802,6 @@ mod tests {
         let taddr = None;
 
         let ufvk = UnifiedFullViewingKey::new(
-            account,
             #[cfg(feature = "transparent-inputs")]
             tkey,
             Some(extfvk.clone()),

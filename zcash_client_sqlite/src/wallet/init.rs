@@ -180,7 +180,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
 /// let extfvk = ExtendedFullViewingKey::from(&extsk);
-/// let ufvk = UnifiedFullViewingKey::new(account, None, Some(extfvk)).unwrap();
+/// let ufvk = UnifiedFullViewingKey::new(None, Some(extfvk)).unwrap();
 /// init_accounts_table(&db_data, &[ufvk]).unwrap();
 /// # }
 /// ```
@@ -199,7 +199,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-    for key in keys.iter() {
+    for (account, key) in (0u32..).zip(keys) {
         let ufvk_str: String = key.encode(&wdb.params);
         let address_str: String = key.default_address().0.encode(&wdb.params);
         #[cfg(feature = "transparent-inputs")]
@@ -214,12 +214,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         wdb.conn.execute(
             "INSERT INTO accounts (account, ufvk, address, transparent_address)
             VALUES (?, ?, ?, ?)",
-            params![
-                u32::from(key.account()),
-                ufvk_str,
-                address_str,
-                taddress_str,
-            ],
+            params![account, ufvk_str, address_str, taddress_str],
         )?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
@@ -328,7 +323,6 @@ mod tests {
 
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(
-            account,
             Some(
                 transparent::AccountPrivKey::from_seed(&network(), &seed, account)
                     .unwrap()
@@ -339,7 +333,7 @@ mod tests {
         .unwrap();
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(account, Some(extfvk)).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(extfvk)).unwrap();
 
         init_accounts_table(&db_data, &[ufvk.clone()]).unwrap();
 

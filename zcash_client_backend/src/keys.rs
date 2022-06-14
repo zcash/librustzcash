@@ -107,7 +107,6 @@ impl UnifiedSpendingKey {
 
     pub fn to_unified_full_viewing_key(&self) -> UnifiedFullViewingKey {
         UnifiedFullViewingKey {
-            account: self.account,
             #[cfg(feature = "transparent-inputs")]
             transparent: Some(self.transparent.to_account_pubkey()),
             sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling)),
@@ -137,7 +136,6 @@ impl UnifiedSpendingKey {
 #[derive(Clone, Debug)]
 #[doc(hidden)]
 pub struct UnifiedFullViewingKey {
-    account: AccountId,
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<legacy::AccountPubKey>,
     // TODO: This type is invalid for a UFVK; create a `sapling::DiversifiableFullViewingKey`
@@ -149,7 +147,6 @@ pub struct UnifiedFullViewingKey {
 impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key, if the required components are present.
     pub fn new(
-        account: AccountId,
         #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
         sapling: Option<sapling::ExtendedFullViewingKey>,
     ) -> Option<UnifiedFullViewingKey> {
@@ -157,7 +154,6 @@ impl UnifiedFullViewingKey {
             None
         } else {
             Some(UnifiedFullViewingKey {
-                account,
                 #[cfg(feature = "transparent-inputs")]
                 transparent,
                 sapling,
@@ -167,11 +163,7 @@ impl UnifiedFullViewingKey {
 
     /// Attempts to decode the given string as an encoding of a `UnifiedFullViewingKey`
     /// for the given network.
-    pub fn decode<P: consensus::Parameters>(
-        params: &P,
-        encoding: &str,
-        account: AccountId,
-    ) -> Result<Self, String> {
+    pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
         encoding
             .strip_prefix("DONOTUSEUFVK")
             .and_then(|data| hex::decode(data).ok())
@@ -199,7 +191,6 @@ impl UnifiedFullViewingKey {
                 };
 
                 Some(Self {
-                    account,
                     #[cfg(feature = "transparent-inputs")]
                     transparent,
                     sapling,
@@ -225,12 +216,6 @@ impl UnifiedFullViewingKey {
         }
 
         format!("DONOTUSEUFVK{}", hex::encode(&ufvk))
-    }
-
-    /// Returns the ZIP32 account identifier to which all component
-    /// keys are related.
-    pub fn account(&self) -> AccountId {
-        self.account
     }
 
     /// Returns the transparent component of the unified key at the
@@ -370,7 +355,6 @@ mod tests {
         let transparent = { None };
 
         let ufvk = UnifiedFullViewingKey::new(
-            account,
             #[cfg(feature = "transparent-inputs")]
             transparent,
             sapling,
@@ -378,8 +362,7 @@ mod tests {
         .unwrap();
 
         let encoding = ufvk.encode(&MAIN_NETWORK);
-        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoding, account).unwrap();
-        assert_eq!(decoded.account, ufvk.account);
+        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoding).unwrap();
         #[cfg(feature = "transparent-inputs")]
         assert_eq!(
             decoded.transparent.map(|t| t.serialize()),
