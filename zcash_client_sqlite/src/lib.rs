@@ -53,6 +53,7 @@ use zcash_client_backend::{
     data_api::{
         BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
     },
+    keys::UnifiedFullViewingKey,
     proto::compact_formats::CompactBlock,
     wallet::SpendableNote,
 };
@@ -224,11 +225,11 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
-    fn get_extended_full_viewing_keys(
+    fn get_unified_full_viewing_keys(
         &self,
-    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
         #[allow(deprecated)]
-        wallet::get_extended_full_viewing_keys(self)
+        wallet::get_unified_full_viewing_keys(self)
     }
 
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
@@ -380,10 +381,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_tx_height(txid)
     }
 
-    fn get_extended_full_viewing_keys(
+    fn get_unified_full_viewing_keys(
         &self,
-    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
-        self.wallet_db.get_extended_full_viewing_keys()
+    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
+        self.wallet_db.get_unified_full_viewing_keys()
     }
 
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {

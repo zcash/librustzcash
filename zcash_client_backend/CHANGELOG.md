@@ -27,6 +27,8 @@ and this library adheres to Rust's notion of
   provides substantially greater flexibility in transaction creation.
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
+- `zcash_client_backend::data_api`:
+    `WalletRead::get_unified_full_viewing_keys`
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`
@@ -103,6 +105,9 @@ and this library adheres to Rust's notion of
   - `Zip321Error::ParseError(String)`
 
 ### Removed
+- `zcash_client_backend::data_api`:
+  - `WalletRead::get_extended_full_viewing_keys` (use
+    `WalletRead::get_unified_full_viewing_keys` instead).
 - The hardcoded `data_api::wallet::ANCHOR_OFFSET` constant.
 - `zcash_client_backend::wallet::AccountId` (moved to `zcash_primitives::zip32::AccountId`).
 

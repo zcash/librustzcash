@@ -176,12 +176,29 @@ pub fn get_address<P: consensus::Parameters>(
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 #[deprecated(
-    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_extended_full_viewing_keys instead."
+    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys instead."
 )]
 pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
 ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, SqliteClientError> {
-    // Fetch the ExtendedFullViewingKeys we are tracking
+    get_unified_full_viewing_keys(wdb).map(|ufvks| {
+        ufvks
+            .into_iter()
+            .map(|(account, ufvk)| {
+                (
+                    account,
+                    ufvk.sapling().cloned().expect("TODO: Add Orchard support"),
+                )
+            })
+            .collect()
+    })
+}
+
+/// Returns the [`UnifiedFullViewingKey`]s for the wallet.
+pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
+    wdb: &WalletDb<P>,
+) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, SqliteClientError> {
+    // Fetch the UnifiedFullViewingKeys we are tracking
     let mut stmt_fetch_accounts = wdb
         .conn
         .prepare("SELECT account, ufvk FROM accounts ORDER BY account ASC")?;
@@ -193,18 +210,15 @@ pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
             let ufvk_str: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str, account)
                 .map_err(SqliteClientError::CorruptedData);
-            // TODO: Return the UFVK, not its Sapling component.
-            let extfvk =
-                ufvk.map(|ufvk| ufvk.sapling().cloned().expect("TODO: Add Orchard support"));
 
-            Ok((account, extfvk))
+            Ok((account, ufvk))
         })
         .map_err(SqliteClientError::from)?;
 
-    let mut res: HashMap<AccountId, ExtendedFullViewingKey> = HashMap::new();
+    let mut res: HashMap<AccountId, UnifiedFullViewingKey> = HashMap::new();
     for row in rows {
-        let (account_id, efvkr) = row?;
-        res.insert(account_id, efvkr?);
+        let (account_id, ufvkr) = row?;
+        res.insert(account_id, ufvkr?);
     }
 
     Ok(res)

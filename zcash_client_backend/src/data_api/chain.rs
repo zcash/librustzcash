@@ -210,9 +210,14 @@ where
             .unwrap_or(sapling_activation_height - 1)
     })?;
 
-    // Fetch the ExtendedFullViewingKeys we are tracking
-    let extfvks = data.get_extended_full_viewing_keys()?;
-    let extfvks: Vec<(&AccountId, &ExtendedFullViewingKey)> = extfvks.iter().collect();
+    // Fetch the UnifiedFullViewingKeys we are tracking
+    let ufvks = data.get_unified_full_viewing_keys()?;
+    // TODO: Change `scan_block` to also scan Orchard.
+    // https://github.com/zcash/librustzcash/issues/403
+    let extfvks: Vec<(&AccountId, &ExtendedFullViewingKey)> = ufvks
+        .iter()
+        .map(|(account, ufvk)| (account, ufvk.sapling().expect("TODO Add Orchard support")))
+        .collect();
 
     // Get the most recent CommitmentTree
     let mut tree = data

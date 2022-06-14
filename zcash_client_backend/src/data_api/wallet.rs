@@ -41,8 +41,17 @@ where
     P: consensus::Parameters,
     D: WalletWrite<Error = E>,
 {
-    // Fetch the ExtendedFullViewingKeys we are tracking
-    let extfvks = data.get_extended_full_viewing_keys()?;
+    // Fetch the UnifiedFullViewingKeys we are tracking
+    let ufvks = data.get_unified_full_viewing_keys()?;
+    let extfvks = ufvks
+        .into_iter()
+        .map(|(account, ufvk)| {
+            (
+                account,
+                ufvk.sapling().cloned().expect("TODO Add Orchard support"),
+            )
+        })
+        .collect();
 
     // Height is block height for mined transactions, and the "mempool height" (chain height + 1)
     // for mempool transactions.
