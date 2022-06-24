@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
+- Bumped dependencies to `orchard 0.2`.
 - `zcash_primitives::consensus`:
   - `MainNetwork::activation_height` now returns the activation height for
     `NetworkUpgrade::Nu5`.
