@@ -35,7 +35,7 @@ criterion = "0.3"
 rand_xorshift = "0.3"
 
 [target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.8", features = ["criterion", "flamegraph"] } # MSRV 1.56
+pprof = { version = "0.9", features = ["criterion", "flamegraph"] } # MSRV 1.56
 
 [features]
 default = ["local-prover", "multicore"]
