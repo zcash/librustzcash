@@ -26,7 +26,7 @@ bls12_381 = "0.7"
 bs58 = { version = "0.4", features = ["check"], optional = true }
 byteorder = "1"
 chacha20poly1305 = "0.9"
-equihash = { version = "0.1", path = "../components/equihash" }
+equihash = { version = "0.2", path = "../components/equihash" }
 ff = "0.12"
 fpe = "0.5"
 group = "0.12"

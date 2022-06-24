@@ -7,8 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.0] - 2022-06-24
 ### Changed
 - MSRV is now 1.56.1.
+- Bumped dependencies to `blake2b_simd 1`.
 
 ## [0.1.0] - 2020-07-10
 Initial release.
