@@ -45,7 +45,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.56.1.
-- Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`, `jubjub 0.9`.
+- Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`, `jubjub 0.9`,
+  `zcash_primitives 0.7`.
 - `zcash_client_backend::proto`:
   - `compact_formats::CompactSpend` has been renamed to `CompactSaplingSpend`,
     and its `epk` field (and associated `set_epk` method) has been renamed to

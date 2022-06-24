@@ -36,7 +36,7 @@ subtle = "2.2.3"
 time = "0.2"
 zcash_address = { version = "0.1", path = "../components/zcash_address" }
 zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption" }
-zcash_primitives = { version = "0.6", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.7", path = "../zcash_primitives" }
 
 [build-dependencies]
 protobuf-codegen-pure = "~2.27.1" # MSRV 1.52.1

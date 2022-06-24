@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.7.0] - 2022-06-24
 ### Changed
 - Bumped dependencies to `equihash 0.2`, `orchard 0.2`.
 - `zcash_primitives::consensus`:
