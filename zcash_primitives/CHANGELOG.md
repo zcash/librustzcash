@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.7.0] - 2022-06-24
+### Changed
+- Bumped dependencies to `equihash 0.2`, `orchard 0.2`.
+- `zcash_primitives::consensus`:
+  - `MainNetwork::activation_height` now returns the activation height for
+    `NetworkUpgrade::Nu5`.
+
 ## [0.6.0] - 2022-05-11
 ### Added
 - `zcash_primitives::sapling::redjubjub::PublicKey::verify_with_zip216`, for
