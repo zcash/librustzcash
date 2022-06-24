@@ -6,6 +6,10 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- `zcash_primitives::consensus`:
+  - `MainNetwork::activation_height` now returns the activation height for
+    `NetworkUpgrade::Nu5`.
 
 ## [0.6.0] - 2022-05-11
 ### Added
