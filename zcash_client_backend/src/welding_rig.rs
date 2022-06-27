@@ -9,6 +9,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{
+        self,
         keys::DiversifiableFullViewingKey,
         note_encryption::{try_sapling_compact_note_decryption, SaplingDomain},
         Node, Note, Nullifier, PaymentAddress, SaplingIvk,
@@ -129,7 +130,7 @@ pub trait ScanningKey {
 }
 
 impl ScanningKey for DiversifiableFullViewingKey {
-    type Nf = Nullifier;
+    type Nf = sapling::Nullifier;
 
     fn try_decryption<
         P: consensus::Parameters,

@@ -215,7 +215,7 @@ where
     // https://github.com/zcash/librustzcash/issues/403
     let dfvks: Vec<_> = ufvks
         .iter()
-        .map(|(account, ufvk)| (account, ufvk.sapling().expect("TODO Add Orchard support")))
+        .filter_map(|(account, ufvk)| ufvk.sapling().map(move |k| (account, k)))
         .collect();
 
     // Get the most recent CommitmentTree

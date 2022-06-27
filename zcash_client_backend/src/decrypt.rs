@@ -46,28 +46,30 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
 
     if let Some(bundle) = tx.sapling_bundle() {
         for (account, ufvk) in ufvks.iter() {
-            let dfvk = ufvk.sapling().expect("TODO: Add Orchard support");
-            let ivk = dfvk.fvk().vk.ivk();
-            let ovk = dfvk.fvk().ovk;
+            if let Some(dfvk) = ufvk.sapling() {
+                let ivk = dfvk.fvk().vk.ivk();
+                let ovk = dfvk.fvk().ovk;
 
-            for (index, output) in bundle.shielded_outputs.iter().enumerate() {
-                let ((note, to, memo), outgoing) =
-                    match try_sapling_note_decryption(params, height, &ivk, output) {
-                        Some(ret) => (ret, false),
-                        None => match try_sapling_output_recovery(params, height, &ovk, output) {
-                            Some(ret) => (ret, true),
-                            None => continue,
-                        },
-                    };
+                for (index, output) in bundle.shielded_outputs.iter().enumerate() {
+                    let ((note, to, memo), outgoing) =
+                        match try_sapling_note_decryption(params, height, &ivk, output) {
+                            Some(ret) => (ret, false),
+                            None => match try_sapling_output_recovery(params, height, &ovk, output)
+                            {
+                                Some(ret) => (ret, true),
+                                None => continue,
+                            },
+                        };
 
-                decrypted.push(DecryptedOutput {
-                    index,
-                    note,
-                    account: *account,
-                    to,
-                    memo,
-                    outgoing,
-                })
+                    decrypted.push(DecryptedOutput {
+                        index,
+                        note,
+                        account: *account,
+                        to,
+                        memo,
+                        outgoing,
+                    })
+                }
             }
         }
     }
