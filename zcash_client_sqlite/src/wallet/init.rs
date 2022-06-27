@@ -1,10 +1,12 @@
 //! Functions for initializing the various databases.
 
 use rusqlite::{params, types::ToSql, NO_PARAMS};
+use std::collections::HashMap;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    zip32::AccountId,
 };
 
 use zcash_client_backend::keys::UnifiedFullViewingKey;
@@ -154,6 +156,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// # #[cfg(feature = "transparent-inputs")]
 /// # {
 /// use tempfile::NamedTempFile;
+/// use std::collections::HashMap;
 ///
 /// use zcash_primitives::{
 ///     consensus::{Network, Parameters},
@@ -181,7 +184,8 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
 /// let dfvk = ExtendedFullViewingKey::from(&extsk).into();
 /// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
-/// init_accounts_table(&db_data, &[ufvk]).unwrap();
+/// let ufvks = HashMap::from([(account, ufvk)]);
+/// init_accounts_table(&db_data, &ufvks).unwrap();
 /// # }
 /// ```
 ///
@@ -190,7 +194,7 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// [`create_spend_to_address`]: zcash_client_backend::data_api::wallet::create_spend_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
-    keys: &[UnifiedFullViewingKey],
+    keys: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
     if empty_check.exists(NO_PARAMS)? {
@@ -199,7 +203,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-    for (account, key) in (0u32..).zip(keys) {
+    for (account, key) in keys.iter() {
         let ufvk_str: String = key.encode(&wdb.params);
         let address_str: String = key.default_address().0.encode(&wdb.params);
         #[cfg(feature = "transparent-inputs")]
@@ -214,7 +218,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         wdb.conn.execute(
             "INSERT INTO accounts (account, ufvk, address, transparent_address)
             VALUES (?, ?, ?, ?)",
-            params![account, ufvk_str, address_str, taddress_str],
+            params![<u32>::from(*account), ufvk_str, address_str, taddress_str],
         )?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
@@ -283,6 +287,7 @@ pub fn init_blocks_table<P>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
+    use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
     use zcash_client_backend::keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey};
@@ -312,8 +317,8 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // We can call the function as many times as we want with no data
-        init_accounts_table(&db_data, &[]).unwrap();
-        init_accounts_table(&db_data, &[]).unwrap();
+        init_accounts_table(&db_data, &HashMap::new()).unwrap();
+        init_accounts_table(&db_data, &HashMap::new()).unwrap();
 
         let seed = [0u8; 32];
         let account = AccountId::from(0);
@@ -336,12 +341,13 @@ mod tests {
 
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
+        let ufvks = HashMap::from([(account, ufvk)]);
 
-        init_accounts_table(&db_data, &[ufvk.clone()]).unwrap();
+        init_accounts_table(&db_data, &ufvks).unwrap();
 
         // Subsequent calls should return an error
-        init_accounts_table(&db_data, &[]).unwrap_err();
-        init_accounts_table(&db_data, &[ufvk]).unwrap_err();
+        init_accounts_table(&db_data, &HashMap::new()).unwrap_err();
+        init_accounts_table(&db_data, &ufvks).unwrap_err();
     }
 
     #[test]
@@ -384,7 +390,8 @@ mod tests {
         let usk = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account_id).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let expected_address = ufvk.sapling().unwrap().default_address().1;
-        init_accounts_table(&db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account_id, ufvk)]);
+        init_accounts_table(&db_data, &ufvks).unwrap();
 
         // The account's address should be in the data DB
         let pa = get_address(&db_data, AccountId::from(0)).unwrap();

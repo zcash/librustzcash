@@ -728,6 +728,7 @@ mod tests {
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
+    use std::collections::HashMap;
 
     use zcash_client_backend::{
         keys::{sapling, UnifiedFullViewingKey},
@@ -809,7 +810,8 @@ mod tests {
         )
         .unwrap();
 
-        init_accounts_table(db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account, ufvk)]);
+        init_accounts_table(db_data, &ufvks).unwrap();
 
         (dfvk, taddr)
     }

@@ -157,6 +157,7 @@ pub fn select_spendable_sapling_notes<P>(
 #[allow(deprecated)]
 mod tests {
     use rusqlite::Connection;
+    use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
     use zcash_proofs::prover::LocalTxProver;
@@ -207,32 +208,45 @@ mod tests {
         let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&db_data).unwrap();
 
+        let acct0 = AccountId::from(0);
+        let acct1 = AccountId::from(1);
+
         // Add two accounts to the wallet
-        let extsk0 = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
-        let extsk1 = sapling::spending_key(&[1u8; 32], network().coin_type(), AccountId::from(1));
+        let extsk0 = sapling::spending_key(&[0u8; 32], network().coin_type(), acct0);
+        let extsk1 = sapling::spending_key(&[1u8; 32], network().coin_type(), acct1);
         let dfvk0 = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk0));
         let dfvk1 = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk1));
 
         #[cfg(feature = "transparent-inputs")]
         let ufvks = {
             let tsk0 =
-                transparent::AccountPrivKey::from_seed(&network(), &[0u8; 32], AccountId::from(0))
-                    .unwrap();
+                transparent::AccountPrivKey::from_seed(&network(), &[0u8; 32], acct0).unwrap();
             let tsk1 =
-                transparent::AccountPrivKey::from_seed(&network(), &[1u8; 32], AccountId::from(1))
-                    .unwrap();
-            [
-                UnifiedFullViewingKey::new(Some(tsk0.to_account_pubkey()), Some(dfvk0), None)
-                    .unwrap(),
-                UnifiedFullViewingKey::new(Some(tsk1.to_account_pubkey()), Some(dfvk1), None)
-                    .unwrap(),
-            ]
+                transparent::AccountPrivKey::from_seed(&network(), &[1u8; 32], acct1).unwrap();
+            HashMap::from([
+                (
+                    acct0,
+                    UnifiedFullViewingKey::new(Some(tsk0.to_account_pubkey()), Some(dfvk0), None)
+                        .unwrap(),
+                ),
+                (
+                    acct1,
+                    UnifiedFullViewingKey::new(Some(tsk1.to_account_pubkey()), Some(dfvk1), None)
+                        .unwrap(),
+                ),
+            ])
         };
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvks = [
-            UnifiedFullViewingKey::new(Some(dfvk0), None).unwrap(),
-            UnifiedFullViewingKey::new(Some(dfvk1), None).unwrap(),
-        ];
+        let ufvks = HashMap::from([
+            (
+                acct0,
+                UnifiedFullViewingKey::new(Some(dfvk0), None).unwrap(),
+            ),
+            (
+                acct1,
+                UnifiedFullViewingKey::new(Some(dfvk1), None).unwrap(),
+            ),
+        ]);
 
         init_accounts_table(&db_data, &ufvks).unwrap();
         let to = extsk0.default_address().1.into();
@@ -279,14 +293,16 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
+        let account_id = AccountId::from(0);
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
         let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
 
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
-        init_accounts_table(&db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account_id, ufvk)]);
+        init_accounts_table(&db_data, &ufvks).unwrap();
         let to = extsk.default_address().1.into();
 
         // We cannot do anything if we aren't synchronised
@@ -323,13 +339,15 @@ mod tests {
         .unwrap();
 
         // Add an account to the wallet
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
+        let account_id = AccountId::from(0);
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
         let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
-        init_accounts_table(&db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account_id, ufvk)]);
+        init_accounts_table(&db_data, &ufvks).unwrap();
         let to = extsk.default_address().1.into();
 
         // Account balance should be zero
@@ -371,13 +389,15 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
+        let account_id = AccountId::from(0);
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
         let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
-        init_accounts_table(&db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account_id, ufvk)]);
+        init_accounts_table(&db_data, &ufvks).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -504,13 +524,15 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
+        let account_id = AccountId::from(0);
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
         let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
-        init_accounts_table(&db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account_id, ufvk)]);
+        init_accounts_table(&db_data, &ufvks).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -633,13 +655,15 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = sapling::spending_key(&[0u8; 32], network.coin_type(), AccountId::from(0));
+        let account_id = AccountId::from(0);
+        let extsk = sapling::spending_key(&[0u8; 32], network.coin_type(), account_id);
         let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
-        init_accounts_table(&db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account_id, ufvk)]);
+        init_accounts_table(&db_data, &ufvks).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -743,13 +767,15 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
+        let account_id = AccountId::from(0);
+        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
         let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
-        init_accounts_table(&db_data, &[ufvk]).unwrap();
+        let ufvks = HashMap::from([(account_id, ufvk)]);
+        init_accounts_table(&db_data, &ufvks).unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(51000).unwrap();
