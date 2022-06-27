@@ -4,6 +4,7 @@ use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
 use std::fmt;
 use std::ops::{Add, Bound, RangeBounds, Sub};
+use zcash_address;
 
 use crate::constants;
 
@@ -140,6 +141,10 @@ pub trait Parameters: Clone {
     /// [SLIP 44]: https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     fn coin_type(&self) -> u32;
 
+    /// Returns the standard network constant for address encoding. Returns
+    /// 'None' for nonstandard networks.
+    fn address_network(&self) -> Option<zcash_address::Network>;
+
     /// Returns the human-readable prefix for Bech32-encoded Sapling extended spending keys
     /// the network to which this Parameters value applies.
     ///
@@ -205,6 +210,10 @@ impl Parameters for MainNetwork {
         constants::mainnet::COIN_TYPE
     }
 
+    fn address_network(&self) -> Option<zcash_address::Network> {
+        Some(zcash_address::Network::Main)
+    }
+
     fn hrp_sapling_extended_spending_key(&self) -> &str {
         constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
     }
@@ -250,6 +259,10 @@ impl Parameters for TestNetwork {
         constants::testnet::COIN_TYPE
     }
 
+    fn address_network(&self) -> Option<zcash_address::Network> {
+        Some(zcash_address::Network::Test)
+    }
+
     fn hrp_sapling_extended_spending_key(&self) -> &str {
         constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
     }
@@ -289,6 +302,13 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => MAIN_NETWORK.coin_type(),
             Network::TestNetwork => TEST_NETWORK.coin_type(),
+        }
+    }
+
+    fn address_network(&self) -> Option<zcash_address::Network> {
+        match self {
+            Network::MainNetwork => Some(zcash_address::Network::Main),
+            Network::TestNetwork => Some(zcash_address::Network::Test),
         }
     }
 

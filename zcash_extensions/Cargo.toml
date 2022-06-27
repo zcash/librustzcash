@@ -16,6 +16,7 @@ zcash_primitives = { version = "0.7", path = "../zcash_primitives", features = [
 ff = "0.12"
 jubjub = "0.9"
 rand_core = "0.6"
+zcash_address = { version = "0.1", path = "../components/zcash_address" }
 zcash_proofs = { version = "0.7", path = "../zcash_proofs" }
 
 [features]
