@@ -101,7 +101,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Empty chain should be valid
         validate_chain(
@@ -115,7 +115,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             Amount::from_u64(5).unwrap(),
         );
         insert_into_cache(&db_cache, &cb);
@@ -144,7 +144,7 @@ mod tests {
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
             cb.hash(),
-            extfvk,
+            &dfvk,
             Amount::from_u64(7).unwrap(),
         );
         insert_into_cache(&db_cache, &cb2);
@@ -180,19 +180,19 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             Amount::from_u64(5).unwrap(),
         );
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
             cb.hash(),
-            extfvk.clone(),
+            &dfvk,
             Amount::from_u64(7).unwrap(),
         );
         insert_into_cache(&db_cache, &cb);
@@ -214,13 +214,13 @@ mod tests {
         let (cb3, _) = fake_compact_block(
             sapling_activation_height() + 2,
             BlockHash([1; 32]),
-            extfvk.clone(),
+            &dfvk,
             Amount::from_u64(8).unwrap(),
         );
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
             cb3.hash(),
-            extfvk,
+            &dfvk,
             Amount::from_u64(3).unwrap(),
         );
         insert_into_cache(&db_cache, &cb3);
@@ -250,19 +250,19 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             Amount::from_u64(5).unwrap(),
         );
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
             cb.hash(),
-            extfvk.clone(),
+            &dfvk,
             Amount::from_u64(7).unwrap(),
         );
         insert_into_cache(&db_cache, &cb);
@@ -284,13 +284,13 @@ mod tests {
         let (cb3, _) = fake_compact_block(
             sapling_activation_height() + 2,
             cb2.hash(),
-            extfvk.clone(),
+            &dfvk,
             Amount::from_u64(8).unwrap(),
         );
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
             BlockHash([1; 32]),
-            extfvk,
+            &dfvk,
             Amount::from_u64(3).unwrap(),
         );
         insert_into_cache(&db_cache, &cb3);
@@ -320,7 +320,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Account balance should be zero
         assert_eq!(
@@ -334,12 +334,12 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             value,
         );
 
         let (cb2, _) =
-            fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk, value2);
+            fake_compact_block(sapling_activation_height() + 1, cb.hash(), &dfvk, value2);
         insert_into_cache(&db_cache, &cb);
         insert_into_cache(&db_cache, &cb2);
 
@@ -389,14 +389,14 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
         let value = Amount::from_u64(50000).unwrap();
         let (cb1, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb1);
@@ -405,14 +405,10 @@ mod tests {
         assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
-        let (cb2, _) = fake_compact_block(
-            sapling_activation_height() + 1,
-            cb1.hash(),
-            extfvk.clone(),
-            value,
-        );
+        let (cb2, _) =
+            fake_compact_block(sapling_activation_height() + 1, cb1.hash(), &dfvk, value);
         let (cb3, _) =
-            fake_compact_block(sapling_activation_height() + 2, cb2.hash(), extfvk, value);
+            fake_compact_block(sapling_activation_height() + 2, cb2.hash(), &dfvk, value);
         insert_into_cache(&db_cache, &cb3);
         match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
             Err(SqliteClientError::BackendError(e)) => {
@@ -448,7 +444,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Account balance should be zero
         assert_eq!(
@@ -461,7 +457,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -476,7 +472,7 @@ mod tests {
         // Create a second fake CompactBlock sending more value to the address
         let value2 = Amount::from_u64(7).unwrap();
         let (cb2, _) =
-            fake_compact_block(sapling_activation_height() + 1, cb.hash(), extfvk, value2);
+            fake_compact_block(sapling_activation_height() + 1, cb.hash(), &dfvk, value2);
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
@@ -500,7 +496,7 @@ mod tests {
         init_wallet_db(&db_data).unwrap();
 
         // Add an account to the wallet
-        let (extfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
         // Account balance should be zero
         assert_eq!(
@@ -513,7 +509,7 @@ mod tests {
         let (cb, nf) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -535,7 +531,7 @@ mod tests {
                 sapling_activation_height() + 1,
                 cb.hash(),
                 (nf, value),
-                extfvk,
+                &dfvk,
                 to2,
                 value2,
             ),

@@ -53,7 +53,7 @@ use zcash_client_backend::{
     data_api::{
         BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
     },
-    encoding::encode_payment_address,
+    keys::UnifiedFullViewingKey,
     proto::compact_formats::CompactBlock,
     wallet::SpendableNote,
 };
@@ -225,11 +225,11 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
-    fn get_extended_full_viewing_keys(
+    fn get_unified_full_viewing_keys(
         &self,
-    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
         #[allow(deprecated)]
-        wallet::get_extended_full_viewing_keys(self)
+        wallet::get_unified_full_viewing_keys(self)
     }
 
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
@@ -381,10 +381,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_tx_height(txid)
     }
 
-    fn get_extended_full_viewing_keys(
+    fn get_unified_full_viewing_keys(
         &self,
-    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
-        self.wallet_db.get_extended_full_viewing_keys()
+    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
+        self.wallet_db.get_unified_full_viewing_keys()
     }
 
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
@@ -721,14 +721,6 @@ impl BlockSource for BlockDb {
     }
 }
 
-fn address_from_extfvk<P: consensus::Parameters>(
-    params: &P,
-    extfvk: &ExtendedFullViewingKey,
-) -> String {
-    let addr = extfvk.default_address().1;
-    encode_payment_address(params.hrp_sapling_payment_address(), &addr)
-}
-
 #[cfg(test)]
 mod tests {
     use ff::PrimeField;
@@ -753,8 +745,8 @@ mod tests {
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{
-            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
-            PaymentAddress,
+            keys::DiversifiableFullViewingKey, note_encryption::sapling_note_encryption,
+            util::generate_random_rseed, Note, Nullifier, PaymentAddress,
         },
         transaction::components::Amount,
         zip32::ExtendedFullViewingKey,
@@ -791,11 +783,11 @@ mod tests {
     #[cfg(test)]
     pub(crate) fn init_test_accounts_table(
         db_data: &WalletDb<Network>,
-    ) -> (ExtendedFullViewingKey, Option<TransparentAddress>) {
+    ) -> (DiversifiableFullViewingKey, Option<TransparentAddress>) {
         let seed = [0u8; 32];
         let account = AccountId::from(0);
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
 
         #[cfg(feature = "transparent-inputs")]
         let (tkey, taddr) = {
@@ -810,16 +802,16 @@ mod tests {
         let taddr = None;
 
         let ufvk = UnifiedFullViewingKey::new(
-            account,
             #[cfg(feature = "transparent-inputs")]
             tkey,
-            Some(extfvk.clone()),
+            Some(dfvk.clone()),
+            None,
         )
         .unwrap();
 
         init_accounts_table(db_data, &[ufvk]).unwrap();
 
-        (extfvk, taddr)
+        (dfvk, taddr)
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying
@@ -827,10 +819,10 @@ mod tests {
     pub(crate) fn fake_compact_block(
         height: BlockHeight,
         prev_hash: BlockHash,
-        extfvk: ExtendedFullViewingKey,
+        dfvk: &DiversifiableFullViewingKey,
         value: Amount,
     ) -> (CompactBlock, Nullifier) {
-        let to = extfvk.default_address().1;
+        let to = dfvk.default_address().1;
 
         // Create a fake Note for the account
         let mut rng = OsRng;
@@ -842,7 +834,7 @@ mod tests {
             rseed,
         };
         let encryptor = sapling_note_encryption::<_, Network>(
-            Some(extfvk.fvk.ovk),
+            Some(dfvk.fvk().ovk),
             note.clone(),
             to,
             MemoBytes::empty(),
@@ -868,7 +860,7 @@ mod tests {
         rng.fill_bytes(&mut cb.hash);
         cb.prevHash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        (cb, note.nf(&extfvk.fvk.vk, 0))
+        (cb, note.nf(&dfvk.fvk().vk, 0))
     }
 
     /// Create a fake CompactBlock at the given height, spending a single note from the
@@ -877,7 +869,7 @@ mod tests {
         height: BlockHeight,
         prev_hash: BlockHash,
         (nf, in_value): (Nullifier, Amount),
-        extfvk: ExtendedFullViewingKey,
+        dfvk: &DiversifiableFullViewingKey,
         to: PaymentAddress,
         value: Amount,
     ) -> CompactBlock {
@@ -902,7 +894,7 @@ mod tests {
                 rseed,
             };
             let encryptor = sapling_note_encryption::<_, Network>(
-                Some(extfvk.fvk.ovk),
+                Some(dfvk.fvk().ovk),
                 note.clone(),
                 to,
                 MemoBytes::empty(),
@@ -921,7 +913,7 @@ mod tests {
 
         // Create a fake Note for the change
         ctx.outputs.push({
-            let change_addr = extfvk.default_address().1;
+            let change_addr = dfvk.default_address().1;
             let rseed = generate_random_rseed(&network(), height, &mut rng);
             let note = Note {
                 g_d: change_addr.diversifier().g_d().unwrap(),
@@ -930,7 +922,7 @@ mod tests {
                 rseed,
             };
             let encryptor = sapling_note_encryption::<_, Network>(
-                Some(extfvk.fvk.ovk),
+                Some(dfvk.fvk().ovk),
                 note.clone(),
                 change_addr,
                 MemoBytes::empty(),

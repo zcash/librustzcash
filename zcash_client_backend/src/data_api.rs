@@ -17,6 +17,7 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     decrypt::DecryptedOutput,
+    keys::UnifiedFullViewingKey,
     proto::compact_formats::CompactBlock,
     wallet::{SpendableNote, WalletTx},
 };
@@ -115,12 +116,13 @@ pub trait WalletRead {
     ///
     /// This will return `Ok(None)` if the account identifier does not correspond
     /// to a known account.
+    // TODO: This does not appear to be the case.
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
 
-    /// Returns all extended full viewing keys known about by this wallet.
-    fn get_extended_full_viewing_keys(
+    /// Returns all unified full viewing keys known to this wallet.
+    fn get_unified_full_viewing_keys(
         &self,
-    ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error>;
+    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error>;
 
     /// Checks whether the specified extended full viewing key is
     /// associated with the account.
@@ -329,6 +331,7 @@ pub mod testing {
     };
 
     use crate::{
+        keys::UnifiedFullViewingKey,
         proto::compact_formats::CompactBlock,
         wallet::{SpendableNote, WalletTransparentOutput},
     };
@@ -385,9 +388,9 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_extended_full_viewing_keys(
+        fn get_unified_full_viewing_keys(
             &self,
-        ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
+        ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
             Ok(HashMap::new())
         }
 

@@ -8,8 +8,10 @@ use zcash_primitives::{
         Note, PaymentAddress,
     },
     transaction::Transaction,
-    zip32::{AccountId, ExtendedFullViewingKey},
+    zip32::AccountId,
 };
+
+use crate::keys::UnifiedFullViewingKey;
 
 /// A decrypted shielded output.
 pub struct DecryptedOutput {
@@ -33,38 +35,41 @@ pub struct DecryptedOutput {
 }
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
-/// [`ExtendedFullViewingKey`]s.
+/// [`UnifiedFullViewingKey`]s.
 pub fn decrypt_transaction<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     tx: &Transaction,
-    extfvks: &HashMap<AccountId, ExtendedFullViewingKey>,
+    ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Vec<DecryptedOutput> {
     let mut decrypted = vec![];
 
     if let Some(bundle) = tx.sapling_bundle() {
-        for (account, extfvk) in extfvks.iter() {
-            let ivk = extfvk.fvk.vk.ivk();
-            let ovk = extfvk.fvk.ovk;
+        for (account, ufvk) in ufvks.iter() {
+            if let Some(dfvk) = ufvk.sapling() {
+                let ivk = dfvk.fvk().vk.ivk();
+                let ovk = dfvk.fvk().ovk;
 
-            for (index, output) in bundle.shielded_outputs.iter().enumerate() {
-                let ((note, to, memo), outgoing) =
-                    match try_sapling_note_decryption(params, height, &ivk, output) {
-                        Some(ret) => (ret, false),
-                        None => match try_sapling_output_recovery(params, height, &ovk, output) {
-                            Some(ret) => (ret, true),
-                            None => continue,
-                        },
-                    };
+                for (index, output) in bundle.shielded_outputs.iter().enumerate() {
+                    let ((note, to, memo), outgoing) =
+                        match try_sapling_note_decryption(params, height, &ivk, output) {
+                            Some(ret) => (ret, false),
+                            None => match try_sapling_output_recovery(params, height, &ovk, output)
+                            {
+                                Some(ret) => (ret, true),
+                                None => continue,
+                            },
+                        };
 
-                decrypted.push(DecryptedOutput {
-                    index,
-                    note,
-                    account: *account,
-                    to,
-                    memo,
-                    outgoing,
-                })
+                    decrypted.push(DecryptedOutput {
+                        index,
+                        note,
+                        account: *account,
+                        to,
+                        memo,
+                        outgoing,
+                    })
+                }
             }
         }
     }

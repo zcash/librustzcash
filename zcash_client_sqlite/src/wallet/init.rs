@@ -7,11 +7,9 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
 };
 
-use zcash_client_backend::{
-    encoding::encode_extended_full_viewing_key, keys::UnifiedFullViewingKey,
-};
+use zcash_client_backend::keys::UnifiedFullViewingKey;
 
-use crate::{address_from_extfvk, error::SqliteClientError, WalletDb};
+use crate::{error::SqliteClientError, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -44,10 +42,12 @@ use {
 /// init_wallet_db(&db).unwrap();
 /// ```
 pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
+    // TODO: Add migrations (https://github.com/zcash/librustzcash/issues/489)
+    // - extfvk column -> ufvk column
     wdb.conn.execute(
         "CREATE TABLE IF NOT EXISTS accounts (
             account INTEGER PRIMARY KEY,
-            extfvk TEXT,
+            ufvk TEXT,
             address TEXT,
             transparent_address TEXT
         )",
@@ -179,8 +179,8 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
-/// let extfvk = ExtendedFullViewingKey::from(&extsk);
-/// let ufvk = UnifiedFullViewingKey::new(account, None, Some(extfvk)).unwrap();
+/// let dfvk = ExtendedFullViewingKey::from(&extsk).into();
+/// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
 /// init_accounts_table(&db_data, &[ufvk]).unwrap();
 /// # }
 /// ```
@@ -199,17 +199,9 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
-    for key in keys.iter() {
-        let extfvk_str: Option<String> = key.sapling().map(|extfvk| {
-            encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
-                extfvk,
-            )
-        });
-
-        let address_str: Option<String> = key
-            .sapling()
-            .map(|extfvk| address_from_extfvk(&wdb.params, extfvk));
+    for (account, key) in (0u32..).zip(keys) {
+        let ufvk_str: String = key.encode(&wdb.params);
+        let address_str: String = key.default_address().0.encode(&wdb.params);
         #[cfg(feature = "transparent-inputs")]
         let taddress_str: Option<String> = key.transparent().and_then(|k| {
             k.derive_external_ivk()
@@ -220,14 +212,9 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         let taddress_str: Option<String> = None;
 
         wdb.conn.execute(
-            "INSERT INTO accounts (account, extfvk, address, transparent_address)
+            "INSERT INTO accounts (account, ufvk, address, transparent_address)
             VALUES (?, ?, ?, ?)",
-            params![
-                u32::from(key.account()),
-                extfvk_str,
-                address_str,
-                taddress_str,
-            ],
+            params![account, ufvk_str, address_str, taddress_str],
         )?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
@@ -306,6 +293,7 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Parameters},
+        sapling::keys::DiversifiableFullViewingKey,
         zip32::ExtendedFullViewingKey,
     };
 
@@ -332,22 +320,22 @@ mod tests {
 
         // First call with data should initialise the accounts table
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
 
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(
-            account,
             Some(
                 transparent::AccountPrivKey::from_seed(&network(), &seed, account)
                     .unwrap()
                     .to_account_pubkey(),
             ),
-            Some(extfvk),
+            Some(dfvk),
+            None,
         )
         .unwrap();
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(account, Some(extfvk)).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
 
         init_accounts_table(&db_data, &[ufvk.clone()]).unwrap();
 

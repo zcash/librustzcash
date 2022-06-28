@@ -17,17 +17,16 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Note, Nullifier, PaymentAddress},
+    sapling::{keys::DiversifiableFullViewingKey, Node, Note, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
+    address::RecipientAddress,
     data_api::error::Error,
-    encoding::{
-        decode_extended_full_viewing_key, decode_payment_address, encode_extended_full_viewing_key,
-        encode_payment_address_p, encode_transparent_address_p,
-    },
+    encoding::{encode_payment_address_p, encode_transparent_address_p},
+    keys::UnifiedFullViewingKey,
     wallet::{WalletShieldedOutput, WalletTx},
     DecryptedOutput,
 };
@@ -162,44 +161,42 @@ pub fn get_address<P: consensus::Parameters>(
         |row| row.get(0),
     )?;
 
-    decode_payment_address(wdb.params.hrp_sapling_payment_address(), &addr)
-        .map_err(SqliteClientError::Bech32)
+    RecipientAddress::decode(&wdb.params, &addr)
+        .ok_or_else(|| {
+            SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
+        })
+        .map(|addr| match addr {
+            // TODO: Return the UA, not its Sapling component.
+            RecipientAddress::Unified(ua) => ua.sapling().cloned(),
+            _ => None,
+        })
 }
 
-/// Returns the [`ExtendedFullViewingKey`]s for the wallet.
-///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-#[deprecated(
-    note = "This function will be removed in a future release. Use zcash_client_backend::data_api::WalletRead::get_extended_full_viewing_keys instead."
-)]
-pub fn get_extended_full_viewing_keys<P: consensus::Parameters>(
+/// Returns the [`UnifiedFullViewingKey`]s for the wallet.
+pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
-) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, SqliteClientError> {
-    // Fetch the ExtendedFullViewingKeys we are tracking
+) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, SqliteClientError> {
+    // Fetch the UnifiedFullViewingKeys we are tracking
     let mut stmt_fetch_accounts = wdb
         .conn
-        .prepare("SELECT account, extfvk FROM accounts ORDER BY account ASC")?;
+        .prepare("SELECT account, ufvk FROM accounts ORDER BY account ASC")?;
 
     let rows = stmt_fetch_accounts
         .query_map(NO_PARAMS, |row| {
             let acct: u32 = row.get(0)?;
-            let extfvk = row.get(1).map(|extfvk: String| {
-                decode_extended_full_viewing_key(
-                    wdb.params.hrp_sapling_extended_full_viewing_key(),
-                    &extfvk,
-                )
-                .map_err(SqliteClientError::Bech32)
-                .and_then(|k| k.ok_or(SqliteClientError::IncorrectHrpExtFvk))
-            })?;
+            let account = AccountId::from(acct);
+            let ufvk_str: String = row.get(1)?;
+            let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
+                .map_err(SqliteClientError::CorruptedData);
 
-            Ok((AccountId::from(acct), extfvk))
+            Ok((account, ufvk))
         })
         .map_err(SqliteClientError::from)?;
 
-    let mut res: HashMap<AccountId, ExtendedFullViewingKey> = HashMap::new();
+    let mut res: HashMap<AccountId, UnifiedFullViewingKey> = HashMap::new();
     for row in rows {
-        let (account_id, efvkr) = row?;
-        res.insert(account_id, efvkr?);
+        let (account_id, ufvkr) = row?;
+        res.insert(account_id, ufvkr?);
     }
 
     Ok(res)
@@ -218,16 +215,25 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
     extfvk: &ExtendedFullViewingKey,
 ) -> Result<bool, SqliteClientError> {
     wdb.conn
-        .prepare("SELECT * FROM accounts WHERE account = ? AND extfvk = ?")?
-        .exists(&[
-            u32::from(account).to_sql()?,
-            encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
-                extfvk,
-            )
-            .to_sql()?,
-        ])
+        .prepare("SELECT ufvk FROM accounts WHERE account = ?")?
+        .query_row(&[u32::from(account).to_sql()?], |row| {
+            row.get(0).map(|ufvk_str: String| {
+                UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
+                    .map_err(SqliteClientError::CorruptedData)
+            })
+        })
+        .optional()
         .map_err(SqliteClientError::from)
+        .and_then(|row| {
+            if let Some(ufvk) = row {
+                ufvk.map(|ufvk| {
+                    ufvk.sapling().map(|dfvk| dfvk.to_bytes())
+                        == Some(DiversifiableFullViewingKey::from(extfvk.clone()).to_bytes())
+                })
+            } else {
+                Ok(false)
+            }
+        })
 }
 
 /// Returns the balance for the account, including all mined unspent notes that we know

@@ -27,6 +27,8 @@ and this library adheres to Rust's notion of
   provides substantially greater flexibility in transaction creation.
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
+- `zcash_client_backend::data_api`:
+    `WalletRead::get_unified_full_viewing_keys`
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`
@@ -89,6 +91,9 @@ and this library adheres to Rust's notion of
 - An `Error::MemoForbidden` error has been added to the
   `data_api::error::Error` enum to report the condition where a memo was
   specified to be sent to a transparent recipient.
+- `zcash_client_backend::decrypt`:
+  - `decrypt_transaction` now takes a `HashMap<_, UnifiedFullViewingKey>`
+    instead of `HashMap<_, ExtendedFullViewingKey>`.
 - If no memo is provided when sending to a shielded recipient, the
   empty memo will be used
 - `zcash_client_backend::keys::spending_key` has been moved to the
@@ -104,6 +109,9 @@ and this library adheres to Rust's notion of
   - `Zip321Error::ParseError(String)`
 
 ### Removed
+- `zcash_client_backend::data_api`:
+  - `WalletRead::get_extended_full_viewing_keys` (use
+    `WalletRead::get_unified_full_viewing_keys` instead).
 - The hardcoded `data_api::wallet::ANCHOR_OFFSET` constant.
 - `zcash_client_backend::wallet::AccountId` (moved to `zcash_primitives::zip32::AccountId`).
 

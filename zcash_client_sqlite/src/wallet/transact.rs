@@ -165,7 +165,10 @@ mod tests {
         block::BlockHash,
         consensus::{BlockHeight, BranchId, Parameters},
         legacy::TransparentAddress,
-        sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
+        sapling::{
+            keys::DiversifiableFullViewingKey, note_encryption::try_sapling_output_recovery,
+            prover::TxProver,
+        },
         transaction::{components::Amount, Transaction},
         zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
     };
@@ -207,8 +210,8 @@ mod tests {
         // Add two accounts to the wallet
         let extsk0 = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
         let extsk1 = sapling::spending_key(&[1u8; 32], network().coin_type(), AccountId::from(1));
-        let extfvk0 = ExtendedFullViewingKey::from(&extsk0);
-        let extfvk1 = ExtendedFullViewingKey::from(&extsk1);
+        let dfvk0 = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk0));
+        let dfvk1 = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk1));
 
         #[cfg(feature = "transparent-inputs")]
         let ufvks = {
@@ -219,24 +222,16 @@ mod tests {
                 transparent::AccountPrivKey::from_seed(&network(), &[1u8; 32], AccountId::from(1))
                     .unwrap();
             [
-                UnifiedFullViewingKey::new(
-                    AccountId::from(0),
-                    Some(tsk0.to_account_pubkey()),
-                    Some(extfvk0),
-                )
-                .unwrap(),
-                UnifiedFullViewingKey::new(
-                    AccountId::from(1),
-                    Some(tsk1.to_account_pubkey()),
-                    Some(extfvk1),
-                )
-                .unwrap(),
+                UnifiedFullViewingKey::new(Some(tsk0.to_account_pubkey()), Some(dfvk0), None)
+                    .unwrap(),
+                UnifiedFullViewingKey::new(Some(tsk1.to_account_pubkey()), Some(dfvk1), None)
+                    .unwrap(),
             ]
         };
         #[cfg(not(feature = "transparent-inputs"))]
         let ufvks = [
-            UnifiedFullViewingKey::new(AccountId::from(0), Some(extfvk0)).unwrap(),
-            UnifiedFullViewingKey::new(AccountId::from(1), Some(extfvk1)).unwrap(),
+            UnifiedFullViewingKey::new(Some(dfvk0), None).unwrap(),
+            UnifiedFullViewingKey::new(Some(dfvk1), None).unwrap(),
         ];
 
         init_accounts_table(&db_data, &ufvks).unwrap();
@@ -285,12 +280,12 @@ mod tests {
 
         // Add an account to the wallet
         let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
 
         #[cfg(feature = "transparent-inputs")]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), None, Some(extfvk)).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), Some(extfvk)).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
         let to = extsk.default_address().1.into();
 
@@ -329,11 +324,11 @@ mod tests {
 
         // Add an account to the wallet
         let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), None, Some(extfvk)).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), Some(extfvk)).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
         let to = extsk.default_address().1.into();
 
@@ -377,12 +372,11 @@ mod tests {
 
         // Add an account to the wallet
         let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
-        let ufvk =
-            UnifiedFullViewingKey::new(AccountId::from(0), None, Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
@@ -390,7 +384,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -409,12 +403,7 @@ mod tests {
         );
 
         // Add more funds to the wallet in a second note
-        let (cb, _) = fake_compact_block(
-            sapling_activation_height() + 1,
-            cb.hash(),
-            extfvk.clone(),
-            value,
-        );
+        let (cb, _) = fake_compact_block(sapling_activation_height() + 1, cb.hash(), &dfvk, value);
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
@@ -457,12 +446,8 @@ mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
         for i in 2..10 {
-            let (cb, _) = fake_compact_block(
-                sapling_activation_height() + i,
-                cb.hash(),
-                extfvk.clone(),
-                value,
-            );
+            let (cb, _) =
+                fake_compact_block(sapling_activation_height() + i, cb.hash(), &dfvk, value);
             insert_into_cache(&db_cache, &cb);
         }
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
@@ -488,8 +473,7 @@ mod tests {
         }
 
         // Mine block 11 so that the second note becomes verified
-        let (cb, _) =
-            fake_compact_block(sapling_activation_height() + 10, cb.hash(), extfvk, value);
+        let (cb, _) = fake_compact_block(sapling_activation_height() + 10, cb.hash(), &dfvk, value);
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
@@ -521,12 +505,11 @@ mod tests {
 
         // Add an account to the wallet
         let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
-        let ufvk =
-            UnifiedFullViewingKey::new(AccountId::from(0), None, Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
@@ -534,7 +517,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk,
+            &dfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -585,7 +568,7 @@ mod tests {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
-                ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])),
+                &ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])).into(),
                 value,
             );
             insert_into_cache(&db_cache, &cb);
@@ -616,7 +599,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height() + 22,
             cb.hash(),
-            ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[22])),
+            &ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[22])).into(),
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -651,12 +634,11 @@ mod tests {
 
         // Add an account to the wallet
         let extsk = sapling::spending_key(&[0u8; 32], network.coin_type(), AccountId::from(0));
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
-        let ufvk =
-            UnifiedFullViewingKey::new(AccountId::from(0), None, Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
@@ -664,7 +646,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk.clone(),
+            &dfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -721,7 +703,7 @@ mod tests {
             try_sapling_output_recovery(
                 &network,
                 sapling_activation_height(),
-                &extfvk.fvk.ovk,
+                &dfvk.fvk().ovk,
                 output,
             )
         };
@@ -738,7 +720,7 @@ mod tests {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
-                ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])),
+                &ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])).into(),
                 value,
             );
             insert_into_cache(&db_cache, &cb);
@@ -762,12 +744,11 @@ mod tests {
 
         // Add an account to the wallet
         let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), AccountId::from(0));
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
         #[cfg(feature = "transparent-inputs")]
-        let ufvk =
-            UnifiedFullViewingKey::new(AccountId::from(0), None, Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
-        let ufvk = UnifiedFullViewingKey::new(AccountId::from(0), Some(extfvk.clone())).unwrap();
+        let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()), None).unwrap();
         init_accounts_table(&db_data, &[ufvk]).unwrap();
 
         // Add funds to the wallet in a single note
@@ -775,7 +756,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
-            extfvk,
+            &dfvk,
             value,
         );
         insert_into_cache(&db_cache, &cb);

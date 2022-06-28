@@ -8,7 +8,7 @@ use zcash_address::{
 };
 use zcash_primitives::{consensus, constants, legacy::TransparentAddress, sapling::PaymentAddress};
 
-fn params_to_network<P: consensus::Parameters>(params: &P) -> Network {
+pub(crate) fn params_to_network<P: consensus::Parameters>(params: &P) -> Network {
     // Use the Sapling HRP as an indicator of network.
     match params.hrp_sapling_payment_address() {
         constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS => Network::Main,
@@ -108,6 +108,11 @@ impl UnifiedAddress {
         self.sapling.as_ref()
     }
 
+    /// Returns the transparent receiver within this Unified Address, if any.
+    pub fn transparent(&self) -> Option<&TransparentAddress> {
+        self.transparent.as_ref()
+    }
+
     fn to_address(&self, net: Network) -> ZcashAddress {
         let ua = unified::Address::try_from_items(
             self.unknown
@@ -136,6 +141,11 @@ impl UnifiedAddress {
         )
         .expect("UnifiedAddress should only be constructed safely");
         ZcashAddress::from_unified(net, ua)
+    }
+
+    /// Returns the string encoding of this `UnifiedAddress` for the given network.
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        self.to_address(params_to_network(params)).to_string()
     }
 }
 

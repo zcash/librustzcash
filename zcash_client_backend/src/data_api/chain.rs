@@ -84,7 +84,6 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
     sapling::Nullifier,
-    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
@@ -210,9 +209,14 @@ where
             .unwrap_or(sapling_activation_height - 1)
     })?;
 
-    // Fetch the ExtendedFullViewingKeys we are tracking
-    let extfvks = data.get_extended_full_viewing_keys()?;
-    let extfvks: Vec<(&AccountId, &ExtendedFullViewingKey)> = extfvks.iter().collect();
+    // Fetch the UnifiedFullViewingKeys we are tracking
+    let ufvks = data.get_unified_full_viewing_keys()?;
+    // TODO: Change `scan_block` to also scan Orchard.
+    // https://github.com/zcash/librustzcash/issues/403
+    let dfvks: Vec<_> = ufvks
+        .iter()
+        .filter_map(|(account, ufvk)| ufvk.sapling().map(move |k| (account, k)))
+        .collect();
 
     // Get the most recent CommitmentTree
     let mut tree = data
@@ -244,7 +248,7 @@ where
             scan_block(
                 params,
                 block,
-                &extfvks,
+                &dfvks,
                 &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],

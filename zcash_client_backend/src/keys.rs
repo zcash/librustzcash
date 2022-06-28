@@ -1,10 +1,12 @@
 //! Helper functions for managing light client key material.
+use zcash_address::unified::{self, Container, Encoding};
 use zcash_primitives::{
     consensus,
+    sapling::keys as sapling_keys,
     zip32::{AccountId, DiversifierIndex},
 };
 
-use crate::address::UnifiedAddress;
+use crate::address::{params_to_network, UnifiedAddress};
 
 #[cfg(feature = "transparent-inputs")]
 use std::convert::TryInto;
@@ -107,10 +109,11 @@ impl UnifiedSpendingKey {
 
     pub fn to_unified_full_viewing_key(&self) -> UnifiedFullViewingKey {
         UnifiedFullViewingKey {
-            account: self.account,
             #[cfg(feature = "transparent-inputs")]
             transparent: Some(self.transparent.to_account_pubkey()),
-            sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling)),
+            sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling).into()),
+            orchard: None,
+            unknown: vec![],
         }
     }
 
@@ -137,38 +140,135 @@ impl UnifiedSpendingKey {
 #[derive(Clone, Debug)]
 #[doc(hidden)]
 pub struct UnifiedFullViewingKey {
-    account: AccountId,
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<legacy::AccountPubKey>,
-    // TODO: This type is invalid for a UFVK; create a `sapling::DiversifiableFullViewingKey`
-    // to replace it.
-    sapling: Option<sapling::ExtendedFullViewingKey>,
+    sapling: Option<sapling_keys::DiversifiableFullViewingKey>,
+    orchard: Option<orchard::keys::FullViewingKey>,
+    unknown: Vec<(u32, Vec<u8>)>,
 }
 
 #[doc(hidden)]
 impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key, if the required components are present.
     pub fn new(
-        account: AccountId,
         #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
-        sapling: Option<sapling::ExtendedFullViewingKey>,
+        sapling: Option<sapling_keys::DiversifiableFullViewingKey>,
+        orchard: Option<orchard::keys::FullViewingKey>,
     ) -> Option<UnifiedFullViewingKey> {
         if sapling.is_none() {
             None
         } else {
             Some(UnifiedFullViewingKey {
-                account,
                 #[cfg(feature = "transparent-inputs")]
                 transparent,
                 sapling,
+                orchard,
+                // We don't allow constructing new UFVKs with unknown items, but we store
+                // this to allow parsing such UFVKs.
+                unknown: vec![],
             })
         }
     }
 
-    /// Returns the ZIP32 account identifier to which all component
-    /// keys are related.
-    pub fn account(&self) -> AccountId {
-        self.account
+    /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
+        let (net, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
+        let expected_net = params_to_network(params);
+        if net != expected_net {
+            return Err(format!(
+                "UFVK is for network {:?} but we expected {:?}",
+                net, expected_net,
+            ));
+        }
+
+        let mut orchard = None;
+        let mut sapling = None;
+        #[cfg(feature = "transparent-inputs")]
+        let mut transparent = None;
+
+        // We can use as-parsed order here for efficiency, because we're breaking out the
+        // receivers we support from the unknown receivers.
+        let unknown = ufvk
+            .items_as_parsed()
+            .iter()
+            .filter_map(|receiver| match receiver {
+                unified::Fvk::Orchard(data) => orchard::keys::FullViewingKey::from_bytes(data)
+                    .ok_or("Invalid Orchard FVK in Unified FVK")
+                    .map(|addr| {
+                        orchard = Some(addr);
+                        None
+                    })
+                    .transpose(),
+                unified::Fvk::Sapling(data) => {
+                    sapling_keys::DiversifiableFullViewingKey::from_bytes(data)
+                        .ok_or("Invalid Sapling FVK in Unified FVK")
+                        .map(|pa| {
+                            sapling = Some(pa);
+                            None
+                        })
+                        .transpose()
+                }
+                #[cfg(feature = "transparent-inputs")]
+                unified::Fvk::P2pkh(data) => legacy::AccountPubKey::deserialize(data)
+                    .map_err(|_| "Invalid transparent FVK in Unified FVK")
+                    .map(|tfvk| {
+                        transparent = Some(tfvk);
+                        None
+                    })
+                    .transpose(),
+                #[cfg(not(feature = "transparent-inputs"))]
+                unified::Fvk::P2pkh(data) => {
+                    Some(Ok((unified::Typecode::P2pkh.into(), data.to_vec())))
+                }
+                unified::Fvk::Unknown { typecode, data } => Some(Ok((*typecode, data.clone()))),
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self {
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            sapling,
+            orchard,
+            unknown,
+        })
+    }
+
+    /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        let items = std::iter::empty()
+            .chain(
+                self.orchard
+                    .as_ref()
+                    .map(|fvk| fvk.to_bytes())
+                    .map(unified::Fvk::Orchard),
+            )
+            .chain(
+                self.sapling
+                    .as_ref()
+                    .map(|dfvk| dfvk.to_bytes())
+                    .map(unified::Fvk::Sapling),
+            )
+            .chain(
+                self.unknown
+                    .iter()
+                    .map(|(typecode, data)| unified::Fvk::Unknown {
+                        typecode: *typecode,
+                        data: data.clone(),
+                    }),
+            );
+        #[cfg(feature = "transparent-inputs")]
+        let items = items.chain(
+            self.transparent
+                .as_ref()
+                .map(|tfvk| tfvk.serialize().try_into().unwrap())
+                .map(unified::Fvk::P2pkh),
+        );
+
+        let ufvk = unified::Ufvk::try_from_items(items.collect())
+            .expect("UnifiedFullViewingKey should only be constructed safely");
+        ufvk.encode(&params_to_network(params))
     }
 
     /// Returns the transparent component of the unified key at the
@@ -178,9 +278,8 @@ impl UnifiedFullViewingKey {
         self.transparent.as_ref()
     }
 
-    /// Returns the Sapling extended full viewing key component of this
-    /// unified key.
-    pub fn sapling(&self) -> Option<&sapling::ExtendedFullViewingKey> {
+    /// Returns the Sapling diversifiable full viewing key component of this unified key.
+    pub fn sapling(&self) -> Option<&sapling_keys::DiversifiableFullViewingKey> {
         self.sapling.as_ref()
     }
 
@@ -256,13 +355,16 @@ impl UnifiedFullViewingKey {
 
 #[cfg(test)]
 mod tests {
-    use super::sapling;
-    use zcash_primitives::zip32::AccountId;
+    use super::{sapling, UnifiedFullViewingKey};
+    use zcash_primitives::{
+        consensus::MAIN_NETWORK,
+        zip32::{AccountId, ExtendedFullViewingKey},
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::encoding::AddressCodec,
-        zcash_primitives::{consensus::MAIN_NETWORK, legacy, legacy::keys::IncomingViewingKey},
+        zcash_primitives::{legacy, legacy::keys::IncomingViewingKey},
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -290,5 +392,47 @@ mod tests {
                 .unwrap()
                 .encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
+    }
+
+    #[test]
+    fn ufvk_round_trip() {
+        let account = 0.into();
+
+        let orchard = {
+            let sk = orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, 0).unwrap();
+            Some(orchard::keys::FullViewingKey::from(&sk))
+        };
+
+        let sapling = {
+            let extsk = sapling::spending_key(&[0; 32], 0, account);
+            Some(ExtendedFullViewingKey::from(&extsk).into())
+        };
+
+        #[cfg(feature = "transparent-inputs")]
+        let transparent = { None };
+
+        let ufvk = UnifiedFullViewingKey::new(
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            sapling,
+            orchard,
+        )
+        .unwrap();
+
+        let encoding = ufvk.encode(&MAIN_NETWORK);
+        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoding).unwrap();
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(
+            decoded.transparent.map(|t| t.serialize()),
+            ufvk.transparent.map(|t| t.serialize()),
+        );
+        assert_eq!(
+            decoded.sapling.map(|s| s.to_bytes()),
+            ufvk.sapling.map(|s| s.to_bytes()),
+        );
+        assert_eq!(
+            decoded.orchard.map(|o| o.to_bytes()),
+            ufvk.orchard.map(|o| o.to_bytes()),
+        );
     }
 }
