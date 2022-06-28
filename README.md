@@ -16,6 +16,14 @@ All code in this workspace is licensed under either of
 
 at your option.
 
+Downstream code forks should note that some (but not all) of these crates
+and components depend on the 'orchard' crate, which is licensed under the
+[Bootstrap Open Source License](https://github.com/zcash/orchard/blob/main/LICENSE-BOSL).
+An [exception](https://github.com/zcash/orchard/blob/main/COPYING) is
+provided that makes this a "permissive" license when used in Zcash or some
+of its chain forks. See the `README.md` files in subdirectories for which
+crates and components this applies to.
+
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally

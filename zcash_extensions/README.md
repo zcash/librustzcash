@@ -1,7 +1,6 @@
-# zcash_client_backend
+# zcash_extensions
 
-This library contains Rust structs and traits for creating shielded Zcash light
-clients.
+This library contains Rust code to support [Transparent Zcash Extensions](https://zips.z.cash/zip-0222).
 
 ## License
 
@@ -13,7 +12,7 @@ Licensed under either of
 
 at your option.
 
-Downstream code forks should note that 'zcash_client_backend' depends on the
+Downstream code forks should note that 'zcash_extensions' depends on the
 'orchard' crate, which is licensed under the
 [Bootstrap Open Source License](https://github.com/zcash/orchard/blob/main/LICENSE-BOSL).
 An [exception](https://github.com/zcash/orchard/blob/main/COPYING) is
@@ -26,4 +25,3 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
-

@@ -13,6 +13,13 @@ Licensed under either of
 
 at your option.
 
+Downstream code forks should note that 'zcash_proofs' depends on the
+'orchard' crate, which is licensed under the
+[Bootstrap Open Source License](https://github.com/zcash/orchard/blob/main/LICENSE-BOSL).
+An [exception](https://github.com/zcash/orchard/blob/main/COPYING) is
+provided that makes this a "permissive" license when used in Zcash or some
+of its chain forks.
+
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally
