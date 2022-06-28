@@ -15,9 +15,12 @@ at your option.
 Downstream code forks should note that 'zcash_primitives' depends on the
 'orchard' crate, which is licensed under the
 [Bootstrap Open Source License](https://github.com/zcash/orchard/blob/main/LICENSE-BOSL).
-An [exception](https://github.com/zcash/orchard/blob/main/COPYING) is
-provided that makes this a "permissive" license when used in Zcash or some
-of its chain forks.
+A license exception is provided allowing some derived works that are linked or
+combined with the 'orchard' crate to be copied or distributed under the original
+licenses (in this case MIT / Apache 2.0), provided that the included portions of
+the 'orchard' code remain subject to BOSL.
+See https://github.com/zcash/orchard/blob/main/COPYING for details of which
+derived works can make use of this exception.
 
 ### Contribution
 

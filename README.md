@@ -19,10 +19,13 @@ at your option.
 Downstream code forks should note that some (but not all) of these crates
 and components depend on the 'orchard' crate, which is licensed under the
 [Bootstrap Open Source License](https://github.com/zcash/orchard/blob/main/LICENSE-BOSL).
-An [exception](https://github.com/zcash/orchard/blob/main/COPYING) is
-provided that makes this a "permissive" license when used in Zcash or some
-of its chain forks. See the `README.md` files in subdirectories for which
-crates and components this applies to.
+A license exception is provided allowing some derived works that are linked or
+combined with the 'orchard' crate to be copied or distributed under the original
+licenses (in this case MIT / Apache 2.0), provided that the included portions of
+the 'orchard' code remain subject to BOSL.
+See <https://github.com/zcash/orchard/blob/main/COPYING> for details of which
+derived works can make use of this exception, and the `README.md` files in
+subdirectories for which crates and components this applies to.
 
 ### Contribution
 
