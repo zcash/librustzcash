@@ -364,7 +364,10 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::encoding::AddressCodec,
-        zcash_primitives::{legacy, legacy::keys::IncomingViewingKey},
+        zcash_primitives::legacy::{
+            self,
+            keys::{AccountPrivKey, IncomingViewingKey},
+        },
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -409,7 +412,11 @@ mod tests {
         };
 
         #[cfg(feature = "transparent-inputs")]
-        let transparent = { None };
+        let transparent = {
+            let privkey =
+                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::from(0)).unwrap();
+            Some(privkey.to_account_pubkey())
+        };
 
         let ufvk = UnifiedFullViewingKey::new(
             #[cfg(feature = "transparent-inputs")]
@@ -419,12 +426,24 @@ mod tests {
         )
         .unwrap();
 
-        let encoding = ufvk.encode(&MAIN_NETWORK);
-        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoding).unwrap();
+        let encoded = ufvk.encode(&MAIN_NETWORK);
+
+        // test encoded form against known values
+        let encoded_with_t = "uview1tg6rpjgju2s2j37gkgjq79qrh5lvzr6e0ed3n4sf4hu5qd35vmsh7avl80xa6mx7ryqce9hztwaqwrdthetpy4pc0kce25x453hwcmax02p80pg5savlg865sft9reat07c5vlactr6l2pxtlqtqunt2j9gmvr8spcuzf07af80h5qmut38h0gvcfa9k4rwujacwwca9vu8jev7wq6c725huv8qjmhss3hdj2vh8cfxhpqcm2qzc34msyrfxk5u6dqttt4vv2mr0aajreww5yufpk0gn4xkfm888467k7v6fmw7syqq6cceu078yw8xja502jxr0jgum43lhvpzmf7eu5dmnn6cr6f7p43yw8znzgxg598mllewnx076hljlvynhzwn5es94yrv65tdg3utuz2u3sras0wfcq4adxwdvlk387d22g3q98t5z74quw2fa4wed32escx8dwh4mw35t4jwf35xyfxnu83mk5s4kw2glkgsshmxk";
+        let _encoded_no_t = "uview12z384wdq76ceewlsu0esk7d97qnd23v2qnvhujxtcf2lsq8g4hwzpx44fwxssnm5tg8skyh4tnc8gydwxefnnm0hd0a6c6etmj0pp9jqkdsllkr70u8gpf7ndsfqcjlqn6dec3faumzqlqcmtjf8vp92h7kj38ph2786zx30hq2wru8ae3excdwc8w0z3t9fuw7mt7xy5sn6s4e45kwm0cjp70wytnensgdnev286t3vew3yuwt2hcz865y037k30e428dvgne37xvyeal2vu8yjnznphf9t2rw3gdp0hk5zwq00ws8f3l3j5n3qkqgsyzrwx4qzmgq0xwwk4vz2r6vtsykgz089jncvycmem3535zjwvvtvjw8v98y0d5ydwte575gjm7a7k";
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(encoded, encoded_with_t);
+        #[cfg(not(feature = "transparent-inputs"))]
+        assert_eq!(encoded, _encoded_no_t);
+
+        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoded).unwrap();
+        let reencoded = decoded.encode(&MAIN_NETWORK);
+        assert_eq!(encoded, reencoded);
+
         #[cfg(feature = "transparent-inputs")]
         assert_eq!(
             decoded.transparent.map(|t| t.serialize()),
-            ufvk.transparent.map(|t| t.serialize()),
+            ufvk.transparent.as_ref().map(|t| t.serialize()),
         );
         assert_eq!(
             decoded.sapling.map(|s| s.to_bytes()),
@@ -434,5 +453,14 @@ mod tests {
             decoded.orchard.map(|o| o.to_bytes()),
             ufvk.orchard.map(|o| o.to_bytes()),
         );
+
+        let decoded_with_t = UnifiedFullViewingKey::decode(&MAIN_NETWORK, encoded_with_t).unwrap();
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(
+            decoded_with_t.transparent.map(|t| t.serialize()),
+            ufvk.transparent.as_ref().map(|t| t.serialize()),
+        );
+        #[cfg(not(feature = "transparent-inputs"))]
+        assert_eq!(decoded_with_t.unknown.len(), 1);
     }
 }
