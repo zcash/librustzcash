@@ -6,7 +6,7 @@ use zcash_primitives::{
     zip32::{AccountId, DiversifierIndex},
 };
 
-use crate::address::{params_to_network, UnifiedAddress};
+use crate::address::UnifiedAddress;
 
 #[cfg(feature = "transparent-inputs")]
 use std::convert::TryInto;
@@ -175,7 +175,7 @@ impl UnifiedFullViewingKey {
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
         let (net, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
-        let expected_net = params_to_network(params);
+        let expected_net = params.address_network().expect("Unrecognized network");
         if net != expected_net {
             return Err(format!(
                 "UFVK is for network {:?} but we expected {:?}",
@@ -268,7 +268,7 @@ impl UnifiedFullViewingKey {
 
         let ufvk = unified::Ufvk::try_from_items(items.collect())
             .expect("UnifiedFullViewingKey should only be constructed safely");
-        ufvk.encode(&params_to_network(params))
+        ufvk.encode(&params.address_network().expect("Unrecognized network"))
     }
 
     /// Returns the transparent component of the unified key at the

@@ -520,6 +520,10 @@ mod tests {
             }
         }
 
+        fn address_network(&self) -> Option<zcash_address::Network> {
+            None
+        }
+
         fn coin_type(&self) -> u32 {
             constants::testnet::COIN_TYPE
         }
