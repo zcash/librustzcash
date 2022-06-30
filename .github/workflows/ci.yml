@@ -23,7 +23,7 @@ jobs:
         run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v3.0.2
+        uses: actions/cache@v3.0.4
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-params
@@ -148,7 +148,7 @@ jobs:
         run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v3.0.2
+        uses: actions/cache@v3.0.4
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-params
