@@ -16,7 +16,7 @@ categories = ["cryptography::cryptocurrencies"]
 all-features = true
 
 [dependencies]
-bellman = { version = "0.13", default-features = false, features = ["groth16"] }
+bellman = { version = "0.13.1", default-features = false, features = ["groth16"] }
 blake2b_simd = "1"
 bls12_381 = "0.7"
 byteorder = "1"

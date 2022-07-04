@@ -159,12 +159,19 @@ impl BatchValidator {
             return false;
         }
 
-        if self.spend_proofs.verify(&mut rng, spend_vk).is_err() {
+        #[cfg(feature = "multicore")]
+        let verify_proofs = |batch: groth16::batch::Verifier<Bls12>, vk| batch.verify_multicore(vk);
+
+        #[cfg(not(feature = "multicore"))]
+        let mut verify_proofs =
+            |batch: groth16::batch::Verifier<Bls12>, vk| batch.verify(&mut rng, vk);
+
+        if verify_proofs(self.spend_proofs, spend_vk).is_err() {
             tracing::debug!("Spend proof batch validation failed");
             return false;
         }
 
-        if self.output_proofs.verify(&mut rng, output_vk).is_err() {
+        if verify_proofs(self.output_proofs, output_vk).is_err() {
             tracing::debug!("Output proof batch validation failed");
             return false;
         }
