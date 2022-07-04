@@ -46,7 +46,8 @@ impl SaplingVerificationContext {
             sighash_value,
             spend_auth_sig,
             zkproof,
-            |rk, msg, spend_auth_sig| {
+            &mut (),
+            |_, rk, msg, spend_auth_sig| {
                 rk.verify_with_zip216(
                     &msg,
                     &spend_auth_sig,
@@ -54,7 +55,9 @@ impl SaplingVerificationContext {
                     zip216_enabled,
                 )
             },
-            |proof, public_inputs| verify_proof(verifying_key, &proof, &public_inputs[..]).is_ok(),
+            |_, proof, public_inputs| {
+                verify_proof(verifying_key, &proof, &public_inputs[..]).is_ok()
+            },
         )
     }
 

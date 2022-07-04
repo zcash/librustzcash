@@ -11,6 +11,9 @@ use super::compute_value_balance;
 mod single;
 pub use single::SaplingVerificationContext;
 
+mod batch;
+pub use batch::BatchValidator;
+
 /// A context object for verifying the Sapling components of a Zcash transaction.
 struct SaplingVerificationContextInner {
     // (sum of the Spend value commitments) - (sum of the Output value commitments)
@@ -28,7 +31,7 @@ impl SaplingVerificationContextInner {
     /// Perform consensus checks on a Sapling SpendDescription, while
     /// accumulating its value commitment inside the context for later use.
     #[allow(clippy::too_many_arguments)]
-    fn check_spend(
+    fn check_spend<C>(
         &mut self,
         cv: jubjub::ExtendedPoint,
         anchor: bls12_381::Scalar,
@@ -37,8 +40,9 @@ impl SaplingVerificationContextInner {
         sighash_value: &[u8; 32],
         spend_auth_sig: Signature,
         zkproof: Proof<Bls12>,
-        spend_auth_sig_verifier: impl FnOnce(PublicKey, [u8; 64], Signature) -> bool,
-        proof_verifier: impl FnOnce(Proof<Bls12>, [bls12_381::Scalar; 7]) -> bool,
+        verifier_ctx: &mut C,
+        spend_auth_sig_verifier: impl FnOnce(&mut C, PublicKey, [u8; 64], Signature) -> bool,
+        proof_verifier: impl FnOnce(&mut C, Proof<Bls12>, [bls12_381::Scalar; 7]) -> bool,
     ) -> bool {
         if (cv.is_small_order() | rk.0.is_small_order()).into() {
             return false;
@@ -57,7 +61,7 @@ impl SaplingVerificationContextInner {
 
         // Verify the spend_auth_sig
         let rk_affine = rk.0.to_affine();
-        if !spend_auth_sig_verifier(rk, data_to_be_signed, spend_auth_sig) {
+        if !spend_auth_sig_verifier(verifier_ctx, rk, data_to_be_signed, spend_auth_sig) {
             return false;
         }
 
@@ -89,7 +93,7 @@ impl SaplingVerificationContextInner {
         }
 
         // Verify the proof
-        proof_verifier(zkproof, public_input)
+        proof_verifier(verifier_ctx, zkproof, public_input)
     }
 
     /// Perform consensus checks on a Sapling OutputDescription, while
