@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_proofs::sapling::BatchValidator`
 
 ## [0.7.0] - 2022-06-24
 ### Changed

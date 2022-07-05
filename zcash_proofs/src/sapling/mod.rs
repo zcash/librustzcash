@@ -8,7 +8,7 @@ mod prover;
 mod verifier;
 
 pub use self::prover::SaplingProvingContext;
-pub use self::verifier::SaplingVerificationContext;
+pub use self::verifier::{BatchValidator, SaplingVerificationContext};
 
 // This function computes `value` in the exponent of the value commitment base
 fn compute_value_balance(value: Amount) -> Option<jubjub::ExtendedPoint> {
