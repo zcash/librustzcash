@@ -44,14 +44,14 @@ impl SaplingVerificationContextInner {
         spend_auth_sig_verifier: impl FnOnce(&mut C, PublicKey, [u8; 64], Signature) -> bool,
         proof_verifier: impl FnOnce(&mut C, Proof<Bls12>, [bls12_381::Scalar; 7]) -> bool,
     ) -> bool {
-        // SCR:cv-not-small-order
-        // SCR:rk-not-small-order
+        // https://p.z.cash/SCR:cv-not-small-order
+        // https://p.z.cash/SCR:rk-not-small-order
         if (cv.is_small_order() | rk.0.is_small_order()).into() {
             return false;
         }
 
         // Accumulate the value commitment in the context
-        // *TCR:bad-txns-sapling-binding-signature-invalid
+        // https://p.z.cash/TCR:bad-txns-sapling-binding-signature-invalid?partial
         self.cv_sum += cv;
 
         // Grab the nullifier as a sequence of bytes
@@ -63,14 +63,14 @@ impl SaplingVerificationContextInner {
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
         // Verify the spend_auth_sig
-        // *SCR:sapling-spend-auth-signature-invalid
-        // *TCR:jubjub-canonical-encoding
+        // https://p.z.cash/SCR:sapling-spend-auth-signature-invalid?partial
+        // https://p.z.cash/TCR:jubjub-canonical-encoding?partial
         let rk_affine = rk.0.to_affine();
         if !spend_auth_sig_verifier(verifier_ctx, rk, data_to_be_signed, spend_auth_sig) {
             return false;
         }
 
-        // *SCR:invalid-proof
+        // https://p.z.cash/SCR:invalid-proof?partial
         // Construct public input for circuit
         let mut public_input = [bls12_381::Scalar::zero(); 7];
         {
@@ -112,17 +112,17 @@ impl SaplingVerificationContextInner {
         zkproof: Proof<Bls12>,
         proof_verifier: impl FnOnce(Proof<Bls12>, [bls12_381::Scalar; 5]) -> bool,
     ) -> bool {
-        // OCR:cv-not-small-order
-        // OCR:epk-not-small-order
+        // https://p.z.cash/OCR:cv-not-small-order
+        // https://p.z.cash/OCR:epk-not-small-order
         if (cv.is_small_order() | epk.is_small_order()).into() {
             return false;
         }
 
         // Accumulate the value commitment in the context
-        // *TCR:bad-txns-sapling-binding-signature-invalid
+        // https://p.z.cash/TCR:bad-txns-sapling-binding-signature-invalid?partial
         self.cv_sum -= cv;
 
-        // *OCR:invalid-proof
+        // https://p.z.cash/OCR:invalid-proof?partial
         // Construct public input for circuit
         let mut public_input = [bls12_381::Scalar::zero(); 5];
         {
@@ -171,8 +171,8 @@ impl SaplingVerificationContextInner {
         (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
 
         // Verify the binding_sig
-        // *TCR:bad-txns-sapling-binding-signature-invalid
-        // *TCR:jubjub-canonical-encoding
+        // https://p.z.cash/TCR:bad-txns-sapling-binding-signature-invalid?partial
+        // https://p.z.cash/TCR:jubjub-canonical-encoding?partial
         binding_sig_verifier(bvk, data_to_be_signed, binding_sig)
     }
 }
