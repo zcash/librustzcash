@@ -127,7 +127,7 @@ impl ScanningKey for DiversifiableFullViewingKey {
     }
 
     fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf {
-        note.nf(&self.fvk().vk, witness.position() as u64)
+        note.nf(&self.fvk().vk.nk, witness.position() as u64)
     }
 }
 
@@ -151,7 +151,7 @@ impl ScanningKey for ExtendedFullViewingKey {
     }
 
     fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf {
-        note.nf(&self.fvk.vk, witness.position() as u64)
+        note.nf(&self.fvk.vk.nk, witness.position() as u64)
     }
 }
 

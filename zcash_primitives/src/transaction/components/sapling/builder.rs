@@ -356,7 +356,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     let proof_generation_key = spend.extsk.expsk.proof_generation_key();
 
                     let nullifier = spend.note.nf(
-                        &proof_generation_key.to_viewing_key(),
+                        &proof_generation_key.to_viewing_key().nk,
                         spend.merkle_path.position,
                     );
 

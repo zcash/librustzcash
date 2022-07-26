@@ -9,6 +9,14 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_primitives::sapling::keys::DiversifiableFullViewingKey`
 - `zcash_primitives::sapling::keys::Scope`
+- `zcash_primitives::sapling::NullifierDerivingKey`
+
+### Changed
+- `zcash_primitives::sapling::ViewingKey` now stores `nk` as a
+  `NullifierDerivingKey` instead of as a bare `jubjub::SubgroupPoint`.
+- The signature of `zcash_primitives::sapling::Note::nf` has changed to
+  take just a `NullifierDerivingKey` (the only capability it actually required)
+  rather than the full `ViewingKey` as its first argument.
 
 ## [0.7.0] - 2022-06-24
 ### Changed

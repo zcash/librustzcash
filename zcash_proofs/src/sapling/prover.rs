@@ -96,7 +96,7 @@ impl SaplingProvingContext {
             rseed,
         };
 
-        let nullifier = note.nf(&viewing_key, merkle_path.position);
+        let nullifier = note.nf(&viewing_key.nk, merkle_path.position);
 
         // We now have the full witness for our circuit
         let instance = Spend {

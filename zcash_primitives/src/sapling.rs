@@ -185,15 +185,19 @@ impl ProofGenerationKey {
     pub fn to_viewing_key(&self) -> ViewingKey {
         ViewingKey {
             ak: self.ak,
-            nk: constants::PROOF_GENERATION_KEY_GENERATOR * self.nsk,
+            nk: NullifierDerivingKey(constants::PROOF_GENERATION_KEY_GENERATOR * self.nsk),
         }
     }
 }
 
+/// A key used to derive the nullifier for a Sapling note.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct NullifierDerivingKey(pub(crate) jubjub::SubgroupPoint);
+
 #[derive(Debug, Clone)]
 pub struct ViewingKey {
     pub ak: jubjub::SubgroupPoint,
-    pub nk: jubjub::SubgroupPoint,
+    pub nk: NullifierDerivingKey,
 }
 
 impl ViewingKey {
@@ -209,7 +213,7 @@ impl ViewingKey {
                 .personal(constants::CRH_IVK_PERSONALIZATION)
                 .to_state()
                 .update(&self.ak.to_bytes())
-                .update(&self.nk.to_bytes())
+                .update(&self.nk.0.to_bytes())
                 .finalize()
                 .as_bytes(),
         );
@@ -457,9 +461,9 @@ impl Note {
         (constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR * self.rcm()) + hash_of_contents
     }
 
-    /// Computes the nullifier given the viewing key and
+    /// Computes the nullifier given the nullifier deriving key and
     /// note position
-    pub fn nf(&self, viewing_key: &ViewingKey, position: u64) -> Nullifier {
+    pub fn nf(&self, nk: &NullifierDerivingKey, position: u64) -> Nullifier {
         // Compute rho = cm + position.G
         let rho = self.cm_full_point()
             + (constants::NULLIFIER_POSITION_GENERATOR * jubjub::Fr::from(position));
@@ -470,7 +474,7 @@ impl Note {
                 .hash_length(32)
                 .personal(constants::PRF_NF_PERSONALIZATION)
                 .to_state()
-                .update(&viewing_key.nk.to_bytes())
+                .update(&nk.0.to_bytes())
                 .update(&rho.to_bytes())
                 .finalize()
                 .as_bytes(),
