@@ -1469,7 +1469,8 @@ mod tests {
             assert!(result.is_some());
             assert_eq!(
                 result,
-                &try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, output).map(|r| (r, 1))
+                &try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, output)
+                    .map(|r| (r, 1))
             );
         }
     }
