@@ -16,7 +16,7 @@ use zcash_primitives::{
     zip32::ExtendedFullViewingKey,
 };
 
-use crate::proto::compact_formats::{CompactBlock, CompactOutput};
+use crate::proto::compact_formats::CompactBlock;
 use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 
 /// Scans a [`CompactOutput`] with a set of [`ScanningKey`]s.
@@ -32,29 +32,12 @@ use crate::wallet::{AccountId, WalletShieldedOutput, WalletShieldedSpend, Wallet
 fn scan_output<P: consensus::Parameters, K: ScanningKey>(
     params: &P,
     height: BlockHeight,
-    (index, output): (usize, CompactOutput),
+    index: usize,
+    output: CompactOutputDescription,
     vks: &[(&AccountId, &K)],
     spent_from_accounts: &HashSet<AccountId>,
     tree: &mut CommitmentTree<Node>,
-    existing_witnesses: &mut [&mut IncrementalWitness<Node>],
-    block_witnesses: &mut [&mut IncrementalWitness<Node>],
-    new_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Option<WalletShieldedOutput<K::Nf>> {
-    let output = CompactOutputDescription::try_from(output).ok()?;
-
-    // Increment tree and witnesses
-    let node = Node::new(output.cmu.to_repr());
-    for witness in existing_witnesses {
-        witness.append(node).unwrap();
-    }
-    for witness in block_witnesses {
-        witness.append(node).unwrap();
-    }
-    for witness in new_witnesses {
-        witness.append(node).unwrap();
-    }
-    tree.append(node).unwrap();
-
     for (account, vk) in vks.iter() {
         let (note, to) = match vk.try_decryption(params, height, &output) {
             Some(ret) => ret,
@@ -249,25 +232,38 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                 })
                 .collect();
 
-            for to_scan in tx.outputs.into_iter().enumerate() {
+            for (index, output) in tx.outputs.into_iter().enumerate() {
                 // Grab mutable references to new witnesses from previous outputs
                 // in this transaction so that we can update them. Scoped so we
                 // don't hold mutable references to shielded_outputs for too long.
-                let mut new_witnesses: Vec<_> = shielded_outputs
+                let new_witnesses: Vec<_> = shielded_outputs
                     .iter_mut()
                     .map(|output| &mut output.witness)
                     .collect();
 
+                let output = CompactOutputDescription::try_from(output).ok().unwrap();
+
+                // Increment tree and witnesses
+                let node = Node::new(output.cmu.to_repr());
+                for witness in &mut *existing_witnesses {
+                    witness.append(node).unwrap();
+                }
+                for witness in &mut block_witnesses {
+                    witness.append(node).unwrap();
+                }
+                for witness in new_witnesses {
+                    witness.append(node).unwrap();
+                }
+                tree.append(node).unwrap();
+
                 if let Some(output) = scan_output(
                     params,
                     block_height,
-                    to_scan,
+                    index,
+                    output,
                     vks,
                     &spent_from_accounts,
                     tree,
-                    existing_witnesses,
-                    &mut block_witnesses,
-                    &mut new_witnesses,
                 ) {
                     shielded_outputs.push(output);
                 }
