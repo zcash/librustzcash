@@ -43,6 +43,7 @@ zcash_note_encryption = { version = "0.0", path = "../components/zcash_note_encr
 
 [dev-dependencies]
 criterion = "0.3"
+proptest = "1.0.0"
 hex-literal = "0.3"
 rand_xorshift = "0.3"
 

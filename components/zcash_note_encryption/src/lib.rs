@@ -383,7 +383,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     let shared_secret = D::ka_agree_dec(ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    try_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+    try_note_decryption_inner(domain, ivk, &ephemeral_key, output, &key)
 }
 
 fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
@@ -391,7 +391,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
     output: &Output,
-    key: D::SymmetricKey,
+    key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let enc_ciphertext = output.enc_ciphertext();
     assert_eq!(enc_ciphertext.len(), ENC_CIPHERTEXT_SIZE);
@@ -478,7 +478,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     let shared_secret = D::ka_agree_dec(&ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+    try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, &key)
 }
 
 fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
@@ -486,7 +486,7 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
     output: &Output,
-    key: D::SymmetricKey,
+    key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient)> {
     assert_eq!(output.enc_ciphertext().len(), COMPACT_NOTE_SIZE);
 

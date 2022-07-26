@@ -1401,7 +1401,7 @@ mod tests {
                 )],
             )[..]
             {
-                [Some((decrypted_note, decrypted_to, decrypted_memo))] => {
+                [Some(((decrypted_note, decrypted_to, decrypted_memo), _i))] => {
                     assert_eq!(decrypted_note, &note);
                     assert_eq!(decrypted_to, &to);
                     assert_eq!(&decrypted_memo.as_array()[..], &tv.memo[..]);
@@ -1417,7 +1417,7 @@ mod tests {
                 )],
             )[..]
             {
-                [Some((decrypted_note, decrypted_to))] => {
+                [Some(((decrypted_note, decrypted_to), _i))] => {
                     assert_eq!(decrypted_note, &note);
                     assert_eq!(decrypted_to, &to);
                 }
@@ -1462,21 +1462,14 @@ mod tests {
             .collect();
 
         let res = batch::try_note_decryption(&[invalid_ivk.clone(), valid_ivk.clone()], &outputs);
-        assert_eq!(res.len(), 20);
-        // The batched trial decryptions with invalid_ivk failed.
-        assert_eq!(&res[..10], &vec![None; 10][..]);
-        for (result, (_, output)) in res[10..].iter().zip(outputs.iter()) {
-            // Confirm that the outputs should indeed have failed with invalid_ivk
-            assert_eq!(
-                try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, output),
-                None
-            );
-
+        assert_eq!(res.len(), 10);
+        for (result, (_, output)) in res.iter().zip(outputs.iter()) {
             // Confirm the successful batched trial decryptions gave the same result.
+            // In all cases, the index of the valid ivk is returned.
             assert!(result.is_some());
             assert_eq!(
                 result,
-                &try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, output)
+                &try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, output).map(|r| (r, 1))
             );
         }
     }
