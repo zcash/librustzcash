@@ -320,7 +320,7 @@ impl<'a, BuildCtx> TzeInputs<'a, BuildCtx> {
     {
         self.builders.push(TzeInputInfo {
             prevout: tzeout,
-            builder: Box::new(move |ctx| builder(&ctx).map(|x| x.to_payload())),
+            builder: Box::new(move |ctx| builder(ctx).map(|x| x.to_payload())),
         });
     }
 }

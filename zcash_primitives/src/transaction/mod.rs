@@ -533,6 +533,7 @@ impl Transaction {
     }
 
     #[allow(clippy::redundant_closure)]
+    #[allow(clippy::type_complexity)]
     fn read_v5_sapling<R: Read>(
         mut reader: R,
     ) -> io::Result<(

@@ -275,7 +275,7 @@ where
                     Err(Error::MemoForbidden)
                 } else {
                     builder
-                        .add_transparent_output(&to, payment.amount)
+                        .add_transparent_output(to, payment.amount)
                         .map_err(Error::Builder)
                 }
             }

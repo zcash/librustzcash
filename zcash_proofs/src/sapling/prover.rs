@@ -86,8 +86,7 @@ impl SaplingProvingContext {
         let payment_address = viewing_key.to_payment_address(diversifier).ok_or(())?;
 
         // This is the result of the re-randomization, we compute it for the caller
-        let rk =
-            PublicKey(proof_generation_key.ak.clone().into()).randomize(ar, SPENDING_KEY_GENERATOR);
+        let rk = PublicKey(proof_generation_key.ak.into()).randomize(ar, SPENDING_KEY_GENERATOR);
 
         // Let's compute the nullifier while we have the position
         let note = Note {

@@ -282,15 +282,15 @@ pub(crate) fn to_txid(
             txdata.lock_time,
             txdata.expiry_height,
         ),
-        hash_transparent_txid_data(&txdata),
-        hash_sapling_txid_data(&txdata),
+        hash_transparent_txid_data(txdata),
+        hash_sapling_txid_data(txdata),
         orchard_bundle.map_or_else(
-            || orchard::hash_bundle_txid_empty(),
+            orchard::hash_bundle_txid_empty,
             orchard::hash_bundle_txid_data,
         ),
         #[cfg(feature = "zfuture")]
         if txdata.version.has_tze() {
-            Some(hash_tze_txid_data(&txdata))
+            Some(hash_tze_txid_data(txdata))
         } else {
             None
         },

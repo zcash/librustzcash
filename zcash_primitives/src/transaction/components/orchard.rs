@@ -42,7 +42,7 @@ impl Flags {
         }
     }
 
-    fn to_byte(&self) -> u8 {
+    fn to_byte(self) -> u8 {
         let mut value = 0u8;
         if self.spends_enabled {
             value |= FLAG_SPENDS_ENABLED;

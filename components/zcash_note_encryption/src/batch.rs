@@ -29,6 +29,7 @@ pub fn try_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>>(
 /// with the same length and in the same order as the outputs were
 /// provided, along with the index in the `ivks` slice associated with
 /// the IVK that successfully decrypted the output.
+#[allow(clippy::type_complexity)]
 pub fn try_compact_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],

@@ -38,7 +38,7 @@ pub fn spending_key(seed: &[u8], coin_type: u32, account: AccountId) -> Extended
     }
 
     ExtendedSpendingKey::from_path(
-        &ExtendedSpendingKey::master(&seed),
+        &ExtendedSpendingKey::master(seed),
         &[
             ChildIndex::Hardened(32),
             ChildIndex::Hardened(coin_type),
@@ -96,7 +96,7 @@ pub fn derive_extended_private_key_from_seed<P: consensus::Parameters>(
     account: AccountId,
     index: u32,
 ) -> Result<ExtendedPrivKey, hdwallet::error::Error> {
-    let pk = ExtendedPrivKey::with_seed(&seed)?;
+    let pk = ExtendedPrivKey::with_seed(seed)?;
     let private_key = pk
         .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
         .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
@@ -119,10 +119,8 @@ impl Wif {
         wif[1..33].copy_from_slice(secret_key);
         if compressed {
             wif[33] = 0x01;
-            Wif(bs58::encode(&wif[..]).with_check().into_string())
-        } else {
-            Wif(bs58::encode(&wif[..]).with_check().into_string())
         }
+        Wif(bs58::encode(&wif[..]).with_check().into_string())
     }
 }
 

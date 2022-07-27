@@ -261,7 +261,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         ivk: &Self::IncomingViewingKey,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
-        sapling_parse_note_plaintext_without_memo(&self, plaintext, |diversifier| {
+        sapling_parse_note_plaintext_without_memo(self, plaintext, |diversifier| {
             Some(diversifier.g_d()? * ivk.0)
         })
     }
@@ -273,7 +273,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         ephemeral_key: &EphemeralKeyBytes,
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
-        sapling_parse_note_plaintext_without_memo(&self, plaintext, |diversifier| {
+        sapling_parse_note_plaintext_without_memo(self, plaintext, |diversifier| {
             if (diversifier.g_d()? * esk).to_bytes() == ephemeral_key.0 {
                 Some(*pk_d)
             } else {
@@ -606,7 +606,7 @@ mod tests {
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
     ) {
-        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(epk));
+        let ock = prf_ock(ovk, cv, &cmu.to_repr(), &epk_bytes(epk));
 
         let mut op = [0; OUT_PLAINTEXT_SIZE];
         op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
@@ -625,7 +625,7 @@ mod tests {
         let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
         let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
-        let key = kdf_sapling(shared_secret, &epk_bytes(&epk));
+        let key = kdf_sapling(shared_secret, &epk_bytes(epk));
 
         let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
         plaintext.copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
@@ -1461,7 +1461,7 @@ mod tests {
             })
             .collect();
 
-        let res = batch::try_note_decryption(&[invalid_ivk.clone(), valid_ivk.clone()], &outputs);
+        let res = batch::try_note_decryption(&[invalid_ivk, valid_ivk.clone()], &outputs);
         assert_eq!(res.len(), 10);
         for (result, (_, output)) in res.iter().zip(outputs.iter()) {
             // Confirm the successful batched trial decryptions gave the same result.

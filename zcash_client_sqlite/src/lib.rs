@@ -203,25 +203,25 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     type TxRef = i64;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        wallet::block_height_extrema(&self).map_err(SqliteClientError::from)
+        wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        wallet::get_block_hash(&self, block_height).map_err(SqliteClientError::from)
+        wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_tx_height(&self, txid).map_err(SqliteClientError::from)
+        wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
     fn get_extended_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, ExtendedFullViewingKey>, Self::Error> {
-        wallet::get_extended_full_viewing_keys(&self)
+        wallet::get_extended_full_viewing_keys(self)
     }
 
     fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
-        wallet::get_address(&self, account)
+        wallet::get_address(self, account)
     }
 
     fn is_valid_account_extfvk(
@@ -229,7 +229,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
-        wallet::is_valid_account_extfvk(&self, account, extfvk)
+        wallet::is_valid_account_extfvk(self, account, extfvk)
     }
 
     fn get_balance_at(
@@ -237,11 +237,11 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        wallet::get_balance_at(&self, account, anchor_height)
+        wallet::get_balance_at(self, account, anchor_height)
     }
 
     fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(&self, id_tx)
+        wallet::get_transaction(self, id_tx)
     }
 
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
@@ -255,7 +255,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
-        wallet::get_commitment_tree(&self, block_height)
+        wallet::get_commitment_tree(self, block_height)
     }
 
     #[allow(clippy::type_complexity)]
@@ -263,15 +263,15 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-        wallet::get_witnesses(&self, block_height)
+        wallet::get_witnesses(self, block_height)
     }
 
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        wallet::get_nullifiers(&self)
+        wallet::get_nullifiers(self)
     }
 
     fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        wallet::get_all_nullifiers(&self)
+        wallet::get_all_nullifiers(self)
     }
 
     fn get_unspent_sapling_notes(
@@ -279,7 +279,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
-        wallet::transact::get_unspent_sapling_notes(&self, account, anchor_height)
+        wallet::transact::get_unspent_sapling_notes(self, account, anchor_height)
     }
 
     fn select_unspent_sapling_notes(
@@ -288,7 +288,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error> {
-        wallet::transact::select_unspent_sapling_notes(&self, account, target_value, anchor_height)
+        wallet::transact::select_unspent_sapling_notes(self, account, target_value, anchor_height)
     }
 
     fn get_unspent_transparent_utxos(
@@ -296,7 +296,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         address: &TransparentAddress,
         anchor_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        wallet::get_unspent_transparent_utxos(&self, address, anchor_height)
+        wallet::get_unspent_transparent_utxos(self, address, anchor_height)
     }
 }
 
@@ -481,12 +481,12 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 block.block_height,
                 block.block_hash,
                 block.block_time,
-                &block.commitment_tree,
+                block.commitment_tree,
             )?;
 
             let mut new_witnesses = vec![];
             for tx in block.transactions {
-                let tx_row = wallet::put_tx_meta(up, &tx, block.block_height)?;
+                let tx_row = wallet::put_tx_meta(up, tx, block.block_height)?;
 
                 // Mark notes as spent and remove them from the scanning cache
                 for spend in &tx.shielded_spends {
@@ -594,7 +594,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             let mut tx_bytes = vec![];
             sent_tx.tx.write(&mut tx_bytes)?;
 
-            let tx_ref = wallet::put_tx_data(up, &tx_bytes, &sent_tx.tx, Some(sent_tx.created))?;
+            let tx_ref = wallet::put_tx_data(up, &tx_bytes, sent_tx.tx, Some(sent_tx.created))?;
 
             // Mark notes as spent.
             //
@@ -609,7 +609,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             for utxo_outpoint in &sent_tx.utxos_spent {
-                wallet::mark_transparent_utxo_spent(up, tx_ref, &utxo_outpoint)?;
+                wallet::mark_transparent_utxo_spent(up, tx_ref, utxo_outpoint)?;
             }
 
             for output in &sent_tx.outputs {
@@ -619,7 +619,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         tx_ref,
                         output.output_index,
                         sent_tx.account,
-                        &addr,
+                        addr,
                         output.value,
                         output.memo.as_ref(),
                     )?,
@@ -628,7 +628,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         tx_ref,
                         output.output_index,
                         sent_tx.account,
-                        &addr,
+                        addr,
                         output.value,
                     )?,
                 }

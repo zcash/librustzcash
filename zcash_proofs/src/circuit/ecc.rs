@@ -862,7 +862,6 @@ mod test {
                 cs.set("select/v'/num", bls12_381::Scalar::one());
                 assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/v' computation");
                 cs.set("select/u'/num", bls12_381::Scalar::zero());
-                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/u' computation");
             } else {
                 assert_eq!(q.u.get_value().unwrap(), bls12_381::Scalar::zero());
                 assert_eq!(q.v.get_value().unwrap(), bls12_381::Scalar::one());
@@ -870,8 +869,8 @@ mod test {
                 cs.set("select/v'/num", u0);
                 assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/v' computation");
                 cs.set("select/u'/num", v0);
-                assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/u' computation");
             }
+            assert_eq!(cs.which_is_unsatisfied().unwrap(), "select/u' computation");
         }
     }
 

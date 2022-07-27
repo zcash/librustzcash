@@ -501,7 +501,7 @@ pub fn rewind_to_height<P: consensus::Parameters>(
     let rewind_height = if block_height >= (last_scanned_height - PRUNING_HEIGHT) {
         Some(block_height)
     } else {
-        match get_rewind_height(&wdb)? {
+        match get_rewind_height(wdb)? {
             Some(h) => {
                 if block_height > h {
                     return Err(SqliteClientError::RequestedRewindInvalid(h));
@@ -848,14 +848,14 @@ pub fn mark_transparent_utxo_spent<'a, P>(
     outpoint: &OutPoint,
 ) -> Result<(), SqliteClientError> {
     let sql_args: &[(&str, &dyn ToSql)] = &[
-        (&":spent_in_tx", &tx_ref),
-        (&":prevout_txid", &outpoint.hash().to_vec()),
-        (&":prevout_idx", &outpoint.n()),
+        (":spent_in_tx", &tx_ref),
+        (":prevout_txid", &outpoint.hash().to_vec()),
+        (":prevout_idx", &outpoint.n()),
     ];
 
     stmts
         .stmt_mark_transparent_utxo_spent
-        .execute_named(&sql_args)?;
+        .execute_named(sql_args)?;
 
     Ok(())
 }
@@ -865,17 +865,17 @@ pub fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
     let sql_args: &[(&str, &dyn ToSql)] = &[
-        (&":address", &output.address.encode(&stmts.wallet_db.params)),
-        (&":prevout_txid", &output.outpoint.hash().to_vec()),
-        (&":prevout_idx", &output.outpoint.n()),
-        (&":script", &output.script),
-        (&":value_zat", &i64::from(output.value)),
-        (&":height", &u32::from(output.height)),
+        (":address", &output.address.encode(&stmts.wallet_db.params)),
+        (":prevout_txid", &output.outpoint.hash().to_vec()),
+        (":prevout_idx", &output.outpoint.n()),
+        (":script", &output.script),
+        (":value_zat", &i64::from(output.value)),
+        (":height", &u32::from(output.height)),
     ];
 
     stmts
         .stmt_insert_received_transparent_utxo
-        .execute_named(&sql_args)?;
+        .execute_named(sql_args)?;
 
     Ok(UtxoId(stmts.wallet_db.conn.last_insert_rowid()))
 }
@@ -886,11 +886,11 @@ pub fn delete_utxos_above<'a, P: consensus::Parameters>(
     height: BlockHeight,
 ) -> Result<usize, SqliteClientError> {
     let sql_args: &[(&str, &dyn ToSql)] = &[
-        (&":address", &taddr.encode(&stmts.wallet_db.params)),
-        (&":above_height", &u32::from(height)),
+        (":address", &taddr.encode(&stmts.wallet_db.params)),
+        (":above_height", &u32::from(height)),
     ];
 
-    let rows = stmts.stmt_delete_utxos.execute_named(&sql_args)?;
+    let rows = stmts.stmt_delete_utxos.execute_named(sql_args)?;
 
     Ok(rows)
 }
@@ -915,21 +915,21 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     let nf_bytes = output.nullifier().map(|nf| nf.0.to_vec());
 
     let sql_args: &[(&str, &dyn ToSql)] = &[
-        (&":account", &account),
-        (&":diversifier", &diversifier),
-        (&":value", &value),
-        (&":rcm", &rcm),
-        (&":nf", &nf_bytes),
-        (&":memo", &memo),
-        (&":is_change", &is_change),
-        (&":tx", &tx),
-        (&":output_index", &output_index),
+        (":account", &account),
+        (":diversifier", &diversifier),
+        (":value", &value),
+        (":rcm", &rcm),
+        (":nf", &nf_bytes),
+        (":memo", &memo),
+        (":is_change", &is_change),
+        (":tx", &tx),
+        (":output_index", &output_index),
     ];
 
     // First try updating an existing received note into the database.
-    if stmts.stmt_update_received_note.execute_named(&sql_args)? == 0 {
+    if stmts.stmt_update_received_note.execute_named(sql_args)? == 0 {
         // It isn't there, so insert our note into the database.
-        stmts.stmt_insert_received_note.execute_named(&sql_args)?;
+        stmts.stmt_insert_received_note.execute_named(sql_args)?;
 
         Ok(NoteId::ReceivedNoteId(
             stmts.wallet_db.conn.last_insert_rowid(),
@@ -998,7 +998,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     // Try updating an existing sent note.
     if stmts.stmt_update_sent_note.execute(params![
         account.0 as i64,
-        encode_payment_address_p(&stmts.wallet_db.params, &to),
+        encode_payment_address_p(&stmts.wallet_db.params, to),
         ivalue,
         &memo.map(|m| m.as_slice()),
         tx_ref,
@@ -1006,7 +1006,7 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     ])? == 0
     {
         // It isn't there, so insert.
-        insert_sent_note(stmts, tx_ref, output_index, account, &to, value, memo)?
+        insert_sent_note(stmts, tx_ref, output_index, account, to, value, memo)?
     }
 
     Ok(())
@@ -1024,7 +1024,7 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     // Try updating an existing sent note.
     if stmts.stmt_update_sent_note.execute(params![
         account.0 as i64,
-        encode_transparent_address_p(&stmts.wallet_db.params, &to),
+        encode_transparent_address_p(&stmts.wallet_db.params, to),
         ivalue,
         (None::<&[u8]>),
         tx_ref,
@@ -1032,7 +1032,7 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     ])? == 0
     {
         // It isn't there, so insert.
-        insert_sent_utxo(stmts, tx_ref, output_index, account, &to, value)?
+        insert_sent_utxo(stmts, tx_ref, output_index, account, to, value)?
     }
 
     Ok(())

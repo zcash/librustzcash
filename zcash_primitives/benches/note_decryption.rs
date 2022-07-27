@@ -101,12 +101,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         let size = 10;
         let outputs: Vec<_> = iter::repeat(output)
             .take(size)
-            .map(|output| {
-                (
-                    SaplingDomain::for_height(TEST_NETWORK.clone(), height),
-                    output,
-                )
-            })
+            .map(|output| (SaplingDomain::for_height(TEST_NETWORK, height), output))
             .collect();
 
         let mut group = c.benchmark_group("sapling-batch-note-decryption");
@@ -122,7 +117,7 @@ fn bench_note_decryption(c: &mut Criterion) {
 
         let compact: Vec<_> = outputs
             .into_iter()
-            .map(|(domain, output)| (domain, CompactOutputDescription::from(output.clone())))
+            .map(|(domain, output)| (domain, CompactOutputDescription::from(output)))
             .collect();
 
         group.bench_function(BenchmarkId::new("compact-valid", size), |b| {

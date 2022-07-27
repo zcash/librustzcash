@@ -84,8 +84,8 @@ impl ChildIndex {
         ChildIndex::from_index(0)
     }
 
-    fn to_index(&self) -> u32 {
-        match *self {
+    fn to_index(self) -> u32 {
+        match self {
             ChildIndex::Hardened(i) => i + (1 << 31),
             ChildIndex::NonHardened(i) => i,
         }

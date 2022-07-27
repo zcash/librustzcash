@@ -212,7 +212,7 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                 .iter()
                 .map(|(_, k)| k.to_sapling_ivk())
                 .collect::<Vec<_>>();
-            let decrypted = batch::try_compact_note_decryption(&ivks, &decoded);
+            let decrypted = batch::try_compact_note_decryption(&ivks, decoded);
 
             for (index, ((_, output), dec_output)) in decoded.iter().zip(decrypted).enumerate() {
                 // Grab mutable references to new witnesses from previous outputs
@@ -244,7 +244,7 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                     // - Notes created by consolidation transactions.
                     // - Notes sent from one account to itself.
                     let (account, vk) = vks[vk_idx];
-                    let is_change = spent_from_accounts.contains(&account);
+                    let is_change = spent_from_accounts.contains(account);
                     let witness = IncrementalWitness::from_tree(tree);
                     let nf = vk.sapling_nf(&note, &witness);
 
