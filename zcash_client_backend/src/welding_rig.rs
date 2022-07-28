@@ -38,12 +38,14 @@ pub trait ScanningKey {
     /// The type of key that is used to decrypt Sapling outputs;
     type SaplingNk;
 
+    type SaplingKeys: IntoIterator<Item = (SaplingIvk, Self::SaplingNk)>;
+
     /// The type of nullifier extracted when a note is successfully
     /// obtained by trial decryption.
     type Nf;
 
     /// Obtain the underlying Sapling incoming viewing key(s) for this scanning key.
-    fn to_sapling_keys(&self) -> Vec<(SaplingIvk, Self::SaplingNk)>;
+    fn to_sapling_keys(&self) -> Self::SaplingKeys;
 
     /// Produces the nullifier for the specified note and witness, if possible.
     ///
@@ -59,10 +61,11 @@ pub trait ScanningKey {
 
 impl ScanningKey for DiversifiableFullViewingKey {
     type SaplingNk = NullifierDerivingKey;
+    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 2];
     type Nf = sapling::Nullifier;
 
-    fn to_sapling_keys(&self) -> Vec<(SaplingIvk, Self::SaplingNk)> {
-        vec![
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [
             (self.to_ivk(Scope::External), self.to_nk(Scope::External)),
             (self.to_ivk(Scope::Internal), self.to_nk(Scope::Internal)),
         ]
@@ -83,10 +86,11 @@ impl ScanningKey for DiversifiableFullViewingKey {
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 impl ScanningKey for ExtendedFullViewingKey {
     type SaplingNk = NullifierDerivingKey;
+    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 1];
     type Nf = sapling::Nullifier;
 
-    fn to_sapling_keys(&self) -> Vec<(SaplingIvk, Self::SaplingNk)> {
-        vec![(self.fvk.vk.ivk(), self.fvk.vk.nk)]
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [(self.fvk.vk.ivk(), self.fvk.vk.nk)]
     }
 
     fn sapling_nf(
@@ -104,10 +108,11 @@ impl ScanningKey for ExtendedFullViewingKey {
 /// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 impl ScanningKey for SaplingIvk {
     type SaplingNk = ();
+    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 1];
     type Nf = ();
 
-    fn to_sapling_keys(&self) -> Vec<(SaplingIvk, Self::SaplingNk)> {
-        vec![(self.clone(), ())]
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [(self.clone(), ())]
     }
 
     fn sapling_nf(_key: &Self::SaplingNk, _note: &Note, _witness: &IncrementalWitness<Node>) {}
