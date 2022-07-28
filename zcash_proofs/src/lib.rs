@@ -460,9 +460,9 @@ fn verify_file_size(
 }
 
 /// Check if the Blake2b hash from `hash_reader` matches `expected_hash`,
-/// while streaming from `data` into `sink`.
+/// while streaming from `hash_reader` into `sink`.
 ///
-/// `hash_reader` can be used to partially read `data`,
+/// `hash_reader` can be used to partially read its inner reader's data,
 /// before verifying the hash using this function.
 ///
 /// Returns an error containing `name` and `params_source` on failure.
