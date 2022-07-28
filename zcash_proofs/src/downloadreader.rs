@@ -23,7 +23,7 @@ impl From<minreq::ResponseLazy> for ResponseLazyReader {
 
 impl io::Read for ResponseLazyReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        use ResponseLazyReader::*;
+        use ResponseLazyReader::{Request, Response};
 
         // Zero-sized buffer. This should never happen.
         if buf.is_empty() {
