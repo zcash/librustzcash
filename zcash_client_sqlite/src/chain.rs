@@ -1,13 +1,16 @@
 //! Functions for enforcing chain validity and handling chain reorgs.
 use protobuf::Message;
 
-use rusqlite::params;
+use rusqlite::{params, Connection, NO_PARAMS};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
 
 use zcash_primitives::consensus::BlockHeight;
 
 use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
 
-use crate::{error::SqliteClientError, BlockDb};
+use crate::{error::SqliteClientError, BlockDb, BlockHash, FsBlockDb};
 
 pub mod init;
 
@@ -22,7 +25,7 @@ struct CompactBlockRow {
 /// with each block retrieved from the backing store. If the `limit`
 /// value provided is `None`, all blocks are traversed up to the
 /// maximum height.
-pub fn with_blocks<F>(
+pub fn blockdb_with_blocks<F>(
     cache: &BlockDb,
     from_height: BlockHeight,
     limit: Option<u32>,
@@ -59,6 +62,120 @@ where
         }
 
         with_row(block)?;
+    }
+
+    Ok(())
+}
+
+pub struct BlockMeta {
+    pub height: BlockHeight,
+    pub block_hash: BlockHash,
+    pub block_time: u32,
+    pub sapling_outputs_count: u32,
+    pub orchard_actions_count: u32,
+}
+
+pub fn blockmetadb_insert(
+    conn: &Connection,
+    block_meta: &[BlockMeta],
+) -> Result<(), SqliteClientError> {
+    let mut stmt_insert = conn.prepare(
+        "INSERT INTO compactblocks_meta (height, blockhash, time, sapling_outputs_count, orchard_actions_count)
+        VALUES (?, ?, ?, ?, ?)"
+    )?;
+
+    conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    let result = block_meta
+        .iter()
+        .map(|m| {
+            stmt_insert.execute(params![
+                u32::from(m.height),
+                &m.block_hash.0[..],
+                m.block_time,
+                m.sapling_outputs_count,
+                m.orchard_actions_count,
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>();
+    match result {
+        Ok(_) => {
+            conn.execute("COMMIT", NO_PARAMS)?;
+            Ok(())
+        }
+        Err(error) => {
+            match conn.execute("ROLLBACK", NO_PARAMS) {
+                Ok(_) => Err(SqliteClientError::DbError(error)),
+                Err(e) =>
+                    // Panicking here is probably the right thing to do, because it
+                    // means the database is corrupt.
+                    panic!(
+                        "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
+                        e,
+                        error
+                    )
+            }
+        }
+    }
+}
+
+/// Implements a traversal of `limit` blocks of the block cache database.
+///
+/// Starting at `from_height`, the `with_row` callback is invoked
+/// with each block retrieved from the backing store. If the `limit`
+/// value provided is `None`, all blocks are traversed up to the
+/// maximum height.
+pub fn fsblockdb_with_blocks<F, P: AsRef<Path>>(
+    cache: &FsBlockDb<P>,
+    from_height: BlockHeight,
+    limit: Option<u32>,
+    mut with_block: F,
+) -> Result<(), SqliteClientError>
+where
+    F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
+{
+    // Fetch the CompactBlocks we need to scan
+    let mut stmt_blocks = cache.conn.prepare(
+        "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
+         FROM compactblocks_meta
+         WHERE height > ?
+         ORDER BY height ASC LIMIT ?",
+    )?;
+
+    let rows = stmt_blocks.query_map(
+        params![u32::from(from_height), limit.unwrap_or(u32::max_value()),],
+        |row| {
+            Ok(BlockMeta {
+                height: BlockHeight::from_u32(row.get(0)?),
+                block_hash: BlockHash::from_slice(&row.get::<_, Vec<_>>(1)?),
+                block_time: row.get(2)?,
+                sapling_outputs_count: row.get(3)?,
+                orchard_actions_count: row.get(4)?,
+            })
+        },
+    )?;
+
+    for row_result in rows {
+        let cbr = row_result?;
+        let block_file = File::open(
+            cache
+                .blocks_dir
+                .as_ref()
+                .join(Path::new(&format!("compactblock-{}-{}", cbr.height, cbr.block_hash))),
+        )?;
+        let mut buf_reader = BufReader::new(block_file);
+
+        let block: CompactBlock =
+            Message::parse_from_reader(&mut buf_reader).map_err(Error::from)?;
+
+        if block.height() != cbr.height {
+            return Err(SqliteClientError::CorruptedData(format!(
+                "Block height {} did not match row's height field value {}",
+                block.height(),
+                cbr.height
+            )));
+        }
+
+        with_block(block)?;
     }
 
     Ok(())

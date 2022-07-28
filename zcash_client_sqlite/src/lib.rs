@@ -30,10 +30,12 @@
 //! [`init_cache_database`]: crate::chain::init::init_cache_database
 
 // Catch documentation errors caused by code changes.
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fs;
+use std::io;
 use std::path::Path;
 
 use rusqlite::{Connection, Statement, NO_PARAMS};
@@ -58,7 +60,7 @@ use zcash_client_backend::{
     wallet::{AccountId, SpendableNote},
 };
 
-use crate::error::SqliteClientError;
+use crate::{chain::BlockMeta, error::SqliteClientError};
 
 use {
     zcash_client_backend::wallet::WalletTransparentOutput,
@@ -666,7 +668,38 @@ impl BlockSource for BlockDb {
     where
         F: FnMut(CompactBlock) -> Result<(), Self::Error>,
     {
-        chain::with_blocks(self, from_height, limit, with_row)
+        chain::blockdb_with_blocks(self, from_height, limit, with_row)
+    }
+}
+
+pub struct FsBlockDb<P: AsRef<Path>> {
+    conn: Connection,
+    blocks_dir: P,
+}
+
+#[derive(Debug)]
+pub enum FsBlockDbError<P: AsRef<Path>> {
+    FsError(io::Error),
+    DbError(rusqlite::Error),
+    InvalidBlocksDir(P),
+    InvalidBlockPath(P),
+}
+
+impl<P: AsRef<Path>> FsBlockDb<P> {
+    pub fn for_paths(db_path: P, blocks_dir: P) -> Result<Self, FsBlockDbError<P>> {
+        let meta = fs::metadata(&blocks_dir).map_err(FsBlockDbError::FsError)?;
+        if meta.is_dir() {
+            Ok(FsBlockDb {
+                conn: Connection::open(db_path).map_err(FsBlockDbError::DbError)?,
+                blocks_dir,
+            })
+        } else {
+            Err(FsBlockDbError::InvalidBlocksDir(blocks_dir))
+        }
+    }
+
+    pub fn write_block_metadata(&self, block_meta: &[BlockMeta]) -> Result<(), SqliteClientError> {
+        chain::blockmetadb_insert(&self.conn, block_meta)
     }
 }
 
