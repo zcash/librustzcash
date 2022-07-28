@@ -611,7 +611,7 @@ fn test_input_circuit_with_bls12_381() {
                 }
             }
 
-            let expected_nf = note.nf(&viewing_key, position);
+            let expected_nf = note.nf(&viewing_key.nk, position);
             let expected_nf = multipack::bytes_to_bits_le(&expected_nf.0);
             let expected_nf = multipack::compute_multipacking(&expected_nf);
             assert_eq!(expected_nf.len(), 2);
@@ -789,7 +789,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 }
             }
 
-            let expected_nf = note.nf(&viewing_key, position);
+            let expected_nf = note.nf(&viewing_key.nk, position);
             let expected_nf = multipack::bytes_to_bits_le(&expected_nf.0);
             let expected_nf = multipack::compute_multipacking(&expected_nf);
             assert_eq!(expected_nf.len(), 2);

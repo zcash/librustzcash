@@ -18,7 +18,10 @@ use std::io::{self, Read, Write};
 
 use crate::{
     keys::{prf_expand, prf_expand_vec, OutgoingViewingKey},
-    sapling::keys::{ExpandedSpendingKey, FullViewingKey},
+    sapling::{
+        keys::{ExpandedSpendingKey, FullViewingKey},
+        NullifierDerivingKey,
+    },
 };
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";
@@ -281,7 +284,7 @@ pub fn sapling_derive_internal_fvk(
     let r = prf_expand(i.as_bytes(), &[0x18]);
     let r = r.as_bytes();
     // PROOF_GENERATION_KEY_GENERATOR = \mathcal{H}^Sapling
-    let nk_internal = PROOF_GENERATION_KEY_GENERATOR * i_nsk + fvk.vk.nk;
+    let nk_internal = NullifierDerivingKey(PROOF_GENERATION_KEY_GENERATOR * i_nsk + fvk.vk.nk.0);
     let dk_internal = DiversifierKey(r[..32].try_into().unwrap());
     let ovk_internal = OutgoingViewingKey(r[32..].try_into().unwrap());
 
@@ -583,7 +586,9 @@ impl ExtendedFullViewingKey {
                 let i_ask = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x13]).as_array());
                 let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x14]).as_array());
                 let ak = (SPENDING_KEY_GENERATOR * i_ask) + self.fvk.vk.ak;
-                let nk = (PROOF_GENERATION_KEY_GENERATOR * i_nsk) + self.fvk.vk.nk;
+                let nk = NullifierDerivingKey(
+                    (PROOF_GENERATION_KEY_GENERATOR * i_nsk) + self.fvk.vk.nk.0,
+                );
 
                 FullViewingKey {
                     vk: ViewingKey { ak, nk },
@@ -1545,7 +1550,7 @@ mod tests {
 
         for (xfvk, tv) in xfvks.iter().zip(test_vectors.iter()) {
             assert_eq!(xfvk.fvk.vk.ak.to_bytes(), tv.ak);
-            assert_eq!(xfvk.fvk.vk.nk.to_bytes(), tv.nk);
+            assert_eq!(xfvk.fvk.vk.nk.0.to_bytes(), tv.nk);
 
             assert_eq!(xfvk.fvk.ovk.0, tv.ovk);
             assert_eq!(xfvk.dk.0, tv.dk);
@@ -1589,7 +1594,7 @@ mod tests {
 
             let internal_xfvk = xfvk.derive_internal();
             assert_eq!(internal_xfvk.fvk.vk.ak.to_bytes(), tv.ak);
-            assert_eq!(internal_xfvk.fvk.vk.nk.to_bytes(), tv.internal_nk);
+            assert_eq!(internal_xfvk.fvk.vk.nk.0.to_bytes(), tv.internal_nk);
 
             assert_eq!(internal_xfvk.fvk.ovk.0, tv.internal_ovk);
             assert_eq!(internal_xfvk.dk.0, tv.internal_dk);

@@ -16,7 +16,7 @@ use ff::PrimeField;
 use group::{Group, GroupEncoding};
 use subtle::CtOption;
 
-use super::{PaymentAddress, ProofGenerationKey, SaplingIvk, ViewingKey};
+use super::{NullifierDerivingKey, PaymentAddress, ProofGenerationKey, SaplingIvk, ViewingKey};
 
 /// A Sapling expanded spending key
 #[derive(Clone)]
@@ -104,7 +104,7 @@ impl FullViewingKey {
         FullViewingKey {
             vk: ViewingKey {
                 ak: SPENDING_KEY_GENERATOR * expsk.ask,
-                nk: PROOF_GENERATION_KEY_GENERATOR * expsk.nsk,
+                nk: NullifierDerivingKey(PROOF_GENERATION_KEY_GENERATOR * expsk.nsk),
             },
             ovk: expsk.ovk,
         }
@@ -134,7 +134,7 @@ impl FullViewingKey {
             ));
         }
         let ak = ak.unwrap();
-        let nk = nk.unwrap();
+        let nk = NullifierDerivingKey(nk.unwrap());
 
         let mut ovk = [0u8; 32];
         reader.read_exact(&mut ovk)?;
@@ -147,7 +147,7 @@ impl FullViewingKey {
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.vk.ak.to_bytes())?;
-        writer.write_all(&self.vk.nk.to_bytes())?;
+        writer.write_all(&self.vk.nk.0.to_bytes())?;
         writer.write_all(&self.ovk.0)?;
 
         Ok(())
@@ -232,9 +232,19 @@ impl DiversifiableFullViewingKey {
         Self { fvk, dk }
     }
 
-    /// Exposes the [`FullViewingKey`] component of this diversifiable full viewing key.
+    /// Exposes the external [`FullViewingKey`] component of this diversifiable full viewing key.
     pub fn fvk(&self) -> &FullViewingKey {
         &self.fvk
+    }
+
+    /// Derives a nullifier-deriving key for the provided scope.
+    ///
+    /// This API is provided so that nullifiers for change notes can be correctly computed.
+    pub fn to_nk(&self, scope: Scope) -> NullifierDerivingKey {
+        match scope {
+            Scope::External => self.fvk.vk.nk,
+            Scope::Internal => self.derive_internal().fvk.vk.nk,
+        }
     }
 
     /// Derives an incoming viewing key corresponding to this full viewing key.

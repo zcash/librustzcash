@@ -6,6 +6,7 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
 ### Added
 - Functionality that enables the receiving and spending of transparent funds,
   behind the new `transparent-inputs` feature flag.
@@ -60,7 +61,7 @@ and this library adheres to Rust's notion of
     been replaced by `ephemeral_key`.
   - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput`: the
     `epk` method has been replaced by `ephemeral_key`.
-- `data_api::wallet::spend_to_address` now takes a `min_confirmations` 
+- `data_api::wallet::spend_to_address` now takes a `min_confirmations`
   parameter, which the caller can provide to specify the minimum number of
   confirmations required for notes being selected. A default value of 10
   confirmations is recommended.
@@ -107,6 +108,12 @@ and this library adheres to Rust's notion of
   - `Zip321Error::TransparentMemo(usize)`
   - `Zip321Error::RecipientMissing(usize)`
   - `Zip321Error::ParseError(String)`
+- The api of `welding_rig::ScanningKey` has changed to accommodate batch
+  decryption and to correctly handle scanning with the internal (change) keys
+  derived from ZIP 316 UFVKs and UIVKs.
+- `welding_rig::scan_block` now uses batching for trial-decryption of
+  transaction outputs.
+
 
 ### Removed
 - `zcash_client_backend::data_api`:

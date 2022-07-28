@@ -520,7 +520,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_S
     let shared_secret = D::ka_agree_dec(ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    try_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+    try_note_decryption_inner(domain, ivk, &ephemeral_key, output, &key)
 }
 
 fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
@@ -528,7 +528,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
     output: &Output,
-    key: D::SymmetricKey,
+    key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let enc_ciphertext = output.enc_ciphertext();
 
@@ -617,7 +617,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D, COMPACT_
     let shared_secret = D::ka_agree_dec(ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, key)
+    try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, &key)
 }
 
 fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>>(
@@ -625,7 +625,7 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, COMPAC
     ivk: &D::IncomingViewingKey,
     ephemeral_key: &EphemeralKeyBytes,
     output: &Output,
-    key: D::SymmetricKey,
+    key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient)> {
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = [0; COMPACT_NOTE_SIZE];

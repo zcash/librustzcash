@@ -7,6 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+- Changes to batch decryption APIs:
+  - The return types of `batch::try_note_decryption` and
+    `batch::try_compact_note_decryption` have changed. Now, instead of
+    returning entries corresponding to the cartesian product of the IVKs used for
+    decryption with the outputs being decrypted, this now returns a vector of
+    decryption results of the same length and in the same order as the `outputs`
+    argument to the function. Each successful result includes the index of the
+    entry in `ivks` used to decrypt the value.
+
 ### Changed
 - MSRV is now 1.56.1.
 

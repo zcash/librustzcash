@@ -4,92 +4,22 @@ use ff::PrimeField;
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
-use zcash_note_encryption::{ShieldedOutput, COMPACT_NOTE_SIZE};
+use zcash_note_encryption::batch;
 use zcash_primitives::{
-    consensus::{self, BlockHeight},
+    consensus,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{
         self,
-        keys::DiversifiableFullViewingKey,
-        note_encryption::{try_sapling_compact_note_decryption, SaplingDomain},
-        Node, Note, Nullifier, PaymentAddress, SaplingIvk,
+        keys::{DiversifiableFullViewingKey, Scope},
+        note_encryption::SaplingDomain,
+        Node, Note, Nullifier, NullifierDerivingKey, SaplingIvk,
     },
     transaction::components::sapling::CompactOutputDescription,
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
-use crate::proto::compact_formats::{CompactBlock, CompactSaplingOutput};
+use crate::proto::compact_formats::CompactBlock;
 use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
-
-/// Scans a [`CompactSaplingOutput`] with a set of [`ScanningKey`]s.
-///
-/// Returns a [`WalletShieldedOutput`] and corresponding [`IncrementalWitness`] if this
-/// output belongs to any of the given [`ScanningKey`]s.
-///
-/// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are incremented
-/// with this output's commitment.
-///
-/// [`ScanningKey`]: crate::welding_rig::ScanningKey
-#[allow(clippy::too_many_arguments)]
-fn scan_output<P: consensus::Parameters, K: ScanningKey>(
-    params: &P,
-    height: BlockHeight,
-    index: usize,
-    output: CompactSaplingOutput,
-    vks: &[(&AccountId, &K)],
-    spent_from_accounts: &HashSet<AccountId>,
-    tree: &mut CommitmentTree<Node>,
-    existing_witnesses: &mut [&mut IncrementalWitness<Node>],
-    block_witnesses: &mut [&mut IncrementalWitness<Node>],
-    new_witnesses: &mut [&mut IncrementalWitness<Node>],
-) -> Option<WalletShieldedOutput<K::Nf>> {
-    let output = CompactOutputDescription::try_from(output).ok()?;
-
-    // Increment tree and witnesses
-    let node = Node::new(output.cmu.to_repr());
-    for witness in existing_witnesses {
-        witness.append(node).unwrap();
-    }
-    for witness in block_witnesses {
-        witness.append(node).unwrap();
-    }
-    for witness in new_witnesses {
-        witness.append(node).unwrap();
-    }
-    tree.append(node).unwrap();
-
-    for (account, vk) in vks.iter() {
-        let (note, to) = match vk.try_decryption(params, height, &output) {
-            Some(ret) => ret,
-            None => continue,
-        };
-
-        // A note is marked as "change" if the account that received it
-        // also spent notes in the same transaction. This will catch,
-        // for instance:
-        // - Change created by spending fractions of notes.
-        // - Notes created by consolidation transactions.
-        // - Notes sent from one account to itself.
-        let is_change = spent_from_accounts.contains(account);
-
-        let witness = IncrementalWitness::from_tree(tree);
-        let nf = vk.nf(&note, &witness);
-
-        return Some(WalletShieldedOutput {
-            index,
-            cmu: output.cmu,
-            ephemeral_key: output.ephemeral_key,
-            account: **account,
-            note,
-            to,
-            is_change,
-            witness,
-            nf,
-        });
-    }
-
-    None
-}
 
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a Sapling [`CompactSaplingOutput`]
@@ -105,47 +35,48 @@ fn scan_output<P: consensus::Parameters, K: ScanningKey>(
 /// [`CompactSaplingOutput`]: crate::proto::compact_formats::CompactSaplingOutput
 /// [`scan_block`]: crate::welding_rig::scan_block
 pub trait ScanningKey {
+    /// The type of key that is used to decrypt Sapling outputs;
+    type SaplingNk;
+
+    type SaplingKeys: IntoIterator<Item = (SaplingIvk, Self::SaplingNk)>;
+
     /// The type of nullifier extracted when a note is successfully
     /// obtained by trial decryption.
     type Nf;
 
-    /// Attempts to decrypt a Sapling note and payment address
-    /// from the specified ciphertext using this scanning key.
-    fn try_decryption<
-        P: consensus::Parameters,
-        Output: ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>,
-    >(
-        &self,
-        params: &P,
-        height: BlockHeight,
-        output: &Output,
-    ) -> Option<(Note, PaymentAddress)>;
+    /// Obtain the underlying Sapling incoming viewing key(s) for this scanning key.
+    fn to_sapling_keys(&self) -> Self::SaplingKeys;
 
     /// Produces the nullifier for the specified note and witness, if possible.
     ///
     /// IVK-based implementations of this trait cannot successfully derive
     /// nullifiers, in which case `Self::Nf` should be set to the unit type
     /// and this function is a no-op.
-    fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf;
+    fn sapling_nf(
+        key: &Self::SaplingNk,
+        note: &Note,
+        witness: &IncrementalWitness<Node>,
+    ) -> Self::Nf;
 }
 
 impl ScanningKey for DiversifiableFullViewingKey {
+    type SaplingNk = NullifierDerivingKey;
+    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 2];
     type Nf = sapling::Nullifier;
 
-    fn try_decryption<
-        P: consensus::Parameters,
-        Output: ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>,
-    >(
-        &self,
-        params: &P,
-        height: BlockHeight,
-        output: &Output,
-    ) -> Option<(Note, PaymentAddress)> {
-        try_sapling_compact_note_decryption(params, height, &self.fvk().vk.ivk(), output)
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [
+            (self.to_ivk(Scope::External), self.to_nk(Scope::External)),
+            (self.to_ivk(Scope::Internal), self.to_nk(Scope::Internal)),
+        ]
     }
 
-    fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf {
-        note.nf(&self.fvk().vk, witness.position() as u64)
+    fn sapling_nf(
+        key: &Self::SaplingNk,
+        note: &Note,
+        witness: &IncrementalWitness<Node>,
+    ) -> Self::Nf {
+        note.nf(key, witness.position() as u64)
     }
 }
 
@@ -154,22 +85,20 @@ impl ScanningKey for DiversifiableFullViewingKey {
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 impl ScanningKey for ExtendedFullViewingKey {
-    type Nf = Nullifier;
+    type SaplingNk = NullifierDerivingKey;
+    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 1];
+    type Nf = sapling::Nullifier;
 
-    fn try_decryption<
-        P: consensus::Parameters,
-        Output: ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>,
-    >(
-        &self,
-        params: &P,
-        height: BlockHeight,
-        output: &Output,
-    ) -> Option<(Note, PaymentAddress)> {
-        try_sapling_compact_note_decryption(params, height, &self.fvk.vk.ivk(), output)
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [(self.fvk.vk.ivk(), self.fvk.vk.nk)]
     }
 
-    fn nf(&self, note: &Note, witness: &IncrementalWitness<Node>) -> Self::Nf {
-        note.nf(&self.fvk.vk, witness.position() as u64)
+    fn sapling_nf(
+        key: &Self::SaplingNk,
+        note: &Note,
+        witness: &IncrementalWitness<Node>,
+    ) -> Self::Nf {
+        note.nf(key, witness.position() as u64)
     }
 }
 
@@ -178,21 +107,15 @@ impl ScanningKey for ExtendedFullViewingKey {
 ///
 /// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 impl ScanningKey for SaplingIvk {
+    type SaplingNk = ();
+    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 1];
     type Nf = ();
 
-    fn try_decryption<
-        P: consensus::Parameters,
-        Output: ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>,
-    >(
-        &self,
-        params: &P,
-        height: BlockHeight,
-        output: &Output,
-    ) -> Option<(Note, PaymentAddress)> {
-        try_sapling_compact_note_decryption(params, height, self, output)
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [(self.clone(), ())]
     }
 
-    fn nf(&self, _note: &Note, _witness: &IncrementalWitness<Node>) {}
+    fn sapling_nf(_key: &Self::SaplingNk, _note: &Note, _witness: &IncrementalWitness<Node>) {}
 }
 
 /// Scans a [`CompactBlock`] with a set of [`ScanningKey`]s.
@@ -283,28 +206,79 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                 })
                 .collect();
 
-            for (idx, c_out) in tx.outputs.into_iter().enumerate() {
+            let decoded = &tx
+                .outputs
+                .into_iter()
+                .map(|output| {
+                    (
+                        SaplingDomain::for_height(params.clone(), block_height),
+                        CompactOutputDescription::try_from(output)
+                            .expect("Invalid output found in compact block decoding."),
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            let vks = vks
+                .iter()
+                .flat_map(|(a, k)| {
+                    k.to_sapling_keys()
+                        .into_iter()
+                        .map(move |(ivk, nk)| (**a, ivk, nk))
+                })
+                .collect::<Vec<_>>();
+
+            let ivks = vks
+                .iter()
+                .map(|(_, ivk, _)| (*ivk).clone())
+                .collect::<Vec<_>>();
+
+            let decrypted = batch::try_compact_note_decryption(&ivks, decoded);
+
+            for (index, ((_, output), dec_output)) in decoded.iter().zip(decrypted).enumerate() {
                 // Grab mutable references to new witnesses from previous outputs
                 // in this transaction so that we can update them. Scoped so we
                 // don't hold mutable references to shielded_outputs for too long.
-                let mut new_witnesses: Vec<_> = shielded_outputs
+                let new_witnesses: Vec<_> = shielded_outputs
                     .iter_mut()
-                    .map(|output| &mut output.witness)
+                    .map(|out| &mut out.witness)
                     .collect();
 
-                if let Some(output) = scan_output(
-                    params,
-                    block_height,
-                    idx,
-                    c_out,
-                    vks,
-                    &spent_from_accounts,
-                    tree,
-                    existing_witnesses,
-                    &mut block_witnesses,
-                    &mut new_witnesses,
-                ) {
-                    shielded_outputs.push(output);
+                // Increment tree and witnesses
+                let node = Node::new(output.cmu.to_repr());
+                for witness in &mut *existing_witnesses {
+                    witness.append(node).unwrap();
+                }
+                for witness in &mut block_witnesses {
+                    witness.append(node).unwrap();
+                }
+                for witness in new_witnesses {
+                    witness.append(node).unwrap();
+                }
+                tree.append(node).unwrap();
+
+                if let Some(((note, to), ivk_idx)) = dec_output {
+                    // A note is marked as "change" if the account that received it
+                    // also spent notes in the same transaction. This will catch,
+                    // for instance:
+                    // - Change created by spending fractions of notes.
+                    // - Notes created by consolidation transactions.
+                    // - Notes sent from one account to itself.
+                    let (account, _, nk) = &vks[ivk_idx];
+                    let is_change = spent_from_accounts.contains(account);
+                    let witness = IncrementalWitness::from_tree(tree);
+                    let nf = K::sapling_nf(nk, &note, &witness);
+
+                    shielded_outputs.push(WalletShieldedOutput {
+                        index,
+                        cmu: output.cmu,
+                        ephemeral_key: output.ephemeral_key.clone(),
+                        account: *account,
+                        note,
+                        to,
+                        is_change,
+                        witness,
+                        nf,
+                    })
                 }
             }
         }

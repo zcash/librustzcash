@@ -862,7 +862,7 @@ mod tests {
         rng.fill_bytes(&mut cb.hash);
         cb.prevHash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        (cb, note.nf(&dfvk.fvk().vk, 0))
+        (cb, note.nf(&dfvk.fvk().vk.nk, 0))
     }
 
     /// Create a fake CompactBlock at the given height, spending a single note from the
