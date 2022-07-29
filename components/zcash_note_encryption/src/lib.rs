@@ -15,7 +15,7 @@
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Catch documentation errors caused by code changes.
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![deny(unsafe_code)]
 // TODO: #![deny(missing_docs)]
 

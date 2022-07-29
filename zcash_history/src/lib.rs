@@ -3,7 +3,7 @@
 //! To be used in zebra and via FFI bindings in zcashd
 
 // Catch documentation errors caused by code changes.
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
 
 mod entry;
