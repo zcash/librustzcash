@@ -289,6 +289,7 @@ pub struct ZcashParameters {
 /// Load the specified parameters, checking the sizes and hashes of the files.
 ///
 /// Returns the loaded parameters.
+#[cfg(any(feature = "local-prover", feature = "download-params"))]
 pub fn load_parameters(
     spend_path: &Path,
     output_path: &Path,
