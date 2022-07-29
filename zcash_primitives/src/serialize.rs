@@ -91,8 +91,8 @@ impl Vector {
 pub struct Array;
 
 impl Array {
-    /// Reads `count` elements from a stream into a vector, assuming the encoding written by
-    /// [`Array::write`], using the provided function to decode each element.
+    /// Reads `count` elements from a stream into a vector, using the provided function to decode
+    /// each element.
     pub fn read<R: Read, E, F>(reader: R, count: usize, func: F) -> io::Result<Vec<E>>
     where
         F: Fn(&mut R) -> io::Result<E>,
@@ -100,8 +100,8 @@ impl Array {
         Self::read_collected(reader, count, func)
     }
 
-    /// Reads `count` elements into a collection, assuming the encoding written by
-    /// [`Array::write`], using the provided function to decode each element.
+    /// Reads `count` elements into a collection, using the provided function to decode each
+    /// element.
     pub fn read_collected<R: Read, E, F, O: FromIterator<E>>(
         reader: R,
         count: usize,
@@ -113,8 +113,8 @@ impl Array {
         Self::read_collected_mut(reader, count, func)
     }
 
-    /// Reads `count` elements into a collection, assuming the encoding written by
-    /// [`Array::write`], using the provided function to decode each element.
+    /// Reads `count` elements into a collection, using the provided function to decode each
+    /// element.
     pub fn read_collected_mut<R: Read, E, F, O: FromIterator<E>>(
         mut reader: R,
         count: usize,

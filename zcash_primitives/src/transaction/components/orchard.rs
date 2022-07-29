@@ -103,7 +103,7 @@ pub(crate) struct Bundle {
     anchor: [u8; 32],
 }
 
-/// Reads an [`orchard::Bundle`] from a v5 transaction format.
+/// Reads an [`Bundle`] from a v5 transaction format.
 pub(crate) fn read_v5_bundle<R: Read>(mut reader: R) -> io::Result<Option<Bundle>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
