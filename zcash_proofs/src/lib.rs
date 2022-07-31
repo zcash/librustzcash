@@ -9,11 +9,14 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
+use std::{
+    fs::File,
+    io::{self, BufReader},
+    path::Path,
+};
+
 use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
 use bls12_381::Bls12;
-use std::fs::File;
-use std::io::{self, BufReader};
-use std::path::Path;
 
 #[cfg(feature = "directories")]
 use directories::BaseDirs;
@@ -22,7 +25,7 @@ use std::path::PathBuf;
 
 pub mod circuit;
 pub mod constants;
-mod hashreader;
+pub mod hashreader;
 pub mod sapling;
 pub mod sprout;
 
@@ -40,15 +43,12 @@ mod downloadreader;
 // Circuit names
 
 /// The sapling spend parameters file name.
-#[cfg(any(feature = "local-prover", feature = "download-params"))]
 pub const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
 
 /// The sapling output parameters file name.
-#[cfg(any(feature = "local-prover", feature = "download-params"))]
 pub const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
 
 /// The sprout parameters file name.
-#[cfg(any(feature = "local-prover", feature = "download-params"))]
 pub const SPROUT_NAME: &str = "sprout-groth16.params";
 
 // Circuit hashes
@@ -66,6 +66,7 @@ const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
 /// The paths to the Sapling parameter files.
 #[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SaplingParameterPaths {
     /// The path to the Sapling spend parameter file.
@@ -289,7 +290,6 @@ pub struct ZcashParameters {
 /// Load the specified parameters, checking the sizes and hashes of the files.
 ///
 /// Returns the loaded parameters.
-#[cfg(any(feature = "local-prover", feature = "download-params"))]
 pub fn load_parameters(
     spend_path: &Path,
     output_path: &Path,

@@ -1,3 +1,5 @@
+//! Abstraction over a reader which hashes the data being read.
+
 use std::{
     fmt::Write,
     io::{self, Read},
