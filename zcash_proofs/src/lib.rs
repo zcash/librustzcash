@@ -9,14 +9,11 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
-use std::{
-    fs::File,
-    io::{self, BufReader},
-    path::Path,
-};
-
 use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
 use bls12_381::Bls12;
+use std::fs::File;
+use std::io::{self, BufReader};
+use std::path::Path;
 
 #[cfg(feature = "directories")]
 use directories::BaseDirs;
@@ -25,7 +22,7 @@ use std::path::PathBuf;
 
 pub mod circuit;
 pub mod constants;
-pub mod hashreader;
+mod hashreader;
 pub mod sapling;
 pub mod sprout;
 
