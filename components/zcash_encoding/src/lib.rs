@@ -4,7 +4,7 @@
 //! for stable binary encodings used throughout the Zcash ecosystem.
 
 // Catch documentation errors caused by code changes.
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
