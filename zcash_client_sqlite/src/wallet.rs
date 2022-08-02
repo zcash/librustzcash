@@ -181,17 +181,15 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
         .conn
         .prepare("SELECT account, ufvk FROM accounts ORDER BY account ASC")?;
 
-    let rows = stmt_fetch_accounts
-        .query_map(NO_PARAMS, |row| {
-            let acct: u32 = row.get(0)?;
-            let account = AccountId::from(acct);
-            let ufvk_str: String = row.get(1)?;
-            let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
-                .map_err(SqliteClientError::CorruptedData);
+    let rows = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
+        let acct: u32 = row.get(0)?;
+        let account = AccountId::from(acct);
+        let ufvk_str: String = row.get(1)?;
+        let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
+            .map_err(SqliteClientError::CorruptedData);
 
-            Ok((account, ufvk))
-        })
-        .map_err(SqliteClientError::from)?;
+        Ok((account, ufvk))
+    })?;
 
     let mut res: HashMap<AccountId, UnifiedFullViewingKey> = HashMap::new();
     for row in rows {
@@ -1243,7 +1241,7 @@ mod tests {
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data).unwrap();
+        init_wallet_db(&mut db_data, vec![]).unwrap();
 
         // Add an account to the wallet
         tests::init_test_accounts_table(&db_data);

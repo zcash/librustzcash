@@ -19,7 +19,10 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Various **BREAKING CHANGES** have been made to the database tables. These will
-  require migrations, which may need to be performed in multiple steps.
+  require migrations, which may need to be performed in multiple steps. Migrations
+  will now be automatically performed for any user using
+  `zcash_client_sqlite::wallet::init_wallet_db`and it is recommended to use this
+  method to maintain the state of the database going forward.
   - The `extfvk` column in the `accounts` table has been replaced by a `ufvk`
     column. Values for this column should be derived from the wallet's seed and
     the account number; the Sapling component of the resulting Unified Full
@@ -48,6 +51,11 @@ and this library adheres to Rust's notion of
   method to be used in contexts where a transaction has just been
   constructed, rather than only in the case that a transaction has
   been decrypted after being retrieved from the network.
+- `zcash_client_sqlite::wallet::init_wallet_db` has been modified to
+  take the wallet seed as an argument so that it can correctly perform
+  migrations that require re-deriving key material. In particular for
+  this upgrade, the seed is used to derive UFVKs to replace the currently
+  stored Sapling extfvks as part of the migration process.
 
 ### Removed
 - `zcash_client_sqlite::wallet`:
