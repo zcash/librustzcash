@@ -97,8 +97,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
@@ -176,8 +176,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
@@ -246,8 +246,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
@@ -316,8 +316,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
@@ -385,8 +385,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
@@ -440,8 +440,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
@@ -492,8 +492,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);

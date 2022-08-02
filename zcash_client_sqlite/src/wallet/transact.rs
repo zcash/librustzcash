@@ -205,8 +205,8 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_incorrect_extsk() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         let acct0 = AccountId::from(0);
         let acct1 = AccountId::from(1);
@@ -289,8 +289,8 @@ mod tests {
     #[test]
     fn create_to_address_fails_with_no_blocks() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
@@ -327,8 +327,8 @@ mod tests {
     #[test]
     fn create_to_address_fails_on_insufficient_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
         init_blocks_table(
             &db_data,
             BlockHeight::from(1u32),
@@ -385,8 +385,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
@@ -520,8 +520,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
@@ -651,8 +651,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), network).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
@@ -763,8 +763,8 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);

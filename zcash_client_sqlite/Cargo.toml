@@ -22,7 +22,10 @@ protobuf = "~2.27.1" # MSRV 1.52.1
 rand_core = "0.6"
 rusqlite = { version = "0.24", features = ["bundled", "time"] }
 secp256k1 = { version = "0.21" }
+schemer = "0.1.2"
+schemer-rusqlite = "0.1.1"
 time = "0.2"
+uuid = "1.1"
 zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.7", path = "../zcash_primitives" }
 

@@ -1242,8 +1242,8 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // Add an account to the wallet
         tests::init_test_accounts_table(&db_data);

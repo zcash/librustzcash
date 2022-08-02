@@ -1,6 +1,8 @@
 //! Functions for initializing the various databases.
 
-use rusqlite::{params, types::ToSql, NO_PARAMS};
+use rusqlite::{params, types::ToSql, Transaction, NO_PARAMS};
+use schemer::{migration, Migrator};
+use schemer_rusqlite::{RusqliteAdapter, RusqliteAdapterError, RusqliteMigration};
 use std::collections::HashMap;
 
 use zcash_primitives::{
@@ -18,6 +20,90 @@ use {
     zcash_client_backend::encoding::AddressCodec,
     zcash_primitives::legacy::keys::IncomingViewingKey,
 };
+
+struct WalletMigration0;
+
+migration!(
+    WalletMigration0,
+    "bc4f5e57-d600-4b6c-990f-b3538f0bfce1",
+    [],
+    "Initialize the wallet database."
+);
+
+impl RusqliteMigration for WalletMigration0 {
+    type Error = RusqliteAdapterError;
+
+    fn up(&self, transaction: &Transaction) -> Result<(), RusqliteAdapterError> {
+        transaction.execute_batch(
+            "CREATE TABLE IF NOT EXISTS accounts (
+                account INTEGER PRIMARY KEY,
+                extfvk TEXT NOT NULL,
+                address TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS blocks (
+                height INTEGER PRIMARY KEY,
+                hash BLOB NOT NULL,
+                time INTEGER NOT NULL,
+                sapling_tree BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS transactions (
+                id_tx INTEGER PRIMARY KEY,
+                txid BLOB NOT NULL UNIQUE,
+                created TEXT,
+                block INTEGER,
+                tx_index INTEGER,
+                expiry_height INTEGER,
+                raw BLOB,
+                FOREIGN KEY (block) REFERENCES blocks(height)
+            );
+            CREATE TABLE IF NOT EXISTS received_notes (
+                id_note INTEGER PRIMARY KEY,
+                tx INTEGER NOT NULL,
+                output_index INTEGER NOT NULL,
+                account INTEGER NOT NULL,
+                diversifier BLOB NOT NULL,
+                value INTEGER NOT NULL,
+                rcm BLOB NOT NULL,
+                nf BLOB NOT NULL UNIQUE,
+                is_change INTEGER NOT NULL,
+                memo BLOB,
+                spent INTEGER,
+                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                FOREIGN KEY (account) REFERENCES accounts(account),
+                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
+                CONSTRAINT tx_output UNIQUE (tx, output_index)
+            );
+            CREATE TABLE IF NOT EXISTS sapling_witnesses (
+                id_witness INTEGER PRIMARY KEY,
+                note INTEGER NOT NULL,
+                block INTEGER NOT NULL,
+                witness BLOB NOT NULL,
+                FOREIGN KEY (note) REFERENCES received_notes(id_note),
+                FOREIGN KEY (block) REFERENCES blocks(height),
+                CONSTRAINT witness_height UNIQUE (note, block)
+            );
+            CREATE TABLE IF NOT EXISTS sent_notes (
+                id_note INTEGER PRIMARY KEY,
+                tx INTEGER NOT NULL,
+                output_index INTEGER NOT NULL,
+                from_account INTEGER NOT NULL,
+                address TEXT NOT NULL,
+                value INTEGER NOT NULL,
+                memo BLOB,
+                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                FOREIGN KEY (from_account) REFERENCES accounts(account),
+                CONSTRAINT tx_output UNIQUE (tx, output_index)
+            );",
+        )?;
+        Ok(())
+    }
+
+    fn down(&self, _transaction: &Transaction) -> Result<(), RusqliteAdapterError> {
+        // We should never down-migrate the first migration, as that can irreversibly
+        // destroy data.
+        Ok(())
+    }
+}
 
 /// Sets up the internal structure of the data database.
 ///
@@ -40,106 +126,20 @@ use {
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-/// init_wallet_db(&db).unwrap();
+/// let mut db = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+/// init_wallet_db(&mut db, None).unwrap();
 /// ```
-pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
-    // TODO: Add migrations (https://github.com/zcash/librustzcash/issues/489)
-    // - extfvk column -> ufvk column
-    wdb.conn.execute(
-        "CREATE TABLE IF NOT EXISTS accounts (
-            account INTEGER PRIMARY KEY,
-            ufvk TEXT,
-            address TEXT,
-            transparent_address TEXT
-        )",
-        NO_PARAMS,
-    )?;
-    wdb.conn.execute(
-        "CREATE TABLE IF NOT EXISTS blocks (
-            height INTEGER PRIMARY KEY,
-            hash BLOB NOT NULL,
-            time INTEGER NOT NULL,
-            sapling_tree BLOB NOT NULL
-        )",
-        NO_PARAMS,
-    )?;
-    wdb.conn.execute(
-        "CREATE TABLE IF NOT EXISTS transactions (
-            id_tx INTEGER PRIMARY KEY,
-            txid BLOB NOT NULL UNIQUE,
-            created TEXT,
-            block INTEGER,
-            tx_index INTEGER,
-            expiry_height INTEGER,
-            raw BLOB,
-            FOREIGN KEY (block) REFERENCES blocks(height)
-        )",
-        NO_PARAMS,
-    )?;
-    wdb.conn.execute(
-        "CREATE TABLE IF NOT EXISTS received_notes (
-            id_note INTEGER PRIMARY KEY,
-            tx INTEGER NOT NULL,
-            output_index INTEGER NOT NULL,
-            account INTEGER NOT NULL,
-            diversifier BLOB NOT NULL,
-            value INTEGER NOT NULL,
-            rcm BLOB NOT NULL,
-            nf BLOB NOT NULL UNIQUE,
-            is_change INTEGER NOT NULL,
-            memo BLOB,
-            spent INTEGER,
-            FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-            FOREIGN KEY (account) REFERENCES accounts(account),
-            FOREIGN KEY (spent) REFERENCES transactions(id_tx),
-            CONSTRAINT tx_output UNIQUE (tx, output_index)
-        )",
-        NO_PARAMS,
-    )?;
-    wdb.conn.execute(
-        "CREATE TABLE IF NOT EXISTS sapling_witnesses (
-            id_witness INTEGER PRIMARY KEY,
-            note INTEGER NOT NULL,
-            block INTEGER NOT NULL,
-            witness BLOB NOT NULL,
-            FOREIGN KEY (note) REFERENCES received_notes(id_note),
-            FOREIGN KEY (block) REFERENCES blocks(height),
-            CONSTRAINT witness_height UNIQUE (note, block)
-        )",
-        NO_PARAMS,
-    )?;
-    wdb.conn.execute(
-        "CREATE TABLE IF NOT EXISTS sent_notes (
-            id_note INTEGER PRIMARY KEY,
-            tx INTEGER NOT NULL,
-            output_pool INTEGER NOT NULL,
-            output_index INTEGER NOT NULL,
-            from_account INTEGER NOT NULL,
-            address TEXT NOT NULL,
-            value INTEGER NOT NULL,
-            memo BLOB,
-            FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-            FOREIGN KEY (from_account) REFERENCES accounts(account),
-            CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
-        )",
-        NO_PARAMS,
-    )?;
-    wdb.conn.execute(
-        "CREATE TABLE IF NOT EXISTS utxos (
-            id_utxo INTEGER PRIMARY KEY,
-            address TEXT NOT NULL, 
-            prevout_txid BLOB NOT NULL, 
-            prevout_idx INTEGER NOT NULL, 
-            script BLOB NOT NULL, 
-            value_zat INTEGER NOT NULL, 
-            height INTEGER NOT NULL,
-            spent_in_tx INTEGER,
-            FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
-            CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-        )",
-        NO_PARAMS,
-    )?;
+pub fn init_wallet_db<P>(wdb: &mut WalletDb<P>) -> Result<(), rusqlite::Error> {
+    let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
+    adapter.init().expect("Migrations table setup succeeds.");
+
+    let mut migrator = Migrator::new(adapter);
+    let migration0 = Box::new(WalletMigration0 {});
+
+    migrator
+        .register(migration0)
+        .expect("Wallet migration failed");
+    migrator.up(None).expect("Migrations succeed.");
     Ok(())
 }
 
@@ -176,8 +176,8 @@ pub fn init_wallet_db<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
 /// };
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-/// init_wallet_db(&db_data).unwrap();
+/// let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+/// init_wallet_db(&mut db_data).unwrap();
 ///
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId::from(0);
@@ -313,8 +313,8 @@ mod tests {
     #[test]
     fn init_accounts_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // We can call the function as many times as we want with no data
         init_accounts_table(&db_data, &HashMap::new()).unwrap();
@@ -353,8 +353,8 @@ mod tests {
     #[test]
     fn init_blocks_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         // First call with data should initialise the blocks table
         init_blocks_table(
@@ -380,8 +380,8 @@ mod tests {
     #[test]
     fn init_accounts_table_stores_correct_address() {
         let data_file = NamedTempFile::new().unwrap();
-        let db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&db_data).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data).unwrap();
 
         let seed = [0u8; 32];
 
