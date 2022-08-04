@@ -33,19 +33,45 @@ pub mod sprout;
 )]
 pub mod prover;
 
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+mod downloadreader;
+
 // Circuit names
-#[cfg(feature = "local-prover")]
-const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
-#[cfg(feature = "local-prover")]
-const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
+
+/// The sapling spend parameters file name.
+pub const SAPLING_SPEND_NAME: &str = "sapling-spend.params";
+
+/// The sapling output parameters file name.
+pub const SAPLING_OUTPUT_NAME: &str = "sapling-output.params";
+
+/// The sprout parameters file name.
+pub const SPROUT_NAME: &str = "sprout-groth16.params";
 
 // Circuit hashes
 const SAPLING_SPEND_HASH: &str = "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c";
 const SAPLING_OUTPUT_HASH: &str = "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028";
 const SPROUT_HASH: &str = "e9b238411bd6c0ec4791e9d04245ec350c9c5744f5610dfcce4365d5ca49dfefd5054e371842b3f88fa1b9d7e8e075249b3ebabd167fa8b0f3161292d36c180a";
 
+// Circuit parameter file sizes
+const SAPLING_SPEND_BYTES: u64 = 47958396;
+const SAPLING_OUTPUT_BYTES: u64 = 3592860;
+const SPROUT_BYTES: u64 = 725523612;
+
 #[cfg(feature = "download-params")]
 const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
+
+/// The paths to the Sapling parameter files.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SaplingParameterPaths {
+    /// The path to the Sapling spend parameter file.
+    pub spend: PathBuf,
+
+    /// The path to the Sapling output parameter file.
+    pub output: PathBuf,
+}
 
 /// Returns the default folder that the Zcash proving parameters are located in.
 #[cfg(feature = "directories")]
@@ -60,58 +86,196 @@ pub fn default_params_folder() -> Option<PathBuf> {
     })
 }
 
-/// Download the Zcash Sapling parameters, storing them in the default location.
+/// Download the Zcash Sapling parameters if needed, and store them in the default location.
+/// Always checks the sizes and hashes of the files, even if they didn't need to be downloaded.
+///
+/// A download timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
 #[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+#[deprecated(
+    since = "0.6.0",
+    note = "please replace with `download_sapling_parameters`, and use `download_sprout_parameters` if needed"
+)]
 pub fn download_parameters() -> Result<(), minreq::Error> {
+    download_sapling_parameters(None).map(|_sapling_paths| ())
+}
+
+/// Download the Zcash Sapling parameters if needed, and store them in the default location.
+/// Always checks the sizes and hashes of the files, even if they didn't need to be downloaded.
+///
+/// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+///
+/// Use `timeout` to set a timeout in seconds for each file download.
+/// If `timeout` is `None`, a timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
+///
+/// Returns the paths to the downloaded files.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+pub fn download_sapling_parameters(
+    timeout: Option<u64>,
+) -> Result<SaplingParameterPaths, minreq::Error> {
+    let spend = fetch_params(
+        SAPLING_SPEND_NAME,
+        SAPLING_SPEND_HASH,
+        SAPLING_SPEND_BYTES,
+        timeout,
+    )?;
+    let output = fetch_params(
+        SAPLING_OUTPUT_NAME,
+        SAPLING_OUTPUT_HASH,
+        SAPLING_OUTPUT_BYTES,
+        timeout,
+    )?;
+
+    Ok(SaplingParameterPaths { spend, output })
+}
+
+/// Download the Zcash Sprout parameters if needed, and store them in the default location.
+/// Always checks the size and hash of the file, even if it didn't need to be downloaded.
+///
+/// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
+///
+/// Use `timeout` to set a timeout in seconds for the file download.
+/// If `timeout` is `None`, a timeout can be set using the `MINREQ_TIMEOUT` environmental variable.
+///
+/// Returns the path to the downloaded file.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minreq::Error> {
+    fetch_params(SPROUT_NAME, SPROUT_HASH, SPROUT_BYTES, timeout)
+}
+
+/// Download the specified parameters if needed, and store them in the default location.
+/// Always checks the size and hash of the file, even if it didn't need to be downloaded.
+///
+/// See [`download_sapling_parameters`] for details.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+fn fetch_params(
+    name: &str,
+    expected_hash: &str,
+    expected_bytes: u64,
+    timeout: Option<u64>,
+) -> Result<PathBuf, minreq::Error> {
     // Ensure that the default Zcash parameters location exists.
     let params_dir = default_params_folder().ok_or_else(|| {
         io::Error::new(io::ErrorKind::Other, "Could not load default params folder")
     })?;
     std::fs::create_dir_all(&params_dir)?;
 
-    let fetch_params = |name: &str, expected_hash: &str| -> Result<(), minreq::Error> {
-        use std::io::Write;
+    let params_path = params_dir.join(name);
 
-        // Download the parts directly (Sapling parameters are small enough for this).
-        let part_1 = minreq::get(format!("{}/{}.part.1", DOWNLOAD_URL, name)).send()?;
-        let part_2 = minreq::get(format!("{}/{}.part.2", DOWNLOAD_URL, name)).send()?;
+    // Download parameters if needed.
+    // TODO: use try_exists when it stabilises, to exit early on permissions errors (#83186)
+    if !params_path.exists() {
+        let result = stream_params_downloads_to_disk(
+            &params_path,
+            name,
+            expected_hash,
+            expected_bytes,
+            timeout,
+        );
 
-        // Verify parameter file hash.
-        let hash = blake2b_simd::State::new()
-            .update(part_1.as_bytes())
-            .update(part_2.as_bytes())
-            .finalize()
-            .to_hex();
-        if &hash != expected_hash {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "{} failed validation (expected: {}, actual: {}, fetched {} bytes)",
-                    name,
-                    expected_hash,
-                    hash,
-                    part_1.as_bytes().len() + part_2.as_bytes().len()
-                ),
-            )
-            .into());
+        // Remove the file on error, and return the download or hash error.
+        if result.is_err() {
+            let _ = std::fs::remove_file(&params_path);
+            result?;
         }
+    } else {
+        // TODO: avoid reading the files twice
+        // Either:
+        // - return Ok if the paths exist, or
+        // - always load and return the parameters, for newly downloaded and existing files.
 
-        // Write parameter file.
-        let mut f = File::create(params_dir.join(name))?;
-        f.write_all(part_1.as_bytes())?;
-        f.write_all(part_2.as_bytes())?;
-        Ok(())
-    };
+        let file_path_string = params_path.to_string_lossy();
 
-    fetch_params(SAPLING_SPEND_NAME, SAPLING_SPEND_HASH)?;
-    fetch_params(SAPLING_OUTPUT_NAME, SAPLING_OUTPUT_HASH)?;
+        // Check the file size is correct before hashing large amounts of data.
+        verify_file_size(&params_path, expected_bytes, name, &file_path_string).expect(
+            "parameter file size is not correct, \
+             please clean your Zcash parameters directory and re-run `fetch-params`.",
+        );
+
+        // Read the file to verify the hash,
+        // discarding bytes after they're hashed.
+        let params_file = File::open(&params_path)?;
+        let params_file = BufReader::with_capacity(1024 * 1024, params_file);
+        let params_file = hashreader::HashReader::new(params_file);
+
+        verify_hash(
+            params_file,
+            io::sink(),
+            expected_hash,
+            expected_bytes,
+            name,
+            &file_path_string,
+        )?;
+    }
+
+    Ok(params_path)
+}
+
+/// Download the specified parameter file, stream it to `params_path`, and check its hash.
+///
+/// See [`download_sapling_parameters`] for details.
+#[cfg(feature = "download-params")]
+#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
+fn stream_params_downloads_to_disk(
+    params_path: &Path,
+    name: &str,
+    expected_hash: &str,
+    expected_bytes: u64,
+    timeout: Option<u64>,
+) -> Result<(), minreq::Error> {
+    use std::io::{BufWriter, Read};
+
+    // Fail early if the directory isn't writeable.
+    let new_params_file = File::create(&params_path)?;
+    let new_params_file = BufWriter::with_capacity(1024 * 1024, new_params_file);
+
+    // Set up the download requests.
+    //
+    // It's necessary for us to host these files in two parts,
+    // because of CloudFlare's maximum cached file size limit of 512 MB.
+    // The files must fit in the cache to prevent "denial of wallet" attacks.
+    let params_url_1 = format!("{}/{}.part.1", DOWNLOAD_URL, name);
+    // TODO: skip empty part.2 files when downloading sapling spend and sapling output
+    let params_url_2 = format!("{}/{}.part.2", DOWNLOAD_URL, name);
+
+    let mut params_download_1 = minreq::get(&params_url_1);
+    let mut params_download_2 = minreq::get(&params_url_2);
+    if let Some(timeout) = timeout {
+        params_download_1 = params_download_1.with_timeout(timeout);
+        params_download_2 = params_download_2.with_timeout(timeout);
+    }
+
+    // Download the responses and write them to a new file,
+    // verifying the hash as bytes are read.
+    let params_download_1 = downloadreader::ResponseLazyReader::from(params_download_1);
+    let params_download_2 = downloadreader::ResponseLazyReader::from(params_download_2);
+
+    // Limit the download size to avoid DoS.
+    // This also avoids launching the second request, if the first request provides enough bytes.
+    let params_download = params_download_1
+        .chain(params_download_2)
+        .take(expected_bytes);
+    let params_download = BufReader::with_capacity(1024 * 1024, params_download);
+    let params_download = hashreader::HashReader::new(params_download);
+
+    verify_hash(
+        params_download,
+        new_params_file,
+        expected_hash,
+        expected_bytes,
+        name,
+        &format!("{} + {}", params_url_1, params_url_2),
+    )?;
 
     Ok(())
 }
 
+/// Zcash Sprout and Sapling groth16 circuit parameters.
 pub struct ZcashParameters {
     pub spend_params: Parameters<Bls12>,
     pub spend_vk: PreparedVerifyingKey<Bls12>,
@@ -120,11 +284,50 @@ pub struct ZcashParameters {
     pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
 }
 
+/// Load the specified parameters, checking the sizes and hashes of the files.
+///
+/// Returns the loaded parameters.
 pub fn load_parameters(
     spend_path: &Path,
     output_path: &Path,
     sprout_path: Option<&Path>,
 ) -> ZcashParameters {
+    // Check the file sizes are correct before hashing large amounts of data.
+    verify_file_size(
+        spend_path,
+        SAPLING_SPEND_BYTES,
+        "sapling spend",
+        &spend_path.to_string_lossy(),
+    )
+    .expect(
+        "parameter file size is not correct, \
+         please clean your Zcash parameters directory and re-run `fetch-params`.",
+    );
+
+    verify_file_size(
+        output_path,
+        SAPLING_OUTPUT_BYTES,
+        "sapling output",
+        &output_path.to_string_lossy(),
+    )
+    .expect(
+        "parameter file size is not correct, \
+         please clean your Zcash parameters directory and re-run `fetch-params`.",
+    );
+
+    if let Some(sprout_path) = sprout_path {
+        verify_file_size(
+            sprout_path,
+            SPROUT_BYTES,
+            "sprout groth16",
+            &sprout_path.to_string_lossy(),
+        )
+        .expect(
+            "parameter file size is not correct, \
+             please clean your Zcash parameters directory and re-run `fetch-params`.",
+        );
+    }
+
     // Load from each of the paths
     let spend_fs = File::open(spend_path).expect("couldn't load Sapling spend parameters file");
     let output_fs = File::open(output_path).expect("couldn't load Sapling output parameters file");
@@ -169,28 +372,48 @@ pub fn parse_parameters<R: io::Read>(
     // want to read it, though, so that the BLAKE2b computed afterward is consistent
     // with `b2sum` on the files.
     let mut sink = io::sink();
-    io::copy(&mut spend_fs, &mut sink)
-        .expect("couldn't finish reading Sapling spend parameter file");
-    io::copy(&mut output_fs, &mut sink)
-        .expect("couldn't finish reading Sapling output parameter file");
-    if let Some(mut sprout_fs) = sprout_fs.as_mut() {
-        io::copy(&mut sprout_fs, &mut sink)
-            .expect("couldn't finish reading Sprout groth16 parameter file");
-    }
 
-    if spend_fs.into_hash() != SAPLING_SPEND_HASH {
-        panic!("Sapling spend parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
-    }
+    // TODO: use the correct paths for Windows and macOS
+    //       use the actual file paths supplied by the caller
+    verify_hash(
+        spend_fs,
+        &mut sink,
+        SAPLING_SPEND_HASH,
+        SAPLING_SPEND_BYTES,
+        SAPLING_SPEND_NAME,
+        "a file",
+    )
+    .expect(
+        "Sapling spend parameter file is not correct, \
+         please clean your `~/.zcash-params/` and re-run `fetch-params`.",
+    );
 
-    if output_fs.into_hash() != SAPLING_OUTPUT_HASH {
-        panic!("Sapling output parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
-    }
+    verify_hash(
+        output_fs,
+        &mut sink,
+        SAPLING_OUTPUT_HASH,
+        SAPLING_OUTPUT_BYTES,
+        SAPLING_OUTPUT_NAME,
+        "a file",
+    )
+    .expect(
+        "Sapling output parameter file is not correct, \
+         please clean your `~/.zcash-params/` and re-run `fetch-params`.",
+    );
 
-    if sprout_fs
-        .map(|fs| fs.into_hash() != SPROUT_HASH)
-        .unwrap_or(false)
-    {
-        panic!("Sprout groth16 parameter file is not correct, please clean your `~/.zcash-params/` and re-run `fetch-params`.");
+    if let Some(sprout_fs) = sprout_fs {
+        verify_hash(
+            sprout_fs,
+            &mut sink,
+            SPROUT_HASH,
+            SPROUT_BYTES,
+            SPROUT_NAME,
+            "a file",
+        )
+        .expect(
+            "Sprout groth16 parameter file is not correct, \
+             please clean your `~/.zcash-params/` and re-run `fetch-params`.",
+        );
     }
 
     // Prepare verifying keys
@@ -205,4 +428,82 @@ pub fn parse_parameters<R: io::Read>(
         output_vk,
         sprout_vk,
     }
+}
+
+/// Check if the size of the file at `params_path` matches `expected_bytes`,
+/// using filesystem metadata.
+///
+/// Returns an error containing `name` and `params_source` on failure.
+fn verify_file_size(
+    params_path: &Path,
+    expected_bytes: u64,
+    name: &str,
+    params_source: &str,
+) -> Result<(), io::Error> {
+    let file_size = std::fs::metadata(&params_path)?.len();
+
+    if file_size != expected_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} failed validation:\n\
+                 expected: {} bytes,\n\
+                 actual:   {} bytes from {:?}",
+                name, expected_bytes, file_size, params_source,
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Check if the Blake2b hash from `hash_reader` matches `expected_hash`,
+/// while streaming from `hash_reader` into `sink`.
+///
+/// `hash_reader` can be used to partially read its inner reader's data,
+/// before verifying the hash using this function.
+///
+/// Returns an error containing `name` and `params_source` on failure.
+fn verify_hash<R: io::Read, W: io::Write>(
+    mut hash_reader: hashreader::HashReader<R>,
+    mut sink: W,
+    expected_hash: &str,
+    expected_bytes: u64,
+    name: &str,
+    params_source: &str,
+) -> Result<(), io::Error> {
+    let read_result = io::copy(&mut hash_reader, &mut sink);
+
+    if let Err(read_error) = read_result {
+        return Err(io::Error::new(
+            read_error.kind(),
+            format!(
+                "{} failed reading:\n\
+                 expected: {} bytes,\n\
+                 actual:   {} bytes from {:?},\n\
+                 error: {:?}",
+                name,
+                expected_bytes,
+                hash_reader.byte_count(),
+                params_source,
+                read_error,
+            ),
+        ));
+    }
+
+    let byte_count = hash_reader.byte_count();
+    let hash = hash_reader.into_hash();
+    if hash != expected_hash {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} failed validation:\n\
+                 expected: {} hashing {} bytes,\n\
+                 actual:   {} hashing {} bytes from {:?}",
+                name, expected_hash, expected_bytes, hash, byte_count, params_source,
+            ),
+        ));
+    }
+
+    Ok(())
 }

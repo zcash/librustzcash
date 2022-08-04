@@ -1,10 +1,17 @@
+//! Abstraction over a reader which hashes the data being read.
+
+use std::{
+    fmt::Write,
+    io::{self, Read},
+};
+
 use blake2b_simd::State;
-use std::io::{self, Read};
 
 /// Abstraction over a reader which hashes the data being read.
 pub struct HashReader<R: Read> {
     reader: R,
     hasher: State,
+    byte_count: usize,
 }
 
 impl<R: Read> HashReader<R> {
@@ -13,6 +20,7 @@ impl<R: Read> HashReader<R> {
         HashReader {
             reader,
             hasher: State::new(),
+            byte_count: 0,
         }
     }
 
@@ -22,10 +30,15 @@ impl<R: Read> HashReader<R> {
 
         let mut s = String::new();
         for c in hash.as_bytes().iter() {
-            s += &format!("{:02x}", c);
+            write!(&mut s, "{:02x}", c).expect("writing to a string never fails");
         }
 
         s
+    }
+
+    /// Return the number of bytes read so far.
+    pub fn byte_count(&self) -> usize {
+        self.byte_count
     }
 }
 
@@ -35,6 +48,7 @@ impl<R: Read> Read for HashReader<R> {
 
         if bytes > 0 {
             self.hasher.update(&buf[0..bytes]);
+            self.byte_count += bytes;
         }
 
         Ok(bytes)

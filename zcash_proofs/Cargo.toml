@@ -42,7 +42,7 @@ pprof = { version = "0.9", features = ["criterion", "flamegraph"] } # MSRV 1.56
 [features]
 default = ["local-prover", "multicore"]
 bundled-prover = ["wagyu-zcash-parameters"]
-download-params = ["minreq"]
+download-params = ["minreq", "directories"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore"]
 
@@ -60,6 +60,10 @@ required-features = ["directories"]
 
 [[example]]
 name = "download-params"
+required-features = ["download-params"]
+
+[[example]]
+name = "download-sprout-and-sapling-params"
 required-features = ["download-params"]
 
 [badges]
