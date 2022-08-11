@@ -24,6 +24,7 @@ rusqlite = { version = "0.24", features = ["bundled", "time"] }
 secp256k1 = { version = "0.21" }
 schemer = "0.1.2"
 schemer-rusqlite = "0.1.1"
+secrecy = "0.8"
 time = "0.2"
 uuid = "1.1"
 zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }

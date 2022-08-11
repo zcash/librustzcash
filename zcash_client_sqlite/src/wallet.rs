@@ -1227,6 +1227,7 @@ pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
+    use secrecy::Secret;
     use tempfile::NamedTempFile;
 
     use zcash_primitives::transaction::components::Amount;
@@ -1241,7 +1242,7 @@ mod tests {
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, vec![]).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(vec![])).unwrap();
 
         // Add an account to the wallet
         tests::init_test_accounts_table(&db_data);

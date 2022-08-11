@@ -2,6 +2,7 @@
 use rusqlite::{params, types::ToSql, Connection, Transaction, NO_PARAMS};
 use schemer::{migration, Migration, Migrator, MigratorError};
 use schemer_rusqlite::{RusqliteAdapter, RusqliteMigration};
+use secrecy::{ExposeSecret, SecretVec};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -146,7 +147,7 @@ impl RusqliteMigration for WalletMigration1 {
 
 struct WalletMigration2<P: consensus::Parameters> {
     params: P,
-    seed: Vec<u8>,
+    seed: SecretVec<u8>,
 }
 
 impl<P: consensus::Parameters> Migration for WalletMigration2<P> {
@@ -204,7 +205,9 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
                         ))
                     })?;
 
-            let usk = UnifiedSpendingKey::from_seed(&self.params, &self.seed, account).unwrap();
+            let usk =
+                UnifiedSpendingKey::from_seed(&self.params, &self.seed.expose_secret(), account)
+                    .unwrap();
             let ufvk = usk.to_unified_full_viewing_key();
 
             let dfvk = ufvk
@@ -308,6 +311,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
 /// # Examples
 ///
 /// ```
+/// use secrecy::Secret;
 /// use tempfile::NamedTempFile;
 /// use zcash_primitives::consensus::Network;
 /// use zcash_client_sqlite::{
@@ -317,7 +321,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let mut db = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-/// init_wallet_db(&mut db, vec![]).unwrap();
+/// init_wallet_db(&mut db, Secret::new(vec![])).unwrap();
 /// ```
 // TODO: It would be possible to make the transition from providing transparent support to no
 // longer providing transparent support safe, by including a migration that verifies that no
@@ -327,7 +331,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
 // library *not* compiled with the `transparent-inputs` feature flag, and fail if any are present.
 pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
-    seed: Vec<u8>,
+    seed: SecretVec<u8>,
 ) -> Result<(), MigratorError<SqliteClientError>> {
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
@@ -360,6 +364,7 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
 /// # #[cfg(feature = "transparent-inputs")]
 /// # {
 /// use tempfile::NamedTempFile;
+/// use secrecy::Secret;
 /// use std::collections::HashMap;
 ///
 /// use zcash_primitives::{
@@ -381,7 +386,7 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
 ///
 /// let data_file = NamedTempFile::new().unwrap();
 /// let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-/// init_wallet_db(&mut db_data, vec![]).unwrap();
+/// init_wallet_db(&mut db_data, Secret::new(vec![])).unwrap();
 ///
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId::from(0);
@@ -506,6 +511,8 @@ pub fn init_blocks_table<P>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
+    use rusqlite::{self, NO_PARAMS};
+    use secrecy::Secret;
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
@@ -533,7 +540,7 @@ mod tests {
     fn init_accounts_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, vec![]).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(vec![])).unwrap();
 
         // We can call the function as many times as we want with no data
         init_accounts_table(&db_data, &HashMap::new()).unwrap();
@@ -573,7 +580,7 @@ mod tests {
     fn init_blocks_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, vec![]).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(vec![])).unwrap();
 
         // First call with data should initialise the blocks table
         init_blocks_table(
@@ -600,7 +607,7 @@ mod tests {
     fn init_accounts_table_stores_correct_address() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, vec![]).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(vec![])).unwrap();
 
         let seed = [0u8; 32];
 
