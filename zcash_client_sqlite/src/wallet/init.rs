@@ -206,7 +206,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
                     })?;
 
             let usk =
-                UnifiedSpendingKey::from_seed(&self.params, &self.seed.expose_secret(), account)
+                UnifiedSpendingKey::from_seed(&self.params, self.seed.expose_secret(), account)
                     .unwrap();
             let ufvk = usk.to_unified_full_viewing_key();
 
@@ -219,8 +219,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
                         format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
                             address,
                             encode_payment_address(self.params.hrp_sapling_payment_address(), &expected_address),
-                            idx
-                            )));
+                            idx)));
             }
 
             add_account_internal(&self.params, transaction, "accounts_new", account, &ufvk)?;
@@ -511,12 +510,15 @@ pub fn init_blocks_table<P>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use rusqlite::{self, NO_PARAMS};
+    use rusqlite::{self, ToSql, NO_PARAMS};
     use secrecy::Secret;
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
-    use zcash_client_backend::keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey};
+    use zcash_client_backend::{
+        encoding::{encode_extended_full_viewing_key, encode_payment_address},
+        keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use zcash_primitives::legacy::keys as transparent;
@@ -535,6 +537,360 @@ mod tests {
     };
 
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
+
+    #[test]
+    fn init_migrate_from_0_3_0() {
+        fn init_0_3_0<P>(
+            wdb: &mut WalletDb<P>,
+            extfvk: &ExtendedFullViewingKey,
+            account: AccountId,
+        ) -> Result<(), rusqlite::Error> {
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS accounts (
+                    account INTEGER PRIMARY KEY,
+                    extfvk TEXT NOT NULL,
+                    address TEXT NOT NULL
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS blocks (
+                    height INTEGER PRIMARY KEY,
+                    hash BLOB NOT NULL,
+                    time INTEGER NOT NULL,
+                    sapling_tree BLOB NOT NULL
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS transactions (
+                    id_tx INTEGER PRIMARY KEY,
+                    txid BLOB NOT NULL UNIQUE,
+                    created TEXT,
+                    block INTEGER,
+                    tx_index INTEGER,
+                    expiry_height INTEGER,
+                    raw BLOB,
+                    FOREIGN KEY (block) REFERENCES blocks(height)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS received_notes (
+                    id_note INTEGER PRIMARY KEY,
+                    tx INTEGER NOT NULL,
+                    output_index INTEGER NOT NULL,
+                    account INTEGER NOT NULL,
+                    diversifier BLOB NOT NULL,
+                    value INTEGER NOT NULL,
+                    rcm BLOB NOT NULL,
+                    nf BLOB NOT NULL UNIQUE,
+                    is_change INTEGER NOT NULL,
+                    memo BLOB,
+                    spent INTEGER,
+                    FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                    FOREIGN KEY (account) REFERENCES accounts(account),
+                    FOREIGN KEY (spent) REFERENCES transactions(id_tx),
+                    CONSTRAINT tx_output UNIQUE (tx, output_index)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS sapling_witnesses (
+                    id_witness INTEGER PRIMARY KEY,
+                    note INTEGER NOT NULL,
+                    block INTEGER NOT NULL,
+                    witness BLOB NOT NULL,
+                    FOREIGN KEY (note) REFERENCES received_notes(id_note),
+                    FOREIGN KEY (block) REFERENCES blocks(height),
+                    CONSTRAINT witness_height UNIQUE (note, block)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS sent_notes (
+                    id_note INTEGER PRIMARY KEY,
+                    tx INTEGER NOT NULL,
+                    output_index INTEGER NOT NULL,
+                    from_account INTEGER NOT NULL,
+                    address TEXT NOT NULL,
+                    value INTEGER NOT NULL,
+                    memo BLOB,
+                    FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                    FOREIGN KEY (from_account) REFERENCES accounts(account),
+                    CONSTRAINT tx_output UNIQUE (tx, output_index)
+                )",
+                NO_PARAMS,
+            )?;
+
+            let address = encode_payment_address(
+                tests::network().hrp_sapling_payment_address(),
+                &extfvk.default_address().1,
+            );
+            let extfvk = encode_extended_full_viewing_key(
+                tests::network().hrp_sapling_extended_full_viewing_key(),
+                extfvk,
+            );
+            wdb.conn.execute(
+                "INSERT INTO accounts (account, extfvk, address)
+                VALUES (?, ?, ?)",
+                &[
+                    u32::from(account).to_sql()?,
+                    extfvk.to_sql()?,
+                    address.to_sql()?,
+                ],
+            )?;
+
+            Ok(())
+        }
+
+        let seed = [0xab; 32];
+        let account = AccountId::from(0);
+        let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
+        let extfvk = ExtendedFullViewingKey::from(&secret_key);
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_0_3_0(&mut db_data, &extfvk, account).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(seed.to_vec())).unwrap();
+    }
+
+    #[test]
+    fn init_migrate_from_autoshielding_poc() {
+        fn init_autoshielding<P>(
+            wdb: &WalletDb<P>,
+            extfvk: &ExtendedFullViewingKey,
+            account: AccountId,
+        ) -> Result<(), rusqlite::Error> {
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS accounts (
+                    account INTEGER PRIMARY KEY,
+                    extfvk TEXT NOT NULL,
+                    address TEXT NOT NULL,
+                    transparent_address TEXT NOT NULL
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS blocks (
+                    height INTEGER PRIMARY KEY,
+                    hash BLOB NOT NULL,
+                    time INTEGER NOT NULL,
+                    sapling_tree BLOB NOT NULL
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS transactions (
+                    id_tx INTEGER PRIMARY KEY,
+                    txid BLOB NOT NULL UNIQUE,
+                    created TEXT,
+                    block INTEGER,
+                    tx_index INTEGER,
+                    expiry_height INTEGER,
+                    raw BLOB,
+                    FOREIGN KEY (block) REFERENCES blocks(height)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS received_notes (
+                    id_note INTEGER PRIMARY KEY,
+                    tx INTEGER NOT NULL,
+                    output_index INTEGER NOT NULL,
+                    account INTEGER NOT NULL,
+                    diversifier BLOB NOT NULL,
+                    value INTEGER NOT NULL,
+                    rcm BLOB NOT NULL,
+                    nf BLOB NOT NULL UNIQUE,
+                    is_change INTEGER NOT NULL,
+                    memo BLOB,
+                    spent INTEGER,
+                    FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                    FOREIGN KEY (account) REFERENCES accounts(account),
+                    FOREIGN KEY (spent) REFERENCES transactions(id_tx),
+                    CONSTRAINT tx_output UNIQUE (tx, output_index)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS sapling_witnesses (
+                    id_witness INTEGER PRIMARY KEY,
+                    note INTEGER NOT NULL,
+                    block INTEGER NOT NULL,
+                    witness BLOB NOT NULL,
+                    FOREIGN KEY (note) REFERENCES received_notes(id_note),
+                    FOREIGN KEY (block) REFERENCES blocks(height),
+                    CONSTRAINT witness_height UNIQUE (note, block)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS sent_notes (
+                    id_note INTEGER PRIMARY KEY,
+                    tx INTEGER NOT NULL,
+                    output_index INTEGER NOT NULL,
+                    from_account INTEGER NOT NULL,
+                    address TEXT NOT NULL,
+                    value INTEGER NOT NULL,
+                    memo BLOB,
+                    FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                    FOREIGN KEY (from_account) REFERENCES accounts(account),
+                    CONSTRAINT tx_output UNIQUE (tx, output_index)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS utxos (
+                    id_utxo INTEGER PRIMARY KEY,
+                    address TEXT NOT NULL,
+                    prevout_txid BLOB NOT NULL,
+                    prevout_idx INTEGER NOT NULL,
+                    script BLOB NOT NULL,
+                    value_zat INTEGER NOT NULL,
+                    height INTEGER NOT NULL,
+                    spent_in_tx INTEGER,
+                    FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
+                    CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
+                )",
+                NO_PARAMS,
+            )?;
+
+            let address = encode_payment_address(
+                tests::network().hrp_sapling_payment_address(),
+                &extfvk.default_address().1,
+            );
+            let extfvk = encode_extended_full_viewing_key(
+                tests::network().hrp_sapling_extended_full_viewing_key(),
+                extfvk,
+            );
+            wdb.conn.execute(
+                "INSERT INTO accounts (account, extfvk, address, transparent_address)
+                VALUES (?, ?, ?, '')",
+                &[
+                    u32::from(account).to_sql()?,
+                    extfvk.to_sql()?,
+                    address.to_sql()?,
+                ],
+            )?;
+
+            Ok(())
+        }
+
+        let seed = [0xab; 32];
+        let account = AccountId::from(0);
+        let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
+        let extfvk = ExtendedFullViewingKey::from(&secret_key);
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_autoshielding(&db_data, &extfvk, account).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(seed.to_vec())).unwrap();
+    }
+
+    #[test]
+    fn init_migrate_from_main_pre_migrations() {
+        fn init_main<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS accounts (
+                    account INTEGER PRIMARY KEY,
+                    ufvk TEXT,
+                    address TEXT,
+                    transparent_address TEXT
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS blocks (
+                    height INTEGER PRIMARY KEY,
+                    hash BLOB NOT NULL,
+                    time INTEGER NOT NULL,
+                    sapling_tree BLOB NOT NULL
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS transactions (
+                    id_tx INTEGER PRIMARY KEY,
+                    txid BLOB NOT NULL UNIQUE,
+                    created TEXT,
+                    block INTEGER,
+                    tx_index INTEGER,
+                    expiry_height INTEGER,
+                    raw BLOB,
+                    FOREIGN KEY (block) REFERENCES blocks(height)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS received_notes (
+                    id_note INTEGER PRIMARY KEY,
+                    tx INTEGER NOT NULL,
+                    output_index INTEGER NOT NULL,
+                    account INTEGER NOT NULL,
+                    diversifier BLOB NOT NULL,
+                    value INTEGER NOT NULL,
+                    rcm BLOB NOT NULL,
+                    nf BLOB NOT NULL UNIQUE,
+                    is_change INTEGER NOT NULL,
+                    memo BLOB,
+                    spent INTEGER,
+                    FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                    FOREIGN KEY (account) REFERENCES accounts(account),
+                    FOREIGN KEY (spent) REFERENCES transactions(id_tx),
+                    CONSTRAINT tx_output UNIQUE (tx, output_index)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS sapling_witnesses (
+                    id_witness INTEGER PRIMARY KEY,
+                    note INTEGER NOT NULL,
+                    block INTEGER NOT NULL,
+                    witness BLOB NOT NULL,
+                    FOREIGN KEY (note) REFERENCES received_notes(id_note),
+                    FOREIGN KEY (block) REFERENCES blocks(height),
+                    CONSTRAINT witness_height UNIQUE (note, block)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS sent_notes (
+                    id_note INTEGER PRIMARY KEY,
+                    tx INTEGER NOT NULL,
+                    output_pool INTEGER NOT NULL,
+                    output_index INTEGER NOT NULL,
+                    from_account INTEGER NOT NULL,
+                    address TEXT NOT NULL,
+                    value INTEGER NOT NULL,
+                    memo BLOB,
+                    FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                    FOREIGN KEY (from_account) REFERENCES accounts(account),
+                    CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
+                )",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "CREATE TABLE IF NOT EXISTS utxos (
+                    id_utxo INTEGER PRIMARY KEY,
+                    address TEXT NOT NULL,
+                    prevout_txid BLOB NOT NULL,
+                    prevout_idx INTEGER NOT NULL,
+                    script BLOB NOT NULL,
+                    value_zat INTEGER NOT NULL,
+                    height INTEGER NOT NULL,
+                    spent_in_tx INTEGER,
+                    FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
+                    CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
+                )",
+                NO_PARAMS,
+            )?;
+            Ok(())
+        }
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_main(&db_data).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(vec![])).unwrap();
+    }
 
     #[test]
     fn init_accounts_table_only_works_once() {
