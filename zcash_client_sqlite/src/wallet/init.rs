@@ -197,13 +197,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         for row in rows {
             let (account, address) = row?;
             let decoded_address =
-                decode_payment_address(self.params.hrp_sapling_payment_address(), &address)?
-                    .ok_or_else(|| {
-                        SqliteClientError::CorruptedData(format!(
-                            "Not a valid Sapling payment address: {}",
-                            address
-                        ))
-                    })?;
+                decode_payment_address(self.params.hrp_sapling_payment_address(), &address)?;
 
             let usk =
                 UnifiedSpendingKey::from_seed(&self.params, self.seed.expose_secret(), account)

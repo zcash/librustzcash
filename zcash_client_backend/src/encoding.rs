@@ -26,15 +26,55 @@ where
     bech32::encode(hrp, data.to_base32(), Variant::Bech32).expect("hrp is invalid")
 }
 
-fn bech32_decode<T, F>(hrp: &str, s: &str, read: F) -> Result<Option<T>, Error>
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Bech32DecodeError {
+    Bech32Error(Error),
+    IncorrectVariant(Variant),
+    ReadError,
+    HrpMismatch { expected: String, actual: String },
+}
+
+impl From<Error> for Bech32DecodeError {
+    fn from(err: Error) -> Self {
+        Bech32DecodeError::Bech32Error(err)
+    }
+}
+
+impl fmt::Display for Bech32DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            Bech32DecodeError::Bech32Error(e) => write!(f, "{}", e),
+            Bech32DecodeError::IncorrectVariant(variant) => write!(
+                f,
+                "Incorrect bech32 encoding (wrong variant: {:?})",
+                variant
+            ),
+            Bech32DecodeError::ReadError => {
+                write!(f, "Failed to decode key from its binary representation.")
+            }
+            Bech32DecodeError::HrpMismatch { expected, actual } => write!(
+                f,
+                "Key was encoded for a different network: expected {}, got {}.",
+                expected, actual
+            ),
+        }
+    }
+}
+
+fn bech32_decode<T, F>(hrp: &str, s: &str, read: F) -> Result<T, Bech32DecodeError>
 where
     F: Fn(Vec<u8>) -> Option<T>,
 {
-    match bech32::decode(s)? {
-        (decoded_hrp, data, Variant::Bech32) if decoded_hrp == hrp => {
-            Vec::<u8>::from_base32(&data).map(read)
-        }
-        _ => Ok(None),
+    let (decoded_hrp, data, variant) = bech32::decode(s)?;
+    if variant != Variant::Bech32 {
+        Err(Bech32DecodeError::IncorrectVariant(variant))
+    } else if decoded_hrp != hrp {
+        Err(Bech32DecodeError::HrpMismatch {
+            expected: hrp.to_string(),
+            actual: decoded_hrp,
+        })
+    } else {
+        read(Vec::<u8>::from_base32(&data)?).ok_or(Bech32DecodeError::ReadError)
     }
 }
 
@@ -121,7 +161,7 @@ pub fn encode_extended_spending_key(hrp: &str, extsk: &ExtendedSpendingKey) -> S
 pub fn decode_extended_spending_key(
     hrp: &str,
     s: &str,
-) -> Result<Option<ExtendedSpendingKey>, Error> {
+) -> Result<ExtendedSpendingKey, Bech32DecodeError> {
     bech32_decode(hrp, s, |data| ExtendedSpendingKey::read(&data[..]).ok())
 }
 
@@ -155,7 +195,7 @@ pub fn encode_extended_full_viewing_key(hrp: &str, extfvk: &ExtendedFullViewingK
 pub fn decode_extended_full_viewing_key(
     hrp: &str,
     s: &str,
-) -> Result<Option<ExtendedFullViewingKey>, Error> {
+) -> Result<ExtendedFullViewingKey, Bech32DecodeError> {
     bech32_decode(hrp, s, |data| ExtendedFullViewingKey::read(&data[..]).ok())
 }
 
@@ -240,11 +280,11 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 ///         HRP_SAPLING_PAYMENT_ADDRESS,
 ///         "ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk",
 ///     ),
-///     Ok(Some(pa)),
+///     Ok(pa),
 /// );
 /// ```
 /// [`PaymentAddress`]: zcash_primitives::sapling::PaymentAddress
-pub fn decode_payment_address(hrp: &str, s: &str) -> Result<Option<PaymentAddress>, Error> {
+pub fn decode_payment_address(hrp: &str, s: &str) -> Result<PaymentAddress, Bech32DecodeError> {
     bech32_decode(hrp, s, |data| {
         if data.len() != 43 {
             return None;
@@ -392,6 +432,7 @@ mod tests {
     use super::{
         decode_extended_full_viewing_key, decode_extended_spending_key, decode_payment_address,
         encode_extended_full_viewing_key, encode_extended_spending_key, encode_payment_address,
+        Bech32DecodeError,
     };
 
     #[test]
@@ -414,7 +455,7 @@ mod tests {
                 encoded_main
             )
             .unwrap(),
-            Some(extsk.clone())
+            extsk
         );
 
         assert_eq!(
@@ -430,7 +471,7 @@ mod tests {
                 encoded_test
             )
             .unwrap(),
-            Some(extsk)
+            extsk
         );
     }
 
@@ -454,7 +495,7 @@ mod tests {
                 encoded_main
             )
             .unwrap(),
-            Some(extfvk.clone())
+            extfvk
         );
 
         assert_eq!(
@@ -470,7 +511,7 @@ mod tests {
                 encoded_test
             )
             .unwrap(),
-            Some(extfvk)
+            extfvk
         );
     }
 
@@ -500,7 +541,7 @@ mod tests {
                 encoded_main
             )
             .unwrap(),
-            Some(addr.clone())
+            addr
         );
 
         assert_eq!(
@@ -513,7 +554,7 @@ mod tests {
                 encoded_test
             )
             .unwrap(),
-            Some(addr)
+            addr
         );
     }
 
@@ -535,9 +576,8 @@ mod tests {
             decode_payment_address(
                 constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
                 &encoded_main
-            )
-            .unwrap(),
-            None
+            ),
+            Err(Bech32DecodeError::ReadError)
         );
     }
 }
