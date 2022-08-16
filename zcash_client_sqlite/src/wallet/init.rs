@@ -229,7 +229,8 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         //
 
         transaction.execute_batch(
-            "CREATE TABLE sent_notes_new (
+            "PRAGMA foreign_keys = ON;
+            CREATE TABLE sent_notes_new (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_pool INTEGER NOT NULL ,
@@ -273,7 +274,8 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         }
 
         transaction.execute_batch(
-            "DROP TABLE sent_notes;
+            "PRAGMA foreign_keys = OFF;
+            DROP TABLE sent_notes;
             ALTER TABLE sent_notes_new RENAME TO sent_notes;
             PRAGMA foreign_keys = ON;",
         )?;
@@ -540,7 +542,7 @@ mod tests {
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS accounts (
+                "CREATE TABLE accounts (
                     account INTEGER PRIMARY KEY,
                     extfvk TEXT NOT NULL,
                     address TEXT NOT NULL
@@ -548,7 +550,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS blocks (
+                "CREATE TABLE blocks (
                     height INTEGER PRIMARY KEY,
                     hash BLOB NOT NULL,
                     time INTEGER NOT NULL,
@@ -557,7 +559,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS transactions (
+                "CREATE TABLE transactions (
                     id_tx INTEGER PRIMARY KEY,
                     txid BLOB NOT NULL UNIQUE,
                     created TEXT,
@@ -570,7 +572,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS received_notes (
+                "CREATE TABLE received_notes (
                     id_note INTEGER PRIMARY KEY,
                     tx INTEGER NOT NULL,
                     output_index INTEGER NOT NULL,
@@ -590,7 +592,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS sapling_witnesses (
+                "CREATE TABLE sapling_witnesses (
                     id_witness INTEGER PRIMARY KEY,
                     note INTEGER NOT NULL,
                     block INTEGER NOT NULL,
@@ -602,7 +604,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS sent_notes (
+                "CREATE TABLE sent_notes (
                     id_note INTEGER PRIMARY KEY,
                     tx INTEGER NOT NULL,
                     output_index INTEGER NOT NULL,
@@ -656,7 +658,7 @@ mod tests {
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS accounts (
+                "CREATE TABLE accounts (
                     account INTEGER PRIMARY KEY,
                     extfvk TEXT NOT NULL,
                     address TEXT NOT NULL,
@@ -665,7 +667,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS blocks (
+                "CREATE TABLE blocks (
                     height INTEGER PRIMARY KEY,
                     hash BLOB NOT NULL,
                     time INTEGER NOT NULL,
@@ -674,7 +676,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS transactions (
+                "CREATE TABLE transactions (
                     id_tx INTEGER PRIMARY KEY,
                     txid BLOB NOT NULL UNIQUE,
                     created TEXT,
@@ -687,7 +689,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS received_notes (
+                "CREATE TABLE received_notes (
                     id_note INTEGER PRIMARY KEY,
                     tx INTEGER NOT NULL,
                     output_index INTEGER NOT NULL,
@@ -707,7 +709,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS sapling_witnesses (
+                "CREATE TABLE sapling_witnesses (
                     id_witness INTEGER PRIMARY KEY,
                     note INTEGER NOT NULL,
                     block INTEGER NOT NULL,
@@ -719,7 +721,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS sent_notes (
+                "CREATE TABLE sent_notes (
                     id_note INTEGER PRIMARY KEY,
                     tx INTEGER NOT NULL,
                     output_index INTEGER NOT NULL,
@@ -734,7 +736,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS utxos (
+                "CREATE TABLE utxos (
                     id_utxo INTEGER PRIMARY KEY,
                     address TEXT NOT NULL,
                     prevout_txid BLOB NOT NULL,
@@ -784,7 +786,7 @@ mod tests {
     fn init_migrate_from_main_pre_migrations() {
         fn init_main<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS accounts (
+                "CREATE TABLE accounts (
                     account INTEGER PRIMARY KEY,
                     ufvk TEXT,
                     address TEXT,
@@ -793,7 +795,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS blocks (
+                "CREATE TABLE blocks (
                     height INTEGER PRIMARY KEY,
                     hash BLOB NOT NULL,
                     time INTEGER NOT NULL,
@@ -802,7 +804,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS transactions (
+                "CREATE TABLE transactions (
                     id_tx INTEGER PRIMARY KEY,
                     txid BLOB NOT NULL UNIQUE,
                     created TEXT,
@@ -815,7 +817,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS received_notes (
+                "CREATE TABLE received_notes (
                     id_note INTEGER PRIMARY KEY,
                     tx INTEGER NOT NULL,
                     output_index INTEGER NOT NULL,
@@ -835,7 +837,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS sapling_witnesses (
+                "CREATE TABLE sapling_witnesses (
                     id_witness INTEGER PRIMARY KEY,
                     note INTEGER NOT NULL,
                     block INTEGER NOT NULL,
@@ -847,7 +849,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS sent_notes (
+                "CREATE TABLE sent_notes (
                     id_note INTEGER PRIMARY KEY,
                     tx INTEGER NOT NULL,
                     output_pool INTEGER NOT NULL,
@@ -863,7 +865,7 @@ mod tests {
                 NO_PARAMS,
             )?;
             wdb.conn.execute(
-                "CREATE TABLE IF NOT EXISTS utxos (
+                "CREATE TABLE utxos (
                     id_utxo INTEGER PRIMARY KEY,
                     address TEXT NOT NULL,
                     prevout_txid BLOB NOT NULL,
