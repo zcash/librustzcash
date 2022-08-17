@@ -93,6 +93,11 @@ impl UnifiedAddress {
         }
     }
 
+    /// Returns the Orchard receiver within this Unified Address, if any.
+    pub fn orchard(&self) -> Option<&orchard::Address> {
+        self.orchard.as_ref()
+    }
+
     /// Returns the Sapling receiver within this Unified Address, if any.
     pub fn sapling(&self) -> Option<&PaymentAddress> {
         self.sapling.as_ref()
