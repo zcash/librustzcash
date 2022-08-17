@@ -13,11 +13,11 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    encoding::{decode_payment_address, encode_payment_address},
+    address::RecipientAddress,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 
-use crate::{error::SqliteClientError, WalletDb};
+use crate::{error::SqliteClientError, wallet::PoolType, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -176,8 +176,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         //
 
         transaction.execute_batch(
-            "PRAGMA foreign_keys = OFF;
-            CREATE TABLE accounts_new (
+            "CREATE TABLE accounts_new (
                 account INTEGER PRIMARY KEY,
                 ufvk TEXT NOT NULL,
                 address TEXT,
@@ -188,32 +187,50 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         let mut stmt_fetch_accounts =
             transaction.prepare("SELECT account, address FROM accounts")?;
 
-        let rows = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
+        let mut rows = stmt_fetch_accounts.query(NO_PARAMS)?;
+        while let Some(row) = rows.next()? {
             let account: u32 = row.get(0)?;
-            let address: String = row.get(1)?;
-            Ok((AccountId::from(account), address))
-        })?;
-
-        for row in rows {
-            let (account, address) = row?;
-            let decoded_address =
-                decode_payment_address(self.params.hrp_sapling_payment_address(), &address)?;
-
+            let account = AccountId::from(account);
             let usk =
                 UnifiedSpendingKey::from_seed(&self.params, self.seed.expose_secret(), account)
                     .unwrap();
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let dfvk = ufvk
-                .sapling()
-                .expect("Derivation should have produced a UFVK containing a Sapling component.");
-            let (idx, expected_address) = dfvk.default_address();
-            if expected_address != decoded_address {
-                return Err(SqliteClientError::CorruptedData(
-                        format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
-                            address,
-                            encode_payment_address(self.params.hrp_sapling_payment_address(), &expected_address),
-                            idx)));
+            let address: String = row.get(1)?;
+            let decoded = RecipientAddress::decode(&self.params, &address).ok_or_else(|| {
+                SqliteClientError::CorruptedData(format!(
+                    "Could not decode {} as a valid Zcash address.",
+                    address
+                ))
+            })?;
+            match decoded {
+                RecipientAddress::Shielded(decoded_address) => {
+                    let dfvk = ufvk.sapling().expect(
+                        "Derivation should have produced a UFVK containing a Sapling component.",
+                    );
+                    let (idx, expected_address) = dfvk.default_address();
+                    if decoded_address != expected_address {
+                        return Err(SqliteClientError::CorruptedData(
+                            format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
+                                address,
+                                RecipientAddress::Shielded(expected_address).encode(&self.params),
+                                idx)));
+                    }
+                }
+                RecipientAddress::Transparent(_) => {
+                    return Err(SqliteClientError::CorruptedData(
+                        "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
+                }
+                RecipientAddress::Unified(decoded_address) => {
+                    let (expected_address, idx) = ufvk.default_address();
+                    if decoded_address != expected_address {
+                        return Err(SqliteClientError::CorruptedData(
+                            format!("Decoded unified address {} does not match the ufvk's default address {} at {:?}.",
+                                address,
+                                RecipientAddress::Unified(expected_address).encode(&self.params),
+                                idx)));
+                    }
+                }
             }
 
             add_account_internal(&self.params, transaction, "accounts_new", account, &ufvk)?;
@@ -229,8 +246,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         //
 
         transaction.execute_batch(
-            "PRAGMA foreign_keys = ON;
-            CREATE TABLE sent_notes_new (
+            "CREATE TABLE sent_notes_new (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_pool INTEGER NOT NULL ,
@@ -265,19 +281,59 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
                     FROM sent_notes;"
             )?;
         } else {
-            transaction.execute_batch(
-                "INSERT INTO sent_notes_new
-                    (id_note, tx, output_pool, output_index, from_account, address, value, memo)
-                    SELECT id_note, tx, 2, output_index, from_account, address, value, memo
-                    FROM sent_notes;",
+            let mut stmt_fetch_sent_notes = transaction.prepare(
+                "SELECT id_note, tx, output_index, from_account, address, value, memo
+                    FROM sent_notes",
             )?;
+
+            let mut stmt_insert_sent_note = transaction.prepare(
+                "INSERT INTO sent_notes_new 
+                    (id_note, tx, output_pool, output_index, from_account, address, value, memo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )?;
+
+            let mut rows = stmt_fetch_sent_notes.query(NO_PARAMS)?;
+            while let Some(row) = rows.next()? {
+                let id_note: i64 = row.get(0)?;
+                let tx_ref: i64 = row.get(1)?;
+                let output_index: i64 = row.get(2)?;
+                let account_id: u32 = row.get(3)?;
+                let address: String = row.get(4)?;
+                let value: i64 = row.get(5)?;
+                let memo: Option<Vec<u8>> = row.get(6)?;
+
+                let decoded_address =
+                    RecipientAddress::decode(&self.params, &address).ok_or_else(|| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Could not decode {} as a valid Zcash address.",
+                            address
+                        ))
+                    })?;
+                let output_pool = match decoded_address {
+                    RecipientAddress::Shielded(_) => Ok(PoolType::Sapling.typecode()),
+                    RecipientAddress::Transparent(_) => Ok(PoolType::Transparent.typecode()),
+                    RecipientAddress::Unified(_) => Err(SqliteClientError::CorruptedData(
+                        "Unified addresses should not yet appear in the sent_notes table."
+                            .to_string(),
+                    )),
+                }?;
+
+                stmt_insert_sent_note.execute(params![
+                    id_note,
+                    tx_ref,
+                    output_pool,
+                    output_index,
+                    account_id,
+                    address,
+                    value,
+                    memo
+                ])?;
+            }
         }
 
         transaction.execute_batch(
-            "PRAGMA foreign_keys = OFF;
-            DROP TABLE sent_notes;
-            ALTER TABLE sent_notes_new RENAME TO sent_notes;
-            PRAGMA foreign_keys = ON;",
+            "DROP TABLE sent_notes;
+            ALTER TABLE sent_notes_new RENAME TO sent_notes;",
         )?;
 
         Ok(())
@@ -328,6 +384,9 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: SecretVec<u8>,
 ) -> Result<(), MigratorError<SqliteClientError>> {
+    wdb.conn
+        .execute("PRAGMA foreign_keys = OFF", NO_PARAMS)
+        .map_err(|e| MigratorError::Adapter(SqliteClientError::from(e)))?;
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
 
@@ -343,6 +402,9 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
         .register_multiple(vec![migration0, migration1, migration2])
         .expect("Wallet migration registration should have been successful.");
     migrator.up(None)?;
+    wdb.conn
+        .execute("PRAGMA foreign_keys = ON", NO_PARAMS)
+        .map_err(|e| MigratorError::Adapter(SqliteClientError::from(e)))?;
     Ok(())
 }
 
@@ -512,6 +574,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_client_backend::{
+        address::RecipientAddress,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
@@ -769,6 +832,21 @@ mod tests {
                 ],
             )?;
 
+            // add a sapling sent note
+            wdb.conn.execute(
+                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '')",
+                NO_PARAMS,
+            )?;
+            wdb.conn.execute(
+                "INSERT INTO sent_notes (tx, output_index, from_account, address, value)
+                VALUES (0, 0, ?, ?, 0)",
+                &[u32::from(account).to_sql()?, address.to_sql()?],
+            )?;
+
             Ok(())
         }
 
@@ -784,7 +862,11 @@ mod tests {
 
     #[test]
     fn init_migrate_from_main_pre_migrations() {
-        fn init_main<P>(wdb: &WalletDb<P>) -> Result<(), rusqlite::Error> {
+        fn init_main<P>(
+            wdb: &WalletDb<P>,
+            ufvk: &UnifiedFullViewingKey,
+            account: AccountId,
+        ) -> Result<(), rusqlite::Error> {
             wdb.conn.execute(
                 "CREATE TABLE accounts (
                     account INTEGER PRIMARY KEY,
@@ -879,13 +961,51 @@ mod tests {
                 )",
                 NO_PARAMS,
             )?;
+
+            let ufvk_str = ufvk.encode(&tests::network());
+            let address_str =
+                RecipientAddress::Unified(ufvk.default_address().0).encode(&tests::network());
+            wdb.conn.execute(
+                "INSERT INTO accounts (account, ufvk, address, transparent_address)
+                VALUES (?, ?, ?, '')",
+                &[
+                    u32::from(account).to_sql()?,
+                    ufvk_str.to_sql()?,
+                    address_str.to_sql()?,
+                ],
+            )?;
+
+            // add a transparent "sent note"
+            #[cfg(feature = "transparent-inputs")]
+            {
+                let taddr = RecipientAddress::Transparent(
+                    ufvk.default_address().0.transparent().unwrap().clone(),
+                )
+                .encode(&tests::network());
+                wdb.conn.execute(
+                    "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
+                    NO_PARAMS,
+                )?;
+                wdb.conn.execute(
+                    "INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '')",
+                    NO_PARAMS,
+                )?;
+                wdb.conn.execute(
+                    "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
+                    VALUES (0, ?, 0, ?, ?, 0)",
+                    &[PoolType::Transparent.typecode(), u32::from(account).to_sql()?, taddr.to_sql()?])?;
+            }
+
             Ok(())
         }
 
+        let seed = [0xab; 32];
+        let account = AccountId::from(0);
+        let secret_key = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account).unwrap();
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_main(&db_data).unwrap();
-        init_wallet_db(&mut db_data, Secret::new(vec![])).unwrap();
+        init_main(&db_data, &secret_key.to_unified_full_viewing_key(), account).unwrap();
+        init_wallet_db(&mut db_data, Secret::new(seed.to_vec())).unwrap();
     }
 
     #[test]
