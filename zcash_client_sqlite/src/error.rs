@@ -3,7 +3,10 @@
 use std::error;
 use std::fmt;
 
-use zcash_client_backend::{data_api, encoding::TransparentCodecError};
+use zcash_client_backend::{
+    data_api,
+    encoding::{Bech32DecodeError, TransparentCodecError},
+};
 use zcash_primitives::consensus::BlockHeight;
 
 use crate::{NoteId, PRUNING_HEIGHT};
@@ -27,8 +30,8 @@ pub enum SqliteClientError {
     /// Illegal attempt to reinitialize an already-initialized wallet database.
     TableNotEmpty,
 
-    /// Bech32 decoding error
-    Bech32(bech32::Error),
+    /// A Bech32-encoded key or address decoding error
+    Bech32DecodeError(Bech32DecodeError),
 
     /// Base58 decoding error
     Base58(bs58::decode::Error),
@@ -58,7 +61,7 @@ impl error::Error for SqliteClientError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             SqliteClientError::InvalidMemo(e) => Some(e),
-            SqliteClientError::Bech32(e) => Some(e),
+            SqliteClientError::Bech32DecodeError(Bech32DecodeError::Bech32Error(e)) => Some(e),
             SqliteClientError::DbError(e) => Some(e),
             SqliteClientError::Io(e) => Some(e),
             _ => None,
@@ -78,7 +81,7 @@ impl fmt::Display for SqliteClientError {
                 write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::RequestedRewindInvalid(h, r) =>
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_HEIGHT, h, r),
-            SqliteClientError::Bech32(e) => write!(f, "{}", e),
+            SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),
             SqliteClientError::Base58(e) => write!(f, "{}", e),
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
@@ -102,9 +105,9 @@ impl From<std::io::Error> for SqliteClientError {
     }
 }
 
-impl From<bech32::Error> for SqliteClientError {
-    fn from(e: bech32::Error) -> Self {
-        SqliteClientError::Bech32(e)
+impl From<Bech32DecodeError> for SqliteClientError {
+    fn from(e: Bech32DecodeError) -> Self {
+        SqliteClientError::Bech32DecodeError(e)
     }
 }
 

@@ -37,6 +37,7 @@ and this library adheres to Rust's notion of
   - `TransactionRequest::new` for constructing a request from `Vec<Payment>`.
   - `TransactionRequest::payments` for accessing the `Payments` that make up a
     request.
+- `zcash_client_backend::encoding::KeyError` 
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:
@@ -113,7 +114,11 @@ and this library adheres to Rust's notion of
   derived from ZIP 316 UFVKs and UIVKs.
 - `welding_rig::scan_block` now uses batching for trial-decryption of
   transaction outputs.
-
+- The return type of the following methods in `zcash_client_backend::encoding`
+  have been changed to improve error reporting:
+  - `decode_extended_spending_key`
+  - `decode_extended_full_viewing_key`
+  - `decode_payment_address`
 
 ### Removed
 - `zcash_client_backend::data_api`:
