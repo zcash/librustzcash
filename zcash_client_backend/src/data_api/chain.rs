@@ -77,13 +77,15 @@
 //! # }
 //! ```
 
+use std::convert::TryFrom;
 use std::fmt::Debug;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
-    sapling::Nullifier,
+    sapling::{keys::Scope, note_encryption::SaplingDomain, Nullifier},
+    transaction::components::sapling::CompactOutputDescription,
 };
 
 use crate::{
@@ -92,8 +94,9 @@ use crate::{
         BlockSource, PrunedBlock, WalletWrite,
     },
     proto::compact_formats::CompactBlock,
+    scan::BatchRunner,
     wallet::WalletTx,
-    welding_rig::scan_block,
+    welding_rig::scan_block_with_runner,
 };
 
 /// Checks that the scanned blocks in the data database, when combined with the recent
@@ -192,7 +195,7 @@ pub fn scan_cached_blocks<E, N, P, C, D>(
     limit: Option<u32>,
 ) -> Result<(), E>
 where
-    P: consensus::Parameters,
+    P: consensus::Parameters + Send + 'static,
     C: BlockSource<Error = E>,
     D: WalletWrite<Error = E, NoteRef = N>,
     N: Copy + Debug,
@@ -229,6 +232,42 @@ where
     // Get the nullifiers for the notes we are tracking
     let mut nullifiers = data.get_nullifiers()?;
 
+    let mut batch_runner = BatchRunner::new(
+        100,
+        dfvks
+            .iter()
+            .flat_map(|(_, dfvk)| [dfvk.to_ivk(Scope::External), dfvk.to_ivk(Scope::Internal)])
+            .collect(),
+    );
+
+    cache.with_blocks(last_height, limit, |block: CompactBlock| {
+        let block_hash = block.hash();
+        let block_height = block.height();
+
+        for tx in block.vtx.into_iter() {
+            let txid = tx.txid();
+            let outputs = tx
+                .outputs
+                .into_iter()
+                .map(|output| {
+                    CompactOutputDescription::try_from(output)
+                        .expect("Invalid output found in compact block decoding.")
+                })
+                .collect::<Vec<_>>();
+
+            batch_runner.add_outputs(
+                block_hash,
+                txid,
+                || SaplingDomain::for_height(params.clone(), block_height),
+                &outputs,
+            )
+        }
+
+        Ok(())
+    })?;
+
+    batch_runner.flush();
+
     cache.with_blocks(last_height, limit, |block: CompactBlock| {
         let current_height = block.height();
 
@@ -245,13 +284,14 @@ where
         let txs: Vec<WalletTx<Nullifier>> = {
             let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
 
-            scan_block(
+            scan_block_with_runner(
                 params,
                 block,
                 &dfvks,
                 &nullifiers,
                 &mut tree,
                 &mut witness_refs[..],
+                Some(&mut batch_runner),
             )
         };
 

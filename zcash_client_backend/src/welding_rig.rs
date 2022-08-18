@@ -1,7 +1,7 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
 
 use ff::PrimeField;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
@@ -18,8 +18,11 @@ use zcash_primitives::{
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
-use crate::proto::compact_formats::CompactBlock;
-use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
+use crate::{
+    proto::compact_formats::CompactBlock,
+    scan::BatchRunner,
+    wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx},
+};
 
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a Sapling [`CompactSaplingOutput`]
@@ -36,7 +39,7 @@ use crate::wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx};
 /// [`scan_block`]: crate::welding_rig::scan_block
 pub trait ScanningKey {
     /// The type of key that is used to decrypt Sapling outputs;
-    type SaplingNk;
+    type SaplingNk: Clone;
 
     type SaplingKeys: IntoIterator<Item = (SaplingIvk, Self::SaplingNk)>;
 
@@ -141,7 +144,7 @@ impl ScanningKey for SaplingIvk {
 /// [`IncrementalWitness`]: zcash_primitives::merkle_tree::IncrementalWitness
 /// [`WalletShieldedOutput`]: crate::wallet::WalletShieldedOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
+pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     params: &P,
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
@@ -149,8 +152,29 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx<K::Nf>> {
+    scan_block_with_runner(
+        params,
+        block,
+        vks,
+        nullifiers,
+        tree,
+        existing_witnesses,
+        None,
+    )
+}
+
+pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
+    params: &P,
+    block: CompactBlock,
+    vks: &[(&AccountId, &K)],
+    nullifiers: &[(AccountId, Nullifier)],
+    tree: &mut CommitmentTree<Node>,
+    existing_witnesses: &mut [&mut IncrementalWitness<Node>],
+    mut batch_runner: Option<&mut BatchRunner<SaplingDomain<P>, CompactOutputDescription>>,
+) -> Vec<WalletTx<K::Nf>> {
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
     let block_height = block.height();
+    let block_hash = block.hash();
 
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
@@ -218,21 +242,53 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                 })
                 .collect::<Vec<_>>();
 
-            let vks = vks
-                .iter()
-                .flat_map(|(a, k)| {
-                    k.to_sapling_keys()
-                        .into_iter()
-                        .map(move |(ivk, nk)| (**a, ivk, nk))
-                })
-                .collect::<Vec<_>>();
+            let decrypted: Vec<_> = if let Some(runner) = batch_runner.as_mut() {
+                let vks = vks
+                    .iter()
+                    .flat_map(|(a, k)| {
+                        k.to_sapling_keys()
+                            .into_iter()
+                            .map(move |(ivk, nk)| (ivk.to_repr(), (**a, nk)))
+                    })
+                    .collect::<HashMap<_, _>>();
 
-            let ivks = vks
-                .iter()
-                .map(|(_, ivk, _)| (*ivk).clone())
-                .collect::<Vec<_>>();
+                let mut decrypted = runner.collect_results(block_hash, txid);
+                (0..decoded.len())
+                    .map(|i| {
+                        decrypted.remove(&(txid, i)).map(|d_note| {
+                            let (a, nk) = vks.get(&d_note.ivk.to_repr()).expect(
+                                "The batch runner and scan_block must use the same set of IVKs.",
+                            );
 
-            let decrypted = batch::try_compact_note_decryption(&ivks, decoded);
+                            ((d_note.note, d_note.recipient), *a, (*nk).clone())
+                        })
+                    })
+                    .collect()
+            } else {
+                let vks = vks
+                    .iter()
+                    .flat_map(|(a, k)| {
+                        k.to_sapling_keys()
+                            .into_iter()
+                            .map(move |(ivk, nk)| (**a, ivk, nk))
+                    })
+                    .collect::<Vec<_>>();
+
+                let ivks = vks
+                    .iter()
+                    .map(|(_, ivk, _)| (*ivk).clone())
+                    .collect::<Vec<_>>();
+
+                batch::try_compact_note_decryption(&ivks, decoded)
+                    .into_iter()
+                    .map(|v| {
+                        v.map(|(note_data, ivk_idx)| {
+                            let (account, _, nk) = &vks[ivk_idx];
+                            (note_data, *account, (*nk).clone())
+                        })
+                    })
+                    .collect()
+            };
 
             for (index, ((_, output), dec_output)) in decoded.iter().zip(decrypted).enumerate() {
                 // Grab mutable references to new witnesses from previous outputs
@@ -256,23 +312,22 @@ pub fn scan_block<P: consensus::Parameters, K: ScanningKey>(
                 }
                 tree.append(node).unwrap();
 
-                if let Some(((note, to), ivk_idx)) = dec_output {
+                if let Some(((note, to), account, nk)) = dec_output {
                     // A note is marked as "change" if the account that received it
                     // also spent notes in the same transaction. This will catch,
                     // for instance:
                     // - Change created by spending fractions of notes.
                     // - Notes created by consolidation transactions.
                     // - Notes sent from one account to itself.
-                    let (account, _, nk) = &vks[ivk_idx];
-                    let is_change = spent_from_accounts.contains(account);
+                    let is_change = spent_from_accounts.contains(&account);
                     let witness = IncrementalWitness::from_tree(tree);
-                    let nf = K::sapling_nf(nk, &note, &witness);
+                    let nf = K::sapling_nf(&nk, &note, &witness);
 
                     shielded_outputs.push(WalletShieldedOutput {
                         index,
                         cmu: output.cmu,
                         ephemeral_key: output.ephemeral_key.clone(),
-                        account: *account,
+                        account,
                         note,
                         to,
                         is_change,
@@ -387,6 +442,11 @@ mod tests {
 
         // Create a fake CompactBlock containing the note
         let mut cb = CompactBlock::new();
+        cb.set_hash({
+            let mut hash = vec![0; 32];
+            rng.fill_bytes(&mut hash);
+            hash
+        });
         cb.set_height(height.into());
 
         // Add a random Sapling tx before ours

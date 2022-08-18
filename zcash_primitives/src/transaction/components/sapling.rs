@@ -389,6 +389,7 @@ impl OutputDescriptionV5 {
     }
 }
 
+#[derive(Clone)]
 pub struct CompactOutputDescription {
     pub ephemeral_key: EphemeralKeyBytes,
     pub cmu: bls12_381::Scalar,

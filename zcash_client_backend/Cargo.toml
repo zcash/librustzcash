@@ -13,10 +13,11 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 
 [dependencies]
+base64 = "0.13"
 bech32 = "0.8"
 bls12_381 = "0.7"
 bs58 = { version = "0.4", features = ["check"] }
-base64 = "0.13"
+crossbeam-channel = "0.5"
 ff = "0.12"
 group = "0.12"
 hex = "0.4"
@@ -29,11 +30,13 @@ percent-encoding = "2.1.0"
 proptest = { version = "1.0.0", optional = true }
 protobuf = "~2.27.1" # MSRV 1.52.1
 rand_core = "0.6"
+rayon = "1.5"
 ripemd = { version = "0.1", optional = true }
 secp256k1 = { version = "0.21", optional = true }
 sha2 = { version = "0.10.1", optional = true }
 subtle = "2.2.3"
 time = "0.2"
+tracing = "0.1"
 zcash_address = { version = "0.1", path = "../components/zcash_address" }
 zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption" }
 zcash_primitives = { version = "0.7", path = "../zcash_primitives" }
