@@ -163,6 +163,34 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
+pub(crate) fn add_block_to_runner<P: consensus::Parameters + Send + 'static>(
+    params: &P,
+    block: CompactBlock,
+    batch_runner: &mut BatchRunner<SaplingDomain<P>, CompactOutputDescription>,
+) {
+    let block_hash = block.hash();
+    let block_height = block.height();
+
+    for tx in block.vtx.into_iter() {
+        let txid = tx.txid();
+        let outputs = tx
+            .outputs
+            .into_iter()
+            .map(|output| {
+                CompactOutputDescription::try_from(output)
+                    .expect("Invalid output found in compact block decoding.")
+            })
+            .collect::<Vec<_>>();
+
+        batch_runner.add_outputs(
+            block_hash,
+            txid,
+            || SaplingDomain::for_height(params.clone(), block_height),
+            &outputs,
+        )
+    }
+}
+
 pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     params: &P,
     block: CompactBlock,
@@ -371,10 +399,14 @@ mod tests {
         zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey},
     };
 
-    use super::scan_block;
-    use crate::proto::compact_formats::{
-        CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+    use crate::{
+        proto::compact_formats::{
+            CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+        },
+        scan::BatchRunner,
     };
+
+    use super::{add_block_to_runner, scan_block, scan_block_with_runner, ScanningKey};
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -483,80 +515,128 @@ mod tests {
 
     #[test]
     fn scan_block_with_my_tx() {
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        fn go(scan_multithreaded: bool) {
+            let extsk = ExtendedSpendingKey::master(&[]);
+            let extfvk = ExtendedFullViewingKey::from(&extsk);
 
-        let cb = fake_compact_block(
-            1u32.into(),
-            Nullifier([0; 32]),
-            extfvk.clone(),
-            Amount::from_u64(5).unwrap(),
-            false,
-        );
-        assert_eq!(cb.vtx.len(), 2);
+            let cb = fake_compact_block(
+                1u32.into(),
+                Nullifier([0; 32]),
+                extfvk.clone(),
+                Amount::from_u64(5).unwrap(),
+                false,
+            );
+            assert_eq!(cb.vtx.len(), 2);
 
-        let mut tree = CommitmentTree::empty();
-        let txs = scan_block(
-            &Network::TestNetwork,
-            cb,
-            &[(&AccountId::from(0), &extfvk)],
-            &[],
-            &mut tree,
-            &mut [],
-        );
-        assert_eq!(txs.len(), 1);
+            let mut tree = CommitmentTree::empty();
+            let mut batch_runner = if scan_multithreaded {
+                let mut runner = BatchRunner::new(
+                    10,
+                    extfvk
+                        .to_sapling_keys()
+                        .iter()
+                        .map(|(k, _)| k.clone())
+                        .collect(),
+                );
 
-        let tx = &txs[0];
-        assert_eq!(tx.index, 1);
-        assert_eq!(tx.num_spends, 1);
-        assert_eq!(tx.num_outputs, 1);
-        assert_eq!(tx.shielded_spends.len(), 0);
-        assert_eq!(tx.shielded_outputs.len(), 1);
-        assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
-        assert_eq!(tx.shielded_outputs[0].note.value, 5);
+                add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
+                runner.flush();
 
-        // Check that the witness root matches
-        assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
+                Some(runner)
+            } else {
+                None
+            };
+
+            let txs = scan_block_with_runner(
+                &Network::TestNetwork,
+                cb,
+                &[(&AccountId::from(0), &extfvk)],
+                &[],
+                &mut tree,
+                &mut [],
+                batch_runner.as_mut(),
+            );
+            assert_eq!(txs.len(), 1);
+
+            let tx = &txs[0];
+            assert_eq!(tx.index, 1);
+            assert_eq!(tx.num_spends, 1);
+            assert_eq!(tx.num_outputs, 1);
+            assert_eq!(tx.shielded_spends.len(), 0);
+            assert_eq!(tx.shielded_outputs.len(), 1);
+            assert_eq!(tx.shielded_outputs[0].index, 0);
+            assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
+            assert_eq!(tx.shielded_outputs[0].note.value, 5);
+
+            // Check that the witness root matches
+            assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
+        }
+
+        go(false);
+        go(true);
     }
 
     #[test]
     fn scan_block_with_txs_after_my_tx() {
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        fn go(scan_multithreaded: bool) {
+            let extsk = ExtendedSpendingKey::master(&[]);
+            let extfvk = ExtendedFullViewingKey::from(&extsk);
 
-        let cb = fake_compact_block(
-            1u32.into(),
-            Nullifier([0; 32]),
-            extfvk.clone(),
-            Amount::from_u64(5).unwrap(),
-            true,
-        );
-        assert_eq!(cb.vtx.len(), 3);
+            let cb = fake_compact_block(
+                1u32.into(),
+                Nullifier([0; 32]),
+                extfvk.clone(),
+                Amount::from_u64(5).unwrap(),
+                true,
+            );
+            assert_eq!(cb.vtx.len(), 3);
 
-        let mut tree = CommitmentTree::empty();
-        let txs = scan_block(
-            &Network::TestNetwork,
-            cb,
-            &[(&AccountId::from(0), &extfvk)],
-            &[],
-            &mut tree,
-            &mut [],
-        );
-        assert_eq!(txs.len(), 1);
+            let mut tree = CommitmentTree::empty();
+            let mut batch_runner = if scan_multithreaded {
+                let mut runner = BatchRunner::new(
+                    10,
+                    extfvk
+                        .to_sapling_keys()
+                        .iter()
+                        .map(|(k, _)| k.clone())
+                        .collect(),
+                );
 
-        let tx = &txs[0];
-        assert_eq!(tx.index, 1);
-        assert_eq!(tx.num_spends, 1);
-        assert_eq!(tx.num_outputs, 1);
-        assert_eq!(tx.shielded_spends.len(), 0);
-        assert_eq!(tx.shielded_outputs.len(), 1);
-        assert_eq!(tx.shielded_outputs[0].index, 0);
-        assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
-        assert_eq!(tx.shielded_outputs[0].note.value, 5);
+                add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
+                runner.flush();
 
-        // Check that the witness root matches
-        assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
+                Some(runner)
+            } else {
+                None
+            };
+
+            let txs = scan_block_with_runner(
+                &Network::TestNetwork,
+                cb,
+                &[(&AccountId::from(0), &extfvk)],
+                &[],
+                &mut tree,
+                &mut [],
+                batch_runner.as_mut(),
+            );
+            assert_eq!(txs.len(), 1);
+
+            let tx = &txs[0];
+            assert_eq!(tx.index, 1);
+            assert_eq!(tx.num_spends, 1);
+            assert_eq!(tx.num_outputs, 1);
+            assert_eq!(tx.shielded_spends.len(), 0);
+            assert_eq!(tx.shielded_outputs.len(), 1);
+            assert_eq!(tx.shielded_outputs[0].index, 0);
+            assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
+            assert_eq!(tx.shielded_outputs[0].note.value, 5);
+
+            // Check that the witness root matches
+            assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
+        }
+
+        go(false);
+        go(true);
     }
 
     #[test]

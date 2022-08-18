@@ -77,15 +77,13 @@
 //! # }
 //! ```
 
-use std::convert::TryFrom;
 use std::fmt::Debug;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
-    sapling::{keys::Scope, note_encryption::SaplingDomain, Nullifier},
-    transaction::components::sapling::CompactOutputDescription,
+    sapling::{keys::Scope, Nullifier},
 };
 
 use crate::{
@@ -96,7 +94,7 @@ use crate::{
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
     wallet::WalletTx,
-    welding_rig::scan_block_with_runner,
+    welding_rig::{add_block_to_runner, scan_block_with_runner},
 };
 
 /// Checks that the scanned blocks in the data database, when combined with the recent
@@ -241,28 +239,7 @@ where
     );
 
     cache.with_blocks(last_height, limit, |block: CompactBlock| {
-        let block_hash = block.hash();
-        let block_height = block.height();
-
-        for tx in block.vtx.into_iter() {
-            let txid = tx.txid();
-            let outputs = tx
-                .outputs
-                .into_iter()
-                .map(|output| {
-                    CompactOutputDescription::try_from(output)
-                        .expect("Invalid output found in compact block decoding.")
-                })
-                .collect::<Vec<_>>();
-
-            batch_runner.add_outputs(
-                block_hash,
-                txid,
-                || SaplingDomain::for_height(params.clone(), block_height),
-                &outputs,
-            )
-        }
-
+        add_block_to_runner(params, block, &mut batch_runner);
         Ok(())
     })?;
 
