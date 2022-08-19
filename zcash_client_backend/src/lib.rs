@@ -14,6 +14,7 @@ mod decrypt;
 pub mod encoding;
 pub mod keys;
 pub mod proto;
+pub mod scan;
 pub mod wallet;
 pub mod welding_rig;
 pub mod zip321;
