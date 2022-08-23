@@ -84,7 +84,13 @@ impl RusqliteMigration for WalletMigration0 {
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
-            "CREATE TABLE IF NOT EXISTS accounts (
+            // We set the user_version field of the database to a constant value of 8 to allow
+            // correct integration with the Android SDK with versions of the database that were
+            // created prior to the introduction of migrations in this crate.  This constant should
+            // remain fixed going forward, and should not be altered by migrations; migration
+            // status is maintained exclusively by the schemer_migrations table.
+            "PRAGMA user_version = 8;
+            CREATE TABLE IF NOT EXISTS accounts (
                 account INTEGER PRIMARY KEY,
                 extfvk TEXT NOT NULL,
                 address TEXT NOT NULL
