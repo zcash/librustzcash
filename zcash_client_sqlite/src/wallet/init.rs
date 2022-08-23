@@ -664,6 +664,104 @@ mod tests {
     use {crate::wallet::PoolType, zcash_primitives::legacy::keys as transparent};
 
     #[test]
+    fn verify_schema() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        let mut stmt_schema_sql = db_data
+            .conn
+            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
+            .unwrap();
+        let mut rows = stmt_schema_sql.query(NO_PARAMS).unwrap();
+        let expected = vec![
+            "CREATE TABLE \"accounts\" (
+                account INTEGER PRIMARY KEY,
+                ufvk TEXT NOT NULL,
+                address TEXT,
+                transparent_address TEXT
+            )",
+            "CREATE TABLE blocks (
+                height INTEGER PRIMARY KEY,
+                hash BLOB NOT NULL,
+                time INTEGER NOT NULL,
+                sapling_tree BLOB NOT NULL
+            )",
+            "CREATE TABLE received_notes (
+                id_note INTEGER PRIMARY KEY,
+                tx INTEGER NOT NULL,
+                output_index INTEGER NOT NULL,
+                account INTEGER NOT NULL,
+                diversifier BLOB NOT NULL,
+                value INTEGER NOT NULL,
+                rcm BLOB NOT NULL,
+                nf BLOB NOT NULL UNIQUE,
+                is_change INTEGER NOT NULL,
+                memo BLOB,
+                spent INTEGER,
+                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                FOREIGN KEY (account) REFERENCES accounts(account),
+                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
+                CONSTRAINT tx_output UNIQUE (tx, output_index)
+            )",
+            "CREATE TABLE sapling_witnesses (
+                id_witness INTEGER PRIMARY KEY,
+                note INTEGER NOT NULL,
+                block INTEGER NOT NULL,
+                witness BLOB NOT NULL,
+                FOREIGN KEY (note) REFERENCES received_notes(id_note),
+                FOREIGN KEY (block) REFERENCES blocks(height),
+                CONSTRAINT witness_height UNIQUE (note, block)
+            )",
+            "CREATE TABLE schemer_migrations (
+                        id blob PRIMARY KEY
+                    )",
+            "CREATE TABLE \"sent_notes\" (
+                id_note INTEGER PRIMARY KEY,
+                tx INTEGER NOT NULL,
+                output_pool INTEGER NOT NULL ,
+                output_index INTEGER NOT NULL,
+                from_account INTEGER NOT NULL,
+                address TEXT NOT NULL,
+                value INTEGER NOT NULL,
+                memo BLOB,
+                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
+                FOREIGN KEY (from_account) REFERENCES accounts(account),
+                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
+            )",
+            "CREATE TABLE transactions (
+                id_tx INTEGER PRIMARY KEY,
+                txid BLOB NOT NULL UNIQUE,
+                created TEXT,
+                block INTEGER,
+                tx_index INTEGER,
+                expiry_height INTEGER,
+                raw BLOB,
+                FOREIGN KEY (block) REFERENCES blocks(height)
+            )",
+            "CREATE TABLE utxos (
+                id_utxo INTEGER PRIMARY KEY,
+                address TEXT NOT NULL,
+                prevout_txid BLOB NOT NULL,
+                prevout_idx INTEGER NOT NULL,
+                script BLOB NOT NULL,
+                value_zat INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                spent_in_tx INTEGER,
+                FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
+                CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
+            )",
+        ];
+
+        let mut expected_idx = 0;
+        while let Some(row) = rows.next().unwrap() {
+            let sql: String = row.get(0).unwrap();
+            assert_eq!(&sql, expected[expected_idx]);
+            expected_idx += 1;
+        }
+    }
+
+    #[test]
     fn init_migrate_from_0_3_0() {
         fn init_0_3_0<P>(
             wdb: &mut WalletDb<P>,
