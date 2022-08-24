@@ -69,6 +69,7 @@ fn to_transparent_child_index(j: DiversifierIndex) -> Option<u32> {
 #[derive(Debug)]
 #[doc(hidden)]
 pub enum DerivationError {
+    Orchard(orchard::zip32::Error),
     #[cfg(feature = "transparent-inputs")]
     Transparent(hdwallet::error::Error),
 }
@@ -82,6 +83,7 @@ pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: legacy::AccountPrivKey,
     sapling: sapling::ExtendedSpendingKey,
+    orchard: orchard::keys::SpendingKey,
 }
 
 #[doc(hidden)]
@@ -95,6 +97,10 @@ impl UnifiedSpendingKey {
             panic!("ZIP 32 seeds MUST be at least 32 bytes");
         }
 
+        let orchard =
+            orchard::keys::SpendingKey::from_zip32_seed(seed, params.coin_type(), account.into())
+                .map_err(DerivationError::Orchard)?;
+
         #[cfg(feature = "transparent-inputs")]
         let transparent = legacy::AccountPrivKey::from_seed(params, seed, account)
             .map_err(DerivationError::Transparent)?;
@@ -104,6 +110,7 @@ impl UnifiedSpendingKey {
             #[cfg(feature = "transparent-inputs")]
             transparent,
             sapling: sapling::spending_key(seed, params.coin_type(), account),
+            orchard,
         })
     }
 
@@ -112,7 +119,7 @@ impl UnifiedSpendingKey {
             #[cfg(feature = "transparent-inputs")]
             transparent: Some(self.transparent.to_account_pubkey()),
             sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling).into()),
-            orchard: None,
+            orchard: Some((&self.orchard).into()),
             unknown: vec![],
         }
     }
@@ -128,10 +135,14 @@ impl UnifiedSpendingKey {
         &self.transparent
     }
 
-    /// Returns the Sapling extended full viewing key component of this
-    /// unified key.
+    /// Returns the Sapling extended spending key component of this unified spending key.
     pub fn sapling(&self) -> &sapling::ExtendedSpendingKey {
         &self.sapling
+    }
+
+    /// Returns the Orchard spending key component of this unified spending key.
+    pub fn orchard(&self) -> &orchard::keys::SpendingKey {
+        &self.orchard
     }
 }
 
@@ -281,6 +292,11 @@ impl UnifiedFullViewingKey {
     /// Returns the Sapling diversifiable full viewing key component of this unified key.
     pub fn sapling(&self) -> Option<&sapling_keys::DiversifiableFullViewingKey> {
         self.sapling.as_ref()
+    }
+
+    /// Returns the Orchard full viewing key component of this unified key.
+    pub fn orchard(&self) -> Option<&orchard::keys::FullViewingKey> {
+        self.orchard.as_ref()
     }
 
     /// Attempts to derive the Unified Address for the given diversifier index.
