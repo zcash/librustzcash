@@ -108,6 +108,11 @@ and this library adheres to Rust's notion of
   refactored to become a member function of a new `DiversifiableFullViewingKey`
   type, which represents the ability to derive IVKs, OVKs, and addresses, but
   not child viewing keys.
+- `zcash_primitives::sapling::keys::DiversifiableFullViewingKey::change_address`
+  has been added as a convenience method for obtaining the change address
+  at the default diversifier. This address **MUST NOT** be encoded and exposed
+  to users. User interfaces should instead mark these notes as "change notes" or
+  "internal wallet operations".
 - A new module `zcash_primitives::legacy::keys` has been added under the
   `transparent-inputs` feature flag to support types related to supporting
   transparent components of unified addresses and derivation of OVKs for

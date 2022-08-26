@@ -2,6 +2,7 @@
 
 use std::error;
 use std::fmt;
+use zcash_address::unified::Typecode;
 use zcash_primitives::{
     consensus::BlockHeight,
     sapling::Node,
@@ -23,6 +24,9 @@ pub enum ChainInvalid {
 
 #[derive(Debug)]
 pub enum Error<NoteId> {
+    /// No account with the given identifier was found in the wallet.
+    AccountNotFound(AccountId),
+
     /// The amount specified exceeds the allowed range.
     InvalidAmount,
 
@@ -47,6 +51,9 @@ pub enum Error<NoteId> {
     /// The root of an output's witness tree in a previously stored transaction
     /// does not correspond to root of the current commitment tree.
     InvalidWitnessAnchor(NoteId, BlockHeight),
+
+    /// No key of the given type was associated with the specified account.
+    KeyNotFound(AccountId, Typecode),
 
     /// The wallet must first perform a scan of the blockchain before other
     /// operations can be performed.
@@ -79,6 +86,9 @@ impl ChainInvalid {
 impl<N: fmt::Display> fmt::Display for Error<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            Error::AccountNotFound(account) => {
+                write!(f, "Wallet does not contain account {}", u32::from(*account))
+            }
             Error::InvalidAmount => write!(
                 f,
                 "The value lies outside the valid range of Zcash amounts."
@@ -104,6 +114,9 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
                 "Witness for note {} has incorrect anchor after scanning block {}",
                 id_note, last_height
             ),
+            Error::KeyNotFound(account, typecode) => {
+                write!(f, "No {:?} key was available for account {}", typecode, u32::from(*account))
+            }
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "{:?}", e),
             Error::Protobuf(e) => write!(f, "{}", e),
