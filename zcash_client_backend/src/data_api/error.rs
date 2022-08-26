@@ -2,6 +2,7 @@
 
 use std::error;
 use std::fmt;
+use zcash_address::unified::Typecode;
 use zcash_primitives::{
     consensus::BlockHeight,
     sapling::Node,
@@ -33,6 +34,12 @@ pub enum Error<NoteId> {
 
     /// Chain validation detected an error in the block at the specified block height.
     InvalidChain(BlockHeight, ChainInvalid),
+
+    /// A provided extsk is not associated with the specified account.
+    AccountNotFound(AccountId),
+
+    /// No key of the given type was associated with the specified account.
+    KeyNotFound(AccountId, Typecode),
 
     /// A provided extsk is not associated with the specified account.
     InvalidExtSk(AccountId),
@@ -90,6 +97,12 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             ),
             Error::InvalidChain(upper_bound, cause) => {
                 write!(f, "Invalid chain (upper bound: {}): {:?}", u32::from(*upper_bound), cause)
+            }
+            Error::AccountNotFound(account) => {
+                write!(f, "Unrecognized account {}", u32::from(*account))
+            }
+            Error::KeyNotFound(account, typecode) => {
+                write!(f, "No {:?} key was available for account {}", typecode, u32::from(*account))
             }
             Error::InvalidExtSk(account) => {
                 write!(f, "Incorrect ExtendedSpendingKey for account {}", u32::from(*account))

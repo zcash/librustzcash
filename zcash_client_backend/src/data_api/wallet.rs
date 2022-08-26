@@ -12,8 +12,11 @@ use zcash_primitives::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{
-    keys::OutgoingViewingKey, legacy::keys as transparent, legacy::keys::IncomingViewingKey,
+use {
+    zcash_address::unified::Typecode,
+    zcash_primitives::{
+        keys::OutgoingViewingKey, legacy::keys as transparent, legacy::keys::IncomingViewingKey,
+    },
 };
 
 use crate::{
@@ -418,11 +421,10 @@ where
 /// * `prover`: The TxProver to use in constructing the shielded transaction.
 /// * `sk`: The secp256k1 secret key that will be used to detect and spend transparent
 ///   UTXOs.
-/// * `extfvk`: The extended full viewing key that will be used to produce the
-///   Sapling address to which funds will be sent.
-/// * `account`: The ZIP32 account identifier associated with the the extended
-///   full viewing key. This procedure will return an error if this does not correctly
-///   correspond to `extfvk`.
+/// * `account`: The ZIP32 account identifier for the account to which funds will
+///   be shielded. Funds will be shielded to the internal (change) address associated with the
+///   Sapling key corresponding to this account, or if a Sapling key is not available for this
+///   account this function will return an error.
 /// * `memo`: A memo to be included in the output to the (internal) recipient.
 ///   This can be used to take notes about auto-shielding operations internal
 ///   to the wallet that the wallet can use to improve how it represents those
@@ -437,7 +439,6 @@ pub fn shield_transparent_funds<E, N, P, D, R, U>(
     params: &P,
     prover: impl TxProver,
     sk: &transparent::AccountPrivKey,
-    extfvk: &ExtendedFullViewingKey,
     account: AccountId,
     memo: &MemoBytes,
     min_confirmations: u32,
@@ -448,11 +449,20 @@ where
     R: Copy + Debug,
     D: WalletWrite<Error = E, TxRef = R> + WalletWriteTransparent<UtxoRef = U>,
 {
-    // Check that the ExtendedSpendingKey we have been given corresponds to the
-    // ExtendedFullViewingKey for the account we are spending from.
-    if !wallet_db.is_valid_account_extfvk(account, extfvk)? {
-        return Err(E::from(Error::InvalidExtSk(account)));
-    }
+    // Obtain the UFVK for the specified account & use its internal change address
+    // as the destination for shielded funds.
+    let shielding_address = wallet_db
+        .get_unified_full_viewing_keys()
+        .and_then(|ufvks| {
+            ufvks
+                .get(&account)
+                .ok_or_else(|| E::from(Error::AccountNotFound(account)))
+                .and_then(|ufvk| {
+                    ufvk.sapling()
+                        .map(|dfvk| dfvk.change_address().1)
+                        .ok_or_else(|| E::from(Error::KeyNotFound(account, Typecode::Sapling)))
+                })
+        })?;
 
     let (latest_scanned_height, latest_anchor) = wallet_db
         .get_target_and_anchor_heights(min_confirmations)
@@ -460,11 +470,6 @@ where
 
     let account_pubkey = sk.to_account_pubkey();
     let ovk = OutgoingViewingKey(account_pubkey.internal_ovk().as_bytes());
-
-    // derive own shielded address from the provided extended full viewing key
-    // TODO: this should become the internal change address derived from
-    // the wallet's UFVK
-    let z_address = extfvk.default_address().1;
 
     // derive the t-address for the extpubkey at the minimum valid child index
     let (taddr, child_index) = account_pubkey
@@ -497,11 +502,16 @@ where
     }
 
     // there are no sapling notes so we set the change manually
-    builder.send_change_to(ovk, z_address.clone());
+    builder.send_change_to(ovk, shielding_address.clone());
 
     // add the sapling output to shield the funds
     builder
-        .add_sapling_output(Some(ovk), z_address.clone(), amount_to_shield, memo.clone())
+        .add_sapling_output(
+            Some(ovk),
+            shielding_address.clone(),
+            amount_to_shield,
+            memo.clone(),
+        )
         .map_err(Error::Builder)?;
 
     let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
@@ -515,7 +525,7 @@ where
         account,
         outputs: vec![SentTransactionOutput {
             output_index,
-            recipient_address: &RecipientAddress::Shielded(z_address),
+            recipient_address: &RecipientAddress::Shielded(shielding_address),
             value: amount_to_shield,
             memo: Some(memo.clone()),
         }],

@@ -292,6 +292,13 @@ impl DiversifiableFullViewingKey {
         zip32::sapling_default_address(&self.fvk, &self.dk)
     }
 
+    /// Returns the internal address corresponding to the smallest valid diversifier index,
+    /// along with that index.
+    pub fn change_address(&self) -> (zip32::DiversifierIndex, PaymentAddress) {
+        let internal_dfvk = self.derive_internal();
+        zip32::sapling_default_address(&internal_dfvk.fvk, &internal_dfvk.dk)
+    }
+
     /// Attempts to decrypt the given address's diversifier with this full viewing key.
     ///
     /// This method extracts the diversifier from the given address and decrypts it as a
