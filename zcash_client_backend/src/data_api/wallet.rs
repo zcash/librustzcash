@@ -423,8 +423,8 @@ where
 ///   UTXOs.
 /// * `account`: The ZIP32 account identifier for the account to which funds will
 ///   be shielded. Funds will be shielded to the internal (change) address associated with the
-///   Sapling key corresponding to this account, or if a Sapling key is not available for this
-///   account this function will return an error.
+///   most preferred shielded receiver corresponding to this account, or if no shielded
+///   receiver can be used for this account, this function will return an error.
 /// * `memo`: A memo to be included in the output to the (internal) recipient.
 ///   This can be used to take notes about auto-shielding operations internal
 ///   to the wallet that the wallet can use to improve how it represents those
@@ -458,6 +458,8 @@ where
                 .get(&account)
                 .ok_or_else(|| E::from(Error::AccountNotFound(account)))
                 .and_then(|ufvk| {
+                    // TODO: select the most preferred shielded receiver once we have the ability to
+                    // spend Orchard funds.
                     ufvk.sapling()
                         .map(|dfvk| dfvk.change_address().1)
                         .ok_or_else(|| E::from(Error::KeyNotFound(account, Typecode::Sapling)))

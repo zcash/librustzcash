@@ -294,6 +294,9 @@ impl DiversifiableFullViewingKey {
 
     /// Returns the internal address corresponding to the smallest valid diversifier index,
     /// along with that index.
+    ///
+    /// This address **MUST NOT** be encoded and exposed to end users. User interfaces
+    /// should instead mark these notes as "change notes" or "internal wallet operations".
     pub fn change_address(&self) -> (zip32::DiversifierIndex, PaymentAddress) {
         let internal_dfvk = self.derive_internal();
         zip32::sapling_default_address(&internal_dfvk.fvk, &internal_dfvk.dk)

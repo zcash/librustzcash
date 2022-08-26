@@ -24,6 +24,9 @@ pub enum ChainInvalid {
 
 #[derive(Debug)]
 pub enum Error<NoteId> {
+    /// No account with the given identifier was found in the wallet.
+    AccountNotFound(AccountId),
+
     /// The amount specified exceeds the allowed range.
     InvalidAmount,
 
@@ -34,12 +37,6 @@ pub enum Error<NoteId> {
 
     /// Chain validation detected an error in the block at the specified block height.
     InvalidChain(BlockHeight, ChainInvalid),
-
-    /// A provided extsk is not associated with the specified account.
-    AccountNotFound(AccountId),
-
-    /// No key of the given type was associated with the specified account.
-    KeyNotFound(AccountId, Typecode),
 
     /// A provided extsk is not associated with the specified account.
     InvalidExtSk(AccountId),
@@ -54,6 +51,9 @@ pub enum Error<NoteId> {
     /// The root of an output's witness tree in a previously stored transaction
     /// does not correspond to root of the current commitment tree.
     InvalidWitnessAnchor(NoteId, BlockHeight),
+
+    /// No key of the given type was associated with the specified account.
+    KeyNotFound(AccountId, Typecode),
 
     /// The wallet must first perform a scan of the blockchain before other
     /// operations can be performed.
@@ -86,6 +86,9 @@ impl ChainInvalid {
 impl<N: fmt::Display> fmt::Display for Error<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            Error::AccountNotFound(account) => {
+                write!(f, "Wallet does not contain account {}", u32::from(*account))
+            }
             Error::InvalidAmount => write!(
                 f,
                 "The value lies outside the valid range of Zcash amounts."
@@ -97,12 +100,6 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             ),
             Error::InvalidChain(upper_bound, cause) => {
                 write!(f, "Invalid chain (upper bound: {}): {:?}", u32::from(*upper_bound), cause)
-            }
-            Error::AccountNotFound(account) => {
-                write!(f, "Unrecognized account {}", u32::from(*account))
-            }
-            Error::KeyNotFound(account, typecode) => {
-                write!(f, "No {:?} key was available for account {}", typecode, u32::from(*account))
             }
             Error::InvalidExtSk(account) => {
                 write!(f, "Incorrect ExtendedSpendingKey for account {}", u32::from(*account))
@@ -117,6 +114,9 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
                 "Witness for note {} has incorrect anchor after scanning block {}",
                 id_note, last_height
             ),
+            Error::KeyNotFound(account, typecode) => {
+                write!(f, "No {:?} key was available for account {}", typecode, u32::from(*account))
+            }
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "{:?}", e),
             Error::Protobuf(e) => write!(f, "{}", e),
