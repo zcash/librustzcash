@@ -8,7 +8,7 @@
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
 
 use ff::PrimeField;
-use rusqlite::{params, OptionalExtension, ToSql, NO_PARAMS};
+use rusqlite::{OptionalExtension, ToSql, NO_PARAMS};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -38,6 +38,7 @@ use zcash_primitives::legacy::TransparentAddress;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
+    rusqlite::params,
     zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
     zcash_primitives::{
         legacy::Script,
@@ -48,13 +49,13 @@ use {
 pub mod init;
 pub mod transact;
 
-enum PoolType {
+pub(crate) enum PoolType {
     Transparent,
     Sapling,
 }
 
 impl PoolType {
-    fn typecode(&self) -> i64 {
+    pub(crate) fn typecode(&self) -> i64 {
         // These constants are *incidentally* shared with the typecodes
         // for unified addresses, but this is exclusively an internal
         // implementation detail.
@@ -822,17 +823,7 @@ pub fn insert_block<'a, P>(
     block_time: u32,
     commitment_tree: &CommitmentTree<Node>,
 ) -> Result<(), SqliteClientError> {
-    let mut encoded_tree = Vec::new();
-    commitment_tree.write(&mut encoded_tree).unwrap();
-
-    stmts.stmt_insert_block.execute(params![
-        u32::from(block_height),
-        &block_hash.0[..],
-        block_time,
-        encoded_tree
-    ])?;
-
-    Ok(())
+    stmts.stmt_insert_block(block_height, block_hash, block_time, commitment_tree)
 }
 
 /// Inserts information about a mined transaction that was observed to
@@ -845,24 +836,12 @@ pub fn put_tx_meta<'a, P, N>(
     tx: &WalletTx<N>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
-    let txid = tx.txid.as_ref().to_vec();
-    if stmts
-        .stmt_update_tx_meta
-        .execute(params![u32::from(height), (tx.index as i64), txid])?
-        == 0
-    {
+    if !stmts.stmt_update_tx_meta(height, tx.index, &tx.txid)? {
         // It isn't there, so insert our transaction into the database.
-        stmts
-            .stmt_insert_tx_meta
-            .execute(params![txid, u32::from(height), (tx.index as i64),])?;
-
-        Ok(stmts.wallet_db.conn.last_insert_rowid())
+        stmts.stmt_insert_tx_meta(&tx.txid, height, tx.index)
     } else {
         // It was there, so grab its row number.
-        stmts
-            .stmt_select_tx_ref
-            .query_row(&[txid], |row| row.get(0))
-            .map_err(SqliteClientError::from)
+        stmts.stmt_select_tx_ref(&tx.txid)
     }
 }
 
@@ -875,31 +854,17 @@ pub fn put_tx_data<'a, P>(
     tx: &Transaction,
     created_at: Option<time::OffsetDateTime>,
 ) -> Result<i64, SqliteClientError> {
-    let txid = tx.txid().as_ref().to_vec();
+    let txid = tx.txid();
 
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
 
-    if stmts
-        .stmt_update_tx_data
-        .execute(params![u32::from(tx.expiry_height()), raw_tx, txid,])?
-        == 0
-    {
+    if !stmts.stmt_update_tx_data(tx.expiry_height(), &raw_tx, &txid)? {
         // It isn't there, so insert our transaction into the database.
-        stmts.stmt_insert_tx_data.execute(params![
-            txid,
-            created_at,
-            u32::from(tx.expiry_height()),
-            raw_tx
-        ])?;
-
-        Ok(stmts.wallet_db.conn.last_insert_rowid())
+        stmts.stmt_insert_tx_data(&txid, created_at, tx.expiry_height(), &raw_tx)
     } else {
         // It was there, so grab its row number.
-        stmts
-            .stmt_select_tx_ref
-            .query_row(&[txid], |row| row.get(0))
-            .map_err(SqliteClientError::from)
+        stmts.stmt_select_tx_ref(&txid)
     }
 }
 
@@ -916,9 +881,7 @@ pub fn mark_sapling_note_spent<'a, P>(
     tx_ref: i64,
     nf: &Nullifier,
 ) -> Result<(), SqliteClientError> {
-    stmts
-        .stmt_mark_sapling_note_spent
-        .execute(&[tx_ref.to_sql()?, nf.0.to_sql()?])?;
+    stmts.stmt_mark_sapling_note_spent(tx_ref, nf)?;
     Ok(())
 }
 
@@ -929,15 +892,7 @@ pub(crate) fn mark_transparent_utxo_spent<'a, P>(
     tx_ref: i64,
     outpoint: &OutPoint,
 ) -> Result<(), SqliteClientError> {
-    let sql_args: &[(&str, &dyn ToSql)] = &[
-        (":spent_in_tx", &tx_ref),
-        (":prevout_txid", &outpoint.hash().to_vec()),
-        (":prevout_idx", &outpoint.n()),
-    ];
-
-    stmts
-        .stmt_mark_transparent_utxo_spent
-        .execute_named(sql_args)?;
+    stmts.stmt_mark_transparent_utxo_spent(tx_ref, outpoint)?;
 
     Ok(())
 }
@@ -948,23 +903,9 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
-    let sql_args: &[(&str, &dyn ToSql)] = &[
-        (
-            ":address",
-            &output.address().encode(&stmts.wallet_db.params),
-        ),
-        (":prevout_txid", &output.outpoint.hash().to_vec()),
-        (":prevout_idx", &output.outpoint.n()),
-        (":script", &output.txout.script_pubkey.0),
-        (":value_zat", &i64::from(output.txout.value)),
-        (":height", &u32::from(output.height)),
-    ];
-
     stmts
-        .stmt_insert_received_transparent_utxo
-        .execute_named(sql_args)?;
-
-    Ok(UtxoId(stmts.wallet_db.conn.last_insert_rowid()))
+        .stmt_insert_received_transparent_utxo(output)
+        .map(UtxoId)
 }
 
 /// Removes all records of UTXOs that were recorded as having been received
@@ -978,14 +919,7 @@ pub fn delete_utxos_above<'a, P: consensus::Parameters>(
     taddr: &TransparentAddress,
     height: BlockHeight,
 ) -> Result<usize, SqliteClientError> {
-    let sql_args: &[(&str, &dyn ToSql)] = &[
-        (":address", &taddr.encode(&stmts.wallet_db.params)),
-        (":above_height", &u32::from(height)),
-    ];
-
-    let rows = stmts.stmt_delete_utxos.execute_named(sql_args)?;
-
-    Ok(rows)
+    stmts.stmt_delete_utxos(taddr, height)
 }
 
 /// Records the specified shielded output as having been received.
@@ -1003,44 +937,41 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     tx_ref: i64,
 ) -> Result<NoteId, SqliteClientError> {
     let rcm = output.note().rcm().to_repr();
-    let account = u32::from(output.account());
-    let diversifier = output.to().diversifier().0.to_vec();
-    let value = output.note().value as i64;
-    let rcm = rcm.as_ref();
-    let memo = output.memo().map(|m| m.as_slice());
+    let account = output.account();
+    let diversifier = output.to().diversifier();
+    let value = output.note().value;
+    let memo = output.memo();
     let is_change = output.is_change();
-    let tx = tx_ref;
-    let output_index = output.index() as i64;
-    let nf_bytes = output.nullifier().map(|nf| nf.0.to_vec());
-
-    let sql_args: &[(&str, &dyn ToSql)] = &[
-        (":account", &account),
-        (":diversifier", &diversifier),
-        (":value", &value),
-        (":rcm", &rcm),
-        (":nf", &nf_bytes),
-        (":memo", &memo),
-        (":is_change", &is_change),
-        (":tx", &tx),
-        (":output_index", &output_index),
-    ];
+    let output_index = output.index();
+    let nf = output.nullifier();
 
     // First try updating an existing received note into the database.
-    if stmts.stmt_update_received_note.execute_named(sql_args)? == 0 {
+    if !stmts.stmt_update_received_note(
+        account,
+        diversifier,
+        value,
+        rcm,
+        &nf,
+        memo,
+        is_change,
+        tx_ref,
+        output_index,
+    )? {
         // It isn't there, so insert our note into the database.
-        stmts.stmt_insert_received_note.execute_named(sql_args)?;
-
-        Ok(NoteId::ReceivedNoteId(
-            stmts.wallet_db.conn.last_insert_rowid(),
-        ))
+        stmts.stmt_insert_received_note(
+            tx_ref,
+            output_index,
+            account,
+            diversifier,
+            value,
+            rcm,
+            &nf,
+            memo,
+            is_change,
+        )
     } else {
         // It was there, so grab its row number.
-        stmts
-            .stmt_select_received_note
-            .query_row(params![tx_ref, (output.index() as i64)], |row| {
-                row.get(0).map(NoteId::ReceivedNoteId)
-            })
-            .map_err(SqliteClientError::from)
+        stmts.stmt_select_received_note(tx_ref, output.index())
     }
 }
 
@@ -1055,14 +986,7 @@ pub fn insert_witness<'a, P>(
     witness: &IncrementalWitness<Node>,
     height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    let mut encoded = Vec::new();
-    witness.write(&mut encoded).unwrap();
-
-    stmts
-        .stmt_insert_witness
-        .execute(params![note_id, u32::from(height), encoded])?;
-
-    Ok(())
+    stmts.stmt_insert_witness(NoteId::ReceivedNoteId(note_id), height, witness)
 }
 
 /// Removes old incremental witnesses up to the given block height.
@@ -1073,10 +997,7 @@ pub fn prune_witnesses<P>(
     stmts: &mut DataConnStmtCache<'_, P>,
     below_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    stmts
-        .stmt_prune_witnesses
-        .execute(&[u32::from(below_height)])?;
-    Ok(())
+    stmts.stmt_prune_witnesses(below_height)
 }
 
 /// Marks notes that have not been mined in transactions
@@ -1088,8 +1009,7 @@ pub fn update_expired_notes<P>(
     stmts: &mut DataConnStmtCache<'_, P>,
     height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    stmts.stmt_update_expired.execute(&[u32::from(height)])?;
-    Ok(())
+    stmts.stmt_update_expired(height)
 }
 
 /// Records information about a note that your wallet created.
@@ -1106,18 +1026,16 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     value: Amount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
-    let ivalue: i64 = value.into();
     // Try updating an existing sent note.
-    if stmts.stmt_update_sent_note.execute(params![
-        u32::from(account),
-        encode_payment_address_p(&stmts.wallet_db.params, to),
-        ivalue,
-        &memo.map(|m| m.as_slice()),
+    if !stmts.stmt_update_sent_note(
+        account,
+        &encode_payment_address_p(&stmts.wallet_db.params, to),
+        value,
+        memo,
         tx_ref,
-        PoolType::Sapling.typecode(),
-        output_index as i64,
-    ])? == 0
-    {
+        PoolType::Sapling,
+        output_index,
+    )? {
         // It isn't there, so insert.
         insert_sent_note(stmts, tx_ref, output_index, account, to, value, memo)?
     }
@@ -1141,18 +1059,16 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     to: &TransparentAddress,
     value: Amount,
 ) -> Result<(), SqliteClientError> {
-    let ivalue: i64 = value.into();
     // Try updating an existing sent UTXO.
-    if stmts.stmt_update_sent_note.execute(params![
-        u32::from(account),
-        encode_transparent_address_p(&stmts.wallet_db.params, to),
-        ivalue,
-        (None::<&[u8]>),
+    if !stmts.stmt_update_sent_note(
+        account,
+        &encode_transparent_address_p(&stmts.wallet_db.params, to),
+        value,
+        None,
         tx_ref,
-        PoolType::Transparent.typecode(),
-        output_index as i64,
-    ])? == 0
-    {
+        PoolType::Transparent,
+        output_index,
+    )? {
         // It isn't there, so insert.
         insert_sent_utxo(stmts, tx_ref, output_index, account, to, value)?
     }
@@ -1181,18 +1097,16 @@ pub fn insert_sent_note<'a, P: consensus::Parameters>(
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
     let to_str = encode_payment_address_p(&stmts.wallet_db.params, to);
-    let ivalue: i64 = value.into();
-    stmts.stmt_insert_sent_note.execute(params![
-        tx_ref,
-        PoolType::Sapling.typecode(),
-        (output_index as i64),
-        u32::from(account),
-        to_str,
-        ivalue,
-        memo.map(|m| m.as_slice().to_vec()),
-    ])?;
 
-    Ok(())
+    stmts.stmt_insert_sent_note(
+        tx_ref,
+        PoolType::Sapling,
+        output_index,
+        account,
+        &to_str,
+        value,
+        memo,
+    )
 }
 
 /// Inserts information about a sent transparent UTXO into the wallet database.
@@ -1210,18 +1124,16 @@ pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
     value: Amount,
 ) -> Result<(), SqliteClientError> {
     let to_str = encode_transparent_address_p(&stmts.wallet_db.params, to);
-    let ivalue: i64 = value.into();
-    stmts.stmt_insert_sent_note.execute(params![
-        tx_ref,
-        PoolType::Transparent.typecode(),
-        output_index as i64,
-        u32::from(account),
-        to_str,
-        ivalue,
-        (None::<&[u8]>),
-    ])?;
 
-    Ok(())
+    stmts.stmt_insert_sent_note(
+        tx_ref,
+        PoolType::Transparent,
+        output_index,
+        account,
+        &to_str,
+        value,
+        None,
+    )
 }
 
 #[cfg(test)]

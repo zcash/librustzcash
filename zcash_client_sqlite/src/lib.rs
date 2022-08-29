@@ -69,6 +69,8 @@ use {
     zcash_primitives::legacy::TransparentAddress,
 };
 
+mod prepared;
+
 pub mod chain;
 pub mod error;
 pub mod wallet;
