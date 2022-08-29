@@ -18,6 +18,13 @@ and this library adheres to Rust's notion of
     rewinds exceed supported bounds.
 - An `unstable` feature flag; this is added to parts of the API that may change
   in any release. It enables `zcash_client_backend`'s `unstable` feature flag.
+- New summary views that may be directly accessed in the sqlite database.
+  The structure of these views should be considered unstable; they may 
+  be replaced by accessors provided by the data access API at some point
+  in the future:
+  - `v_transactions`
+  - `v_tx_received`
+  - `v_tx_sent`
 
 ### Changed
 - Various **BREAKING CHANGES** have been made to the database tables. These will

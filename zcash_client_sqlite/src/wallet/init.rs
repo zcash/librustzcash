@@ -377,7 +377,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
             )?;
 
             let mut stmt_insert_sent_note = transaction.prepare(
-                "INSERT INTO sent_notes_new 
+                "INSERT INTO sent_notes_new
                     (id_note, tx, output_pool, output_index, from_account, address, value, memo)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
@@ -435,6 +435,98 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
     }
 }
 
+struct WalletMigrationAddTxViews;
+
+migration!(
+    WalletMigrationAddTxViews,
+    "282fad2e-8372-4ca0-8bed-71821320909f",
+    ["be57ef3b-388e-42ea-97e2-678dafcf9754"],
+    "Add views over transaction & note data."
+);
+
+impl RusqliteMigration for WalletMigrationAddTxViews {
+    type Error = WalletMigrationError;
+
+    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+        transaction.execute_batch(
+            "CREATE VIEW v_tx_sent AS
+            SELECT transactions.id_tx         AS id_tx,
+                   transactions.block         AS mined_height,
+                   transactions.tx_index      AS tx_index,
+                   transactions.txid          AS txid,
+                   transactions.expiry_height AS expiry_height,
+                   transactions.raw           AS raw,
+                   SUM(sent_notes.value)      AS sent_total,
+                   COUNT(sent_notes.id_note)  AS sent_note_count,
+                   blocks.time                AS block_time
+            FROM   transactions
+                   JOIN sent_notes
+                          ON transactions.id_tx = sent_notes.tx
+                   LEFT JOIN blocks
+                          ON transactions.block = blocks.height
+            GROUP BY sent_notes.tx;
+            CREATE VIEW v_tx_received AS
+            SELECT transactions.id_tx            AS id_tx,
+                   transactions.block            AS mined_height,
+                   transactions.tx_index         AS tx_index,
+                   transactions.txid             AS txid,
+                   SUM(received_notes.value)     AS received_total,
+                   COUNT(received_notes.id_note) AS received_note_count,
+                   blocks.time                   AS block_time
+            FROM   transactions
+                   JOIN received_notes
+                          ON transactions.id_tx = received_notes.tx
+                   LEFT JOIN blocks
+                          ON transactions.block = blocks.height
+            GROUP BY received_notes.tx;
+            CREATE VIEW v_transactions AS
+            SELECT id_tx, 
+                   mined_height, 
+                   tx_index, 
+                   txid, 
+                   expiry_height, 
+                   raw,
+                   SUM(value) AS net_value,
+                   SUM(is_change) > 0 AS has_change
+            FROM (
+                SELECT transactions.id_tx            AS id_tx,
+                       transactions.block            AS mined_height,
+                       transactions.tx_index         AS tx_index,
+                       transactions.txid             AS txid,
+                       transactions.expiry_height    AS expiry_height,
+                       transactions.raw              AS raw,
+                       received_notes.value          AS value,
+                       received_notes.is_change      AS is_change
+                FROM   transactions
+                       JOIN received_notes ON transactions.id_tx = received_notes.tx
+                UNION
+                SELECT transactions.id_tx            AS id_tx,
+                       transactions.block            AS mined_height,
+                       transactions.tx_index         AS tx_index,
+                       transactions.txid             AS txid,
+                       transactions.expiry_height    AS expiry_height,
+                       transactions.raw              AS raw,
+                       -sent_notes.value             AS value,
+                       false                         AS is_change
+                FROM   transactions
+                       JOIN sent_notes ON transactions.id_tx = sent_notes.tx
+            )
+            GROUP BY id_tx;",
+        )?;
+
+        Ok(())
+    }
+
+    fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+        transaction.execute_batch(
+            "DROP VIEW v_tx_sent_notes;
+            DROP VIEW v_tx_received_notes;
+            DROP VIEW v_tx_notes;",
+        )?;
+        Ok(())
+    }
+}
+
 /// Sets up the internal structure of the data database.
 ///
 /// This procedure will automatically perform migration operations to update the wallet database to
@@ -487,12 +579,15 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
         params: wdb.params.clone(),
         seed,
     });
-    let addrs_migration = Box::new(migrations::AddressesTableMigration {
+    let migration3 = Box::new(WalletMigrationAddTxViews {});
+    let migration4 = Box::new(migrations::AddressesTableMigration {
         params: wdb.params.clone(),
     });
 
     migrator
-        .register_multiple(vec![migration0, migration1, migration2, addrs_migration])
+        .register_multiple(vec![
+            migration0, migration1, migration2, migration3, migration4,
+        ])
         .expect("Wallet migration registration should have been successful.");
     migrator.up(None)?;
     wdb.conn
@@ -704,12 +799,7 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
 
-        let mut stmt_schema_sql = db_data
-            .conn
-            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
-            .unwrap();
-        let mut rows = stmt_schema_sql.query(NO_PARAMS).unwrap();
-        let expected = vec![
+        let expected_tables = vec![
             "CREATE TABLE \"accounts\" (
                 account INTEGER PRIMARY KEY,
                 ufvk TEXT NOT NULL
@@ -793,10 +883,93 @@ mod tests {
             )",
         ];
 
+        let mut tables_query = db_data
+            .conn
+            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
+            .unwrap();
+        let mut rows = tables_query.query(NO_PARAMS).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
-            assert_eq!(&sql, expected[expected_idx]);
+            assert_eq!(&sql, expected_tables[expected_idx]);
+            expected_idx += 1;
+        }
+
+        let expected_views = vec![
+            "CREATE VIEW v_transactions AS
+            SELECT id_tx, 
+                   mined_height, 
+                   tx_index, 
+                   txid, 
+                   expiry_height, 
+                   raw,
+                   SUM(value) AS net_value,
+                   SUM(is_change) > 0 AS has_change
+            FROM (
+                SELECT transactions.id_tx            AS id_tx,
+                       transactions.block            AS mined_height,
+                       transactions.tx_index         AS tx_index,
+                       transactions.txid             AS txid,
+                       transactions.expiry_height    AS expiry_height,
+                       transactions.raw              AS raw,
+                       received_notes.value          AS value,
+                       received_notes.is_change      AS is_change
+                FROM   transactions
+                       JOIN received_notes ON transactions.id_tx = received_notes.tx
+                UNION
+                SELECT transactions.id_tx            AS id_tx,
+                       transactions.block            AS mined_height,
+                       transactions.tx_index         AS tx_index,
+                       transactions.txid             AS txid,
+                       transactions.expiry_height    AS expiry_height,
+                       transactions.raw              AS raw,
+                       -sent_notes.value             AS value,
+                       false                         AS is_change
+                FROM   transactions
+                       JOIN sent_notes ON transactions.id_tx = sent_notes.tx
+            )
+            GROUP BY id_tx",
+            "CREATE VIEW v_tx_received AS
+            SELECT transactions.id_tx            AS id_tx,
+                   transactions.block            AS mined_height,
+                   transactions.tx_index         AS tx_index,
+                   transactions.txid             AS txid,
+                   SUM(received_notes.value)     AS received_total,
+                   COUNT(received_notes.id_note) AS received_note_count,
+                   blocks.time                   AS block_time
+            FROM   transactions
+                   JOIN received_notes
+                          ON transactions.id_tx = received_notes.tx
+                   LEFT JOIN blocks
+                          ON transactions.block = blocks.height
+            GROUP BY received_notes.tx",
+            "CREATE VIEW v_tx_sent AS
+            SELECT transactions.id_tx         AS id_tx,
+                   transactions.block         AS mined_height,
+                   transactions.tx_index      AS tx_index,
+                   transactions.txid          AS txid,
+                   transactions.expiry_height AS expiry_height,
+                   transactions.raw           AS raw,
+                   SUM(sent_notes.value)      AS sent_total,
+                   COUNT(sent_notes.id_note)  AS sent_note_count,
+                   blocks.time                AS block_time
+            FROM   transactions
+                   JOIN sent_notes
+                          ON transactions.id_tx = sent_notes.tx
+                   LEFT JOIN blocks
+                          ON transactions.block = blocks.height
+            GROUP BY sent_notes.tx",
+        ];
+
+        let mut views_query = db_data
+            .conn
+            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
+            .unwrap();
+        let mut rows = views_query.query(NO_PARAMS).unwrap();
+        let mut expected_idx = 0;
+        while let Some(row) = rows.next().unwrap() {
+            let sql: String = row.get(0).unwrap();
+            assert_eq!(&sql, expected_views[expected_idx]);
             expected_idx += 1;
         }
     }
@@ -1209,6 +1382,68 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_main(&db_data, &secret_key.to_unified_full_viewing_key(), account).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(seed.to_vec()))).unwrap();
+    }
+
+    #[test]
+    fn transaction_views() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        db_data.conn.execute_batch(
+            "INSERT INTO accounts (account, ufvk) VALUES (0, '');
+            INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
+            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value) VALUES (0, 2, 0, 0, '', 2);
+            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value) VALUES (0, 2, 1, 0, '', 3);
+            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change) VALUES (0, 0, 0, '', 5, '', 'a', false);
+            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change) VALUES (0, 1, 0, '', 7, '', 'b', true);",
+        ).unwrap();
+
+        let mut q = db_data
+            .conn
+            .prepare("SELECT received_total, received_note_count FROM v_tx_received")
+            .unwrap();
+        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut row_count = 0;
+        while let Some(row) = rows.next().unwrap() {
+            row_count += 1;
+            let total: i64 = row.get(0).unwrap();
+            let count: i64 = row.get(1).unwrap();
+            assert_eq!(total, 12);
+            assert_eq!(count, 2);
+        }
+        assert_eq!(row_count, 1);
+
+        let mut q = db_data
+            .conn
+            .prepare("SELECT sent_total, sent_note_count FROM v_tx_sent")
+            .unwrap();
+        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut row_count = 0;
+        while let Some(row) = rows.next().unwrap() {
+            row_count += 1;
+            let total: i64 = row.get(0).unwrap();
+            let count: i64 = row.get(1).unwrap();
+            assert_eq!(total, 5);
+            assert_eq!(count, 2);
+        }
+        assert_eq!(row_count, 1);
+
+        let mut q = db_data
+            .conn
+            .prepare("SELECT net_value, has_change FROM v_transactions")
+            .unwrap();
+        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut row_count = 0;
+        while let Some(row) = rows.next().unwrap() {
+            row_count += 1;
+            let net_value: i64 = row.get(0).unwrap();
+            let has_change: bool = row.get(1).unwrap();
+            assert_eq!(net_value, 7);
+            assert!(has_change);
+        }
+        assert_eq!(row_count, 1);
     }
 
     #[test]
