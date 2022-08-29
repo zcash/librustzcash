@@ -116,92 +116,7 @@ impl<P: consensus::Parameters> WalletDb<P> {
     /// for that database. This operation may eagerly initialize and cache sqlite
     /// prepared statements that are used in write operations.
     pub fn get_update_ops(&self) -> Result<DataConnStmtCache<'_, P>, SqliteClientError> {
-        Ok(
-            DataConnStmtCache {
-                wallet_db: self,
-                stmt_insert_block: self.conn.prepare(
-                    "INSERT INTO blocks (height, hash, time, sapling_tree)
-                    VALUES (?, ?, ?, ?)",
-                )?,
-                stmt_insert_tx_meta: self.conn.prepare(
-                    "INSERT INTO transactions (txid, block, tx_index)
-                    VALUES (?, ?, ?)",
-                )?,
-                stmt_update_tx_meta: self.conn.prepare(
-                    "UPDATE transactions
-                    SET block = ?, tx_index = ? WHERE txid = ?",
-                )?,
-                stmt_insert_tx_data: self.conn.prepare(
-                    "INSERT INTO transactions (txid, created, expiry_height, raw)
-                    VALUES (?, ?, ?, ?)",
-                )?,
-                stmt_update_tx_data: self.conn.prepare(
-                    "UPDATE transactions
-                    SET expiry_height = ?, raw = ? WHERE txid = ?",
-                )?,
-                stmt_select_tx_ref: self.conn.prepare(
-                    "SELECT id_tx FROM transactions WHERE txid = ?",
-                )?,
-                stmt_mark_sapling_note_spent: self.conn.prepare(
-                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
-                )?,
-                #[cfg(feature = "transparent-inputs")]
-                stmt_mark_transparent_utxo_spent: self.conn.prepare(
-                    "UPDATE utxos SET spent_in_tx = :spent_in_tx
-                    WHERE prevout_txid = :prevout_txid
-                    AND prevout_idx = :prevout_idx"
-                )?,
-                #[cfg(feature = "transparent-inputs")]
-                stmt_insert_received_transparent_utxo: self.conn.prepare(
-                    "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
-                    VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
-                )?,
-                #[cfg(feature = "transparent-inputs")]
-                stmt_delete_utxos: self.conn.prepare(
-                    "DELETE FROM utxos WHERE address = :address AND height > :above_height"
-                )?,
-                stmt_insert_received_note: self.conn.prepare(
-                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
-                    VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
-                )?,
-                stmt_update_received_note: self.conn.prepare(
-                    "UPDATE received_notes
-                    SET account = :account,
-                        diversifier = :diversifier,
-                        value = :value,
-                        rcm = :rcm,
-                        nf = IFNULL(:nf, nf),
-                        memo = IFNULL(:memo, memo),
-                        is_change = IFNULL(:is_change, is_change)
-                    WHERE tx = :tx AND output_index = :output_index",
-                )?,
-                stmt_select_received_note: self.conn.prepare(
-                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
-                )?,
-                stmt_update_sent_note: self.conn.prepare(
-                    "UPDATE sent_notes
-                    SET from_account = ?, address = ?, value = ?, memo = ?
-                    WHERE tx = ? AND output_pool = ? AND output_index = ?",
-                )?,
-                stmt_insert_sent_note: self.conn.prepare(
-                    "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)",
-                )?,
-                stmt_insert_witness: self.conn.prepare(
-                    "INSERT INTO sapling_witnesses (note, block, witness)
-                    VALUES (?, ?, ?)",
-                )?,
-                stmt_prune_witnesses: self.conn.prepare(
-                    "DELETE FROM sapling_witnesses WHERE block < ?"
-                )?,
-                stmt_update_expired: self.conn.prepare(
-                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
-                        SELECT id_tx FROM transactions
-                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
-                    )",
-                )?,
-            }
-        )
+        DataConnStmtCache::new(self)
     }
 }
 
@@ -362,6 +277,97 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_insert_witness: Statement<'a>,
     stmt_prune_witnesses: Statement<'a>,
     stmt_update_expired: Statement<'a>,
+}
+
+impl<'a, P> DataConnStmtCache<'a, P> {
+    fn new(wallet_db: &'a WalletDb<P>) -> Result<Self, SqliteClientError> {
+        Ok(
+            DataConnStmtCache {
+                wallet_db,
+                stmt_insert_block: wallet_db.conn.prepare(
+                    "INSERT INTO blocks (height, hash, time, sapling_tree)
+                    VALUES (?, ?, ?, ?)",
+                )?,
+                stmt_insert_tx_meta: wallet_db.conn.prepare(
+                    "INSERT INTO transactions (txid, block, tx_index)
+                    VALUES (?, ?, ?)",
+                )?,
+                stmt_update_tx_meta: wallet_db.conn.prepare(
+                    "UPDATE transactions
+                    SET block = ?, tx_index = ? WHERE txid = ?",
+                )?,
+                stmt_insert_tx_data: wallet_db.conn.prepare(
+                    "INSERT INTO transactions (txid, created, expiry_height, raw)
+                    VALUES (?, ?, ?, ?)",
+                )?,
+                stmt_update_tx_data: wallet_db.conn.prepare(
+                    "UPDATE transactions
+                    SET expiry_height = ?, raw = ? WHERE txid = ?",
+                )?,
+                stmt_select_tx_ref: wallet_db.conn.prepare(
+                    "SELECT id_tx FROM transactions WHERE txid = ?",
+                )?,
+                stmt_mark_sapling_note_spent: wallet_db.conn.prepare(
+                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
+                )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_mark_transparent_utxo_spent: wallet_db.conn.prepare(
+                    "UPDATE utxos SET spent_in_tx = :spent_in_tx
+                    WHERE prevout_txid = :prevout_txid
+                    AND prevout_idx = :prevout_idx"
+                )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_insert_received_transparent_utxo: wallet_db.conn.prepare(
+                    "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
+                    VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
+                )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_delete_utxos: wallet_db.conn.prepare(
+                    "DELETE FROM utxos WHERE address = :address AND height > :above_height"
+                )?,
+                stmt_insert_received_note: wallet_db.conn.prepare(
+                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
+                    VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
+                )?,
+                stmt_update_received_note: wallet_db.conn.prepare(
+                    "UPDATE received_notes
+                    SET account = :account,
+                        diversifier = :diversifier,
+                        value = :value,
+                        rcm = :rcm,
+                        nf = IFNULL(:nf, nf),
+                        memo = IFNULL(:memo, memo),
+                        is_change = IFNULL(:is_change, is_change)
+                    WHERE tx = :tx AND output_index = :output_index",
+                )?,
+                stmt_select_received_note: wallet_db.conn.prepare(
+                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
+                )?,
+                stmt_update_sent_note: wallet_db.conn.prepare(
+                    "UPDATE sent_notes
+                    SET from_account = ?, address = ?, value = ?, memo = ?
+                    WHERE tx = ? AND output_pool = ? AND output_index = ?",
+                )?,
+                stmt_insert_sent_note: wallet_db.conn.prepare(
+                    "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)",
+                )?,
+                stmt_insert_witness: wallet_db.conn.prepare(
+                    "INSERT INTO sapling_witnesses (note, block, witness)
+                    VALUES (?, ?, ?)",
+                )?,
+                stmt_prune_witnesses: wallet_db.conn.prepare(
+                    "DELETE FROM sapling_witnesses WHERE block < ?"
+                )?,
+                stmt_update_expired: wallet_db.conn.prepare(
+                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
+                        SELECT id_tx FROM transactions
+                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
+                    )",
+                )?,
+            }
+        )
+    }
 }
 
 impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
