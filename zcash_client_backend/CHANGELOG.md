@@ -26,10 +26,13 @@ and this library adheres to Rust's notion of
   of a `zcash_client_backend::zip321::TransactionRequest` value.
   This facilitates the implementation of ZIP 321 support in wallets and
   provides substantially greater flexibility in transaction creation.
+- An `unstable` feature flag; this is added to parts of the API that may change
+  in any release.
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
 - `zcash_client_backend::data_api`:
-    `WalletRead::get_unified_full_viewing_keys`
+  - `WalletRead::get_unified_full_viewing_keys`
+  - `WalletWrite::remove_tx` (behind the `unstable` feature flag).
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`

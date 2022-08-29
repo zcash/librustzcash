@@ -57,6 +57,7 @@ test-dependencies = [
     "orchard/test-dependencies",
     "zcash_primitives/test-dependencies",
 ]
+unstable = []
 
 [lib]
 bench = false

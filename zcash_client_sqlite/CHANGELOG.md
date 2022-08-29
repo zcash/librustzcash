@@ -16,6 +16,8 @@ and this library adheres to Rust's notion of
     transparent address decoding.
   - `SqliteClientError::RequestedRewindInvalid`, to report when requested
     rewinds exceed supported bounds.
+- An `unstable` feature flag; this is added to parts of the API that may change
+  in any release. It enables `zcash_client_backend`'s `unstable` feature flag.
 
 ### Changed
 - Various **BREAKING CHANGES** have been made to the database tables. These will

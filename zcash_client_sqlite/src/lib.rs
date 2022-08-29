@@ -558,6 +558,59 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         })
     }
 
+    #[cfg(feature = "unstable")]
+    fn remove_tx(&mut self, txid: &TxId) -> Result<(), Self::Error> {
+        self.transactionally(|up| {
+            // Find the transaction to be deleted.
+            let tx_ref = up.stmt_select_tx_ref(txid)?;
+
+            // Delete witnesses for received notes that will be deleted.
+            up.wallet_db.conn.execute_named(
+                "DELETE FROM sapling_witnesses WHERE note IN (
+                    SELECT rn.id_note
+                    FROM received_notes rn
+                    WHERE rn.tx = :tx
+                )",
+                &[(":tx", &tx_ref)],
+            )?;
+
+            // Delete received notes that were outputs of the given transaction.
+            up.wallet_db.conn.execute_named(
+                "DELETE FROM received_notes WHERE tx = :tx",
+                &[(":tx", &tx_ref)],
+            )?;
+
+            // Unmine received notes that were inputs to the given transaction.
+            up.wallet_db.conn.execute_named(
+                "UPDATE received_notes SET spent = null WHERE spent = :tx",
+                &[(":tx", &tx_ref)],
+            )?;
+
+            // We don't normally want to delete sent notes, as this can contain data that
+            // is not recoverable from the chain. However, given that the caller wants to
+            // delete the transaction in which these notes were sent, we cannot keep these
+            // database entries around.
+            up.wallet_db
+                .conn
+                .execute_named("DELETE FROM sent_notes WHERE tx = :tx", &[(":tx", &tx_ref)])?;
+
+            // Delete the UTXOs because these are effectively cached and we don't have a
+            // good way of knowing whether they're spent.
+            up.wallet_db.conn.execute_named(
+                "DELETE FROM utxos WHERE spent_in_tx = :tx",
+                &[(":tx", &tx_ref)],
+            )?;
+
+            // Now that it isn't depended on, delete the transaction.
+            up.wallet_db.conn.execute_named(
+                "DELETE FROM transactions WHERE id_tx = :tx",
+                &[(":tx", &tx_ref)],
+            )?;
+
+            Ok(())
+        })
+    }
+
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
         wallet::rewind_to_height(self.wallet_db, block_height)
     }
@@ -602,6 +655,7 @@ impl BlockSource for BlockDb {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use ff::PrimeField;
     use group::GroupEncoding;
@@ -839,5 +893,93 @@ mod tests {
             .unwrap()
             .execute(params![u32::from(cb.height()), cb_bytes,])
             .unwrap();
+    }
+
+    #[cfg(feature = "unstable")]
+    #[test]
+    fn remove_tx_reverts_balance() {
+        use secrecy::Secret;
+        use tempfile::NamedTempFile;
+        use zcash_client_backend::data_api::{chain::scan_cached_blocks, WalletWrite};
+        use zcash_primitives::zip32::ExtendedSpendingKey;
+
+        use crate::{
+            chain::init::init_cache_database,
+            wallet::{get_balance, init::init_wallet_db, rewind_to_height},
+        };
+
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
+        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+
+        // Add an account to the wallet.
+        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+
+        // Account balance should be zero.
+        assert_eq!(
+            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            Amount::zero()
+        );
+
+        // Create a fake CompactBlock sending value to the address.
+        let value = Amount::from_u64(5).unwrap();
+        let (cb, nf) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            &dfvk,
+            value,
+        );
+        insert_into_cache(&db_cache, &cb);
+
+        // Create a second fake CompactBlock spending value from the address.
+        let extsk2 = ExtendedSpendingKey::master(&[0]);
+        let to2 = extsk2.default_address().1;
+        let value2 = Amount::from_u64(2).unwrap();
+        let cb2 = fake_compact_block_spending(
+            sapling_activation_height() + 1,
+            cb.hash(),
+            (nf, value),
+            &dfvk,
+            to2,
+            value2,
+        );
+        insert_into_cache(&db_cache, &cb2);
+
+        // Scan the cache.
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Account balance should equal the change.
+        assert_eq!(
+            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            (value - value2).unwrap()
+        );
+
+        // Remove the second transaction.
+        let mut db_ops = db_data.get_update_ops().unwrap();
+        let txid2 = cb2.vtx.get(0).unwrap().txid();
+        db_ops.remove_tx(&txid2).unwrap();
+
+        // Account balance should only reflect the first received note.
+        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+
+        // Scanning the cache again won't change the balance, as the wallet believes it
+        // has already scanned all the blocks in the cache.
+        scan_cached_blocks(&network(), &db_cache, &mut db_write, None).unwrap();
+        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+
+        // Rewind the wallet by one block, and scan the cache again.
+        rewind_to_height(&db_data, sapling_activation_height()).unwrap();
+        scan_cached_blocks(&network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Account balance should once again equal the change.
+        assert_eq!(
+            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            (value - value2).unwrap()
+        );
     }
 }

@@ -272,6 +272,12 @@ pub trait WalletWrite: WalletRead {
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
 
+    /// Removes the specified transaction from the persistent wallet store, if it exists.
+    ///
+    /// Any effects of the transaction (such as spending received notes) are unwound.
+    #[cfg(feature = "unstable")]
+    fn remove_tx(&mut self, txid: &TxId) -> Result<(), Self::Error>;
+
     /// Rewinds the wallet database to the specified height.
     ///
     /// This method assumes that the state of the underlying data store is
@@ -492,6 +498,11 @@ pub mod testing {
             _sent_tx: &SentTransaction,
         ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId::from_bytes([0u8; 32]))
+        }
+
+        #[cfg(feature = "unstable")]
+        fn remove_tx(&mut self, _txid: &TxId) -> Result<(), Self::Error> {
+            Ok(())
         }
 
         fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
