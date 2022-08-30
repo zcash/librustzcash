@@ -32,7 +32,7 @@ and this library adheres to Rust's notion of
   - `RecipientAddress::Unified`
 - `zcash_client_backend::data_api`:
   - `WalletRead::get_unified_full_viewing_keys`
-  - `WalletWrite::remove_tx` (behind the `unstable` feature flag).
+  - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`

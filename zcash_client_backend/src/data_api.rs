@@ -272,11 +272,13 @@ pub trait WalletWrite: WalletRead {
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
 
-    /// Removes the specified transaction from the persistent wallet store, if it exists.
+    /// Removes the specified unmined transaction from the persistent wallet store, if it
+    /// exists.
     ///
-    /// Any effects of the transaction (such as spending received notes) are unwound.
+    /// Returns an error if the specified transaction has been mined. To remove a mined
+    /// transaction, first use [`WalletWrite::rewind_to_height`] to unmine it.
     #[cfg(feature = "unstable")]
-    fn remove_tx(&mut self, txid: &TxId) -> Result<(), Self::Error>;
+    fn remove_unmined_tx(&mut self, txid: &TxId) -> Result<(), Self::Error>;
 
     /// Rewinds the wallet database to the specified height.
     ///
@@ -501,7 +503,7 @@ pub mod testing {
         }
 
         #[cfg(feature = "unstable")]
-        fn remove_tx(&mut self, _txid: &TxId) -> Result<(), Self::Error> {
+        fn remove_unmined_tx(&mut self, _txid: &TxId) -> Result<(), Self::Error> {
             Ok(())
         }
 

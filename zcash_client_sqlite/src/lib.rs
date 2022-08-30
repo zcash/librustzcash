@@ -559,20 +559,26 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     }
 
     #[cfg(feature = "unstable")]
-    fn remove_tx(&mut self, txid: &TxId) -> Result<(), Self::Error> {
+    fn remove_unmined_tx(&mut self, txid: &TxId) -> Result<(), Self::Error> {
         self.transactionally(|up| {
             // Find the transaction to be deleted.
             let tx_ref = up.stmt_select_tx_ref(txid)?;
 
-            // Delete witnesses for received notes that will be deleted.
-            up.wallet_db.conn.execute_named(
-                "DELETE FROM sapling_witnesses WHERE note IN (
-                    SELECT rn.id_note
-                    FROM received_notes rn
-                    WHERE rn.tx = :tx
-                )",
-                &[(":tx", &tx_ref)],
-            )?;
+            // Check that the transaction has not been mined (otherwise deleting it would
+            // require deleting child transactions that we haven't been authorized to
+            // remove).
+            if up
+                .wallet_db
+                .conn
+                .query_row_named(
+                    "SELECT block FROM transactions WHERE id_tx = :tx",
+                    &[(":tx", &tx_ref)],
+                    |row| row.get::<_, Option<u32>>(0),
+                )?
+                .is_some()
+            {
+                return Err(SqliteClientError::TransactionIsMined(*txid));
+            }
 
             // Delete received notes that were outputs of the given transaction.
             up.wallet_db.conn.execute_named(
@@ -897,7 +903,7 @@ mod tests {
 
     #[cfg(feature = "unstable")]
     #[test]
-    fn remove_tx_reverts_balance() {
+    fn remove_unmined_tx_reverts_balance() {
         use secrecy::Secret;
         use tempfile::NamedTempFile;
         use zcash_client_backend::data_api::{chain::scan_cached_blocks, WalletWrite};
@@ -905,6 +911,7 @@ mod tests {
 
         use crate::{
             chain::init::init_cache_database,
+            error::SqliteClientError,
             wallet::{get_balance, init::init_wallet_db, rewind_to_height},
         };
 
@@ -959,21 +966,44 @@ mod tests {
             (value - value2).unwrap()
         );
 
-        // Remove the second transaction.
+        // Attempting to remove the first transaction should fail because it is mined.
         let mut db_ops = db_data.get_update_ops().unwrap();
+        let txid = cb.vtx.get(0).unwrap().txid();
+        assert!(matches!(
+            db_ops.remove_unmined_tx(&txid).unwrap_err(),
+            SqliteClientError::TransactionIsMined(x) if x == txid,
+        ));
+
+        // Attempting to remove the second transaction should fail because it is mined.
         let txid2 = cb2.vtx.get(0).unwrap().txid();
-        db_ops.remove_tx(&txid2).unwrap();
+        assert!(matches!(
+            db_ops.remove_unmined_tx(&txid2).unwrap_err(),
+            SqliteClientError::TransactionIsMined(x) if x == txid2,
+        ));
 
-        // Account balance should only reflect the first received note.
-        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
-
-        // Scanning the cache again won't change the balance, as the wallet believes it
-        // has already scanned all the blocks in the cache.
-        scan_cached_blocks(&network(), &db_cache, &mut db_write, None).unwrap();
-        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
-
-        // Rewind the wallet by one block, and scan the cache again.
+        // Rewind the wallet by one block, to unmine the second transaction.
         rewind_to_height(&db_data, sapling_activation_height()).unwrap();
+
+        // Account balance should be zero: the first transaction is spent, but the second
+        // transaction is unmined.
+        assert_eq!(
+            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            Amount::zero()
+        );
+
+        // Attempting to remove the first transaction should still fail.
+        assert!(matches!(
+            db_ops.remove_unmined_tx(&txid).unwrap_err(),
+            SqliteClientError::TransactionIsMined(x) if x == txid,
+        ));
+
+        // The second transaction can be removed.
+        db_ops.remove_unmined_tx(&txid2).unwrap();
+
+        // Account balance should now reflect the first received note.
+        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+
+        // Scan the cache again.
         scan_cached_blocks(&network(), &db_cache, &mut db_write, None).unwrap();
 
         // Account balance should once again equal the change.
