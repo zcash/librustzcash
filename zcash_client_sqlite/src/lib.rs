@@ -43,13 +43,13 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier, PaymentAddress},
+    sapling::{Node, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
-    address::RecipientAddress,
+    address::{RecipientAddress, UnifiedAddress},
     data_api::{
         BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
     },
@@ -150,9 +150,8 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_unified_full_viewing_keys(self)
     }
 
-    fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_address(self, account)
+    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
+        wallet::get_address_ua(self, account)
     }
 
     fn is_valid_account_extfvk(
@@ -267,7 +266,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_unified_full_viewing_keys()
     }
 
-    fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
+    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
         self.wallet_db.get_address(account)
     }
 

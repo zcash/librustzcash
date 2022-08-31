@@ -9,13 +9,13 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier, PaymentAddress},
+    sapling::{Node, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
-    address::RecipientAddress,
+    address::{RecipientAddress, UnifiedAddress},
     decrypt::DecryptedOutput,
     keys::UnifiedFullViewingKey,
     proto::compact_formats::CompactBlock,
@@ -111,13 +111,13 @@ pub trait WalletRead {
     /// or `Ok(None)` if the transaction is not mined in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns the payment address for the specified account, if the account
+    /// Returns the unified address for the specified account, if the account
     /// identifier specified refers to a valid account for this wallet.
     ///
     /// This will return `Ok(None)` if the account identifier does not correspond
     /// to a known account.
     // TODO: This does not appear to be the case.
-    fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
+    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns all unified full viewing keys known to this wallet.
     fn get_unified_full_viewing_keys(
@@ -333,12 +333,13 @@ pub mod testing {
         legacy::TransparentAddress,
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::{Node, Nullifier, PaymentAddress},
+        sapling::{Node, Nullifier},
         transaction::{components::Amount, Transaction, TxId},
         zip32::{AccountId, ExtendedFullViewingKey},
     };
 
     use crate::{
+        address::UnifiedAddress,
         keys::UnifiedFullViewingKey,
         proto::compact_formats::CompactBlock,
         wallet::{SpendableNote, WalletTransparentOutput},
@@ -392,7 +393,7 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_address(&self, _account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
+        fn get_address(&self, _account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
         }
 

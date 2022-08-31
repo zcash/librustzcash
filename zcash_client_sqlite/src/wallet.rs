@@ -23,7 +23,7 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::RecipientAddress,
+    address::{RecipientAddress, UnifiedAddress},
     data_api::error::Error,
     encoding::{encode_payment_address_p, encode_transparent_address_p},
     keys::UnifiedFullViewingKey,
@@ -171,6 +171,33 @@ pub fn get_address<P: consensus::Parameters>(
             RecipientAddress::Unified(ua) => ua.sapling().cloned(),
             _ => None,
         })
+}
+
+pub(crate) fn get_address_ua<P: consensus::Parameters>(
+    wdb: &WalletDb<P>,
+    account: AccountId,
+) -> Result<Option<UnifiedAddress>, SqliteClientError> {
+    // This returns the first diversified address, which will be the default one.
+    let addr: Option<String> = wdb.conn.query_row_named(
+        "SELECT address FROM accounts WHERE account = :account",
+        &[(":account", &u32::from(account))],
+        |row| row.get(0),
+    )?;
+
+    addr.map(|addr_str| {
+        RecipientAddress::decode(&wdb.params, &addr_str)
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
+            })
+            .and_then(|addr| match addr {
+                RecipientAddress::Unified(ua) => Ok(ua),
+                _ => Err(SqliteClientError::CorruptedData(format!(
+                    "Addresses table contains {} which is not a unified address",
+                    addr_str,
+                ))),
+            })
+    })
+    .transpose()
 }
 
 /// Returns the [`UnifiedFullViewingKey`]s for the wallet.

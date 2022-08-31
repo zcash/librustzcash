@@ -32,6 +32,7 @@ and this library adheres to Rust's notion of
   - `RecipientAddress::Unified`
 - `zcash_client_backend::data_api`:
   - `WalletRead::get_unified_full_viewing_keys`
+  - `WalletRead::get_all_nullifiers`
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
@@ -78,13 +79,12 @@ and this library adheres to Rust's notion of
     a `min_confirmations` argument that is used to compute an upper bound on
     the anchor height being returned; this had previously been hardcoded to
     `data_api::wallet::ANCHOR_OFFSET`.
+  - `WalletRead::get_address` now returns a `UnifiedAddress` instead of a
+    `sapling::PaymentAddress`.
   - `WalletRead::get_spendable_notes` has been renamed to
     `get_spendable_sapling_notes`
   - `WalletRead::select_spendable_notes` has been renamed to
     `select_spendable_sapling_notes`
-  - `WalletRead::get_all_nullifiers` has been
-    added. This method provides access to all Sapling nullifiers, including
-    for notes that have been previously marked spent.
 - The `zcash_client_backend::data_api::SentTransaction` type has been
   substantially modified to accommodate handling of transparent inputs.
   Per-output data has been split out into a new struct `SentTransactionOutput`
