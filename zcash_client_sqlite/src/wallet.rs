@@ -155,8 +155,9 @@ pub fn get_address<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     account: AccountId,
 ) -> Result<Option<PaymentAddress>, SqliteClientError> {
+    // This returns the first diversified address, which will be the default one.
     let addr: String = wdb.conn.query_row(
-        "SELECT address FROM accounts
+        "SELECT address FROM addresses
         WHERE account = ?",
         &[u32::from(account)],
         |row| row.get(0),
@@ -181,7 +182,7 @@ pub(crate) fn get_address_ua<P: consensus::Parameters>(
     let addr: Option<String> = wdb
         .conn
         .query_row_named(
-            "SELECT address FROM accounts WHERE account = :account",
+            "SELECT address FROM addresses WHERE account = :account",
             &[(":account", &u32::from(account))],
             |row| row.get(0),
         )
