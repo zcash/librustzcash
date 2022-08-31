@@ -11,6 +11,9 @@ use zcash_primitives::consensus::BlockHeight;
 
 use crate::{NoteId, PRUNING_HEIGHT};
 
+#[cfg(feature = "unstable")]
+use zcash_primitives::transaction::TxId;
+
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
 pub enum SqliteClientError {
@@ -29,6 +32,10 @@ pub enum SqliteClientError {
 
     /// Illegal attempt to reinitialize an already-initialized wallet database.
     TableNotEmpty,
+
+    /// A transaction that has already been mined was requested for removal.
+    #[cfg(feature = "unstable")]
+    TransactionIsMined(TxId),
 
     /// A Bech32-encoded key or address decoding error
     Bech32DecodeError(Bech32DecodeError),
@@ -85,6 +92,8 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::Base58(e) => write!(f, "{}", e),
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
+            #[cfg(feature = "unstable")]
+            SqliteClientError::TransactionIsMined(txid) => write!(f, "Cannot remove transaction {} which has already been mined", txid),
             SqliteClientError::DbError(e) => write!(f, "{}", e),
             SqliteClientError::Io(e) => write!(f, "{}", e),
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),

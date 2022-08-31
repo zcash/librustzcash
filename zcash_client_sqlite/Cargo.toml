@@ -38,6 +38,7 @@ zcash_proofs = { version = "0.7", path = "../zcash_proofs" }
 mainnet = []
 test-dependencies = ["zcash_client_backend/test-dependencies"]
 transparent-inputs = ["zcash_client_backend/transparent-inputs"]
+unstable = ["zcash_client_backend/unstable"]
 
 [lib]
 bench = false
