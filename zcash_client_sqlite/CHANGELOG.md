@@ -66,6 +66,11 @@ and this library adheres to Rust's notion of
     `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
     instead).
 
+### Fixed
+- The `zcash_client_backend::data_api::WalletRead::get_address` implementation
+  for `zcash_client_sqlite::WalletDb` now correctly returns `Ok(None)` if the
+  account identifier does not correspond to a known account.
+
 ### Deprecated
 - A number of public API methods that are used internally to support the
   `zcash_client_backend::data_api::{WalletRead, WalletWrite}` interfaces have

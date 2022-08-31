@@ -178,11 +178,14 @@ pub(crate) fn get_address_ua<P: consensus::Parameters>(
     account: AccountId,
 ) -> Result<Option<UnifiedAddress>, SqliteClientError> {
     // This returns the first diversified address, which will be the default one.
-    let addr: Option<String> = wdb.conn.query_row_named(
-        "SELECT address FROM accounts WHERE account = :account",
-        &[(":account", &u32::from(account))],
-        |row| row.get(0),
-    )?;
+    let addr: Option<String> = wdb
+        .conn
+        .query_row_named(
+            "SELECT address FROM accounts WHERE account = :account",
+            &[(":account", &u32::from(account))],
+            |row| row.get(0),
+        )
+        .optional()?;
 
     addr.map(|addr_str| {
         RecipientAddress::decode(&wdb.params, &addr_str)
