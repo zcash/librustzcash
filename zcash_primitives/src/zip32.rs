@@ -134,6 +134,20 @@ impl Default for DiversifierIndex {
     }
 }
 
+impl From<u32> for DiversifierIndex {
+    fn from(i: u32) -> Self {
+        u64::from(i).into()
+    }
+}
+
+impl From<u64> for DiversifierIndex {
+    fn from(i: u64) -> Self {
+        let mut result = DiversifierIndex([0; 11]);
+        (&mut result.0[..8]).copy_from_slice(&i.to_le_bytes());
+        result
+    }
+}
+
 impl DiversifierIndex {
     pub fn new() -> Self {
         DiversifierIndex([0; 11])
@@ -732,6 +746,20 @@ mod tests {
         let d_j = dk.diversifier(j_3).unwrap();
         assert_eq!(d_j.0, d_3);
         assert_eq!(dk.diversifier_index(&Diversifier(d_3)), j_3);
+    }
+
+    #[test]
+    fn diversifier_index_from() {
+        let di32: u32 = 0xa0b0c0d0;
+        assert_eq!(
+            DiversifierIndex::from(di32),
+            DiversifierIndex([0xd0, 0xc0, 0xb0, 0xa0, 0, 0, 0, 0, 0, 0, 0])
+        );
+        let di64: u64 = 0x0102030405060708;
+        assert_eq!(
+            DiversifierIndex::from(di64),
+            DiversifierIndex([8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0])
+        );
     }
 
     #[test]
