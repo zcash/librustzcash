@@ -1,4 +1,7 @@
-use hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex};
+use hdwallet::{
+    traits::{Deserialize, Serialize},
+    ExtendedPrivKey, ExtendedPubKey, KeyIndex,
+};
 use ripemd::Digest as RipemdDigest;
 use secp256k1::PublicKey;
 use sha2::{Digest as Sha2Digest, Sha256};
@@ -62,6 +65,20 @@ impl AccountPrivKey {
             .derive_private_key(KeyIndex::Normal(1))?
             .derive_private_key(KeyIndex::Normal(child_index))
             .map(|k| k.private_key)
+    }
+
+    /// Returns the `AccountPrivKey` serialized using the encoding for a
+    /// [BIP 32](https://en.bitcoin.it/wiki/BIP_0032) ExtendedPrivKey
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.0.serialize()
+    }
+
+    /// Decodes the `AccountPrivKey` from the encoding specified for a
+    /// [BIP 32](https://en.bitcoin.it/wiki/BIP_0032) ExtendedPrivKey
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        ExtendedPrivKey::deserialize(b)
+            .map(AccountPrivKey::from_extended_privkey)
+            .ok()
     }
 }
 

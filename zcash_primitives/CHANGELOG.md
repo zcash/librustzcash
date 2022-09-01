@@ -7,9 +7,19 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
-- `zcash_primitives::sapling::keys::DiversifiableFullViewingKey`
-- `zcash_primitives::sapling::keys::Scope`
+- `zcash_primitives::legacy::AccountPrivKey::{to_bytes, from_bytes}`
 - `zcash_primitives::sapling::NullifierDerivingKey`
+- Added in `zcash_primitives::sapling::keys`
+  - `DecodingError`
+  - `DiversifiableFullViewingKey`
+  - `Scope`
+  - `ExpandedSpendingKey::from_bytes`
+  - `ExtendedSpendingKey::{from_bytes, to_bytes}`
+- Added in `zcash_primitives::zip32`
+  - `ChainCode::as_bytes`
+  - `DiversifierIndex::as_bytes`
+  - `ExtendedSpendingKey::{from_bytes, to_bytes}`
+  - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
 
 ### Changed
 - `zcash_primitives::sapling::ViewingKey` now stores `nk` as a

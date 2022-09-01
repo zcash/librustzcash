@@ -17,6 +17,16 @@ use subtle::CtOption;
 
 use super::{NullifierDerivingKey, PaymentAddress, ProofGenerationKey, SaplingIvk, ViewingKey};
 
+/// Errors that can occur in the decoding of Sapling spending keys.
+pub enum DecodingError {
+    /// The length of the byte slice provided for decoding was incorrect.
+    LengthInvalid { expected: usize, actual: usize },
+    /// Could not decode the `ask` bytes to a jubjub field element.
+    InvalidAsk,
+    /// Could not decode the `nsk` bytes to a jubjub field element.
+    InvalidNsk,
+}
+
 /// A Sapling expanded spending key
 #[derive(Clone)]
 pub struct ExpandedSpendingKey {
@@ -49,39 +59,52 @@ impl ExpandedSpendingKey {
         }
     }
 
+    /// Decodes the expanded spending key from its serialized representation
+    /// as part of the encoding of the extended spending key as defined in
+    /// [ZIP 32](https://zips.z.cash/zip-0032)
+    pub fn from_bytes(b: &[u8]) -> Result<Self, DecodingError> {
+        if b.len() != 96 {
+            return Err(DecodingError::LengthInvalid {
+                expected: 96,
+                actual: b.len(),
+            });
+        }
+
+        let ask = Option::from(jubjub::Fr::from_repr(b[0..32].try_into().unwrap()))
+            .ok_or(DecodingError::InvalidAsk)?;
+        let nsk = Option::from(jubjub::Fr::from_repr(b[32..64].try_into().unwrap()))
+            .ok_or(DecodingError::InvalidNsk)?;
+        let ovk = OutgoingViewingKey(b[64..96].try_into().unwrap());
+
+        Ok(ExpandedSpendingKey { ask, nsk, ovk })
+    }
+
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut ask_repr = [0u8; 32];
-        reader.read_exact(ask_repr.as_mut())?;
-        let ask = Option::from(jubjub::Fr::from_repr(ask_repr))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ask not in field"))?;
-
-        let mut nsk_repr = [0u8; 32];
-        reader.read_exact(nsk_repr.as_mut())?;
-        let nsk = Option::from(jubjub::Fr::from_repr(nsk_repr))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "nsk not in field"))?;
-
-        let mut ovk = [0u8; 32];
-        reader.read_exact(&mut ovk)?;
-
-        Ok(ExpandedSpendingKey {
-            ask,
-            nsk,
-            ovk: OutgoingViewingKey(ovk),
+        let mut repr = [0u8; 96];
+        reader.read_exact(repr.as_mut())?;
+        Self::from_bytes(&repr).map_err(|e| match e {
+            DecodingError::InvalidAsk => {
+                io::Error::new(io::ErrorKind::InvalidData, "ask not in field")
+            }
+            DecodingError::InvalidNsk => {
+                io::Error::new(io::ErrorKind::InvalidData, "nsk not in field")
+            }
+            DecodingError::LengthInvalid { .. } => unreachable!(),
         })
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.ask.to_repr().as_ref())?;
-        writer.write_all(self.nsk.to_repr().as_ref())?;
-        writer.write_all(&self.ovk.0)?;
-
-        Ok(())
+        writer.write_all(&self.to_bytes())
     }
 
+    /// Encodes the expanded spending key to the its seralized representation
+    /// as part of the encoding of the extended spending key as defined in
+    /// [ZIP 32](https://zips.z.cash/zip-0032)
     pub fn to_bytes(&self) -> [u8; 96] {
         let mut result = [0u8; 96];
-        self.write(&mut result[..])
-            .expect("should be able to serialize an ExpandedSpendingKey");
+        (&mut result[0..32]).copy_from_slice(&self.ask.to_repr());
+        (&mut result[32..64]).copy_from_slice(&self.nsk.to_repr());
+        (&mut result[64..96]).copy_from_slice(&self.ovk.0);
         result
     }
 }
