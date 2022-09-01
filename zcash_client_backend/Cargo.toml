@@ -18,6 +18,7 @@ base64 = "0.13"
 bech32 = "0.8"
 bls12_381 = "0.7"
 bs58 = { version = "0.4", features = ["check"] }
+byteorder = { version = "1", optional = true }
 crossbeam-channel = "0.5"
 ff = "0.12"
 group = "0.12"
@@ -39,6 +40,7 @@ subtle = "2.2.3"
 time = "0.2"
 tracing = "0.1"
 zcash_address = { version = "0.1", path = "../components/zcash_address" }
+zcash_encoding = { version = "0.1", path = "../components/zcash_encoding" }
 zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption" }
 zcash_primitives = { version = "0.7", path = "../zcash_primitives" }
 
@@ -47,6 +49,7 @@ protobuf-codegen-pure = "~2.27.1" # MSRV 1.52.1
 
 [dev-dependencies]
 gumdrop = "0.8"
+proptest = "1.0.0"
 rand_xorshift = "0.3"
 tempfile = "3.1.0"
 zcash_proofs = { version = "0.7", path = "../zcash_proofs" }
@@ -58,7 +61,7 @@ test-dependencies = [
     "orchard/test-dependencies",
     "zcash_primitives/test-dependencies",
 ]
-unstable = []
+unstable = ["byteorder"]
 
 [lib]
 bench = false

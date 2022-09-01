@@ -1,8 +1,9 @@
 use bech32::{self, FromBase32, ToBase32, Variant};
 use std::cmp;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
+use std::num::TryFromIntError;
 
 use crate::Network;
 
@@ -85,6 +86,13 @@ impl From<Typecode> for u32 {
             Typecode::Orchard => 0x03,
             Typecode::Unknown(typecode) => typecode,
         }
+    }
+}
+
+impl TryFrom<Typecode> for usize {
+    type Error = TryFromIntError;
+    fn try_from(t: Typecode) -> Result<Self, Self::Error> {
+        u32::from(t).try_into()
     }
 }
 

@@ -104,7 +104,7 @@ impl<E: Error + 'static> Error for ConversionError<E> {
 /// ```
 pub trait TryFromRawAddress: Sized {
     /// Conversion errors for the user type (e.g. failing to parse the data passed to
-    /// [`Self::try_from_sapling`] as a valid Sapling address).
+    /// [`Self::try_from_raw_sapling`] as a valid Sapling address).
     type Error;
 
     fn try_from_raw_sprout(data: sprout::Data) -> Result<Self, ConversionError<Self::Error>> {
