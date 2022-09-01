@@ -458,6 +458,7 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                    transactions.raw           AS raw,
                    SUM(sent_notes.value)      AS sent_total,
                    COUNT(sent_notes.id_note)  AS sent_note_count,
+                   SUM(CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
                    blocks.time                AS block_time
             FROM   transactions
                    JOIN sent_notes
@@ -472,6 +473,7 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                    transactions.txid             AS txid,
                    SUM(received_notes.value)     AS received_total,
                    COUNT(received_notes.id_note) AS received_note_count,
+                   SUM(CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
                    blocks.time                   AS block_time
             FROM   transactions
                    JOIN received_notes
@@ -480,14 +482,15 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                           ON transactions.block = blocks.height
             GROUP BY received_notes.tx;
             CREATE VIEW v_transactions AS
-            SELECT id_tx, 
-                   mined_height, 
-                   tx_index, 
-                   txid, 
-                   expiry_height, 
+            SELECT id_tx,
+                   mined_height,
+                   tx_index,
+                   txid,
+                   expiry_height,
                    raw,
                    SUM(value) AS net_value,
-                   SUM(is_change) > 0 AS has_change
+                   SUM(is_change) > 0 AS has_change,
+                   SUM(memo_present) AS memo_count
             FROM (
                 SELECT transactions.id_tx            AS id_tx,
                        transactions.block            AS mined_height,
@@ -496,7 +499,8 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
                        received_notes.value          AS value,
-                       received_notes.is_change      AS is_change
+                       received_notes.is_change      AS is_change,
+                       CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
                 FROM   transactions
                        JOIN received_notes ON transactions.id_tx = received_notes.tx
                 UNION
@@ -507,7 +511,8 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
                        -sent_notes.value             AS value,
-                       false                         AS is_change
+                       false                         AS is_change,
+                       CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
                 FROM   transactions
                        JOIN sent_notes ON transactions.id_tx = sent_notes.tx
             )
@@ -897,14 +902,15 @@ mod tests {
 
         let expected_views = vec![
             "CREATE VIEW v_transactions AS
-            SELECT id_tx, 
-                   mined_height, 
-                   tx_index, 
-                   txid, 
-                   expiry_height, 
+            SELECT id_tx,
+                   mined_height,
+                   tx_index,
+                   txid,
+                   expiry_height,
                    raw,
                    SUM(value) AS net_value,
-                   SUM(is_change) > 0 AS has_change
+                   SUM(is_change) > 0 AS has_change,
+                   SUM(memo_present) AS memo_count
             FROM (
                 SELECT transactions.id_tx            AS id_tx,
                        transactions.block            AS mined_height,
@@ -913,7 +919,8 @@ mod tests {
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
                        received_notes.value          AS value,
-                       received_notes.is_change      AS is_change
+                       received_notes.is_change      AS is_change,
+                       CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
                 FROM   transactions
                        JOIN received_notes ON transactions.id_tx = received_notes.tx
                 UNION
@@ -924,7 +931,8 @@ mod tests {
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
                        -sent_notes.value             AS value,
-                       false                         AS is_change
+                       false                         AS is_change,
+                       CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
                 FROM   transactions
                        JOIN sent_notes ON transactions.id_tx = sent_notes.tx
             )
@@ -936,6 +944,7 @@ mod tests {
                    transactions.txid             AS txid,
                    SUM(received_notes.value)     AS received_total,
                    COUNT(received_notes.id_note) AS received_note_count,
+                   SUM(CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
                    blocks.time                   AS block_time
             FROM   transactions
                    JOIN received_notes
@@ -952,6 +961,7 @@ mod tests {
                    transactions.raw           AS raw,
                    SUM(sent_notes.value)      AS sent_total,
                    COUNT(sent_notes.id_note)  AS sent_note_count,
+                   SUM(CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
                    blocks.time                AS block_time
             FROM   transactions
                    JOIN sent_notes
@@ -1394,15 +1404,21 @@ mod tests {
             "INSERT INTO accounts (account, ufvk) VALUES (0, '');
             INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
-            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value) VALUES (0, 2, 0, 0, '', 2);
-            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value) VALUES (0, 2, 1, 0, '', 3);
-            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change) VALUES (0, 0, 0, '', 5, '', 'a', false);
-            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change) VALUES (0, 1, 0, '', 7, '', 'b', true);",
+
+            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
+            VALUES (0, 2, 0, 0, '', 2);
+            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
+            VALUES (0, 2, 1, 0, '', 3, 'a');
+
+            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
+            VALUES (0, 0, 0, '', 5, '', 'a', false, 'b');
+            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
+            VALUES (0, 1, 0, '', 7, '', 'b', true, 'c');",
         ).unwrap();
 
         let mut q = db_data
             .conn
-            .prepare("SELECT received_total, received_note_count FROM v_tx_received")
+            .prepare("SELECT received_total, received_note_count, memo_count FROM v_tx_received")
             .unwrap();
         let mut rows = q.query(NO_PARAMS).unwrap();
         let mut row_count = 0;
@@ -1410,14 +1426,16 @@ mod tests {
             row_count += 1;
             let total: i64 = row.get(0).unwrap();
             let count: i64 = row.get(1).unwrap();
+            let memo_count: i64 = row.get(2).unwrap();
             assert_eq!(total, 12);
             assert_eq!(count, 2);
+            assert_eq!(memo_count, 2);
         }
         assert_eq!(row_count, 1);
 
         let mut q = db_data
             .conn
-            .prepare("SELECT sent_total, sent_note_count FROM v_tx_sent")
+            .prepare("SELECT sent_total, sent_note_count, memo_count FROM v_tx_sent")
             .unwrap();
         let mut rows = q.query(NO_PARAMS).unwrap();
         let mut row_count = 0;
@@ -1425,14 +1443,16 @@ mod tests {
             row_count += 1;
             let total: i64 = row.get(0).unwrap();
             let count: i64 = row.get(1).unwrap();
+            let memo_count: i64 = row.get(2).unwrap();
             assert_eq!(total, 5);
             assert_eq!(count, 2);
+            assert_eq!(memo_count, 1);
         }
         assert_eq!(row_count, 1);
 
         let mut q = db_data
             .conn
-            .prepare("SELECT net_value, has_change FROM v_transactions")
+            .prepare("SELECT net_value, has_change, memo_count FROM v_transactions")
             .unwrap();
         let mut rows = q.query(NO_PARAMS).unwrap();
         let mut row_count = 0;
@@ -1440,8 +1460,10 @@ mod tests {
             row_count += 1;
             let net_value: i64 = row.get(0).unwrap();
             let has_change: bool = row.get(1).unwrap();
+            let memo_count: i64 = row.get(2).unwrap();
             assert_eq!(net_value, 7);
             assert!(has_change);
+            assert_eq!(memo_count, 3);
         }
         assert_eq!(row_count, 1);
     }
