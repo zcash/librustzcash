@@ -316,7 +316,7 @@ where
     }
 
     // Create the transaction
-    let mut builder = Builder::new(params.clone(), height);
+    let mut builder = Builder::new_with_fee(params.clone(), height, DEFAULT_FEE);
     for selected in spendable_notes {
         let from = extfvk
             .fvk
@@ -400,8 +400,9 @@ where
     wallet_db.store_sent_tx(&SentTransaction {
         tx: &tx,
         created: time::OffsetDateTime::now_utc(),
-        outputs: sent_outputs,
         account,
+        outputs: sent_outputs,
+        fee_amount: DEFAULT_FEE,
         #[cfg(feature = "transparent-inputs")]
         utxos_spent: vec![],
     })
@@ -494,7 +495,7 @@ where
 
     let amount_to_shield = (total_amount - fee).ok_or_else(|| E::from(Error::InvalidAmount))?;
 
-    let mut builder = Builder::new(params.clone(), latest_scanned_height);
+    let mut builder = Builder::new_with_fee(params.clone(), latest_scanned_height, fee);
 
     let secret_key = sk.derive_external_secret_key(child_index).unwrap();
     for utxo in &utxos {
@@ -531,6 +532,7 @@ where
             value: amount_to_shield,
             memo: Some(memo.clone()),
         }],
+        fee_amount: fee,
         utxos_spent: utxos.iter().map(|utxo| utxo.outpoint.clone()).collect(),
     })
 }

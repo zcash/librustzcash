@@ -88,7 +88,8 @@ and this library adheres to Rust's notion of
 - The `zcash_client_backend::data_api::SentTransaction` type has been
   substantially modified to accommodate handling of transparent inputs.
   Per-output data has been split out into a new struct `SentTransactionOutput`
-  and `SentTransaction` can now contain multiple outputs.
+  and `SentTransaction` can now contain multiple outputs, and tracks the
+  fee paid.
 - `data_api::WalletWrite::store_received_tx` has been renamed to
   `store_decrypted_tx`.
 - `data_api::ReceivedTransaction` has been renamed to `DecryptedTransaction`,

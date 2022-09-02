@@ -1,5 +1,5 @@
 //! Functions for initializing the various databases.
-use rusqlite::{self, params, types::ToSql, Connection, Transaction, NO_PARAMS};
+use rusqlite::{self, params, types::ToSql, Connection, NO_PARAMS};
 use schemer::{migration, Migration, Migrator, MigratorError};
 use schemer_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::{ExposeSecret, SecretVec};
@@ -9,7 +9,11 @@ use uuid::Uuid;
 
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, BranchId},
+    transaction::{
+        components::amount::{Amount, BalanceError},
+        Transaction,
+    },
     zip32::AccountId,
 };
 
@@ -38,11 +42,20 @@ pub enum WalletMigrationError {
 
     /// Wrapper for rusqlite errors.
     DbError(rusqlite::Error),
+
+    /// Wrapper for amount balance violations
+    BalanceError(BalanceError),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
     fn from(e: rusqlite::Error) -> Self {
         WalletMigrationError::DbError(e)
+    }
+}
+
+impl From<BalanceError> for WalletMigrationError {
+    fn from(e: BalanceError) -> Self {
+        WalletMigrationError::BalanceError(e)
     }
 }
 
@@ -59,6 +72,7 @@ impl fmt::Display for WalletMigrationError {
                 write!(f, "Wallet database is corrupted: {}", reason)
             }
             WalletMigrationError::DbError(e) => write!(f, "{}", e),
+            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
         }
     }
 }
@@ -84,7 +98,7 @@ migration!(
 impl RusqliteMigration for WalletMigration0 {
     type Error = WalletMigrationError;
 
-    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
             // We set the user_version field of the database to a constant value of 8 to allow
             // correct integration with the Android SDK with versions of the database that were
@@ -155,7 +169,7 @@ impl RusqliteMigration for WalletMigration0 {
         Ok(())
     }
 
-    fn down(&self, _transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // We should never down-migrate the first migration, as that can irreversibly
         // destroy data.
         panic!("Cannot revert the initial migration.");
@@ -174,7 +188,7 @@ migration!(
 impl RusqliteMigration for WalletMigration1 {
     type Error = WalletMigrationError;
 
-    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
             "CREATE TABLE IF NOT EXISTS utxos (
                 id_utxo INTEGER PRIMARY KEY,
@@ -192,18 +206,18 @@ impl RusqliteMigration for WalletMigration1 {
         Ok(())
     }
 
-    fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch("DROP TABLE utxos;")?;
         Ok(())
     }
 }
 
-struct WalletMigration2<P: consensus::Parameters> {
+struct WalletMigration2<P> {
     params: P,
     seed: Option<SecretVec<u8>>,
 }
 
-impl<P: consensus::Parameters> Migration for WalletMigration2<P> {
+impl<P> Migration for WalletMigration2<P> {
     fn id(&self) -> Uuid {
         ::uuid::Uuid::parse_str("be57ef3b-388e-42ea-97e2-678dafcf9754").unwrap()
     }
@@ -223,7 +237,7 @@ impl<P: consensus::Parameters> Migration for WalletMigration2<P> {
 impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
     type Error = WalletMigrationError;
 
-    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         //
         // Update the accounts table to store ufvks rather than extfvks
         //
@@ -429,25 +443,77 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         Ok(())
     }
 
-    fn down(&self, _transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // TODO: something better than just panic?
         panic!("Cannot revert this migration.");
     }
 }
 
-struct WalletMigrationAddTxViews;
+struct WalletMigrationAddTxViews<P> {
+    params: P,
+}
 
-migration!(
-    WalletMigrationAddTxViews,
-    "282fad2e-8372-4ca0-8bed-71821320909f",
-    ["be57ef3b-388e-42ea-97e2-678dafcf9754"],
-    "Add views over transaction & note data."
-);
+impl<P> Migration for WalletMigrationAddTxViews<P> {
+    fn id(&self) -> Uuid {
+        ::uuid::Uuid::parse_str("282fad2e-8372-4ca0-8bed-71821320909f").unwrap()
+    }
 
-impl RusqliteMigration for WalletMigrationAddTxViews {
+    fn dependencies(&self) -> HashSet<Uuid> {
+        ["be57ef3b-388e-42ea-97e2-678dafcf9754"]
+            .iter()
+            .map(|uuidstr| ::uuid::Uuid::parse_str(uuidstr).unwrap())
+            .collect()
+    }
+
+    fn description(&self) -> &'static str {
+        "Add transaction summary views & add fee information to transactions."
+    }
+}
+
+impl<P: consensus::Parameters> RusqliteMigration for WalletMigrationAddTxViews<P> {
     type Error = WalletMigrationError;
 
-    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
+        transaction.execute_batch("ALTER TABLE transactions ADD COLUMN fee INTEGER;")?;
+
+        let mut stmt_list_txs =
+            transaction.prepare("SELECT id_tx, raw, block FROM transactions")?;
+
+        let mut stmt_set_fee =
+            transaction.prepare("UPDATE transactions SET fee = ? WHERE id_tx = ?")?;
+
+        let mut stmt_find_utxo_value = transaction
+            .prepare("SELECT value_zat FROM utxos WHERE prevout_txid = ? AND prevout_idx = ?")?;
+
+        let mut tx_rows = stmt_list_txs.query(NO_PARAMS)?;
+        while let Some(row) = tx_rows.next()? {
+            let id_tx: i64 = row.get(0)?;
+            let tx_bytes: Vec<u8> = row.get(1)?;
+            let h: u32 = row.get(2)?;
+            let block_height = BlockHeight::from(h);
+
+            let tx = Transaction::read(
+                &tx_bytes[..],
+                BranchId::for_height(&self.params, block_height),
+            )
+            .map_err(|e| {
+                WalletMigrationError::CorruptedData(format!(
+                    "Parsing failed for transaction {:?}: {:?}",
+                    id_tx, e
+                ))
+            })?;
+
+            let fee_paid = tx.fee_paid(|op| {
+                stmt_find_utxo_value
+                    .query_row(&[op.hash().to_sql()?, op.n().to_sql()?], |row| {
+                        row.get(0).map(|i| Amount::from_i64(i).unwrap())
+                    })
+                    .map_err(WalletMigrationError::DbError)
+            })?;
+
+            stmt_set_fee.execute(&[i64::from(fee_paid), id_tx])?;
+        }
+
         transaction.execute_batch(
             "CREATE VIEW v_tx_sent AS
             SELECT transactions.id_tx         AS id_tx,
@@ -488,7 +554,7 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                    txid,
                    expiry_height,
                    raw,
-                   SUM(value) AS net_value,
+                   SUM(value) + MAX(fee) AS net_value,
                    SUM(is_change) > 0 AS has_change,
                    SUM(memo_present) AS memo_count
             FROM (
@@ -498,7 +564,11 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
-                       received_notes.value          AS value,
+                       transactions.fee              AS fee,
+                       CASE
+                            WHEN received_notes.is_change THEN 0
+                            ELSE value
+                       END AS value,
                        received_notes.is_change      AS is_change,
                        CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
                 FROM   transactions
@@ -510,6 +580,7 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
+                       0                             AS fee,
                        -sent_notes.value             AS value,
                        false                         AS is_change,
                        CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
@@ -522,7 +593,7 @@ impl RusqliteMigration for WalletMigrationAddTxViews {
         Ok(())
     }
 
-    fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
             "DROP VIEW v_tx_sent_notes;
             DROP VIEW v_tx_received_notes;
@@ -584,7 +655,9 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
         params: wdb.params.clone(),
         seed,
     });
-    let migration3 = Box::new(WalletMigrationAddTxViews {});
+    let migration3 = Box::new(WalletMigrationAddTxViews {
+        params: wdb.params.clone(),
+    });
     let migration4 = Box::new(migrations::AddressesTableMigration {
         params: wdb.params.clone(),
     });
@@ -782,8 +855,9 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, Parameters},
+        consensus::{BlockHeight, BranchId, Parameters},
         sapling::keys::DiversifiableFullViewingKey,
+        transaction::{TransactionData, TxVersion},
         zip32::ExtendedFullViewingKey,
     };
 
@@ -803,6 +877,9 @@ mod tests {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
+
+        use regex::Regex;
+        let re = Regex::new(r"\s+").unwrap();
 
         let expected_tables = vec![
             "CREATE TABLE \"accounts\" (
@@ -849,8 +926,8 @@ mod tests {
                 CONSTRAINT witness_height UNIQUE (note, block)
             )",
             "CREATE TABLE schemer_migrations (
-                        id blob PRIMARY KEY
-                    )",
+                id blob PRIMARY KEY
+            )",
             "CREATE TABLE \"sent_notes\" (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -872,6 +949,7 @@ mod tests {
                 tx_index INTEGER,
                 expiry_height INTEGER,
                 raw BLOB,
+                fee INTEGER,
                 FOREIGN KEY (block) REFERENCES blocks(height)
             )",
             "CREATE TABLE utxos (
@@ -896,7 +974,10 @@ mod tests {
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
-            assert_eq!(&sql, expected_tables[expected_idx]);
+            assert_eq!(
+                re.replace_all(&sql, " "),
+                re.replace_all(expected_tables[expected_idx], " ")
+            );
             expected_idx += 1;
         }
 
@@ -908,7 +989,7 @@ mod tests {
                    txid,
                    expiry_height,
                    raw,
-                   SUM(value) AS net_value,
+                   SUM(value) + MAX(fee) AS net_value,
                    SUM(is_change) > 0 AS has_change,
                    SUM(memo_present) AS memo_count
             FROM (
@@ -918,7 +999,11 @@ mod tests {
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
-                       received_notes.value          AS value,
+                       transactions.fee              AS fee,
+                       CASE
+                            WHEN received_notes.is_change THEN 0
+                            ELSE value
+                       END AS value,
                        received_notes.is_change      AS is_change,
                        CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
                 FROM   transactions
@@ -930,6 +1015,7 @@ mod tests {
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
+                       0                             AS fee,
                        -sent_notes.value             AS value,
                        false                         AS is_change,
                        CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
@@ -979,7 +1065,10 @@ mod tests {
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
-            assert_eq!(&sql, expected_views[expected_idx]);
+            assert_eq!(
+                re.replace_all(&sql, " "),
+                re.replace_all(expected_views[expected_idx], " ")
+            );
             expected_idx += 1;
         }
     }
@@ -1224,9 +1313,25 @@ mod tests {
                 "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
                 NO_PARAMS,
             )?;
+
+            let tx = TransactionData::from_parts(
+                TxVersion::Sapling,
+                BranchId::Canopy,
+                0,
+                BlockHeight::from(0),
+                None,
+                None,
+                None,
+                None,
+            )
+            .freeze()
+            .unwrap();
+
+            let mut tx_bytes = vec![];
+            tx.write(&mut tx_bytes).unwrap();
             wdb.conn.execute(
-                "INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '')",
-                NO_PARAMS,
+                "INSERT INTO transactions (block, id_tx, txid, raw) VALUES (0, 0, '', ?)",
+                &[&tx_bytes[..]],
             )?;
             wdb.conn.execute(
                 "INSERT INTO sent_notes (tx, output_index, from_account, address, value)
@@ -1461,7 +1566,7 @@ mod tests {
             let net_value: i64 = row.get(0).unwrap();
             let has_change: bool = row.get(1).unwrap();
             let memo_count: i64 = row.get(2).unwrap();
-            assert_eq!(net_value, 7);
+            assert_eq!(net_value, 0);
             assert!(has_change);
             assert_eq!(memo_count, 3);
         }

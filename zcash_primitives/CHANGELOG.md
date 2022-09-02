@@ -23,6 +23,12 @@ and this library adheres to Rust's notion of
   - `DiversifierIndex::{as_bytes}`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`
   - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
+- `zcash_primitives::transaction::Builder` constructors:
+  - `Builder::new_with_fee`
+  - `Builder::new_with_rng_and_fee`
+- `zcash_primitives::transaction::TransactionData::fee_paid`
+- `zcash_primitives::transaction::components::amount::BalanceError`
+- `zcash_primitives::transaction::components::sprout::Bundle::value_balance`
 
 ### Changed
 - `zcash_primitives::sapling::ViewingKey` now stores `nk` as a

@@ -27,13 +27,14 @@ use crate::{
 
 use self::{
     components::{
-        amount::Amount,
+        amount::{Amount, BalanceError},
         orchard as orchard_serialization,
         sapling::{
             self, OutputDescription, OutputDescriptionV5, SpendDescription, SpendDescriptionV5,
         },
         sprout::{self, JsDescription},
         transparent::{self, TxIn, TxOut},
+        OutPoint,
     },
     txid::{to_txid, BlockTxCommitmentDigester, TxIdDigester},
     util::sha256d::{HashReader, HashWriter},
@@ -317,7 +318,6 @@ impl<A: Authorization> TransactionData<A> {
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
-        #[cfg(feature = "zfuture")] tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
     ) -> Self {
         TransactionData {
             version,
@@ -329,6 +329,32 @@ impl<A: Authorization> TransactionData<A> {
             sapling_bundle,
             orchard_bundle,
             #[cfg(feature = "zfuture")]
+            tze_bundle: None,
+        }
+    }
+
+    #[cfg(feature = "zfuture")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts_zfuture(
+        version: TxVersion,
+        consensus_branch_id: BranchId,
+        lock_time: u32,
+        expiry_height: BlockHeight,
+        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
+        sprout_bundle: Option<sprout::Bundle>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
+        tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+    ) -> Self {
+        TransactionData {
+            version,
+            consensus_branch_id,
+            lock_time,
+            expiry_height,
+            transparent_bundle,
+            sprout_bundle,
+            sapling_bundle,
+            orchard_bundle,
             tze_bundle,
         }
     }
@@ -368,6 +394,37 @@ impl<A: Authorization> TransactionData<A> {
     #[cfg(feature = "zfuture")]
     pub fn tze_bundle(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
         self.tze_bundle.as_ref()
+    }
+
+    /// Returns the total fees paid by the transaction, given a function that can
+    /// be used to retrieve the output values of previous transactions' outputs
+    /// that are being spent in this transaction.
+    pub fn fee_paid<E, F: FnMut(&OutPoint) -> Result<Amount, E>>(
+        &self,
+        get_prevout: F,
+    ) -> Result<Amount, E>
+    where
+        E: From<BalanceError>,
+    {
+        let value_balances = [
+            self.transparent_bundle
+                .as_ref()
+                .map_or_else(|| Ok(Amount::zero()), |b| b.value_balance(get_prevout))?,
+            self.sprout_bundle.as_ref().map_or_else(
+                || Ok(Amount::zero()),
+                |b| b.value_balance().ok_or(BalanceError::Overflow),
+            )?,
+            self.sapling_bundle
+                .as_ref()
+                .map_or_else(Amount::zero, |b| b.value_balance),
+            self.orchard_bundle
+                .as_ref()
+                .map_or_else(Amount::zero, |b| *b.value_balance()),
+        ];
+
+        IntoIterator::into_iter(&value_balances)
+            .sum::<Option<_>>()
+            .ok_or_else(|| BalanceError::Overflow.into())
     }
 
     pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {

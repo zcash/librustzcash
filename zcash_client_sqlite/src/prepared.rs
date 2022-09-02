@@ -84,12 +84,15 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     SET block = ?, tx_index = ? WHERE txid = ?",
                 )?,
                 stmt_insert_tx_data: wallet_db.conn.prepare(
-                    "INSERT INTO transactions (txid, created, expiry_height, raw)
-                    VALUES (?, ?, ?, ?)",
+                    "INSERT INTO transactions (txid, created, expiry_height, raw, fee)
+                    VALUES (?, ?, ?, ?, ?)",
                 )?,
                 stmt_update_tx_data: wallet_db.conn.prepare(
                     "UPDATE transactions
-                    SET expiry_height = ?, raw = ? WHERE txid = ?",
+                    SET expiry_height = :expiry_height, 
+                        raw = :raw, 
+                        fee = IFNULL(:fee, fee) 
+                    WHERE txid = :txid",
                 )?,
                 stmt_select_tx_ref: wallet_db.conn.prepare(
                     "SELECT id_tx FROM transactions WHERE txid = ?",
@@ -226,12 +229,14 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         created_at: Option<time::OffsetDateTime>,
         expiry_height: BlockHeight,
         raw_tx: &[u8],
+        fee: Option<Amount>,
     ) -> Result<i64, SqliteClientError> {
         self.stmt_insert_tx_data.execute(params![
             &txid.as_ref()[..],
             created_at,
             u32::from(expiry_height),
-            raw_tx
+            raw_tx,
+            fee.map(i64::from)
         ])?;
 
         Ok(self.wallet_db.conn.last_insert_rowid())
@@ -244,13 +249,16 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         &mut self,
         expiry_height: BlockHeight,
         raw_tx: &[u8],
+        fee: Option<Amount>,
         txid: &TxId,
     ) -> Result<bool, SqliteClientError> {
-        match self.stmt_update_tx_data.execute(params![
-            u32::from(expiry_height),
-            raw_tx,
-            &txid.as_ref()[..],
-        ])? {
+        let sql_args: &[(&str, &dyn ToSql)] = &[
+            (":expiry_height", &u32::from(expiry_height)),
+            (":raw", &raw_tx),
+            (":fee", &fee.map(i64::from)),
+            (":txid", &&txid.as_ref()[..]),
+        ];
+        match self.stmt_update_tx_data.execute_named(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("txid column is marked as UNIQUE"),

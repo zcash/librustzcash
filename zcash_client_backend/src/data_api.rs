@@ -245,6 +245,7 @@ pub struct SentTransaction<'a> {
     pub created: time::OffsetDateTime,
     pub account: AccountId,
     pub outputs: Vec<SentTransactionOutput<'a>>,
+    pub fee_amount: Amount,
     #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
 }
