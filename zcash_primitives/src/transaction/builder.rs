@@ -266,7 +266,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 .ok_or(Error::InvalidAmount)?,
         ];
 
-        IntoIterator::into_iter(&value_balances)
+        value_balances
+            .into_iter()
             .sum::<Option<_>>()
             .ok_or(Error::InvalidAmount)
     }
