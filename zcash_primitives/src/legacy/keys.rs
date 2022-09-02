@@ -2,7 +2,6 @@ use hdwallet::{ExtendedPrivKey, ExtendedPubKey, KeyIndex};
 use ripemd::Digest as RipemdDigest;
 use secp256k1::PublicKey;
 use sha2::{Digest as Sha2Digest, Sha256};
-use std::convert::TryInto;
 
 use crate::{consensus, keys::prf_expand_vec, zip32::AccountId};
 

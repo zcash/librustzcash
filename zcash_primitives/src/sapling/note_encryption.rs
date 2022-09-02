@@ -5,7 +5,6 @@ use ff::PrimeField;
 use group::{cofactor::CofactorGroup, GroupEncoding};
 use jubjub::{AffinePoint, ExtendedPoint};
 use rand_core::RngCore;
-use std::convert::TryInto;
 
 use zcash_note_encryption::{
     try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock,
@@ -474,7 +473,6 @@ mod tests {
     use group::{cofactor::CofactorGroup, GroupEncoding};
     use rand_core::OsRng;
     use rand_core::{CryptoRng, RngCore};
-    use std::convert::TryInto;
 
     use zcash_note_encryption::{
         batch, EphemeralKeyBytes, NoteEncryption, OutgoingCipherKey, ENC_CIPHERTEXT_SIZE,

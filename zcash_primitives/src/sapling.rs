@@ -17,7 +17,6 @@ use incrementalmerkletree::{self, Altitude};
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 use std::array::TryFromSliceError;
-use std::convert::{TryFrom, TryInto};
 use std::io::{self, Read, Write};
 use subtle::{Choice, ConstantTimeEq};
 
@@ -526,7 +525,6 @@ impl Note {
 pub mod testing {
     use proptest::prelude::*;
     use std::cmp::min;
-    use std::convert::TryFrom;
 
     use crate::{
         transaction::components::amount::MAX_MONEY, zip32::testing::arb_extended_spending_key,

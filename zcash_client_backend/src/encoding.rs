@@ -7,7 +7,6 @@
 
 use bech32::{self, Error, FromBase32, ToBase32, Variant};
 use bs58::{self, decode::Error as Bs58Error};
-use std::convert::TryInto;
 use std::fmt;
 use std::io::{self, Write};
 use zcash_primitives::{

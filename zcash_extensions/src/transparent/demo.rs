@@ -18,8 +18,6 @@
 //! - `tx_b`: `[ TzeIn(tx_a, preimage_1) -> TzeOut(value, hash_2) ]`
 //! - `tx_c`: `[ TzeIn(tx_b, preimage_2) -> [any output types...] ]`
 
-use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 

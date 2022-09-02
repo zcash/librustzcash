@@ -1,6 +1,5 @@
 use crate::legacy::Script;
 use blake2b_simd::Hash as Blake2bHash;
-use std::convert::TryInto;
 
 use super::{
     components::{

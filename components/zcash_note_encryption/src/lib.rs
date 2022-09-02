@@ -24,8 +24,6 @@ extern crate alloc;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use core::convert::TryInto;
-
 use chacha20::{
     cipher::{NewCipher, StreamCipher, StreamCipherSeek},
     ChaCha20,

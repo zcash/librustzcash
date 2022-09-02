@@ -1,7 +1,6 @@
 //! Implementations of serialization and parsing for Orchard note commitment trees.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::convert::{TryFrom, TryInto};
 use std::io::{self, Read, Write};
 
 use incrementalmerkletree::{

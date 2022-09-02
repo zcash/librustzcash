@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use gumdrop::Options;
 use zcash_client_backend::encoding::{decode_extended_full_viewing_key, encode_payment_address};
 use zcash_primitives::{

@@ -9,9 +9,6 @@ use zcash_primitives::{
 use crate::address::UnifiedAddress;
 
 #[cfg(feature = "transparent-inputs")]
-use std::convert::TryInto;
-
-#[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey};
 
 pub mod sapling {

@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use std::convert::TryInto;
 
 use ff::PrimeField;
 use group::GroupEncoding;
@@ -429,7 +428,6 @@ pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use rand::{rngs::StdRng, SeedableRng};
-    use std::convert::TryFrom;
 
     use crate::{
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},

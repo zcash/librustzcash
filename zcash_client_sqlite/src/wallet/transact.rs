@@ -1,7 +1,6 @@
 //! Functions for creating transactions.
 //!
 use rusqlite::{named_params, Row};
-use std::convert::TryInto;
 
 use ff::PrimeField;
 
