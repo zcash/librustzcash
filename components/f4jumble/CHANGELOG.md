@@ -9,3 +9,4 @@ and this library adheres to Rust's notion of
 
 ## [0.1.0] - 2022-05-11
 Initial release.
+MSRV is 1.51

@@ -12,6 +12,9 @@ and this library adheres to Rust's notion of
 - `zcash_address::TryFromRawAddress`
 - `zcash_address::ZcashAddress::convert_if_network`
 
+### Changed
+- MSRV is now 1.52
+
 ### Removed
 - `zcash_address::FromAddress` (use `TryFromAddress` instead).
 
