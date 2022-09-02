@@ -486,7 +486,8 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             u32::from(account),
             to_str,
             ivalue,
-            memo.map(|m| m.as_slice()),
+            memo.filter(|m| *m != &MemoBytes::empty())
+                .map(|m| m.as_slice()),
         ])?;
 
         Ok(())
@@ -511,7 +512,8 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             u32::from(account),
             to_str,
             ivalue,
-            &memo.map(|m| m.as_slice()),
+            memo.filter(|m| *m != &MemoBytes::empty())
+                .map(|m| m.as_slice()),
             tx_ref,
             pool_type.typecode(),
             output_index as i64,

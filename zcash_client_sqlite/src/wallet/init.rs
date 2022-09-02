@@ -524,7 +524,13 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigrationAddTxViews<P
                    transactions.raw           AS raw,
                    SUM(sent_notes.value)      AS sent_total,
                    COUNT(sent_notes.id_note)  AS sent_note_count,
-                   SUM(CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
+                   SUM(
+                       CASE
+                           WHEN sent_notes.memo IS NULL THEN 0
+                           WHEN SUBSTR(sent_notes.memo, 0, 2) = X'F6' THEN 0
+                           ELSE 1
+                       END
+                   ) AS memo_count,
                    blocks.time                AS block_time
             FROM   transactions
                    JOIN sent_notes
@@ -539,7 +545,13 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigrationAddTxViews<P
                    transactions.txid             AS txid,
                    SUM(received_notes.value)     AS received_total,
                    COUNT(received_notes.id_note) AS received_note_count,
-                   SUM(CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
+                   SUM(
+                       CASE
+                           WHEN received_notes.memo IS NULL THEN 0
+                           WHEN SUBSTR(received_notes.memo, 0, 2) = X'F6' THEN 0
+                           ELSE 1
+                       END
+                   ) AS memo_count,
                    blocks.time                   AS block_time
             FROM   transactions
                    JOIN received_notes
@@ -564,13 +576,17 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigrationAddTxViews<P
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
-                       transactions.fee              AS fee,
+                       0                             AS fee,
                        CASE
                             WHEN received_notes.is_change THEN 0
                             ELSE value
                        END AS value,
                        received_notes.is_change      AS is_change,
-                       CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
+                       CASE
+                           WHEN received_notes.memo IS NULL THEN 0
+                           WHEN SUBSTR(received_notes.memo, 0, 2) = X'F6' THEN 0
+                           ELSE 1
+                       END AS memo_present
                 FROM   transactions
                        JOIN received_notes ON transactions.id_tx = received_notes.tx
                 UNION
@@ -580,10 +596,14 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigrationAddTxViews<P
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
-                       0                             AS fee,
+                       transactions.fee              AS fee,
                        -sent_notes.value             AS value,
                        false                         AS is_change,
-                       CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
+                       CASE
+                           WHEN sent_notes.memo IS NULL THEN 0
+                           WHEN SUBSTR(sent_notes.memo, 0, 2) = X'F6' THEN 0
+                           ELSE 1
+                       END AS memo_present
                 FROM   transactions
                        JOIN sent_notes ON transactions.id_tx = sent_notes.tx
             )
@@ -999,13 +1019,17 @@ mod tests {
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
-                       transactions.fee              AS fee,
+                       0                             AS fee,
                        CASE
                             WHEN received_notes.is_change THEN 0
                             ELSE value
                        END AS value,
                        received_notes.is_change      AS is_change,
-                       CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
+                       CASE
+                           WHEN received_notes.memo IS NULL THEN 0
+                           WHEN received_notes.memo = X'F600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' THEN 0
+                           ELSE 1
+                       END AS memo_present
                 FROM   transactions
                        JOIN received_notes ON transactions.id_tx = received_notes.tx
                 UNION
@@ -1015,10 +1039,14 @@ mod tests {
                        transactions.txid             AS txid,
                        transactions.expiry_height    AS expiry_height,
                        transactions.raw              AS raw,
-                       0                             AS fee,
+                       transactions.fee              AS fee,
                        -sent_notes.value             AS value,
                        false                         AS is_change,
-                       CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END AS memo_present
+                       CASE
+                           WHEN sent_notes.memo IS NULL THEN 0
+                           WHEN sent_notes.memo = X'F600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' THEN 0
+                           ELSE 1
+                       END AS memo_present
                 FROM   transactions
                        JOIN sent_notes ON transactions.id_tx = sent_notes.tx
             )
@@ -1030,7 +1058,13 @@ mod tests {
                    transactions.txid             AS txid,
                    SUM(received_notes.value)     AS received_total,
                    COUNT(received_notes.id_note) AS received_note_count,
-                   SUM(CASE WHEN received_notes.memo IS NULL OR received_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
+                   SUM(
+                       CASE
+                           WHEN received_notes.memo IS NULL THEN 0
+                           WHEN received_notes.memo = X'F600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' THEN 0
+                           ELSE 1
+                       END
+                   ) AS memo_count,
                    blocks.time                   AS block_time
             FROM   transactions
                    JOIN received_notes
@@ -1047,7 +1081,13 @@ mod tests {
                    transactions.raw           AS raw,
                    SUM(sent_notes.value)      AS sent_total,
                    COUNT(sent_notes.id_note)  AS sent_note_count,
-                   SUM(CASE WHEN sent_notes.memo IS NULL OR sent_notes.memo = '' THEN 0 ELSE 1 END) AS memo_count,
+                   SUM(
+                       CASE
+                           WHEN sent_notes.memo IS NULL THEN 0
+                           WHEN sent_notes.memo = X'F600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' THEN 0
+                           ELSE 1
+                       END
+                   ) AS memo_count,
                    blocks.time                AS block_time
             FROM   transactions
                    JOIN sent_notes
@@ -1513,12 +1553,14 @@ mod tests {
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
             VALUES (0, 2, 0, 0, '', 2);
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
-            VALUES (0, 2, 1, 0, '', 3, 'a');
+            VALUES (0, 2, 1, 0, '', 3, X'61');
+            INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
+            VALUES (0, 2, 2, 0, '', 0, X'f600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
 
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
-            VALUES (0, 0, 0, '', 5, '', 'a', false, 'b');
+            VALUES (0, 0, 0, '', 5, '', 'a', false, X'62');
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
-            VALUES (0, 1, 0, '', 7, '', 'b', true, 'c');",
+            VALUES (0, 1, 0, '', 7, '', 'b', true, X'63');",
         ).unwrap();
 
         let mut q = db_data
@@ -1550,7 +1592,7 @@ mod tests {
             let count: i64 = row.get(1).unwrap();
             let memo_count: i64 = row.get(2).unwrap();
             assert_eq!(total, 5);
-            assert_eq!(count, 2);
+            assert_eq!(count, 3);
             assert_eq!(memo_count, 1);
         }
         assert_eq!(row_count, 1);
