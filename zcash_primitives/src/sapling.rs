@@ -192,7 +192,7 @@ impl ProofGenerationKey {
 
 /// A key used to derive the nullifier for a Sapling note.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct NullifierDerivingKey(pub(crate) jubjub::SubgroupPoint);
+pub struct NullifierDerivingKey(pub jubjub::SubgroupPoint);
 
 #[derive(Debug, Clone)]
 pub struct ViewingKey {
