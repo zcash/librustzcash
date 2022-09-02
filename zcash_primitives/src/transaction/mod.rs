@@ -396,15 +396,13 @@ impl<A: Authorization> TransactionData<A> {
         self.tze_bundle.as_ref()
     }
 
-    /// Returns the total fees paid by the transaction, given a function that can
-    /// be used to retrieve the output values of previous transactions' outputs
-    /// that are being spent in this transaction.
-    pub fn fee_paid<E, F: FnMut(&OutPoint) -> Result<Amount, E>>(
-        &self,
-        get_prevout: F,
-    ) -> Result<Amount, E>
+    /// Returns the total fees paid by the transaction, given a function that can be used to
+    /// retrieve the value of previous transactions' transparent outputs that are being spent in
+    /// this transaction.
+    pub fn fee_paid<E, F>(&self, get_prevout: F) -> Result<Amount, E>
     where
         E: From<BalanceError>,
+        F: FnMut(&OutPoint) -> Result<Amount, E>,
     {
         let value_balances = [
             self.transparent_bundle

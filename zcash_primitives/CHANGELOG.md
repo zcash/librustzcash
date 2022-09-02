@@ -28,7 +28,11 @@ and this library adheres to Rust's notion of
   - `Builder::new_with_rng_and_fee`
 - `zcash_primitives::transaction::TransactionData::fee_paid`
 - `zcash_primitives::transaction::components::amount::BalanceError`
-- `zcash_primitives::transaction::components::sprout::Bundle::value_balance`
+- Added in `zcash_primitives::transaction::components::sprout`
+  - `Bundle::value_balance`
+  - `JSDescription::net_value`
+- Added in `zcash_primitives::transaction::components::transparent`
+  - `Bundle::value_balance`
 
 ### Changed
 - `zcash_primitives::sapling::ViewingKey` now stores `nk` as a
