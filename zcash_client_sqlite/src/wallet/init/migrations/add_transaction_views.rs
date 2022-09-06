@@ -1,5 +1,5 @@
 //! Functions for initializing the various databases.
-use rusqlite::{self, types::ToSql, NO_PARAMS};
+use rusqlite::{self, types::ToSql, OptionalExtension, NO_PARAMS};
 use schemer::{self};
 use schemer_rusqlite::RusqliteMigration;
 
@@ -56,30 +56,50 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut tx_rows = stmt_list_txs.query(NO_PARAMS)?;
         while let Some(row) = tx_rows.next()? {
             let id_tx: i64 = row.get(0)?;
-            let tx_bytes: Vec<u8> = row.get(1)?;
+            let tx_bytes: Option<Vec<u8>> = row.get(1)?;
             let h: u32 = row.get(2)?;
             let block_height = BlockHeight::from(h);
 
-            let tx = Transaction::read(
-                &tx_bytes[..],
-                BranchId::for_height(&self.params, block_height),
-            )
-            .map_err(|e| {
-                WalletMigrationError::CorruptedData(format!(
-                    "Parsing failed for transaction {:?}: {:?}",
-                    id_tx, e
-                ))
-            })?;
+            // If only transaction metadata has been stored, and not transaction data, the fee
+            // information will eventually be set when the full transaction data is inserted.
+            if let Some(b) = tx_bytes {
+                let tx =
+                    Transaction::read(&b[..], BranchId::for_height(&self.params, block_height))
+                        .map_err(|e| {
+                            WalletMigrationError::CorruptedData(format!(
+                                "Parsing failed for transaction {:?}: {:?}",
+                                id_tx, e
+                            ))
+                        })?;
 
-            let fee_paid = tx.fee_paid(|op| {
-                stmt_find_utxo_value
-                    .query_row(&[op.hash().to_sql()?, op.n().to_sql()?], |row| {
-                        row.get(0).map(|i| Amount::from_i64(i).unwrap())
-                    })
-                    .map_err(WalletMigrationError::DbError)
-            })?;
+                let fee_paid = tx.fee_paid(|op| {
+                    let op_amount = stmt_find_utxo_value
+                        .query_row(&[op.hash().to_sql()?, op.n().to_sql()?], |row| {
+                            row.get::<_, i64>(0)
+                        })
+                        .optional()
+                        .map_err(WalletMigrationError::DbError)?;
 
-            stmt_set_fee.execute(&[i64::from(fee_paid), id_tx])?;
+                    op_amount.map_or_else(
+                        || {
+                            Err(WalletMigrationError::CorruptedData(format!(
+                                "Unable to find UTXO corresponding to outpoint {:?}",
+                                op
+                            )))
+                        },
+                        |i| {
+                            Amount::from_i64(i).map_err(|_| {
+                                WalletMigrationError::CorruptedData(format!(
+                                    "UTXO amount out of range in outpoint {:?}",
+                                    op
+                                ))
+                            })
+                        },
+                    )
+                })?;
+
+                stmt_set_fee.execute(&[i64::from(fee_paid), id_tx])?;
+            }
         }
 
         transaction.execute_batch(
