@@ -36,8 +36,7 @@ pub fn sapling_ka_agree(esk: &jubjub::Fr, pk_d: &jubjub::ExtendedPoint) -> jubju
     // <ExtendedPoint as CofactorGroup>::clear_cofactor is implemented using
     // ExtendedPoint::mul_by_cofactor in the jubjub crate.
 
-    let mut wnaf = group::Wnaf::new();
-    wnaf.scalar(esk).base(*pk_d).clear_cofactor()
+    (*pk_d * esk).clear_cofactor()
 }
 
 /// Sapling KDF for note encryption.
