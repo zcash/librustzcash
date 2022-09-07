@@ -420,7 +420,8 @@ impl<A: Authorization> TransactionData<A> {
                 .map_or_else(Amount::zero, |b| *b.value_balance()),
         ];
 
-        IntoIterator::into_iter(&value_balances)
+        value_balances
+            .iter()
             .sum::<Option<_>>()
             .ok_or_else(|| BalanceError::Overflow.into())
     }

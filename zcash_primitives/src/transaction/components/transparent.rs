@@ -68,12 +68,10 @@ impl<A: Authorization> Bundle<A> {
     /// transferred out of the transparent pool into shielded pools or to fees; a negative value
     /// means that the containing transaction has funds being transferred into the transparent pool
     /// from the shielded pools.
-    pub fn value_balance<E, F: FnMut(&OutPoint) -> Result<Amount, E>>(
-        &self,
-        mut get_prevout_value: F,
-    ) -> Result<Amount, E>
+    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Amount, E>
     where
         E: From<BalanceError>,
+        F: FnMut(&OutPoint) -> Result<Amount, E>,
     {
         let input_sum = self.vin.iter().try_fold(Amount::zero(), |total, txin| {
             get_prevout_value(&txin.prevout)
