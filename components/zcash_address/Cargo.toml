@@ -10,6 +10,7 @@ repository = "https://github.com/zcash/librustzcash"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2018"
+rust-version = "1.52"
 categories = ["cryptography::cryptocurrencies", "encoding"]
 keywords = ["zcash", "address", "sapling", "unified"]
 

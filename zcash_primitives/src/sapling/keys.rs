@@ -4,7 +4,6 @@
 //!
 //! [section 4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 
-use std::convert::TryInto;
 use std::io::{self, Read, Write};
 
 use crate::{

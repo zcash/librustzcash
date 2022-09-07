@@ -7,7 +7,6 @@ use incrementalmerkletree::{
     Altitude,
 };
 use std::collections::VecDeque;
-use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 use std::iter::repeat;
 use zcash_encoding::{Optional, Vector};
@@ -620,7 +619,6 @@ impl<Node: Hashable> MerklePath<Node> {
 mod tests {
     use incrementalmerkletree::bridgetree::Frontier;
     use proptest::prelude::*;
-    use std::convert::TryInto;
     use std::io::{self, Read, Write};
 
     use crate::sapling::{testing::arb_node, Node};

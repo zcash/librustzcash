@@ -1,7 +1,6 @@
 //! Structs for handling encrypted memos.
 
 use std::cmp::Ordering;
-use std::convert::{TryFrom, TryInto};
 use std::error;
 use std::fmt;
 use std::ops::Deref;
@@ -275,7 +274,6 @@ impl str::FromStr for Memo {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
     use std::str::FromStr;
 
     use super::{Error, Memo, MemoBytes};

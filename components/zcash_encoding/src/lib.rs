@@ -10,7 +10,6 @@
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
-use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 use std::iter::FromIterator;
 
@@ -271,7 +270,6 @@ impl Optional {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::convert::{TryFrom, TryInto};
     use std::fmt::Debug;
 
     #[test]

@@ -18,9 +18,6 @@ use crate::transaction::{
 };
 
 #[cfg(feature = "zfuture")]
-use std::convert::TryInto;
-
-#[cfg(feature = "zfuture")]
 use zcash_encoding::{CompactSize, Vector};
 
 #[cfg(feature = "zfuture")]
