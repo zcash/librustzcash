@@ -45,7 +45,7 @@ and this library adheres to Rust's notion of
   likely to be modified and/or moved to a different module in a future
   release:
   - `zcash_client_backend::address::UnifiedAddress`
-  - `zcash_client_backend::keys::{UnifiedSpendingKey`, `UnifiedFullViewingKey`}
+  - `zcash_client_backend::keys::{UnifiedSpendingKey`, `UnifiedFullViewingKey`, `Era`, `DecodingError`}
   - `zcash_client_backend::encoding::AddressCodec`
   - `zcash_client_backend::encoding::encode_payment_address`
   - `zcash_client_backend::encoding::encode_transparent_address`

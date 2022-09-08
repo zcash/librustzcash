@@ -18,7 +18,7 @@ use std::io::{self, Read, Write};
 use crate::{
     keys::{prf_expand, prf_expand_vec, OutgoingViewingKey},
     sapling::{
-        keys::{ExpandedSpendingKey, FullViewingKey},
+        keys::{DecodingError, ExpandedSpendingKey, FullViewingKey},
         NullifierDerivingKey,
     },
 };
@@ -91,6 +91,10 @@ impl FvkTag {
     fn master() -> Self {
         FvkTag([0u8; 4])
     }
+
+    fn as_bytes(&self) -> &[u8; 4] {
+        &self.0
+    }
 }
 
 /// A child index for a derived key
@@ -123,6 +127,14 @@ impl ChildIndex {
 /// A BIP-32 chain code
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChainCode([u8; 32]);
+
+impl ChainCode {
+    /// Returns byte representation of the chain code, as required for
+    /// [ZIP 32](https://zips.z.cash/zip-0032) encoding.
+    fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DiversifierIndex(pub [u8; 11]);
@@ -167,13 +179,23 @@ impl DiversifierIndex {
 
 /// A key used to derive diversifiers for a particular child key
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DiversifierKey(pub [u8; 32]);
+pub struct DiversifierKey([u8; 32]);
 
 impl DiversifierKey {
     pub fn master(sk_m: &[u8]) -> Self {
         let mut dk_m = [0u8; 32];
         dk_m.copy_from_slice(&prf_expand(sk_m, &[0x10]).as_bytes()[..32]);
         DiversifierKey(dk_m)
+    }
+
+    /// Constructs the diversifier key from its constituent bytes.
+    pub fn from_bytes(key: [u8; 32]) -> Self {
+        DiversifierKey(key)
+    }
+
+    /// Returns the byte representation of the diversifier key.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
     }
 
     fn derive_child(&self, i_l: &[u8]) -> Self {
@@ -402,6 +424,45 @@ impl ExtendedSpendingKey {
         }
     }
 
+    /// Decodes the extended spending key from its serialized representation as defined in
+    /// [ZIP 32](https://zips.z.cash/zip-0032)
+    pub fn from_bytes(b: &[u8]) -> Result<Self, DecodingError> {
+        if b.len() != 169 {
+            return Err(DecodingError::LengthInvalid {
+                expected: 169,
+                actual: b.len(),
+            });
+        }
+
+        let depth = b[0];
+
+        let mut parent_fvk_tag = FvkTag([0; 4]);
+        (&mut parent_fvk_tag.0[..]).copy_from_slice(&b[1..5]);
+
+        let mut ci_bytes = [0u8; 4];
+        (&mut ci_bytes[..]).copy_from_slice(&b[5..9]);
+        let child_index = ChildIndex::from_index(u32::from_le_bytes(ci_bytes));
+
+        let mut chain_code = ChainCode([0u8; 32]);
+        (&mut chain_code.0[..]).copy_from_slice(&b[9..41]);
+
+        let expsk = ExpandedSpendingKey::from_bytes(&b[41..137])?;
+
+        let mut dk = DiversifierKey([0u8; 32]);
+        (&mut dk.0[..]).copy_from_slice(&b[137..169]);
+
+        Ok(ExtendedSpendingKey {
+            depth,
+            parent_fvk_tag,
+            child_index,
+            chain_code,
+            expsk,
+            dk,
+        })
+    }
+
+    /// Reads and decodes the encoded form of the extended spending key as define in
+    /// [ZIP 32](https://zips.z.cash/zip-0032) from the provided reader.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let depth = reader.read_u8()?;
         let mut tag = [0; 4];
@@ -423,15 +484,23 @@ impl ExtendedSpendingKey {
         })
     }
 
-    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_u8(self.depth)?;
-        writer.write_all(&self.parent_fvk_tag.0)?;
-        writer.write_u32::<LittleEndian>(self.child_index.value())?;
-        writer.write_all(&self.chain_code.0)?;
-        writer.write_all(&self.expsk.to_bytes())?;
-        writer.write_all(&self.dk.0)?;
+    /// Encodes the extended spending key to the its seralized representation as defined in
+    /// [ZIP 32](https://zips.z.cash/zip-0032)
+    pub fn to_bytes(&self) -> [u8; 169] {
+        let mut result = [0u8; 169];
+        result[0] = self.depth;
+        (&mut result[1..5]).copy_from_slice(&self.parent_fvk_tag.as_bytes()[..]);
+        (&mut result[5..9]).copy_from_slice(&self.child_index.value().to_le_bytes()[..]);
+        (&mut result[9..41]).copy_from_slice(&self.chain_code.as_bytes()[..]);
+        (&mut result[41..137]).copy_from_slice(&self.expsk.to_bytes()[..]);
+        (&mut result[137..169]).copy_from_slice(&self.dk.as_bytes()[..]);
+        result
+    }
 
-        Ok(())
+    /// Writes the encoded form of the extended spending key as define in
+    /// [ZIP 32](https://zips.z.cash/zip-0032) to the provided writer.
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.to_bytes())
     }
 
     /// Returns the child key corresponding to the path derived from the master key

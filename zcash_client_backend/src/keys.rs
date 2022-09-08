@@ -1,19 +1,35 @@
 //! Helper functions for managing light client key material.
+use orchard;
 use zcash_address::unified::{self, Container, Encoding};
 use zcash_primitives::{
     consensus,
-    sapling::keys as sapling_keys,
     zip32::{AccountId, DiversifierIndex},
 };
 
 use crate::address::UnifiedAddress;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey};
+use {
+    std::convert::TryInto,
+    zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey},
+};
+
+#[cfg(feature = "unstable")]
+use {
+    byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
+    std::convert::TryFrom,
+    std::io::{Read, Write},
+    zcash_address::unified::Typecode,
+    zcash_encoding::CompactSize,
+    zcash_primitives::consensus::BranchId,
+};
 
 pub mod sapling {
     use zcash_primitives::zip32::{AccountId, ChildIndex};
-    pub use zcash_primitives::zip32::{ExtendedFullViewingKey, ExtendedSpendingKey};
+    pub use zcash_primitives::{
+        sapling::keys::DiversifiableFullViewingKey,
+        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    };
 
     /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
     /// given seed.
@@ -71,12 +87,58 @@ pub enum DerivationError {
     Transparent(hdwallet::error::Error),
 }
 
+/// A version identifier for the encoding of unified spending keys.
+///
+/// Each era corresponds to a range of block heights. During an era, the unified spending key
+/// parsed from an encoded form tagged with that era's identifier is expected to provide
+/// sufficient spending authority to spend any non-Sprout shielded note created in a transaction
+/// within the era's block range.
+#[cfg(feature = "unstable")]
+#[derive(Debug, PartialEq, Eq)]
+pub enum Era {
+    /// The Orchard era begins at Orchard activation, and will end if a new pool that requires a
+    /// change to unified spending keys is introduced.
+    Orchard,
+}
+
+/// A type for errors that can occur when decoding keys from their serialized representations.
+#[cfg(feature = "unstable")]
+#[derive(Debug, PartialEq, Eq)]
+pub enum DecodingError {
+    ReadError(&'static str),
+    EraInvalid,
+    EraMismatch(Era),
+    TypecodeInvalid,
+    LengthInvalid,
+    LengthMismatch(Typecode, u32),
+    InsufficientData(Typecode),
+    KeyDataInvalid(Typecode),
+}
+
+#[cfg(feature = "unstable")]
+impl Era {
+    /// Returns the unique identifier for the era.
+    fn id(&self) -> u32 {
+        // We use the consensus branch id of the network upgrade that introduced a
+        // new USK format as the identifier for the era.
+        match self {
+            Era::Orchard => u32::from(BranchId::Nu5),
+        }
+    }
+
+    fn try_from_id(id: u32) -> Option<Self> {
+        BranchId::try_from(id).ok().and_then(|b| match b {
+            BranchId::Nu5 => Some(Era::Orchard),
+            _ => None,
+        })
+    }
+}
+
 /// A set of viewing keys that are all associated with a single
 /// ZIP-0032 account identifier.
 #[derive(Clone, Debug)]
 #[doc(hidden)]
 pub struct UnifiedSpendingKey {
-    account: AccountId,
     #[cfg(feature = "transparent-inputs")]
     transparent: legacy::AccountPrivKey,
     sapling: sapling::ExtendedSpendingKey,
@@ -103,7 +165,6 @@ impl UnifiedSpendingKey {
             .map_err(DerivationError::Transparent)?;
 
         Ok(UnifiedSpendingKey {
-            account,
             #[cfg(feature = "transparent-inputs")]
             transparent,
             sapling: sapling::spending_key(seed, params.coin_type(), account),
@@ -119,10 +180,6 @@ impl UnifiedSpendingKey {
             orchard: Some((&self.orchard).into()),
             unknown: vec![],
         }
-    }
-
-    pub fn account(&self) -> AccountId {
-        self.account
     }
 
     /// Returns the transparent component of the unified key at the
@@ -141,16 +198,154 @@ impl UnifiedSpendingKey {
     pub fn orchard(&self) -> &orchard::keys::SpendingKey {
         &self.orchard
     }
+
+    /// Returns a binary encoding of this key suitable for decoding with [`decode`].
+    ///
+    /// The encoded form of a unified spending key is only intended for use
+    /// within wallets when required for storage and/or crossing FFI boundaries;
+    /// unified spending keys should not be exposed to users, and consequently
+    /// no string-based encoding is defined. This encoding does not include any
+    /// internal validation metadata (such as checksums) as keys decoded from
+    /// this form will necessarily be validated when the attempt is made to
+    /// spend a note that they have authority for.
+    #[cfg(feature = "unstable")]
+    pub fn to_bytes(&self, era: Era) -> Vec<u8> {
+        let mut result = vec![];
+        result.write_u32::<LittleEndian>(era.id()).unwrap();
+
+        // orchard
+        let orchard_key = self.orchard();
+        CompactSize::write(&mut result, usize::try_from(Typecode::Orchard).unwrap()).unwrap();
+
+        let orchard_key_bytes = orchard_key.to_bytes();
+        CompactSize::write(&mut result, orchard_key_bytes.len()).unwrap();
+        result.write_all(orchard_key_bytes).unwrap();
+
+        // sapling
+        let sapling_key = self.sapling();
+        CompactSize::write(&mut result, usize::try_from(Typecode::Sapling).unwrap()).unwrap();
+
+        let sapling_key_bytes = sapling_key.to_bytes();
+        CompactSize::write(&mut result, sapling_key_bytes.len()).unwrap();
+        result.write_all(&sapling_key_bytes).unwrap();
+
+        // transparent
+        #[cfg(feature = "transparent-inputs")]
+        {
+            let account_tkey = self.transparent();
+            CompactSize::write(&mut result, usize::try_from(Typecode::P2pkh).unwrap()).unwrap();
+
+            let account_tkey_bytes = account_tkey.to_bytes();
+            CompactSize::write(&mut result, account_tkey_bytes.len()).unwrap();
+            result.write_all(&account_tkey_bytes).unwrap();
+        }
+
+        result
+    }
+
+    /// Decodes a [`UnifiedSpendingKey`] value from its serialized representation.
+    ///
+    /// See [`to_bytes`] for additional detail about the encoded form.
+    #[allow(clippy::unnecessary_unwrap)]
+    #[cfg(feature = "unstable")]
+    pub fn from_bytes(era: Era, encoded: &[u8]) -> Result<Self, DecodingError> {
+        let mut source = std::io::Cursor::new(encoded);
+        let decoded_era = source
+            .read_u32::<LittleEndian>()
+            .map_err(|_| DecodingError::ReadError("era"))
+            .and_then(|id| Era::try_from_id(id).ok_or(DecodingError::EraInvalid))?;
+
+        if decoded_era != era {
+            return Err(DecodingError::EraMismatch(decoded_era));
+        }
+
+        let mut orchard = None;
+        let mut sapling = None;
+        #[cfg(feature = "transparent-inputs")]
+        let mut transparent = None;
+        loop {
+            let tc = CompactSize::read_t::<_, u32>(&mut source)
+                .map_err(|_| DecodingError::ReadError("typecode"))
+                .and_then(|v| Typecode::try_from(v).map_err(|_| DecodingError::TypecodeInvalid))?;
+
+            let len = CompactSize::read_t::<_, u32>(&mut source)
+                .map_err(|_| DecodingError::ReadError("key length"))?;
+
+            match tc {
+                Typecode::Orchard => {
+                    if len != 32 {
+                        return Err(DecodingError::LengthMismatch(Typecode::Orchard, len));
+                    }
+
+                    let mut key = [0u8; 32];
+                    source
+                        .read_exact(&mut key)
+                        .map_err(|_| DecodingError::InsufficientData(Typecode::Orchard))?;
+                    orchard = Some(
+                        Option::<orchard::keys::SpendingKey>::from(
+                            orchard::keys::SpendingKey::from_bytes(key),
+                        )
+                        .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))?,
+                    );
+                }
+                Typecode::Sapling => {
+                    if len != 169 {
+                        return Err(DecodingError::LengthMismatch(Typecode::Sapling, len));
+                    }
+
+                    let mut key = [0u8; 169];
+                    source
+                        .read_exact(&mut key)
+                        .map_err(|_| DecodingError::InsufficientData(Typecode::Sapling))?;
+                    sapling = Some(
+                        sapling::ExtendedSpendingKey::from_bytes(&key)
+                            .map_err(|_| DecodingError::KeyDataInvalid(Typecode::Sapling))?,
+                    );
+                }
+                #[cfg(feature = "transparent-inputs")]
+                Typecode::P2pkh => {
+                    if len != 64 {
+                        return Err(DecodingError::LengthMismatch(Typecode::P2pkh, len));
+                    }
+
+                    let mut key = [0u8; 64];
+                    source
+                        .read_exact(&mut key)
+                        .map_err(|_| DecodingError::InsufficientData(Typecode::P2pkh))?;
+                    transparent = Some(
+                        legacy::AccountPrivKey::from_bytes(&key)
+                            .ok_or(DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
+                    );
+                }
+                _ => {
+                    return Err(DecodingError::TypecodeInvalid);
+                }
+            }
+
+            #[cfg(feature = "transparent-inputs")]
+            let has_transparent = transparent.is_some();
+            #[cfg(not(feature = "transparent-inputs"))]
+            let has_transparent = true;
+
+            if orchard.is_some() && sapling.is_some() && has_transparent {
+                return Ok(UnifiedSpendingKey {
+                    orchard: orchard.unwrap(),
+                    sapling: sapling.unwrap(),
+                    #[cfg(feature = "transparent-inputs")]
+                    transparent: transparent.unwrap(),
+                });
+            }
+        }
+    }
 }
 
-/// A set of viewing keys that are all associated with a single
-/// ZIP-0032 account identifier.
+/// A [ZIP 316](https://zips.z.cash/zip-0316) unified full viewing key.
 #[derive(Clone, Debug)]
 #[doc(hidden)]
 pub struct UnifiedFullViewingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: Option<legacy::AccountPubKey>,
-    sapling: Option<sapling_keys::DiversifiableFullViewingKey>,
+    sapling: Option<sapling::DiversifiableFullViewingKey>,
     orchard: Option<orchard::keys::FullViewingKey>,
     unknown: Vec<(u32, Vec<u8>)>,
 }
@@ -160,7 +355,7 @@ impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key, if the required components are present.
     pub fn new(
         #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
-        sapling: Option<sapling_keys::DiversifiableFullViewingKey>,
+        sapling: Option<sapling::DiversifiableFullViewingKey>,
         orchard: Option<orchard::keys::FullViewingKey>,
     ) -> Option<UnifiedFullViewingKey> {
         if sapling.is_none() {
@@ -210,7 +405,7 @@ impl UnifiedFullViewingKey {
                     })
                     .transpose(),
                 unified::Fvk::Sapling(data) => {
-                    sapling_keys::DiversifiableFullViewingKey::from_bytes(data)
+                    sapling::DiversifiableFullViewingKey::from_bytes(data)
                         .ok_or("Invalid Sapling FVK in Unified FVK")
                         .map(|pa| {
                             sapling = Some(pa);
@@ -287,7 +482,7 @@ impl UnifiedFullViewingKey {
     }
 
     /// Returns the Sapling diversifiable full viewing key component of this unified key.
-    pub fn sapling(&self) -> Option<&sapling_keys::DiversifiableFullViewingKey> {
+    pub fn sapling(&self) -> Option<&sapling::DiversifiableFullViewingKey> {
         self.sapling.as_ref()
     }
 
@@ -366,8 +561,29 @@ impl UnifiedFullViewingKey {
     }
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::*;
+
+    use super::UnifiedSpendingKey;
+    use zcash_primitives::{consensus::Network, zip32::AccountId};
+
+    pub fn arb_unified_spending_key(params: Network) -> impl Strategy<Value = UnifiedSpendingKey> {
+        prop::array::uniform32(prop::num::u8::ANY).prop_flat_map(move |seed| {
+            prop::num::u32::ANY
+                .prop_map(move |account| {
+                    UnifiedSpendingKey::from_seed(&params, &seed, AccountId::from(account))
+                })
+                .prop_filter("seeds must generate valid USKs", |v| v.is_ok())
+                .prop_map(|v| v.unwrap())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::proptest;
+
     use super::{sapling, UnifiedFullViewingKey};
     use zcash_primitives::{
         consensus::MAIN_NETWORK,
@@ -381,6 +597,13 @@ mod tests {
             self,
             keys::{AccountPrivKey, IncomingViewingKey},
         },
+    };
+
+    #[cfg(feature = "unstable")]
+    use {
+        super::{testing::arb_unified_spending_key, Era, UnifiedSpendingKey},
+        subtle::ConstantTimeEq,
+        zcash_primitives::consensus::Network,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -475,5 +698,23 @@ mod tests {
         );
         #[cfg(not(feature = "transparent-inputs"))]
         assert_eq!(decoded_with_t.unknown.len(), 1);
+    }
+
+    proptest! {
+        #[test]
+        #[cfg(feature = "unstable")]
+        fn prop_usk_roundtrip(usk in arb_unified_spending_key(Network::MainNetwork)) {
+            let encoded = usk.to_bytes(Era::Orchard);
+            #[cfg(not(feature = "transparent-inputs"))]
+            assert_eq!(encoded.len(), 4 + 2 + 32 + 2 + 169);
+            #[cfg(feature = "transparent-inputs")]
+            assert_eq!(encoded.len(), 4 + 2 + 32 + 2 + 169 + 2 + 64);
+            let decoded = UnifiedSpendingKey::from_bytes(Era::Orchard, &encoded);
+            let decoded = decoded.unwrap_or_else(|e| panic!("Error decoding USK: {:?}", e));
+            assert!(bool::from(decoded.orchard().ct_eq(usk.orchard())));
+            assert_eq!(decoded.sapling(), usk.sapling());
+            #[cfg(feature = "transparent-inputs")]
+            assert_eq!(decoded.transparent().to_bytes(), usk.transparent().to_bytes());
+        }
     }
 }
