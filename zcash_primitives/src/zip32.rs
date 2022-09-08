@@ -179,7 +179,7 @@ impl DiversifierIndex {
 
 /// A key used to derive diversifiers for a particular child key
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DiversifierKey(pub [u8; 32]);
+pub struct DiversifierKey([u8; 32]);
 
 impl DiversifierKey {
     pub fn master(sk_m: &[u8]) -> Self {

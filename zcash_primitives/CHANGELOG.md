@@ -17,7 +17,8 @@ and this library adheres to Rust's notion of
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`
 - Added in `zcash_primitives::zip32`
   - `ChainCode::as_bytes`
-  - `DiversifierIndex::as_bytes`
+  - `DiversifierKey::{from_bytes, as_bytes}`
+  - `DiversifierIndex::{as_bytes}`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`
   - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
 
@@ -27,6 +28,8 @@ and this library adheres to Rust's notion of
 - The signature of `zcash_primitives::sapling::Note::nf` has changed to
   take just a `NullifierDerivingKey` (the only capability it actually required)
   rather than the full `ViewingKey` as its first argument.
+- Made the internals of `zip32::DiversifierKey` private; use `from_bytes` and
+  `as_bytes` on this type instead.
 
 ## [0.7.0] - 2022-06-24
 ### Changed

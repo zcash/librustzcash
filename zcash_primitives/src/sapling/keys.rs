@@ -233,7 +233,7 @@ impl DiversifiableFullViewingKey {
     pub fn from_bytes(bytes: &[u8; 128]) -> Option<Self> {
         FullViewingKey::read(&bytes[..96]).ok().map(|fvk| Self {
             fvk,
-            dk: zip32::DiversifierKey(bytes[96..].try_into().unwrap()),
+            dk: zip32::DiversifierKey::from_bytes(bytes[96..].try_into().unwrap()),
         })
     }
 
@@ -243,7 +243,7 @@ impl DiversifiableFullViewingKey {
         self.fvk
             .write(&mut bytes[..96])
             .expect("slice should be the correct length");
-        bytes[96..].copy_from_slice(&self.dk.0);
+        bytes[96..].copy_from_slice(&self.dk.as_bytes()[..]);
         bytes
     }
 
