@@ -4,6 +4,9 @@ use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+#[cfg(feature = "transparent-inputs")]
+use std::collections::HashSet;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -193,6 +196,16 @@ pub trait WalletRead {
 
 #[cfg(feature = "transparent-inputs")]
 pub trait WalletReadTransparent: WalletRead {
+    /// Returns the set of all transparent receivers associated with the given account.
+    ///
+    /// The set contains all transparent receivers that are known to have been derived
+    /// under this account. Wallets should scan the chain for UTXOs sent to these
+    /// receivers.
+    fn get_transparent_receivers(
+        &self,
+        account: AccountId,
+    ) -> Result<HashSet<TransparentAddress>, Self::Error>;
+
     /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
     /// including `max_height`.
     fn get_unspent_transparent_outputs(
@@ -325,6 +338,9 @@ pub trait BlockSource {
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
     use std::collections::HashMap;
+
+    #[cfg(feature = "transparent-inputs")]
+    use std::collections::HashSet;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -469,6 +485,13 @@ pub mod testing {
 
     #[cfg(feature = "transparent-inputs")]
     impl WalletReadTransparent for MockWalletDb {
+        fn get_transparent_receivers(
+            &self,
+            _account: AccountId,
+        ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+            Ok(HashSet::new())
+        }
+
         fn get_unspent_transparent_outputs(
             &self,
             _address: &TransparentAddress,

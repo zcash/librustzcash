@@ -12,6 +12,9 @@ use rusqlite::{OptionalExtension, ToSql, NO_PARAMS};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
+#[cfg(feature = "transparent-inputs")]
+use std::collections::HashSet;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -41,7 +44,7 @@ use {
     rusqlite::params,
     zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
     zcash_primitives::{
-        legacy::Script,
+        legacy::{keys::IncomingViewingKey, Script},
         transaction::components::{OutPoint, TxOut},
     },
 };
@@ -202,6 +205,56 @@ pub(crate) fn get_address_ua<P: consensus::Parameters>(
             })
     })
     .transpose()
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
+    wdb: &WalletDb<P>,
+    account: AccountId,
+) -> Result<HashSet<TransparentAddress>, SqliteClientError> {
+    let mut ret = HashSet::new();
+
+    // Get all UAs derived
+    let mut ua_query = wdb
+        .conn
+        .prepare("SELECT address FROM addresses WHERE account = :account")?;
+    let mut rows = ua_query.query_named(&[(":account", &u32::from(account))])?;
+
+    while let Some(row) = rows.next()? {
+        let ua_str: String = row.get(0)?;
+        let ua = RecipientAddress::decode(&wdb.params, &ua_str)
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
+            })
+            .and_then(|addr| match addr {
+                RecipientAddress::Unified(ua) => Ok(ua),
+                _ => Err(SqliteClientError::CorruptedData(format!(
+                    "Addresses table contains {} which is not a unified address",
+                    ua_str,
+                ))),
+            })?;
+        if let Some(taddr) = ua.transparent() {
+            ret.insert(*taddr);
+        }
+    }
+
+    // Get the UFVK for the account.
+    let ufvk_str: String = wdb.conn.query_row(
+        "SELECT ufvk FROM accounts WHERE account = :account",
+        &[u32::from(account)],
+        |row| row.get(0),
+    )?;
+    let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
+        .map_err(SqliteClientError::CorruptedData)?;
+
+    // Derive the default transparent address (if it wasn't already part of a derived UA).
+    if let Some(tfvk) = ufvk.transparent() {
+        let tivk = tfvk.derive_external_ivk()?;
+        let taddr = tivk.default_address().0;
+        ret.insert(taddr);
+    }
+
+    Ok(ret)
 }
 
 /// Returns the [`UnifiedFullViewingKey`]s for the wallet.

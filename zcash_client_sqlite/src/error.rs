@@ -43,6 +43,9 @@ pub enum SqliteClientError {
     /// Base58 decoding error
     Base58(bs58::decode::Error),
 
+    #[cfg(feature = "transparent-inputs")]
+    HdwalletError(hdwallet::error::Error),
+
     /// Base58 decoding error
     TransparentAddress(TransparentCodecError),
 
@@ -90,6 +93,8 @@ impl fmt::Display for SqliteClientError {
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_HEIGHT, h, r),
             SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),
             SqliteClientError::Base58(e) => write!(f, "{}", e),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
             #[cfg(feature = "unstable")]
@@ -123,6 +128,13 @@ impl From<Bech32DecodeError> for SqliteClientError {
 impl From<bs58::decode::Error> for SqliteClientError {
     fn from(e: bs58::decode::Error) -> Self {
         SqliteClientError::Base58(e)
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<hdwallet::error::Error> for SqliteClientError {
+    fn from(e: hdwallet::error::Error) -> Self {
+        SqliteClientError::HdwalletError(e)
     }
 }
 

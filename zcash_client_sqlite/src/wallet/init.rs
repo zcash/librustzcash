@@ -1182,10 +1182,9 @@ mod tests {
             // add a transparent "sent note"
             #[cfg(feature = "transparent-inputs")]
             {
-                let taddr = RecipientAddress::Transparent(
-                    ufvk.default_address().0.transparent().unwrap().clone(),
-                )
-                .encode(&tests::network());
+                let taddr =
+                    RecipientAddress::Transparent(*ufvk.default_address().0.transparent().unwrap())
+                        .encode(&tests::network());
                 wdb.conn.execute(
                     "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
                     NO_PARAMS,
