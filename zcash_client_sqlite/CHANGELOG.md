@@ -29,6 +29,12 @@ and this library adheres to Rust's notion of
     column. Values for this column should be derived from the wallet's seed and
     the account number; the Sapling component of the resulting Unified Full
     Viewing Key should match the old value in the `extfvk` column.
+  - The `address` and `transparent_address` columns of the `accounts` table have
+    been removed.
+    - A new `addresses` table stores Unified Addresses, keyed on their `account`
+      and `diversifier_index`, to enable storing diversifed Unified Addresses.
+    - Transparent addresses for an account should be obtained by extracting the
+      transparent receiver of a Unified Address for the account.
   - A new non-null column, `output_pool` has been added to the `sent_notes`
     table to enable distinguishing between Sapling and transparent outputs
     (and in the future, outputs to other pools). Values for this column should
@@ -65,6 +71,11 @@ and this library adheres to Rust's notion of
   - `get_extended_full_viewing_keys` (use
     `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
     instead).
+
+### Fixed
+- The `zcash_client_backend::data_api::WalletRead::get_address` implementation
+  for `zcash_client_sqlite::WalletDb` now correctly returns `Ok(None)` if the
+  account identifier does not correspond to a known account.
 
 ### Deprecated
 - A number of public API methods that are used internally to support the

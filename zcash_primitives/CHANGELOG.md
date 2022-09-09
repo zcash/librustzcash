@@ -7,7 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
-- `zcash_primitives::legacy::AccountPrivKey::{to_bytes, from_bytes}`
+- `zcash_primitives::legacy`:
+  - `impl {Copy, Eq, Ord} for TransparentAddress`
+  - `keys::AccountPrivKey::{to_bytes, from_bytes}`
 - `zcash_primitives::sapling::NullifierDerivingKey`
 - Added in `zcash_primitives::sapling::keys`
   - `DecodingError`

@@ -4,18 +4,21 @@ use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+#[cfg(feature = "transparent-inputs")]
+use std::collections::HashSet;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier, PaymentAddress},
+    sapling::{Node, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
-    address::RecipientAddress,
+    address::{RecipientAddress, UnifiedAddress},
     decrypt::DecryptedOutput,
     keys::UnifiedFullViewingKey,
     proto::compact_formats::CompactBlock,
@@ -111,13 +114,12 @@ pub trait WalletRead {
     /// or `Ok(None)` if the transaction is not mined in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns the payment address for the specified account, if the account
+    /// Returns the unified address for the specified account, if the account
     /// identifier specified refers to a valid account for this wallet.
     ///
     /// This will return `Ok(None)` if the account identifier does not correspond
     /// to a known account.
-    // TODO: This does not appear to be the case.
-    fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error>;
+    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns all unified full viewing keys known to this wallet.
     fn get_unified_full_viewing_keys(
@@ -194,6 +196,16 @@ pub trait WalletRead {
 
 #[cfg(feature = "transparent-inputs")]
 pub trait WalletReadTransparent: WalletRead {
+    /// Returns the set of all transparent receivers associated with the given account.
+    ///
+    /// The set contains all transparent receivers that are known to have been derived
+    /// under this account. Wallets should scan the chain for UTXOs sent to these
+    /// receivers.
+    fn get_transparent_receivers(
+        &self,
+        account: AccountId,
+    ) -> Result<HashSet<TransparentAddress>, Self::Error>;
+
     /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
     /// including `max_height`.
     fn get_unspent_transparent_outputs(
@@ -327,18 +339,22 @@ pub trait BlockSource {
 pub mod testing {
     use std::collections::HashMap;
 
+    #[cfg(feature = "transparent-inputs")]
+    use std::collections::HashSet;
+
     use zcash_primitives::{
         block::BlockHash,
         consensus::BlockHeight,
         legacy::TransparentAddress,
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::{Node, Nullifier, PaymentAddress},
+        sapling::{Node, Nullifier},
         transaction::{components::Amount, Transaction, TxId},
         zip32::{AccountId, ExtendedFullViewingKey},
     };
 
     use crate::{
+        address::UnifiedAddress,
         keys::UnifiedFullViewingKey,
         proto::compact_formats::CompactBlock,
         wallet::{SpendableNote, WalletTransparentOutput},
@@ -392,7 +408,7 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_address(&self, _account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
+        fn get_address(&self, _account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
         }
 
@@ -469,6 +485,13 @@ pub mod testing {
 
     #[cfg(feature = "transparent-inputs")]
     impl WalletReadTransparent for MockWalletDb {
+        fn get_transparent_receivers(
+            &self,
+            _account: AccountId,
+        ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+            Ok(HashSet::new())
+        }
+
         fn get_unspent_transparent_outputs(
             &self,
             _address: &TransparentAddress,

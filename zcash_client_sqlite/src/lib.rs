@@ -36,6 +36,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
+#[cfg(feature = "transparent-inputs")]
+use std::collections::HashSet;
+
 use rusqlite::{Connection, NO_PARAMS};
 
 use zcash_primitives::{
@@ -43,13 +46,13 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier, PaymentAddress},
+    sapling::{Node, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
-    address::RecipientAddress,
+    address::{RecipientAddress, UnifiedAddress},
     data_api::{
         BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
     },
@@ -150,9 +153,8 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_unified_full_viewing_keys(self)
     }
 
-    fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_address(self, account)
+    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
+        wallet::get_address_ua(self, account)
     }
 
     fn is_valid_account_extfvk(
@@ -235,6 +237,13 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
 
 #[cfg(feature = "transparent-inputs")]
 impl<P: consensus::Parameters> WalletReadTransparent for WalletDb<P> {
+    fn get_transparent_receivers(
+        &self,
+        account: AccountId,
+    ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+        wallet::get_transparent_receivers(self, account)
+    }
+
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
@@ -267,7 +276,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_unified_full_viewing_keys()
     }
 
-    fn get_address(&self, account: AccountId) -> Result<Option<PaymentAddress>, Self::Error> {
+    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
         self.wallet_db.get_address(account)
     }
 
@@ -340,6 +349,13 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
 
 #[cfg(feature = "transparent-inputs")]
 impl<'a, P: consensus::Parameters> WalletReadTransparent for DataConnStmtCache<'a, P> {
+    fn get_transparent_receivers(
+        &self,
+        account: AccountId,
+    ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+        self.wallet_db.get_transparent_receivers(account)
+    }
+
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,
@@ -725,6 +741,14 @@ mod tests {
     pub(crate) fn init_test_accounts_table(
         db_data: &WalletDb<Network>,
     ) -> (DiversifiableFullViewingKey, Option<TransparentAddress>) {
+        let (ufvk, taddr) = init_test_accounts_table_ufvk(db_data);
+        (ufvk.sapling().unwrap().clone(), taddr)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn init_test_accounts_table_ufvk(
+        db_data: &WalletDb<Network>,
+    ) -> (UnifiedFullViewingKey, Option<TransparentAddress>) {
         let seed = [0u8; 32];
         let account = AccountId::from(0);
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
@@ -745,15 +769,15 @@ mod tests {
         let ufvk = UnifiedFullViewingKey::new(
             #[cfg(feature = "transparent-inputs")]
             tkey,
-            Some(dfvk.clone()),
+            Some(dfvk),
             None,
         )
         .unwrap();
 
-        let ufvks = HashMap::from([(account, ufvk)]);
+        let ufvks = HashMap::from([(account, ufvk.clone())]);
         init_accounts_table(db_data, &ufvks).unwrap();
 
-        (dfvk, taddr)
+        (ufvk, taddr)
     }
 
     /// Create a fake CompactBlock at the given height, containing a single output paying
@@ -899,6 +923,36 @@ mod tests {
             .unwrap()
             .execute(params![u32::from(cb.height()), cb_bytes,])
             .unwrap();
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    #[test]
+    fn transparent_receivers() {
+        use secrecy::Secret;
+        use tempfile::NamedTempFile;
+        use zcash_client_backend::data_api::WalletReadTransparent;
+
+        use crate::{chain::init::init_cache_database, wallet::init::init_wallet_db};
+
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
+        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+
+        // Add an account to the wallet.
+        let (ufvk, taddr) = init_test_accounts_table_ufvk(&db_data);
+        let taddr = taddr.unwrap();
+
+        let receivers = db_data.get_transparent_receivers(0.into()).unwrap();
+
+        // The receiver for the default UA should be in the set.
+        assert!(receivers.contains(ufvk.default_address().0.transparent().unwrap()));
+
+        // The default t-addr should be in the set.
+        assert!(receivers.contains(&taddr));
     }
 
     #[cfg(feature = "unstable")]
