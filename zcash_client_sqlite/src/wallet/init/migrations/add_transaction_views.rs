@@ -260,10 +260,12 @@ mod tests {
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
             VALUES (0, 2, 2, 0, '', 0, X'F600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
 
+            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+            VALUES (0, 0, 0, '', 2, '', 'a', false);
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
-            VALUES (0, 0, 0, '', 5, '', 'a', false, X'62');
+            VALUES (0, 3, 0, '', 5, '', 'b', false, X'62');
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change, memo)
-            VALUES (0, 1, 0, '', 7, '', 'b', true, X'63');",
+            VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');",
         ).unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();
@@ -279,8 +281,8 @@ mod tests {
             let total: i64 = row.get(0).unwrap();
             let count: i64 = row.get(1).unwrap();
             let memo_count: i64 = row.get(2).unwrap();
-            assert_eq!(total, 12);
-            assert_eq!(count, 2);
+            assert_eq!(total, 14);
+            assert_eq!(count, 3);
             assert_eq!(memo_count, 2);
         }
         assert_eq!(row_count, 1);
@@ -313,7 +315,7 @@ mod tests {
             let net_value: i64 = row.get(0).unwrap();
             let has_change: bool = row.get(1).unwrap();
             let memo_count: i64 = row.get(2).unwrap();
-            assert_eq!(net_value, 0);
+            assert_eq!(net_value, 2);
             assert!(has_change);
             assert_eq!(memo_count, 3);
         }
