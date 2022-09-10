@@ -25,6 +25,7 @@ and this library adheres to Rust's notion of
   - `v_transactions`
   - `v_tx_received`
   - `v_tx_sent`
+- `zcash_client_sqlite::wallet::init::WalletMigrationError`
 
 ### Changed
 - Various **BREAKING CHANGES** have been made to the database tables. These will
