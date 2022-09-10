@@ -89,9 +89,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 )?,
                 stmt_update_tx_data: wallet_db.conn.prepare(
                     "UPDATE transactions
-                    SET expiry_height = :expiry_height, 
-                        raw = :raw, 
-                        fee = IFNULL(:fee, fee) 
+                    SET expiry_height = :expiry_height,
+                        raw = :raw,
+                        fee = IFNULL(:fee, fee)
                     WHERE txid = :txid",
                 )?,
                 stmt_select_tx_ref: wallet_db.conn.prepare(
@@ -135,12 +135,17 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 )?,
                 stmt_update_sent_note: wallet_db.conn.prepare(
                     "UPDATE sent_notes
-                    SET from_account = ?, address = ?, value = ?, memo = ?
-                    WHERE tx = ? AND output_pool = ? AND output_index = ?",
+                    SET from_account = :account,
+                        address = :address,
+                        value = :value,
+                        memo = IFNULL(:memo, memo)
+                    WHERE tx = :tx
+                      AND output_pool = :output_pool
+                      AND output_index = :output_index",
                 )?,
                 stmt_insert_sent_note: wallet_db.conn.prepare(
                     "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    VALUES (:tx, :output_pool, :output_index, :from_account, :address, :value, :memo)"
                 )?,
                 stmt_insert_witness: wallet_db.conn.prepare(
                     "INSERT INTO sapling_witnesses (note, block, witness)
@@ -396,7 +401,12 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
             (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
-            (":memo", &memo.map(|m| m.as_slice())),
+            (
+                ":memo",
+                &memo
+                    .filter(|m| *m != &MemoBytes::empty())
+                    .map(|m| m.as_slice()),
+            ),
             (":is_change", &is_change),
         ];
 
@@ -433,7 +443,12 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
             (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
-            (":memo", &memo.map(|m| m.as_slice())),
+            (
+                ":memo",
+                &memo
+                    .filter(|m| *m != &MemoBytes::empty())
+                    .map(|m| m.as_slice()),
+            ),
             (":is_change", &is_change),
             (":tx", &tx_ref),
             (":output_index", &(output_index as i64)),
@@ -478,18 +493,21 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         value: Amount,
         memo: Option<&MemoBytes>,
     ) -> Result<(), SqliteClientError> {
-        let ivalue: i64 = value.into();
-        self.stmt_insert_sent_note.execute(params![
-            tx_ref,
-            pool_type.typecode(),
-            (output_index as i64),
-            u32::from(account),
-            to_str,
-            ivalue,
-            memo.filter(|m| *m != &MemoBytes::empty())
-                .map(|m| m.as_slice()),
-        ])?;
-
+        let sql_args: &[(&str, &dyn ToSql)] = &[
+            (":tx", &tx_ref),
+            (":output_pool", &pool_type.typecode()),
+            (":output_index", &i64::try_from(output_index).unwrap()),
+            (":from_account", &u32::from(account)),
+            (":address", &to_str),
+            (":value", &i64::from(value)),
+            (
+                ":memo",
+                &memo
+                    .filter(|m| *m != &MemoBytes::empty())
+                    .map(|m| m.as_slice()),
+            ),
+        ];
+        self.stmt_insert_sent_note.execute_named(sql_args)?;
         Ok(())
     }
 
@@ -507,17 +525,21 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         pool_type: PoolType,
         output_index: usize,
     ) -> Result<bool, SqliteClientError> {
-        let ivalue: i64 = value.into();
-        match self.stmt_update_sent_note.execute(params![
-            u32::from(account),
-            to_str,
-            ivalue,
-            memo.filter(|m| *m != &MemoBytes::empty())
-                .map(|m| m.as_slice()),
-            tx_ref,
-            pool_type.typecode(),
-            output_index as i64,
-        ])? {
+        let sql_args: &[(&str, &dyn ToSql)] = &[
+            (":account", &u32::from(account)),
+            (":address", &to_str),
+            (":value", &i64::from(value)),
+            (
+                ":memo",
+                &memo
+                    .filter(|m| *m != &MemoBytes::empty())
+                    .map(|m| m.as_slice()),
+            ),
+            (":tx", &tx_ref),
+            (":output_pool", &pool_type.typecode()),
+            (":output_index", &i64::try_from(output_index).unwrap()),
+        ];
+        match self.stmt_update_sent_note.execute_named(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("tx_output constraint is marked as UNIQUE"),
