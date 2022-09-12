@@ -11,7 +11,7 @@ use zcash_primitives::{
     sapling::{
         note_encryption::{
             sapling_note_encryption, try_sapling_compact_note_decryption,
-            try_sapling_note_decryption, SaplingDomain,
+            try_sapling_note_decryption, PreparedIncomingViewingKey, SaplingDomain,
         },
         util::generate_random_rseed,
         Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
@@ -66,6 +66,9 @@ fn bench_note_decryption(c: &mut Criterion) {
             zkproof: [0; GROTH_PROOF_SIZE],
         }
     };
+
+    let valid_ivk = PreparedIncomingViewingKey::new(&valid_ivk);
+    let invalid_ivk = PreparedIncomingViewingKey::new(&invalid_ivk);
 
     {
         let mut group = c.benchmark_group("sapling-note-decryption");

@@ -85,7 +85,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
-    sapling::{keys::Scope, Nullifier},
+    sapling::{keys::Scope, note_encryption::PreparedIncomingViewingKey, Nullifier},
 };
 
 use crate::{
@@ -234,12 +234,15 @@ where
 
     let mut batch_runner = BatchRunner::new(
         100,
-        dfvks.iter().flat_map(|(account, dfvk)| {
-            [
-                ((**account, Scope::External), dfvk.to_ivk(Scope::External)),
-                ((**account, Scope::Internal), dfvk.to_ivk(Scope::Internal)),
-            ]
-        }),
+        dfvks
+            .iter()
+            .flat_map(|(account, dfvk)| {
+                [
+                    ((**account, Scope::External), dfvk.to_ivk(Scope::External)),
+                    ((**account, Scope::Internal), dfvk.to_ivk(Scope::Internal)),
+                ]
+            })
+            .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(&ivk))),
     );
 
     cache.with_blocks(last_height, limit, |block: CompactBlock| {

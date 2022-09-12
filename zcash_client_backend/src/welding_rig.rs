@@ -11,7 +11,7 @@ use zcash_primitives::{
     sapling::{
         self,
         keys::{DiversifiableFullViewingKey, Scope},
-        note_encryption::SaplingDomain,
+        note_encryption::{PreparedIncomingViewingKey, SaplingDomain},
         Node, Note, Nullifier, NullifierDerivingKey, SaplingIvk,
     },
     transaction::components::sapling::CompactOutputDescription,
@@ -325,7 +325,8 @@ pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, 
 
                 let ivks = vks
                     .iter()
-                    .map(|(_, ivk, _)| (*ivk).clone())
+                    .map(|(_, ivk, _)| ivk)
+                    .map(PreparedIncomingViewingKey::new)
                     .collect::<Vec<_>>();
 
                 batch::try_compact_note_decryption(&ivks, decoded)
@@ -413,8 +414,9 @@ mod tests {
         memo::MemoBytes,
         merkle_tree::CommitmentTree,
         sapling::{
-            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
-            SaplingIvk,
+            note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey},
+            util::generate_random_rseed,
+            Note, Nullifier, SaplingIvk,
         },
         transaction::components::Amount,
         zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey},
@@ -557,7 +559,8 @@ mod tests {
                     extfvk
                         .to_sapling_keys()
                         .iter()
-                        .map(|(scope, ivk, _)| ((account, *scope), ivk.clone())),
+                        .map(|(scope, ivk, _)| ((account, *scope), ivk))
+                        .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
                 );
 
                 add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
@@ -620,7 +623,8 @@ mod tests {
                     extfvk
                         .to_sapling_keys()
                         .iter()
-                        .map(|(scope, ivk, _)| ((account, *scope), ivk.clone())),
+                        .map(|(scope, ivk, _)| ((account, *scope), ivk))
+                        .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
                 );
 
                 add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
