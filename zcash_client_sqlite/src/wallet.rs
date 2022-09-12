@@ -22,7 +22,7 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{keys::DiversifiableFullViewingKey, Node, Note, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
-    zip32::{AccountId, ExtendedFullViewingKey},
+    zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
@@ -158,10 +158,12 @@ pub fn get_address<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     account: AccountId,
 ) -> Result<Option<PaymentAddress>, SqliteClientError> {
-    // This returns the first diversified address, which will be the default one.
+    // This returns the most recently generated address.
     let addr: String = wdb.conn.query_row(
-        "SELECT address FROM addresses
-        WHERE account = ?",
+        "SELECT address
+        FROM addresses WHERE account = ?
+        ORDER BY diversifier_index_be DESC
+        LIMIT 1",
         &[u32::from(account)],
         |row| row.get(0),
     )?;
@@ -177,21 +179,31 @@ pub fn get_address<P: consensus::Parameters>(
         })
 }
 
-pub(crate) fn get_address_ua<P: consensus::Parameters>(
+pub(crate) fn get_current_address<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     account: AccountId,
-) -> Result<Option<UnifiedAddress>, SqliteClientError> {
-    // This returns the first diversified address, which will be the default one.
-    let addr: Option<String> = wdb
+) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
+    // This returns the most recently generated address.
+    let addr: Option<(String, Vec<u8>)> = wdb
         .conn
         .query_row_named(
-            "SELECT address FROM addresses WHERE account = :account",
+            "SELECT address, diversifier_index_be
+            FROM addresses WHERE account = :account
+            ORDER BY diversifier_index_be DESC
+            LIMIT 1",
             &[(":account", &u32::from(account))],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
 
-    addr.map(|addr_str| {
+    addr.map(|(addr_str, di_vec)| {
+        let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
+            SqliteClientError::CorruptedData(
+                "Diverisifier index is not an 11-byte value".to_owned(),
+            )
+        })?;
+        di_be.reverse();
+
         RecipientAddress::decode(&wdb.params, &addr_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
@@ -203,6 +215,7 @@ pub(crate) fn get_address_ua<P: consensus::Parameters>(
                     addr_str,
                 ))),
             })
+            .map(|addr| (addr, DiversifierIndex(di_be)))
     })
     .transpose()
 }
@@ -619,7 +632,7 @@ pub fn get_block_hash<P>(
 pub fn get_rewind_height<P>(wdb: &WalletDb<P>) -> Result<Option<BlockHeight>, SqliteClientError> {
     wdb.conn
         .query_row(
-            "SELECT MIN(tx.block) 
+            "SELECT MIN(tx.block)
              FROM received_notes n
              JOIN transactions tx ON tx.id_tx = n.tx
              WHERE n.spent IS NULL",

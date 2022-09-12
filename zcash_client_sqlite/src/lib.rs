@@ -48,7 +48,7 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
-    zip32::{AccountId, ExtendedFullViewingKey},
+    zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
@@ -153,8 +153,11 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_unified_full_viewing_keys(self)
     }
 
-    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_address_ua(self, account)
+    fn get_current_address(
+        &self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        wallet::get_current_address(self, account).map(|res| res.map(|(addr, _)| addr))
     }
 
     fn is_valid_account_extfvk(
@@ -276,8 +279,11 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_unified_full_viewing_keys()
     }
 
-    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
-        self.wallet_db.get_address(account)
+    fn get_current_address(
+        &self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        self.wallet_db.get_current_address(account)
     }
 
     fn is_valid_account_extfvk(
@@ -396,6 +402,34 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 
 #[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
+    fn get_next_available_address(
+        &mut self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        match self.get_unified_full_viewing_keys()?.get(&account) {
+            Some(ufvk) => {
+                let search_from = match wallet::get_current_address(self.wallet_db, account)? {
+                    Some((_, mut last_diversifier_index)) => {
+                        last_diversifier_index
+                            .increment()
+                            .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
+                        last_diversifier_index
+                    }
+                    None => DiversifierIndex::default(),
+                };
+
+                let (addr, diversifier_index) = ufvk
+                    .find_address(search_from)
+                    .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
+
+                self.stmt_insert_address(account, diversifier_index, &addr)?;
+
+                Ok(Some(addr))
+            }
+            None => Ok(None),
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     fn advance_by_block(
         &mut self,
@@ -686,13 +720,6 @@ mod tests {
     use rusqlite::params;
     use std::collections::HashMap;
 
-    use zcash_client_backend::{
-        keys::{sapling, UnifiedFullViewingKey},
-        proto::compact_formats::{
-            CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
-        },
-    };
-
     #[cfg(feature = "transparent-inputs")]
     use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
 
@@ -709,7 +736,18 @@ mod tests {
         zip32::ExtendedFullViewingKey,
     };
 
-    use crate::{wallet::init::init_accounts_table, AccountId, WalletDb};
+    use zcash_client_backend::{
+        data_api::{WalletRead, WalletWrite},
+        keys::{sapling, UnifiedFullViewingKey},
+        proto::compact_formats::{
+            CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+        },
+    };
+
+    use crate::{
+        wallet::init::{init_accounts_table, init_wallet_db},
+        AccountId, WalletDb,
+    };
 
     use super::BlockDb;
 
@@ -923,6 +961,29 @@ mod tests {
             .unwrap()
             .execute(params![u32::from(cb.height()), cb_bytes,])
             .unwrap();
+    }
+
+    #[test]
+    pub(crate) fn get_next_available_address() {
+        use tempfile::NamedTempFile;
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
+
+        let account = AccountId::from(0);
+        init_wallet_db(&mut db_data, None).unwrap();
+        let _ = init_test_accounts_table_ufvk(&db_data);
+
+        let current_addr = db_data.get_current_address(account).unwrap();
+        assert!(current_addr.is_some());
+
+        let mut update_ops = db_data.get_update_ops().unwrap();
+        let addr2 = update_ops.get_next_available_address(account).unwrap();
+        assert!(addr2.is_some());
+        assert_ne!(current_addr, addr2);
+
+        let addr2_cur = db_data.get_current_address(account).unwrap();
+        assert_eq!(addr2, addr2_cur);
     }
 
     #[cfg(feature = "transparent-inputs")]

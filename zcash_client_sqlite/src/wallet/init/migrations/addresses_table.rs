@@ -51,10 +51,10 @@ impl<P: consensus::Parameters> RusqliteMigration for AddressesTableMigration<P> 
         transaction.execute_batch(
             "CREATE TABLE addresses (
                 account INTEGER NOT NULL,
-                diversifier_index BLOB NOT NULL,
+                diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
                 FOREIGN KEY (account) REFERENCES accounts(account),
-                CONSTRAINT diversification UNIQUE (account, diversifier_index)
+                CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
             );
             CREATE TABLE accounts_new (
                 account INTEGER PRIMARY KEY,
