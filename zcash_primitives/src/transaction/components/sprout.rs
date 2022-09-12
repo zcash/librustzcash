@@ -17,6 +17,18 @@ pub struct Bundle {
     pub joinsplit_sig: [u8; 64],
 }
 
+impl Bundle {
+    /// The value balance for the bundle. When this is positive,
+    /// its value is added to the transparent value pool; when it
+    /// is negative, its value is subtracted from the transparent
+    /// value pool.
+    pub fn value_balance(&self) -> Option<Amount> {
+        self.joinsplits
+            .iter()
+            .try_fold(Amount::zero(), |total, js| total + js.net_value())
+    }
+}
+
 #[derive(Clone)]
 #[allow(clippy::upper_case_acronyms)]
 pub(crate) enum SproutProof {
@@ -171,5 +183,13 @@ impl JsDescription {
 
         writer.write_all(&self.ciphertexts[0])?;
         writer.write_all(&self.ciphertexts[1])
+    }
+
+    /// The net value for the JoinSplit. When this is positive,
+    /// its value is added to the transparent value pool; when it
+    /// is negative, its value is subtracted from the transparent
+    /// value pool.
+    pub fn net_value(&self) -> Amount {
+        (self.vpub_new - self.vpub_old).expect("difference is in range [-MAX_MONEY..=MAX_MONEY]")
     }
 }

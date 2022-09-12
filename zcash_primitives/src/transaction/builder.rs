@@ -141,6 +141,18 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     pub fn new(params: P, target_height: BlockHeight) -> Self {
         Builder::new_with_rng(params, target_height, OsRng)
     }
+
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height, using
+    /// the specified fee, and otherwise default values for general transaction fields and the
+    /// default OS random.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    pub fn new_with_fee(params: P, target_height: BlockHeight, fee: Amount) -> Self {
+        Builder::new_with_rng_and_fee(params, OsRng, target_height, fee)
+    }
 }
 
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
@@ -154,7 +166,24 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ///
     /// The fee will be set to the default fee (0.0001 ZEC).
     pub fn new_with_rng(params: P, target_height: BlockHeight, rng: R) -> Builder<'a, P, R> {
-        Self::new_internal(params, target_height, rng)
+        Self::new_internal(params, rng, target_height, DEFAULT_FEE)
+    }
+
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height, and
+    /// randomness source, using the specified fee, and otherwise default values for general
+    /// transaction fields and the default OS random.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    pub fn new_with_rng_and_fee(
+        params: P,
+        rng: R,
+        target_height: BlockHeight,
+        fee: Amount,
+    ) -> Builder<'a, P, R> {
+        Self::new_internal(params, rng, target_height, fee)
     }
 }
 
@@ -163,13 +192,18 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ///
     /// WARNING: THIS MUST REMAIN PRIVATE AS IT ALLOWS CONSTRUCTION
     /// OF BUILDERS WITH NON-CryptoRng RNGs
-    fn new_internal(params: P, target_height: BlockHeight, rng: R) -> Builder<'a, P, R> {
+    fn new_internal(
+        params: P,
+        rng: R,
+        target_height: BlockHeight,
+        fee: Amount,
+    ) -> Builder<'a, P, R> {
         Builder {
             params: params.clone(),
             rng,
             target_height,
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
-            fee: DEFAULT_FEE,
+            fee,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: SaplingBuilder::new(params, target_height),
             change_address: None,
@@ -454,7 +488,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     ///
     /// WARNING: DO NOT USE IN PRODUCTION
     pub fn test_only_new_with_rng(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
-        Self::new_internal(params, height, rng)
+        Self::new_internal(params, rng, height, DEFAULT_FEE)
     }
 
     pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error> {

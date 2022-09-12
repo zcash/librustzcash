@@ -33,12 +33,18 @@ zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.7", path = "../zcash_primitives" }
 
 [dev-dependencies]
+proptest = "1.0.0"
+regex = "1.4"
 tempfile = "3"
 zcash_proofs = { version = "0.7", path = "../zcash_proofs" }
+zcash_primitives = { version = "0.7", path = "../zcash_primitives", features = ["test-dependencies"] }
 
 [features]
 mainnet = []
-test-dependencies = ["zcash_client_backend/test-dependencies"]
+test-dependencies = [
+    "zcash_primitives/test-dependencies",
+    "zcash_client_backend/test-dependencies",
+]
 transparent-inputs = ["hdwallet", "zcash_client_backend/transparent-inputs"]
 unstable = ["zcash_client_backend/unstable"]
 

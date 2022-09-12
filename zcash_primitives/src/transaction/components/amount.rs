@@ -222,6 +222,14 @@ impl TryFrom<orchard::ValueSum> for Amount {
     }
 }
 
+/// A type for balance violations in amount addition and subtraction
+/// (overflow and underflow of allowed ranges)
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum BalanceError {
+    Overflow,
+    Underflow,
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::prop_compose;

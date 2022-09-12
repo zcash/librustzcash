@@ -936,6 +936,7 @@ pub fn put_tx_meta<'a, P, N>(
 pub fn put_tx_data<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx: &Transaction,
+    fee: Option<Amount>,
     created_at: Option<time::OffsetDateTime>,
 ) -> Result<i64, SqliteClientError> {
     let txid = tx.txid();
@@ -943,9 +944,9 @@ pub fn put_tx_data<'a, P>(
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
 
-    if !stmts.stmt_update_tx_data(tx.expiry_height(), &raw_tx, &txid)? {
+    if !stmts.stmt_update_tx_data(tx.expiry_height(), &raw_tx, fee, &txid)? {
         // It isn't there, so insert our transaction into the database.
-        stmts.stmt_insert_tx_data(&txid, created_at, tx.expiry_height(), &raw_tx)
+        stmts.stmt_insert_tx_data(&txid, created_at, tx.expiry_height(), &raw_tx, fee)
     } else {
         // It was there, so grab its row number.
         stmts.stmt_select_tx_ref(&txid)

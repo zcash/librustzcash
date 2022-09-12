@@ -1,5 +1,5 @@
 //! Functions for initializing the various databases.
-use rusqlite::{self, params, types::ToSql, Connection, Transaction, NO_PARAMS};
+use rusqlite::{self, params, types::ToSql, Connection, NO_PARAMS};
 use schemer::{migration, Migration, Migrator, MigratorError};
 use schemer_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::{ExposeSecret, SecretVec};
@@ -10,6 +10,7 @@ use uuid::Uuid;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    transaction::components::amount::BalanceError,
     zip32::AccountId,
 };
 
@@ -38,11 +39,20 @@ pub enum WalletMigrationError {
 
     /// Wrapper for rusqlite errors.
     DbError(rusqlite::Error),
+
+    /// Wrapper for amount balance violations
+    BalanceError(BalanceError),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
     fn from(e: rusqlite::Error) -> Self {
         WalletMigrationError::DbError(e)
+    }
+}
+
+impl From<BalanceError> for WalletMigrationError {
+    fn from(e: BalanceError) -> Self {
+        WalletMigrationError::BalanceError(e)
     }
 }
 
@@ -59,6 +69,7 @@ impl fmt::Display for WalletMigrationError {
                 write!(f, "Wallet database is corrupted: {}", reason)
             }
             WalletMigrationError::DbError(e) => write!(f, "{}", e),
+            WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
         }
     }
 }
@@ -84,7 +95,7 @@ migration!(
 impl RusqliteMigration for WalletMigration0 {
     type Error = WalletMigrationError;
 
-    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
             // We set the user_version field of the database to a constant value of 8 to allow
             // correct integration with the Android SDK with versions of the database that were
@@ -155,7 +166,7 @@ impl RusqliteMigration for WalletMigration0 {
         Ok(())
     }
 
-    fn down(&self, _transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // We should never down-migrate the first migration, as that can irreversibly
         // destroy data.
         panic!("Cannot revert the initial migration.");
@@ -174,7 +185,7 @@ migration!(
 impl RusqliteMigration for WalletMigration1 {
     type Error = WalletMigrationError;
 
-    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch(
             "CREATE TABLE IF NOT EXISTS utxos (
                 id_utxo INTEGER PRIMARY KEY,
@@ -192,20 +203,26 @@ impl RusqliteMigration for WalletMigration1 {
         Ok(())
     }
 
-    fn down(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         transaction.execute_batch("DROP TABLE utxos;")?;
         Ok(())
     }
 }
 
-struct WalletMigration2<P: consensus::Parameters> {
+struct WalletMigration2<P> {
     params: P,
     seed: Option<SecretVec<u8>>,
 }
 
-impl<P: consensus::Parameters> Migration for WalletMigration2<P> {
+impl<P> WalletMigration2<P> {
+    fn id() -> Uuid {
+        Uuid::parse_str("be57ef3b-388e-42ea-97e2-678dafcf9754").unwrap()
+    }
+}
+
+impl<P> Migration for WalletMigration2<P> {
     fn id(&self) -> Uuid {
-        ::uuid::Uuid::parse_str("be57ef3b-388e-42ea-97e2-678dafcf9754").unwrap()
+        WalletMigration2::<P>::id()
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
@@ -223,7 +240,7 @@ impl<P: consensus::Parameters> Migration for WalletMigration2<P> {
 impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
     type Error = WalletMigrationError;
 
-    fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         //
         // Update the accounts table to store ufvks rather than extfvks
         //
@@ -377,7 +394,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
             )?;
 
             let mut stmt_insert_sent_note = transaction.prepare(
-                "INSERT INTO sent_notes_new 
+                "INSERT INTO sent_notes_new
                     (id_note, tx, output_pool, output_index, from_account, address, value, memo)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
@@ -429,7 +446,7 @@ impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
         Ok(())
     }
 
-    fn down(&self, _transaction: &Transaction) -> Result<(), WalletMigrationError> {
+    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // TODO: something better than just panic?
         panic!("Cannot revert this migration.");
     }
@@ -474,6 +491,14 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
+    init_wallet_db_internal(wdb, seed, None)
+}
+
+fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
+    wdb: &mut WalletDb<P>,
+    seed: Option<SecretVec<u8>>,
+    target_migration: Option<Uuid>,
+) -> Result<(), MigratorError<WalletMigrationError>> {
     wdb.conn
         .execute("PRAGMA foreign_keys = OFF", NO_PARAMS)
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
@@ -481,20 +506,10 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     adapter.init().expect("Migrations table setup succeeds.");
 
     let mut migrator = Migrator::new(adapter);
-    let migration0 = Box::new(WalletMigration0 {});
-    let migration1 = Box::new(WalletMigration1 {});
-    let migration2 = Box::new(WalletMigration2 {
-        params: wdb.params.clone(),
-        seed,
-    });
-    let addrs_migration = Box::new(migrations::AddressesTableMigration {
-        params: wdb.params.clone(),
-    });
-
     migrator
-        .register_multiple(vec![migration0, migration1, migration2, addrs_migration])
+        .register_multiple(migrations::all_migrations(&wdb.params, seed))
         .expect("Wallet migration registration should have been successful.");
-    migrator.up(None)?;
+    migrator.up(target_migration)?;
     wdb.conn
         .execute("PRAGMA foreign_keys = ON", NO_PARAMS)
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
@@ -682,8 +697,9 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, Parameters},
+        consensus::{BlockHeight, BranchId, Parameters},
         sapling::keys::DiversifiableFullViewingKey,
+        transaction::{TransactionData, TxVersion},
         zip32::ExtendedFullViewingKey,
     };
 
@@ -704,12 +720,10 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
 
-        let mut stmt_schema_sql = db_data
-            .conn
-            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
-            .unwrap();
-        let mut rows = stmt_schema_sql.query(NO_PARAMS).unwrap();
-        let expected = vec![
+        use regex::Regex;
+        let re = Regex::new(r"\s+").unwrap();
+
+        let expected_tables = vec![
             "CREATE TABLE \"accounts\" (
                 account INTEGER PRIMARY KEY,
                 ufvk TEXT NOT NULL
@@ -754,8 +768,8 @@ mod tests {
                 CONSTRAINT witness_height UNIQUE (note, block)
             )",
             "CREATE TABLE schemer_migrations (
-                        id blob PRIMARY KEY
-                    )",
+                id blob PRIMARY KEY
+            )",
             "CREATE TABLE \"sent_notes\" (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -777,6 +791,7 @@ mod tests {
                 tx_index INTEGER,
                 expiry_height INTEGER,
                 raw BLOB,
+                fee INTEGER,
                 FOREIGN KEY (block) REFERENCES blocks(height)
             )",
             "CREATE TABLE utxos (
@@ -793,10 +808,125 @@ mod tests {
             )",
         ];
 
+        let mut tables_query = db_data
+            .conn
+            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
+            .unwrap();
+        let mut rows = tables_query.query(NO_PARAMS).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
-            assert_eq!(&sql, expected[expected_idx]);
+            assert_eq!(
+                re.replace_all(&sql, " "),
+                re.replace_all(expected_tables[expected_idx], " ")
+            );
+            expected_idx += 1;
+        }
+
+        let expected_views = vec![
+            "CREATE VIEW v_transactions AS
+            SELECT id_tx,
+                   mined_height,
+                   tx_index,
+                   txid,
+                   expiry_height,
+                   raw,
+                   SUM(value) + MAX(fee) AS net_value,
+                   SUM(is_change) > 0 AS has_change,
+                   SUM(memo_present) AS memo_count
+            FROM (
+                SELECT transactions.id_tx            AS id_tx,
+                       transactions.block            AS mined_height,
+                       transactions.tx_index         AS tx_index,
+                       transactions.txid             AS txid,
+                       transactions.expiry_height    AS expiry_height,
+                       transactions.raw              AS raw,
+                       0                             AS fee,
+                       CASE
+                            WHEN received_notes.is_change THEN 0
+                            ELSE value
+                       END AS value,
+                       received_notes.is_change      AS is_change,
+                       CASE
+                           WHEN received_notes.memo IS NULL THEN 0
+                           ELSE 1
+                       END AS memo_present
+                FROM   transactions
+                       JOIN received_notes ON transactions.id_tx = received_notes.tx
+                UNION
+                SELECT transactions.id_tx            AS id_tx,
+                       transactions.block            AS mined_height,
+                       transactions.tx_index         AS tx_index,
+                       transactions.txid             AS txid,
+                       transactions.expiry_height    AS expiry_height,
+                       transactions.raw              AS raw,
+                       transactions.fee              AS fee,
+                       -sent_notes.value             AS value,
+                       false                         AS is_change,
+                       CASE
+                           WHEN sent_notes.memo IS NULL THEN 0
+                           ELSE 1
+                       END AS memo_present
+                FROM   transactions
+                       JOIN sent_notes ON transactions.id_tx = sent_notes.tx
+            )
+            GROUP BY id_tx",
+            "CREATE VIEW v_tx_received AS
+            SELECT transactions.id_tx            AS id_tx,
+                   transactions.block            AS mined_height,
+                   transactions.tx_index         AS tx_index,
+                   transactions.txid             AS txid,
+                   SUM(received_notes.value)     AS received_total,
+                   COUNT(received_notes.id_note) AS received_note_count,
+                   SUM(
+                       CASE
+                           WHEN received_notes.memo IS NULL THEN 0
+                           ELSE 1
+                       END
+                   ) AS memo_count,
+                   blocks.time                   AS block_time
+            FROM   transactions
+                   JOIN received_notes
+                          ON transactions.id_tx = received_notes.tx
+                   LEFT JOIN blocks
+                          ON transactions.block = blocks.height
+            GROUP BY received_notes.tx",
+            "CREATE VIEW v_tx_sent AS
+            SELECT transactions.id_tx         AS id_tx,
+                   transactions.block         AS mined_height,
+                   transactions.tx_index      AS tx_index,
+                   transactions.txid          AS txid,
+                   transactions.expiry_height AS expiry_height,
+                   transactions.raw           AS raw,
+                   SUM(sent_notes.value)      AS sent_total,
+                   COUNT(sent_notes.id_note)  AS sent_note_count,
+                   SUM(
+                       CASE
+                           WHEN sent_notes.memo IS NULL THEN 0
+                           ELSE 1
+                       END
+                   ) AS memo_count,
+                   blocks.time                AS block_time
+            FROM   transactions
+                   JOIN sent_notes
+                          ON transactions.id_tx = sent_notes.tx
+                   LEFT JOIN blocks
+                          ON transactions.block = blocks.height
+            GROUP BY sent_notes.tx",
+        ];
+
+        let mut views_query = db_data
+            .conn
+            .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
+            .unwrap();
+        let mut rows = views_query.query(NO_PARAMS).unwrap();
+        let mut expected_idx = 0;
+        while let Some(row) = rows.next().unwrap() {
+            let sql: String = row.get(0).unwrap();
+            assert_eq!(
+                re.replace_all(&sql, " "),
+                re.replace_all(expected_views[expected_idx], " ")
+            );
             expected_idx += 1;
         }
     }
@@ -1041,9 +1171,25 @@ mod tests {
                 "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
                 NO_PARAMS,
             )?;
+
+            let tx = TransactionData::from_parts(
+                TxVersion::Sapling,
+                BranchId::Canopy,
+                0,
+                BlockHeight::from(0),
+                None,
+                None,
+                None,
+                None,
+            )
+            .freeze()
+            .unwrap();
+
+            let mut tx_bytes = vec![];
+            tx.write(&mut tx_bytes).unwrap();
             wdb.conn.execute(
-                "INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '')",
-                NO_PARAMS,
+                "INSERT INTO transactions (block, id_tx, txid, raw) VALUES (0, 0, '', ?)",
+                &[&tx_bytes[..]],
             )?;
             wdb.conn.execute(
                 "INSERT INTO sent_notes (tx, output_index, from_account, address, value)

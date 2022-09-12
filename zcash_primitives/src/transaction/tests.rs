@@ -245,21 +245,30 @@ fn zip_0244() {
                 },
             });
 
-        (
-            TransactionData::from_parts(
-                txdata.version(),
-                txdata.consensus_branch_id(),
-                txdata.lock_time(),
-                txdata.expiry_height(),
-                test_bundle,
-                txdata.sprout_bundle().cloned(),
-                txdata.sapling_bundle().cloned(),
-                txdata.orchard_bundle().cloned(),
-                #[cfg(feature = "zfuture")]
-                txdata.tze_bundle().cloned(),
-            ),
-            txdata.digest(TxIdDigester),
-        )
+        #[cfg(not(feature = "zfuture"))]
+        let tdata = TransactionData::from_parts(
+            txdata.version(),
+            txdata.consensus_branch_id(),
+            txdata.lock_time(),
+            txdata.expiry_height(),
+            test_bundle,
+            txdata.sprout_bundle().cloned(),
+            txdata.sapling_bundle().cloned(),
+            txdata.orchard_bundle().cloned(),
+        );
+        #[cfg(feature = "zfuture")]
+        let tdata = TransactionData::from_parts_zfuture(
+            txdata.version(),
+            txdata.consensus_branch_id(),
+            txdata.lock_time(),
+            txdata.expiry_height(),
+            test_bundle,
+            txdata.sprout_bundle().cloned(),
+            txdata.sapling_bundle().cloned(),
+            txdata.orchard_bundle().cloned(),
+            txdata.tze_bundle().cloned(),
+        );
+        (tdata, txdata.digest(TxIdDigester))
     }
 
     for tv in self::data::zip_0244::make_test_vectors() {

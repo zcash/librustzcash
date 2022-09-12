@@ -456,7 +456,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     ) -> Result<Self::TxRef, Self::Error> {
         let nullifiers = self.wallet_db.get_all_nullifiers()?;
         self.transactionally(|up| {
-            let tx_ref = wallet::put_tx_data(up, d_tx.tx, None)?;
+            let tx_ref = wallet::put_tx_data(up, d_tx.tx, None, None)?;
 
             let mut spending_account_id: Option<AccountId> = None;
             for output in d_tx.sapling_outputs {
@@ -515,7 +515,12 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error> {
         // Update the database atomically, to ensure the result is internally consistent.
         self.transactionally(|up| {
-            let tx_ref = wallet::put_tx_data(up, sent_tx.tx, Some(sent_tx.created))?;
+            let tx_ref = wallet::put_tx_data(
+                up,
+                sent_tx.tx,
+                Some(sent_tx.fee_amount),
+                Some(sent_tx.created),
+            )?;
 
             // Mark notes as spent.
             //

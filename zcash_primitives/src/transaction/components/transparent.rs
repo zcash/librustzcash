@@ -7,7 +7,7 @@ use std::io::{self, Read, Write};
 
 use crate::legacy::Script;
 
-use super::amount::Amount;
+use super::amount::{Amount, BalanceError};
 
 pub mod builder;
 
@@ -61,6 +61,31 @@ impl<A: Authorization> Bundle<A> {
             vout: self.vout,
             authorization: f.map_authorization(self.authorization),
         }
+    }
+
+    /// The amount of value added to or removed from the transparent pool by the action of this
+    /// bundle. A positive value represents that the containing transaction has funds being
+    /// transferred out of the transparent pool into shielded pools or to fees; a negative value
+    /// means that the containing transaction has funds being transferred into the transparent pool
+    /// from the shielded pools.
+    pub fn value_balance<E, F>(&self, mut get_prevout_value: F) -> Result<Amount, E>
+    where
+        E: From<BalanceError>,
+        F: FnMut(&OutPoint) -> Result<Amount, E>,
+    {
+        let input_sum = self.vin.iter().try_fold(Amount::zero(), |total, txin| {
+            get_prevout_value(&txin.prevout)
+                .and_then(|v| (total + v).ok_or_else(|| BalanceError::Overflow.into()))
+        })?;
+
+        let output_sum = self
+            .vout
+            .iter()
+            .map(|p| p.value)
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
+
+        (input_sum - output_sum).ok_or_else(|| BalanceError::Underflow.into())
     }
 }
 
