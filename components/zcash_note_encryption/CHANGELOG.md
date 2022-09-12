@@ -6,7 +6,17 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_note_encryption::Domain`:
+  - `Domain::PreparedEphemeralPublicKey` associated type.
+  - `Domain::prepare_epk` method, which produces the above type.
 
+### Changed
+- MSRV is now 1.56.1.
+- Migrated to `group 0.13`.
+- `zcash_note_encryption::Domain` now requires `epk` to be converted to
+  `Domain::PreparedEphemeralPublicKey` before being passed to
+  `Domain::ka_agree_dec`.
 - Changes to batch decryption APIs:
   - The return types of `batch::try_note_decryption` and
     `batch::try_compact_note_decryption` have changed. Now, instead of
@@ -15,9 +25,6 @@ and this library adheres to Rust's notion of
     decryption results of the same length and in the same order as the `outputs`
     argument to the function. Each successful result includes the index of the
     entry in `ivks` used to decrypt the value.
-
-### Changed
-- MSRV is now 1.56.1.
 
 ## [0.1.0] - 2021-12-17
 Initial release.
