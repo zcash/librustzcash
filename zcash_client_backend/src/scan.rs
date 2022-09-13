@@ -7,17 +7,18 @@ use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_
 use zcash_primitives::{block::BlockHash, transaction::TxId};
 
 /// A decrypted note.
-pub(crate) struct DecryptedNote<D: Domain> {
-    /// The incoming viewing key used to decrypt the note.
-    pub(crate) ivk: D::IncomingViewingKey,
+pub(crate) struct DecryptedNote<A, D: Domain> {
+    /// The tag corresponding to the incoming viewing key used to decrypt the note.
+    pub(crate) ivk_tag: A,
     /// The recipient of the note.
     pub(crate) recipient: D::Recipient,
     /// The note!
     pub(crate) note: D::Note,
 }
 
-impl<D: Domain> fmt::Debug for DecryptedNote<D>
+impl<A, D: Domain> fmt::Debug for DecryptedNote<A, D>
 where
+    A: fmt::Debug,
     D::IncomingViewingKey: fmt::Debug,
     D::Recipient: fmt::Debug,
     D::Note: fmt::Debug,
@@ -25,7 +26,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DecryptedNote")
-            .field("ivk", &self.ivk)
+            .field("ivk_tag", &self.ivk_tag)
             .field("recipient", &self.recipient)
             .field("note", &self.note)
             .finish()
@@ -40,10 +41,11 @@ struct OutputIndex<V> {
     value: V,
 }
 
-type OutputReplier<D> = OutputIndex<channel::Sender<OutputIndex<Option<DecryptedNote<D>>>>>;
+type OutputReplier<A, D> = OutputIndex<channel::Sender<OutputIndex<Option<DecryptedNote<A, D>>>>>;
 
 /// A batch of outputs to trial decrypt.
-struct Batch<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> {
+struct Batch<A, D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> {
+    tags: Vec<A>,
     ivks: Vec<D::IncomingViewingKey>,
     /// We currently store outputs and repliers as parallel vectors, because
     /// [`batch::try_note_decryption`] accepts a slice of domain/output pairs
@@ -53,18 +55,20 @@ struct Batch<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> {
     /// all be part of the same struct, which would also track the output index
     /// (that is captured in the outer `OutputIndex` of each `OutputReplier`).
     outputs: Vec<(D, Output)>,
-    repliers: Vec<OutputReplier<D>>,
+    repliers: Vec<OutputReplier<A, D>>,
 }
 
-impl<D, Output> Batch<D, Output>
+impl<A, D, Output> Batch<A, D, Output>
 where
+    A: Clone,
     D: BatchDomain,
     Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
-    D::IncomingViewingKey: Clone,
 {
     /// Constructs a new batch.
-    fn new(ivks: Vec<D::IncomingViewingKey>) -> Self {
+    fn new(tags: Vec<A>, ivks: Vec<D::IncomingViewingKey>) -> Self {
+        assert_eq!(tags.len(), ivks.len());
         Self {
+            tags,
             ivks,
             outputs: vec![],
             repliers: vec![],
@@ -86,7 +90,7 @@ where
             let result = OutputIndex {
                 output_index: replier.output_index,
                 value: decryption_result.map(|((note, recipient), ivk_idx)| DecryptedNote {
-                    ivk: self.ivks[ivk_idx].clone(),
+                    ivk_tag: self.tags[ivk_idx].clone(),
                     recipient,
                     note,
                 }),
@@ -100,7 +104,7 @@ where
     }
 }
 
-impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE> + Clone> Batch<D, Output> {
+impl<A, D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE> + Clone> Batch<A, D, Output> {
     /// Adds the given outputs to this batch.
     ///
     /// `replier` will be called with the result of every output.
@@ -108,7 +112,7 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE> + Clone> Batch
         &mut self,
         domain: impl Fn() -> D,
         outputs: &[Output],
-        replier: channel::Sender<OutputIndex<Option<DecryptedNote<D>>>>,
+        replier: channel::Sender<OutputIndex<Option<DecryptedNote<A, D>>>>,
     ) {
         self.outputs
             .extend(outputs.iter().cloned().map(|output| (domain(), output)));
@@ -123,30 +127,36 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE> + Clone> Batch
 type ResultKey = (BlockHash, TxId);
 
 /// Logic to run batches of trial decryptions on the global threadpool.
-pub(crate) struct BatchRunner<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> {
+pub(crate) struct BatchRunner<A, D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> {
     batch_size_threshold: usize,
-    acc: Batch<D, Output>,
-    pending_results: HashMap<ResultKey, channel::Receiver<OutputIndex<Option<DecryptedNote<D>>>>>,
+    acc: Batch<A, D, Output>,
+    pending_results:
+        HashMap<ResultKey, channel::Receiver<OutputIndex<Option<DecryptedNote<A, D>>>>>,
 }
 
-impl<D, Output> BatchRunner<D, Output>
+impl<A, D, Output> BatchRunner<A, D, Output>
 where
+    A: Clone,
     D: BatchDomain,
     Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
-    D::IncomingViewingKey: Clone,
 {
     /// Constructs a new batch runner for the given incoming viewing keys.
-    pub(crate) fn new(batch_size_threshold: usize, ivks: Vec<D::IncomingViewingKey>) -> Self {
+    pub(crate) fn new(
+        batch_size_threshold: usize,
+        ivks: impl Iterator<Item = (A, D::IncomingViewingKey)>,
+    ) -> Self {
+        let (tags, ivks) = ivks.unzip();
         Self {
             batch_size_threshold,
-            acc: Batch::new(ivks),
+            acc: Batch::new(tags, ivks),
             pending_results: HashMap::default(),
         }
     }
 }
 
-impl<D, Output> BatchRunner<D, Output>
+impl<A, D, Output> BatchRunner<A, D, Output>
 where
+    A: Clone + Send + 'static,
     D: BatchDomain + Send + 'static,
     D::IncomingViewingKey: Clone + Send,
     D::Memo: Send,
@@ -184,7 +194,7 @@ where
     /// Subsequent calls to `Self::add_outputs` will be accumulated into a new batch.
     pub(crate) fn flush(&mut self) {
         if !self.acc.is_empty() {
-            let mut batch = Batch::new(self.acc.ivks.clone());
+            let mut batch = Batch::new(self.acc.tags.clone(), self.acc.ivks.clone());
             mem::swap(&mut batch, &mut self.acc);
             rayon::spawn_fifo(|| batch.run());
         }
@@ -199,7 +209,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-    ) -> HashMap<(TxId, usize), DecryptedNote<D>> {
+    ) -> HashMap<(TxId, usize), DecryptedNote<A, D>> {
         self.pending_results
             .remove(&(block_tag, txid))
             // We won't have a pending result if the transaction didn't have outputs of

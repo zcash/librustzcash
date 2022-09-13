@@ -38,10 +38,13 @@ use crate::{
 /// [`CompactSaplingOutput`]: crate::proto::compact_formats::CompactSaplingOutput
 /// [`scan_block`]: crate::welding_rig::scan_block
 pub trait ScanningKey {
+    /// The type representing the scope of the scanning key.
+    type Scope: Clone + Eq + std::hash::Hash + Send + 'static;
+
     /// The type of key that is used to decrypt Sapling outputs;
     type SaplingNk: Clone;
 
-    type SaplingKeys: IntoIterator<Item = (SaplingIvk, Self::SaplingNk)>;
+    type SaplingKeys: IntoIterator<Item = (Self::Scope, SaplingIvk, Self::SaplingNk)>;
 
     /// The type of nullifier extracted when a note is successfully
     /// obtained by trial decryption.
@@ -63,14 +66,23 @@ pub trait ScanningKey {
 }
 
 impl ScanningKey for DiversifiableFullViewingKey {
+    type Scope = Scope;
     type SaplingNk = NullifierDerivingKey;
-    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 2];
+    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 2];
     type Nf = sapling::Nullifier;
 
     fn to_sapling_keys(&self) -> Self::SaplingKeys {
         [
-            (self.to_ivk(Scope::External), self.to_nk(Scope::External)),
-            (self.to_ivk(Scope::Internal), self.to_nk(Scope::Internal)),
+            (
+                Scope::External,
+                self.to_ivk(Scope::External),
+                self.to_nk(Scope::External),
+            ),
+            (
+                Scope::Internal,
+                self.to_ivk(Scope::Internal),
+                self.to_nk(Scope::Internal),
+            ),
         ]
     }
 
@@ -88,12 +100,13 @@ impl ScanningKey for DiversifiableFullViewingKey {
 ///
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 impl ScanningKey for ExtendedFullViewingKey {
+    type Scope = Scope;
     type SaplingNk = NullifierDerivingKey;
-    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 1];
+    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 1];
     type Nf = sapling::Nullifier;
 
     fn to_sapling_keys(&self) -> Self::SaplingKeys {
-        [(self.fvk.vk.ivk(), self.fvk.vk.nk)]
+        [(Scope::External, self.fvk.vk.ivk(), self.fvk.vk.nk)]
     }
 
     fn sapling_nf(
@@ -110,12 +123,13 @@ impl ScanningKey for ExtendedFullViewingKey {
 ///
 /// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 impl ScanningKey for SaplingIvk {
+    type Scope = ();
     type SaplingNk = ();
-    type SaplingKeys = [(SaplingIvk, Self::SaplingNk); 1];
+    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 1];
     type Nf = ();
 
     fn to_sapling_keys(&self) -> Self::SaplingKeys {
-        [(self.clone(), ())]
+        [((), self.clone(), ())]
     }
 
     fn sapling_nf(_key: &Self::SaplingNk, _note: &Note, _witness: &IncrementalWitness<Node>) {}
@@ -163,11 +177,14 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
-pub(crate) fn add_block_to_runner<P: consensus::Parameters + Send + 'static>(
+pub(crate) fn add_block_to_runner<P, S>(
     params: &P,
     block: CompactBlock,
-    batch_runner: &mut BatchRunner<SaplingDomain<P>, CompactOutputDescription>,
-) {
+    batch_runner: &mut BatchRunner<(AccountId, S), SaplingDomain<P>, CompactOutputDescription>,
+) where
+    P: consensus::Parameters + Send + 'static,
+    S: Clone + Send + 'static,
+{
     let block_hash = block.hash();
     let block_height = block.height();
 
@@ -198,7 +215,9 @@ pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, 
     nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
-    mut batch_runner: Option<&mut BatchRunner<SaplingDomain<P>, CompactOutputDescription>>,
+    mut batch_runner: Option<
+        &mut BatchRunner<(AccountId, K::Scope), SaplingDomain<P>, CompactOutputDescription>,
+    >,
 ) -> Vec<WalletTx<K::Nf>> {
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
     let block_height = block.height();
@@ -276,7 +295,7 @@ pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, 
                     .flat_map(|(a, k)| {
                         k.to_sapling_keys()
                             .into_iter()
-                            .map(move |(ivk, nk)| (ivk.to_repr(), (**a, nk)))
+                            .map(move |(scope, _, nk)| ((**a, scope), nk))
                     })
                     .collect::<HashMap<_, _>>();
 
@@ -284,11 +303,12 @@ pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, 
                 (0..decoded.len())
                     .map(|i| {
                         decrypted.remove(&(txid, i)).map(|d_note| {
-                            let (a, nk) = vks.get(&d_note.ivk.to_repr()).expect(
+                            let a = d_note.ivk_tag.0;
+                            let nk = vks.get(&d_note.ivk_tag).expect(
                                 "The batch runner and scan_block must use the same set of IVKs.",
                             );
 
-                            ((d_note.note, d_note.recipient), *a, (*nk).clone())
+                            ((d_note.note, d_note.recipient), a, (*nk).clone())
                         })
                     })
                     .collect()
@@ -298,7 +318,7 @@ pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, 
                     .flat_map(|(a, k)| {
                         k.to_sapling_keys()
                             .into_iter()
-                            .map(move |(ivk, nk)| (**a, ivk, nk))
+                            .map(move |(_, ivk, nk)| (**a, ivk, nk))
                     })
                     .collect::<Vec<_>>();
 
@@ -516,6 +536,7 @@ mod tests {
     #[test]
     fn scan_block_with_my_tx() {
         fn go(scan_multithreaded: bool) {
+            let account = AccountId::from(0);
             let extsk = ExtendedSpendingKey::master(&[]);
             let extfvk = ExtendedFullViewingKey::from(&extsk);
 
@@ -535,8 +556,7 @@ mod tests {
                     extfvk
                         .to_sapling_keys()
                         .iter()
-                        .map(|(k, _)| k.clone())
-                        .collect(),
+                        .map(|(scope, ivk, _)| ((account, *scope), ivk.clone())),
                 );
 
                 add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
@@ -550,7 +570,7 @@ mod tests {
             let txs = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
-                &[(&AccountId::from(0), &extfvk)],
+                &[(&account, &extfvk)],
                 &[],
                 &mut tree,
                 &mut [],
@@ -565,7 +585,7 @@ mod tests {
             assert_eq!(tx.shielded_spends.len(), 0);
             assert_eq!(tx.shielded_outputs.len(), 1);
             assert_eq!(tx.shielded_outputs[0].index, 0);
-            assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
+            assert_eq!(tx.shielded_outputs[0].account, account);
             assert_eq!(tx.shielded_outputs[0].note.value, 5);
 
             // Check that the witness root matches
@@ -579,6 +599,7 @@ mod tests {
     #[test]
     fn scan_block_with_txs_after_my_tx() {
         fn go(scan_multithreaded: bool) {
+            let account = AccountId::from(0);
             let extsk = ExtendedSpendingKey::master(&[]);
             let extfvk = ExtendedFullViewingKey::from(&extsk);
 
@@ -598,8 +619,7 @@ mod tests {
                     extfvk
                         .to_sapling_keys()
                         .iter()
-                        .map(|(k, _)| k.clone())
-                        .collect(),
+                        .map(|(scope, ivk, _)| ((account, *scope), ivk.clone())),
                 );
 
                 add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);

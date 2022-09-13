@@ -232,10 +232,12 @@ where
 
     let mut batch_runner = BatchRunner::new(
         100,
-        dfvks
-            .iter()
-            .flat_map(|(_, dfvk)| [dfvk.to_ivk(Scope::External), dfvk.to_ivk(Scope::Internal)])
-            .collect(),
+        dfvks.iter().flat_map(|(account, dfvk)| {
+            [
+                ((**account, Scope::External), dfvk.to_ivk(Scope::External)),
+                ((**account, Scope::Internal), dfvk.to_ivk(Scope::Internal)),
+            ]
+        }),
     );
 
     cache.with_blocks(last_height, limit, |block: CompactBlock| {

@@ -191,7 +191,7 @@ impl FullViewingKey {
 /// to other people. For example, a user can give an external [`SaplingIvk`] to a merchant
 /// terminal, enabling it to only detect "real" transactions from customers and not
 /// internal transactions from the wallet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Scope {
     /// A scope used for wallet-external operations, namely deriving addresses to give to
     /// other users in order to receive funds.
