@@ -7,7 +7,7 @@ use zcash_client_backend::{
     data_api,
     encoding::{Bech32DecodeError, TransparentCodecError},
 };
-use zcash_primitives::consensus::BlockHeight;
+use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
 use crate::{NoteId, PRUNING_HEIGHT};
 
@@ -69,6 +69,10 @@ pub enum SqliteClientError {
     /// The space of allocatable diversifier indices has been exhausted for
     /// the given account.
     DiversifierIndexOutOfRange,
+
+    /// An error occurred deriving a spending key from a seed and an account
+    /// identifier.
+    KeyDerivationError(AccountId),
 }
 
 impl error::Error for SqliteClientError {
@@ -108,6 +112,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
             SqliteClientError::BackendError(e) => write!(f, "{}", e),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
+            SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
         }
     }
 }

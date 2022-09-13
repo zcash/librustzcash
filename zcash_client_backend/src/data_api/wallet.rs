@@ -149,7 +149,9 @@ where
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, account);
 /// let to = extsk.default_address().1.into();
 ///
-/// let mut db_read = testing::MockWalletDb {};
+/// let mut db_read = testing::MockWalletDb {
+///     network: Network::TestNetwork
+/// };
 ///
 /// create_spend_to_address(
 ///     &mut db_read,

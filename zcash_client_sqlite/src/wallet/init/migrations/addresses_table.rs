@@ -7,7 +7,8 @@ use uuid::Uuid;
 use zcash_client_backend::{address::RecipientAddress, keys::UnifiedFullViewingKey};
 use zcash_primitives::{consensus, zip32::AccountId};
 
-use super::super::{add_account_internal, WalletMigrationError};
+use super::super::WalletMigrationError;
+use crate::wallet::add_account_internal;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::keys::IncomingViewingKey;
@@ -153,8 +154,8 @@ impl<P: consensus::Parameters> RusqliteMigration for AddressesTableMigration<P> 
             }
 
             add_account_internal::<P, WalletMigrationError>(
-                &self.params,
                 transaction,
+                &self.params,
                 "accounts_new",
                 account,
                 &ufvk,

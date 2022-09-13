@@ -1,5 +1,5 @@
 //! Functions for initializing the various databases.
-use rusqlite::{self, params, types::ToSql, Connection, NO_PARAMS};
+use rusqlite::{self, params, types::ToSql, NO_PARAMS};
 use schemer::{migration, Migration, Migrator, MigratorError};
 use schemer_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::{ExposeSecret, SecretVec};
@@ -19,7 +19,11 @@ use zcash_client_backend::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 
-use crate::{error::SqliteClientError, wallet::PoolType, WalletDb};
+use crate::{
+    error::SqliteClientError,
+    wallet::{self, PoolType},
+    WalletDb,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -516,12 +520,17 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     Ok(())
 }
 
-/// Initialises the data database with the given [`UnifiedFullViewingKey`]s.
+/// Initialises the data database with the given set of account [`UnifiedFullViewingKey`]s.
+///
+/// **WARNING** This method should be used with care, and should ordinarily be unnecessary.
+/// Prefer to use [`zcash_client_backend::data_api::WalletWrite::create_account`] instead.
 ///
 /// The [`UnifiedFullViewingKey`]s are stored internally and used by other APIs such as
-/// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. `extfvks` **MUST**
-/// be arranged in account-order; that is, the [`UnifiedFullViewingKey`] for ZIP 32
-/// account `i` **MUST** be at `extfvks[i]`.
+/// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. Account identifiers
+/// in `keys` **MUST** form a consecutive sequence beginning at account 0, and the
+/// [`UnifiedFullViewingKey`] corresponding to a given account identifier **MUST** be derived from
+/// the wallet's mnemonic seed at the BIP-44 `account` path level as described by
+/// [ZIP 316](https://zips.z.cash/zip-0316)
 ///
 /// # Examples
 ///
@@ -578,49 +587,9 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
     for (account, key) in keys.iter() {
-        add_account_internal::<P, SqliteClientError>(
-            &wdb.params,
-            &wdb.conn,
-            "accounts",
-            *account,
-            key,
-        )?;
+        wallet::add_account(wdb, *account, key)?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
-
-    Ok(())
-}
-
-fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::Error>>(
-    network: &P,
-    conn: &Connection,
-    accounts_table: &'static str,
-    account: AccountId,
-    key: &UnifiedFullViewingKey,
-) -> Result<(), E> {
-    let ufvk_str: String = key.encode(network);
-    conn.execute_named(
-        &format!(
-            "INSERT INTO {} (account, ufvk) VALUES (:account, :ufvk)",
-            accounts_table
-        ),
-        &[(":account", &<u32>::from(account)), (":ufvk", &ufvk_str)],
-    )?;
-
-    // Always derive the default Unified Address for the account.
-    let (address, mut idx) = key.default_address();
-    let address_str: String = address.encode(network);
-    // the diversifier index is stored in big-endian order to allow sorting
-    idx.0.reverse();
-    conn.execute_named(
-        "INSERT INTO addresses (account, diversifier_index_be, address)
-        VALUES (:account, :diversifier_index_be, :address)",
-        &[
-            (":account", &<u32>::from(account)),
-            (":diversifier_index_be", &&idx.0[..]),
-            (":address", &address_str),
-        ],
-    )?;
 
     Ok(())
 }

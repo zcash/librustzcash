@@ -1,5 +1,6 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
+use secrecy::SecretVec;
 use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -20,7 +21,7 @@ use zcash_primitives::{
 use crate::{
     address::{RecipientAddress, UnifiedAddress},
     decrypt::DecryptedOutput,
-    keys::UnifiedFullViewingKey,
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::{SpendableNote, WalletTx},
 };
@@ -269,6 +270,14 @@ pub struct SentTransactionOutput<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// Creates a new account-level spending authority by derivation from the provided
+    /// seed using the next available unused account identifier, and returns this identifier
+    /// along with the generated unified spending key.
+    fn create_account(
+        &mut self,
+        seed: SecretVec<u8>,
+    ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error>;
+
     /// Generates and persists the next available diversified address, given the current
     /// addresses known to the wallet.
     ///
@@ -353,6 +362,7 @@ pub trait BlockSource {
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
+    use secrecy::{ExposeSecret, SecretVec};
     use std::collections::HashMap;
 
     #[cfg(feature = "transparent-inputs")]
@@ -360,7 +370,7 @@ pub mod testing {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::BlockHeight,
+        consensus::{BlockHeight, Network},
         legacy::TransparentAddress,
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -371,7 +381,7 @@ pub mod testing {
 
     use crate::{
         address::UnifiedAddress,
-        keys::UnifiedFullViewingKey,
+        keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
         proto::compact_formats::CompactBlock,
         wallet::{SpendableNote, WalletTransparentOutput},
     };
@@ -402,7 +412,9 @@ pub mod testing {
         }
     }
 
-    pub struct MockWalletDb {}
+    pub struct MockWalletDb {
+        pub network: Network,
+    }
 
     impl WalletRead for MockWalletDb {
         type Error = Error<u32>;
@@ -521,6 +533,16 @@ pub mod testing {
     }
 
     impl WalletWrite for MockWalletDb {
+        fn create_account(
+            &mut self,
+            seed: SecretVec<u8>,
+        ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
+            let account = AccountId::from(0);
+            UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
+                .map(|k| (account, k))
+                .map_err(|_| Error::KeyDerivationError(account))
+        }
+
         fn get_next_available_address(
             &mut self,
             _account: AccountId,

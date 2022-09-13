@@ -29,7 +29,9 @@
 //! # fn test() -> Result<(), Error<u32>> {
 //! let network = Network::TestNetwork;
 //! let db_cache = testing::MockBlockSource {};
-//! let mut db_data = testing::MockWalletDb {};
+//! let mut db_data = testing::MockWalletDb {
+//!     network: Network::TestNetwork
+//! };
 //!
 //! // 1) Download new CompactBlocks into db_cache.
 //!
