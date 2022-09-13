@@ -114,12 +114,15 @@ pub trait WalletRead {
     /// or `Ok(None)` if the transaction is not mined in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns the unified address for the specified account, if the account
-    /// identifier specified refers to a valid account for this wallet.
+    /// Returns the most recently generated unified address for the specified account, if the
+    /// account identifier specified refers to a valid account for this wallet.
     ///
     /// This will return `Ok(None)` if the account identifier does not correspond
     /// to a known account.
-    fn get_address(&self, account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error>;
+    fn get_current_address(
+        &self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns all unified full viewing keys known to this wallet.
     fn get_unified_full_viewing_keys(
@@ -266,6 +269,16 @@ pub struct SentTransactionOutput<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// Generates and persists the next available diversified address, given the current
+    /// addresses known to the wallet.
+    ///
+    /// Returns `Ok(None)` if the account identifier does not correspond to a known
+    /// account.
+    fn get_next_available_address(
+        &mut self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error>;
+
     /// Updates the state of the wallet database by persisting the provided
     /// block information, along with the updated witness data that was
     /// produced when scanning the block for transactions pertaining to
@@ -283,6 +296,8 @@ pub trait WalletWrite: WalletRead {
         received_tx: &DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error>;
 
+    /// Saves information about a transaction that was constructed and sent by the wallet to the
+    /// persistent wallet store.
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
 
     /// Removes the specified unmined transaction from the persistent wallet store, if it
@@ -409,7 +424,10 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_address(&self, _account: AccountId) -> Result<Option<UnifiedAddress>, Self::Error> {
+        fn get_current_address(
+            &self,
+            _account: AccountId,
+        ) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
         }
 
@@ -503,6 +521,13 @@ pub mod testing {
     }
 
     impl WalletWrite for MockWalletDb {
+        fn get_next_available_address(
+            &mut self,
+            _account: AccountId,
+        ) -> Result<Option<UnifiedAddress>, Self::Error> {
+            Ok(None)
+        }
+
         #[allow(clippy::type_complexity)]
         fn advance_by_block(
             &mut self,

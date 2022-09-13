@@ -16,6 +16,8 @@ and this library adheres to Rust's notion of
     transparent address decoding.
   - `SqliteClientError::RequestedRewindInvalid`, to report when requested
     rewinds exceed supported bounds.
+  - `SqliteClientError::DiversifierIndexOutOfRange`, to report when the space
+    of available diversifier indices has been exhausted. 
 - An `unstable` feature flag; this is added to parts of the API that may change
   in any release. It enables `zcash_client_backend`'s `unstable` feature flag.
 - New summary views that may be directly accessed in the sqlite database.

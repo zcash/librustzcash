@@ -32,8 +32,10 @@ and this library adheres to Rust's notion of
   - `RecipientAddress::Unified`
 - `zcash_client_backend::data_api`:
   - `WalletRead::get_unified_full_viewing_keys`
+  - `WalletRead::get_current_address`
   - `WalletRead::get_all_nullifiers`
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
+  - `WalletWrite::get_next_available_address`
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`
@@ -79,8 +81,6 @@ and this library adheres to Rust's notion of
     a `min_confirmations` argument that is used to compute an upper bound on
     the anchor height being returned; this had previously been hardcoded to
     `data_api::wallet::ANCHOR_OFFSET`.
-  - `WalletRead::get_address` now returns a `UnifiedAddress` instead of a
-    `sapling::PaymentAddress`.
   - `WalletRead::get_spendable_notes` has been renamed to
     `get_spendable_sapling_notes`
   - `WalletRead::select_spendable_notes` has been renamed to
@@ -128,6 +128,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `WalletRead::get_extended_full_viewing_keys` (use
     `WalletRead::get_unified_full_viewing_keys` instead).
+  - `WalletRead::get_address` (use `WalletRead::get_current_address` or
+    `WalletWrite::get_next_available_address` instead.)
 - The hardcoded `data_api::wallet::ANCHOR_OFFSET` constant.
 - `zcash_client_backend::wallet::AccountId` (moved to `zcash_primitives::zip32::AccountId`).
 

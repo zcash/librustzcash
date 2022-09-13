@@ -65,6 +65,10 @@ pub enum SqliteClientError {
 
     /// Wrapper for errors from zcash_client_backend
     BackendError(data_api::error::Error<NoteId>),
+
+    /// The space of allocatable diversifier indices has been exhausted for
+    /// the given account.
+    DiversifierIndexOutOfRange,
 }
 
 impl error::Error for SqliteClientError {
@@ -103,6 +107,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::Io(e) => write!(f, "{}", e),
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
             SqliteClientError::BackendError(e) => write!(f, "{}", e),
+            SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
         }
     }
 }

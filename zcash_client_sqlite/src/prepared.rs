@@ -15,8 +15,10 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Diversifier, Node, Nullifier},
     transaction::{components::Amount, TxId},
-    zip32::AccountId,
+    zip32::{AccountId, DiversifierIndex},
 };
+
+use zcash_client_backend::address::UnifiedAddress;
 
 use crate::{error::SqliteClientError, wallet::PoolType, NoteId, WalletDb};
 
@@ -64,6 +66,8 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_insert_witness: Statement<'a>,
     stmt_prune_witnesses: Statement<'a>,
     stmt_update_expired: Statement<'a>,
+
+    stmt_insert_address: Statement<'a>,
 }
 
 impl<'a, P> DataConnStmtCache<'a, P> {
@@ -159,6 +163,10 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                         SELECT id_tx FROM transactions
                         WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
+                )?,
+                stmt_insert_address: wallet_db.conn.prepare(
+                    "INSERT INTO addresses (account, diversifier_index_be, address)
+                    VALUES (:account, :diversifier_index_be, :address)",
                 )?,
             }
         )
@@ -368,6 +376,27 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         let rows = self.stmt_delete_utxos.execute_named(sql_args)?;
 
         Ok(rows)
+    }
+
+    /// Adds the given address and diversifier index to the addresses table.
+    ///
+    /// Returns the database row for the newly-inserted address.
+    pub(crate) fn stmt_insert_address(
+        &mut self,
+        account: AccountId,
+        mut diversifier_index: DiversifierIndex,
+        address: &UnifiedAddress,
+    ) -> Result<i64, SqliteClientError> {
+        diversifier_index.0.reverse();
+        let sql_args: &[(&str, &dyn ToSql)] = &[
+            (":account", &u32::from(account)),
+            (":diversifier_index_be", &&diversifier_index.0[..]),
+            (":address", &address.encode(&self.wallet_db.params)),
+        ];
+
+        self.stmt_insert_address.execute_named(sql_args)?;
+
+        Ok(self.wallet_db.conn.last_insert_rowid())
     }
 }
 

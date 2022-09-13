@@ -608,14 +608,16 @@ fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::Error>>(
     )?;
 
     // Always derive the default Unified Address for the account.
-    let (address, idx) = key.default_address();
+    let (address, mut idx) = key.default_address();
     let address_str: String = address.encode(network);
+    // the diversifier index is stored in big-endian order to allow sorting
+    idx.0.reverse();
     conn.execute_named(
-        "INSERT INTO addresses (account, diversifier_index, address)
-        VALUES (:account, :diversifier_index, :address)",
+        "INSERT INTO addresses (account, diversifier_index_be, address)
+        VALUES (:account, :diversifier_index_be, :address)",
         &[
             (":account", &<u32>::from(account)),
-            (":diversifier_index", &&idx.0[..]),
+            (":diversifier_index_be", &&idx.0[..]),
             (":address", &address_str),
         ],
     )?;
@@ -730,10 +732,10 @@ mod tests {
             )",
             "CREATE TABLE addresses (
                 account INTEGER NOT NULL,
-                diversifier_index BLOB NOT NULL,
+                diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
                 FOREIGN KEY (account) REFERENCES accounts(account),
-                CONSTRAINT diversification UNIQUE (account, diversifier_index)
+                CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
             )",
             "CREATE TABLE blocks (
                 height INTEGER PRIMARY KEY,
