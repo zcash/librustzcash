@@ -42,6 +42,7 @@ struct OutputIndex<V> {
 }
 
 type OutputReplier<A, D> = OutputIndex<channel::Sender<OutputIndex<Option<DecryptedNote<A, D>>>>>;
+type OutputResult<A, D> = channel::Receiver<OutputIndex<Option<DecryptedNote<A, D>>>>;
 
 /// A batch of outputs to trial decrypt.
 struct Batch<A, D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> {
@@ -130,8 +131,7 @@ type ResultKey = (BlockHash, TxId);
 pub(crate) struct BatchRunner<A, D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> {
     batch_size_threshold: usize,
     acc: Batch<A, D, Output>,
-    pending_results:
-        HashMap<ResultKey, channel::Receiver<OutputIndex<Option<DecryptedNote<A, D>>>>>,
+    pending_results: HashMap<ResultKey, OutputResult<A, D>>,
 }
 
 impl<A, D, Output> BatchRunner<A, D, Output>

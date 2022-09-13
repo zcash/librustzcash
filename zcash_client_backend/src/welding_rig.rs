@@ -177,10 +177,13 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
+type TaggedBatchRunner<P, S> =
+    BatchRunner<(AccountId, S), SaplingDomain<P>, CompactOutputDescription>;
+
 pub(crate) fn add_block_to_runner<P, S>(
     params: &P,
     block: CompactBlock,
-    batch_runner: &mut BatchRunner<(AccountId, S), SaplingDomain<P>, CompactOutputDescription>,
+    batch_runner: &mut TaggedBatchRunner<P, S>,
 ) where
     P: consensus::Parameters + Send + 'static,
     S: Clone + Send + 'static,
@@ -215,9 +218,7 @@ pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, 
     nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
-    mut batch_runner: Option<
-        &mut BatchRunner<(AccountId, K::Scope), SaplingDomain<P>, CompactOutputDescription>,
-    >,
+    mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope>>,
 ) -> Vec<WalletTx<K::Nf>> {
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
     let block_height = block.height();
