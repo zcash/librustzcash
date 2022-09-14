@@ -179,6 +179,60 @@ pub fn get_address<P: consensus::Parameters>(
         })
 }
 
+pub(crate) fn get_max_account_id<P>(
+    wdb: &WalletDb<P>,
+) -> Result<Option<AccountId>, SqliteClientError> {
+    // This returns the most recently generated address.
+    Ok(wdb
+        .conn
+        .query_row("SELECT MAX(account) FROM accounts", NO_PARAMS, |row| {
+            row.get::<_, u32>(0).map(AccountId::from)
+        })
+        .optional()?)
+}
+
+pub(crate) fn add_account<P: consensus::Parameters>(
+    wdb: &WalletDb<P>,
+    account: AccountId,
+    key: &UnifiedFullViewingKey,
+) -> Result<(), SqliteClientError> {
+    add_account_internal(&wdb.conn, &wdb.params, "accounts", account, key)
+}
+
+pub(crate) fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::Error>>(
+    conn: &rusqlite::Connection,
+    network: &P,
+    accounts_table: &'static str,
+    account: AccountId,
+    key: &UnifiedFullViewingKey,
+) -> Result<(), E> {
+    let ufvk_str: String = key.encode(network);
+    conn.execute_named(
+        &format!(
+            "INSERT INTO {} (account, ufvk) VALUES (:account, :ufvk)",
+            accounts_table
+        ),
+        &[(":account", &<u32>::from(account)), (":ufvk", &ufvk_str)],
+    )?;
+
+    // Always derive the default Unified Address for the account.
+    let (address, mut idx) = key.default_address();
+    let address_str: String = address.encode(network);
+    // the diversifier index is stored in big-endian order to allow sorting
+    idx.0.reverse();
+    conn.execute_named(
+        "INSERT INTO addresses (account, diversifier_index_be, address)
+        VALUES (:account, :diversifier_index_be, :address)",
+        &[
+            (":account", &<u32>::from(account)),
+            (":diversifier_index_be", &&idx.0[..]),
+            (":address", &address_str),
+        ],
+    )?;
+
+    Ok(())
+}
+
 pub(crate) fn get_current_address<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     account: AccountId,

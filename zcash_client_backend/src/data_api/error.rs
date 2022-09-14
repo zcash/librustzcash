@@ -71,6 +71,10 @@ pub enum Error<NoteId> {
 
     /// It is forbidden to provide a memo when constructing a transparent output.
     MemoForbidden,
+
+    /// An error occurred deriving a spending key from a seed and an account
+    /// identifier.
+    KeyDerivationError(AccountId),
 }
 
 impl ChainInvalid {
@@ -122,6 +126,7 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::Protobuf(e) => write!(f, "{}", e),
             Error::SaplingNotActive => write!(f, "Could not determine Sapling upgrade activation height."),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
+            Error::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
         }
     }
 }

@@ -32,6 +32,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+use secrecy::{ExposeSecret, SecretVec};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -56,7 +57,7 @@ use zcash_client_backend::{
     data_api::{
         BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
     },
-    keys::UnifiedFullViewingKey,
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::SpendableNote,
 };
@@ -402,6 +403,33 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 
 #[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
+    fn create_account(
+        &mut self,
+        seed: &SecretVec<u8>,
+    ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
+        self.transactionally(|stmts| {
+            let account = wallet::get_max_account_id(stmts.wallet_db)?
+                .map(|a| AccountId::from(u32::from(a) + 1))
+                .unwrap_or_else(|| AccountId::from(0));
+
+            if u32::from(account) >= 0x7FFFFFFF {
+                return Err(SqliteClientError::AccountIdOutOfRange);
+            }
+
+            let usk = UnifiedSpendingKey::from_seed(
+                &stmts.wallet_db.params,
+                seed.expose_secret(),
+                account,
+            )
+            .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
+            let ufvk = usk.to_unified_full_viewing_key();
+
+            wallet::add_account(stmts.wallet_db, account, &ufvk)?;
+
+            Ok((account, usk))
+        })
+    }
+
     fn get_next_available_address(
         &mut self,
         account: AccountId,

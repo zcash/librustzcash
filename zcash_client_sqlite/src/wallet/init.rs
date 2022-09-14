@@ -1,5 +1,5 @@
 //! Functions for initializing the various databases.
-use rusqlite::{self, params, types::ToSql, Connection, NO_PARAMS};
+use rusqlite::{self, params, types::ToSql, NO_PARAMS};
 use schemer::{migration, Migration, Migrator, MigratorError};
 use schemer_rusqlite::{RusqliteAdapter, RusqliteMigration};
 use secrecy::{ExposeSecret, SecretVec};
@@ -19,7 +19,11 @@ use zcash_client_backend::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
 };
 
-use crate::{error::SqliteClientError, wallet::PoolType, WalletDb};
+use crate::{
+    error::SqliteClientError,
+    wallet::{self, PoolType},
+    WalletDb,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -516,12 +520,19 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     Ok(())
 }
 
-/// Initialises the data database with the given [`UnifiedFullViewingKey`]s.
+/// Initialises the data database with the given set of account [`UnifiedFullViewingKey`]s.
+///
+/// **WARNING** This method should be used with care, and should ordinarily be unnecessary.
+/// Prefer to use [`WalletWrite::create_account`] instead.
+///
+/// [`WalletWrite::create_account`]: zcash_client_backend::data_api::WalletWrite::create_account
 ///
 /// The [`UnifiedFullViewingKey`]s are stored internally and used by other APIs such as
-/// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. `extfvks` **MUST**
-/// be arranged in account-order; that is, the [`UnifiedFullViewingKey`] for ZIP 32
-/// account `i` **MUST** be at `extfvks[i]`.
+/// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. Account identifiers
+/// in `keys` **MUST** form a consecutive sequence beginning at account 0, and the
+/// [`UnifiedFullViewingKey`] corresponding to a given account identifier **MUST** be derived from
+/// the wallet's mnemonic seed at the BIP-44 `account` path level as described by
+/// [ZIP 316](https://zips.z.cash/zip-0316)
 ///
 /// # Examples
 ///
@@ -575,52 +586,19 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         return Err(SqliteClientError::TableNotEmpty);
     }
 
+    // Ensure that the account identifiers are sequential and begin at zero.
+    if let Some(account_id) = keys.keys().max() {
+        if usize::try_from(u32::from(*account_id)).unwrap() >= keys.len() {
+            return Err(SqliteClientError::AccountIdDiscontinuity);
+        }
+    }
+
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
     for (account, key) in keys.iter() {
-        add_account_internal::<P, SqliteClientError>(
-            &wdb.params,
-            &wdb.conn,
-            "accounts",
-            *account,
-            key,
-        )?;
+        wallet::add_account(wdb, *account, key)?;
     }
     wdb.conn.execute("COMMIT", NO_PARAMS)?;
-
-    Ok(())
-}
-
-fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::Error>>(
-    network: &P,
-    conn: &Connection,
-    accounts_table: &'static str,
-    account: AccountId,
-    key: &UnifiedFullViewingKey,
-) -> Result<(), E> {
-    let ufvk_str: String = key.encode(network);
-    conn.execute_named(
-        &format!(
-            "INSERT INTO {} (account, ufvk) VALUES (:account, :ufvk)",
-            accounts_table
-        ),
-        &[(":account", &<u32>::from(account)), (":ufvk", &ufvk_str)],
-    )?;
-
-    // Always derive the default Unified Address for the account.
-    let (address, mut idx) = key.default_address();
-    let address_str: String = address.encode(network);
-    // the diversifier index is stored in big-endian order to allow sorting
-    idx.0.reverse();
-    conn.execute_named(
-        "INSERT INTO addresses (account, diversifier_index_be, address)
-        VALUES (:account, :diversifier_index_be, :address)",
-        &[
-            (":account", &<u32>::from(account)),
-            (":diversifier_index_be", &&idx.0[..]),
-            (":address", &address_str),
-        ],
-    )?;
 
     Ok(())
 }
@@ -706,6 +684,7 @@ mod tests {
     };
 
     use crate::{
+        error::SqliteClientError,
         tests::{self, network},
         wallet::get_address,
         AccountId, WalletDb,
@@ -1397,6 +1376,35 @@ mod tests {
         // Subsequent calls should return an error
         init_accounts_table(&db_data, &HashMap::new()).unwrap_err();
         init_accounts_table(&db_data, &ufvks).unwrap_err();
+    }
+
+    #[test]
+    fn init_accounts_table_allows_no_gaps() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
+        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+
+        // allow sequential initialization
+        let seed = [0u8; 32];
+        let ufvks = |ids: &[u32]| {
+            ids.iter()
+                .map(|a| {
+                    let account = AccountId::from(*a);
+                    UnifiedSpendingKey::from_seed(&network(), &seed, account)
+                        .map(|k| (account, k.to_unified_full_viewing_key()))
+                        .unwrap()
+                })
+                .collect::<HashMap<_, _>>()
+        };
+
+        // should fail if we have a gap
+        assert!(matches!(
+            init_accounts_table(&db_data, &ufvks(&[0, 2])),
+            Err(SqliteClientError::AccountIdDiscontinuity)
+        ));
+
+        // should succeed if there are no gaps
+        assert!(init_accounts_table(&db_data, &ufvks(&[0, 1, 2])).is_ok());
     }
 
     #[test]

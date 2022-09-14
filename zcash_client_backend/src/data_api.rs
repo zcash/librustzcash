@@ -7,6 +7,7 @@ use std::fmt::Debug;
 #[cfg(feature = "transparent-inputs")]
 use std::collections::HashSet;
 
+use secrecy::SecretVec;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -20,7 +21,7 @@ use zcash_primitives::{
 use crate::{
     address::{RecipientAddress, UnifiedAddress},
     decrypt::DecryptedOutput,
-    keys::UnifiedFullViewingKey,
+    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::{SpendableNote, WalletTx},
 };
@@ -269,6 +270,26 @@ pub struct SentTransactionOutput<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// Tells the wallet to track the next available account-level spend authority, given
+    /// the current set of [ZIP 316] account identifiers known to the wallet database.
+    ///
+    /// Returns the account identifier for the newly-created wallet database entry, along
+    /// with the associated [`UnifiedSpendingKey`].
+    ///
+    /// If `seed` was imported from a backup and this method is being used to restore a
+    /// previous wallet state, you should use this method to add all of the desired
+    /// accounts before scanning the chain from the seed's birthday height.
+    ///
+    /// By convention, wallets should only allow a new account to be generated after funds
+    /// have been received by the currently-available account (in order to enable
+    /// automated account recovery).
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    fn create_account(
+        &mut self,
+        seed: &SecretVec<u8>,
+    ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error>;
+
     /// Generates and persists the next available diversified address, given the current
     /// addresses known to the wallet.
     ///
@@ -353,6 +374,7 @@ pub trait BlockSource {
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
+    use secrecy::{ExposeSecret, SecretVec};
     use std::collections::HashMap;
 
     #[cfg(feature = "transparent-inputs")]
@@ -360,7 +382,7 @@ pub mod testing {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::BlockHeight,
+        consensus::{BlockHeight, Network},
         legacy::TransparentAddress,
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
@@ -371,7 +393,7 @@ pub mod testing {
 
     use crate::{
         address::UnifiedAddress,
-        keys::UnifiedFullViewingKey,
+        keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
         proto::compact_formats::CompactBlock,
         wallet::{SpendableNote, WalletTransparentOutput},
     };
@@ -402,7 +424,9 @@ pub mod testing {
         }
     }
 
-    pub struct MockWalletDb {}
+    pub struct MockWalletDb {
+        pub network: Network,
+    }
 
     impl WalletRead for MockWalletDb {
         type Error = Error<u32>;
@@ -521,6 +545,16 @@ pub mod testing {
     }
 
     impl WalletWrite for MockWalletDb {
+        fn create_account(
+            &mut self,
+            seed: &SecretVec<u8>,
+        ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
+            let account = AccountId::from(0);
+            UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
+                .map(|k| (account, k))
+                .map_err(|_| Error::KeyDerivationError(account))
+        }
+
         fn get_next_available_address(
             &mut self,
             _account: AccountId,

@@ -34,6 +34,7 @@ and this library adheres to Rust's notion of
   - `WalletRead::get_unified_full_viewing_keys`
   - `WalletRead::get_current_address`
   - `WalletRead::get_all_nullifiers`
+  - `WalletWrite::create_account`
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
   - `WalletWrite::get_next_available_address`
 - `zcash_client_backend::proto`:

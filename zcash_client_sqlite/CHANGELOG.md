@@ -18,6 +18,10 @@ and this library adheres to Rust's notion of
     rewinds exceed supported bounds.
   - `SqliteClientError::DiversifierIndexOutOfRange`, to report when the space
     of available diversifier indices has been exhausted. 
+  - `SqliteClientError::AccountIdDiscontinuity`, to report when a user attempts
+    to initialize the accounts table with a noncontiguous set of account identifiers.
+  - `SqliteClientError::AccountIdOutOfRange`, to report when the maximum account
+    identifier has been reached.
 - An `unstable` feature flag; this is added to parts of the API that may change
   in any release. It enables `zcash_client_backend`'s `unstable` feature flag.
 - New summary views that may be directly accessed in the sqlite database.

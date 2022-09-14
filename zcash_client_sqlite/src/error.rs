@@ -7,7 +7,7 @@ use zcash_client_backend::{
     data_api,
     encoding::{Bech32DecodeError, TransparentCodecError},
 };
-use zcash_primitives::consensus::BlockHeight;
+use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
 use crate::{NoteId, PRUNING_HEIGHT};
 
@@ -69,6 +69,17 @@ pub enum SqliteClientError {
     /// The space of allocatable diversifier indices has been exhausted for
     /// the given account.
     DiversifierIndexOutOfRange,
+
+    /// An error occurred deriving a spending key from a seed and an account
+    /// identifier.
+    KeyDerivationError(AccountId),
+
+    /// A caller attempted to initialize the accounts table with a discontinuous
+    /// set of account identifiers.
+    AccountIdDiscontinuity,
+
+    /// A caller attempted to construct a new account with an invalid account identifier.
+    AccountIdOutOfRange,
 }
 
 impl error::Error for SqliteClientError {
@@ -108,6 +119,9 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
             SqliteClientError::BackendError(e) => write!(f, "{}", e),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
+            SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
+            SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
+            SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
         }
     }
 }
