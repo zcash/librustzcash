@@ -131,7 +131,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      # Use stable for this to ensure that cargo-tarpaulin can be built.
+      # Use stable for this to ensure that cargo-tarpaulin can be built and has the source
+      # coverage features released in 1.60.0.
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -140,7 +141,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: install
-          args: cargo-tarpaulin
+          args: --git https://github.com/xd009642/tarpaulin.git --branch feat/llvm-profparser-integration cargo-tarpaulin
 
       - name: Fetch path to Zcash parameters
         working-directory: ./zcash_proofs
@@ -161,7 +162,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: tarpaulin
-          args: --all-features --release --timeout 600 --out Xml
+          args: --engine llvm --all-features --release --timeout 600 --out Xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.1.0
 
