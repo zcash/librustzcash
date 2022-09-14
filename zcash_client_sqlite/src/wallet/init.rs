@@ -523,7 +523,9 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 /// Initialises the data database with the given set of account [`UnifiedFullViewingKey`]s.
 ///
 /// **WARNING** This method should be used with care, and should ordinarily be unnecessary.
-/// Prefer to use [`zcash_client_backend::data_api::WalletWrite::create_account`] instead.
+/// Prefer to use [`WalletWrite::create_account`] instead.
+///
+/// [`WalletWrite::create_account`]: zcash_client_backend::data_api::WalletWrite::create_account
 ///
 /// The [`UnifiedFullViewingKey`]s are stored internally and used by other APIs such as
 /// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. Account identifiers

@@ -270,12 +270,24 @@ pub struct SentTransactionOutput<'a> {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
-    /// Creates a new account-level spending authority by derivation from the provided
-    /// seed using the next available unused account identifier, and returns this identifier
-    /// along with the generated unified spending key.
+    /// Tells the wallet to track the next available account-level spend authority, given
+    /// the current set of [ZIP 316] account identifiers known to the wallet database.
+    ///
+    /// Returns the account identifier for the newly-created wallet database entry, along
+    /// with the associated [`UnifiedSpendingKey`].
+    ///
+    /// If `seed` was imported from a backup and this method is being used to restore a
+    /// previous wallet state, you should use this method to add all of the desired
+    /// accounts before scanning the chain from the seed's birthday height.
+    ///
+    /// By convention, wallets should only allow a new account to be generated after funds
+    /// have been received by the currently-available account (in order to enable
+    /// automated account recovery).
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
     fn create_account(
         &mut self,
-        seed: SecretVec<u8>,
+        seed: &SecretVec<u8>,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
@@ -535,7 +547,7 @@ pub mod testing {
     impl WalletWrite for MockWalletDb {
         fn create_account(
             &mut self,
-            seed: SecretVec<u8>,
+            seed: &SecretVec<u8>,
         ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
             let account = AccountId::from(0);
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)

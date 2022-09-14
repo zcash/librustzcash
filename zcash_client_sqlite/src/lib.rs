@@ -405,7 +405,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn create_account(
         &mut self,
-        seed: SecretVec<u8>,
+        seed: &SecretVec<u8>,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|stmts| {
             let account = wallet::get_max_account_id(stmts.wallet_db)?
