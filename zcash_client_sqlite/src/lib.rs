@@ -412,6 +412,10 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 .map(|a| AccountId::from(u32::from(a) + 1))
                 .unwrap_or_else(|| AccountId::from(0));
 
+            if u32::from(account) >= 0x7FFFFFFF {
+                return Err(SqliteClientError::AccountIdOutOfRange);
+            }
+
             let usk = UnifiedSpendingKey::from_seed(
                 &stmts.wallet_db.params,
                 seed.expose_secret(),

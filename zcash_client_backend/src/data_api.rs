@@ -1,6 +1,5 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
-use secrecy::SecretVec;
 use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -8,6 +7,7 @@ use std::fmt::Debug;
 #[cfg(feature = "transparent-inputs")]
 use std::collections::HashSet;
 
+use secrecy::SecretVec;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,

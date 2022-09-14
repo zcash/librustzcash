@@ -586,6 +586,13 @@ pub fn init_accounts_table<P: consensus::Parameters>(
         return Err(SqliteClientError::TableNotEmpty);
     }
 
+    // Ensure that the account identifiers are sequential and begin at zero.
+    if let Some(account_id) = keys.keys().max() {
+        if usize::try_from(u32::from(*account_id)).unwrap() >= keys.len() {
+            return Err(SqliteClientError::AccountIdDiscontinuity);
+        }
+    }
+
     // Insert accounts atomically
     wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
     for (account, key) in keys.iter() {
@@ -677,6 +684,7 @@ mod tests {
     };
 
     use crate::{
+        error::SqliteClientError,
         tests::{self, network},
         wallet::get_address,
         AccountId, WalletDb,
@@ -1368,6 +1376,35 @@ mod tests {
         // Subsequent calls should return an error
         init_accounts_table(&db_data, &HashMap::new()).unwrap_err();
         init_accounts_table(&db_data, &ufvks).unwrap_err();
+    }
+
+    #[test]
+    fn init_accounts_table_allows_no_gaps() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
+        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+
+        // allow sequential initialization
+        let seed = [0u8; 32];
+        let ufvks = |ids: &[u32]| {
+            ids.iter()
+                .map(|a| {
+                    let account = AccountId::from(*a);
+                    UnifiedSpendingKey::from_seed(&network(), &seed, account)
+                        .map(|k| (account, k.to_unified_full_viewing_key()))
+                        .unwrap()
+                })
+                .collect::<HashMap<_, _>>()
+        };
+
+        // should fail if we have a gap
+        assert!(matches!(
+            init_accounts_table(&db_data, &ufvks(&[0, 2])),
+            Err(SqliteClientError::AccountIdDiscontinuity)
+        ));
+
+        // should succeed if there are no gaps
+        assert!(init_accounts_table(&db_data, &ufvks(&[0, 1, 2])).is_ok());
     }
 
     #[test]
