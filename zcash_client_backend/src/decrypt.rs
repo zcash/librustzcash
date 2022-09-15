@@ -4,7 +4,9 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     sapling::{
-        note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
+        note_encryption::{
+            try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
+        },
         Note, PaymentAddress,
     },
     transaction::Transaction,
@@ -47,7 +49,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     if let Some(bundle) = tx.sapling_bundle() {
         for (account, ufvk) in ufvks.iter() {
             if let Some(dfvk) = ufvk.sapling() {
-                let ivk = dfvk.fvk().vk.ivk();
+                let ivk = PreparedIncomingViewingKey::new(&dfvk.fvk().vk.ivk());
                 let ovk = dfvk.fvk().ovk;
 
                 for (index, output) in bundle.shielded_outputs.iter().enumerate() {

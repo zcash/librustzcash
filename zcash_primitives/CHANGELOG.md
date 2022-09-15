@@ -17,6 +17,9 @@ and this library adheres to Rust's notion of
   - `Scope`
   - `ExpandedSpendingKey::from_bytes`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`
+- `zcash_primitives::sapling::note_encryption`:
+  - `PreparedIncomingViewingKey`
+  - `PreparedEphemeralPublicKey`
 - Added in `zcash_primitives::zip32`
   - `ChainCode::as_bytes`
   - `DiversifierKey::{from_bytes, as_bytes}`
@@ -35,6 +38,7 @@ and this library adheres to Rust's notion of
   - `Bundle::value_balance`
 
 ### Changed
+- Migrated to `group 0.13`.
 - `zcash_primitives::sapling::ViewingKey` now stores `nk` as a
   `NullifierDerivingKey` instead of as a bare `jubjub::SubgroupPoint`.
 - The signature of `zcash_primitives::sapling::Note::nf` has changed to
@@ -42,6 +46,15 @@ and this library adheres to Rust's notion of
   rather than the full `ViewingKey` as its first argument.
 - Made the internals of `zip32::DiversifierKey` private; use `from_bytes` and
   `as_bytes` on this type instead.
+- `zcash_primitives::sapling::note_encryption` APIs now expose precomputations
+  explicitly (where previously they were performed internally), to enable users
+  to avoid recomputing incoming viewing key precomputations. Users now need to
+  call `PreparedIncomingViewingKey::new` to convert their `SaplingIvk`s into
+  their precomputed forms, and can do so wherever it makes sense in their stack.
+  - `SaplingDomain::IncomingViewingKey` is now `PreparedIncomingViewingKey`
+    instead of `SaplingIvk`.
+  - `try_sapling_note_decryption` and `try_sapling_compact_note_decryption` now
+    take `&PreparedIncomingViewingKey` instead of `&SaplingIvk`.
 
 ## [0.7.0] - 2022-06-24
 ### Changed

@@ -51,7 +51,7 @@ where
         return (0..outputs.len()).map(|_| None).collect();
     };
 
-    // Fetch the ephemeral keys for each output and batch-parse them.
+    // Fetch the ephemeral keys for each output, and batch-parse and prepare them.
     let ephemeral_keys = D::batch_epk(outputs.iter().map(|(_, output)| output.ephemeral_key()));
 
     // Derive the shared secrets for all combinations of (ivk, output).

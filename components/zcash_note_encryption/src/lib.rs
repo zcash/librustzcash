@@ -113,6 +113,7 @@ enum NoteValidity {
 pub trait Domain {
     type EphemeralSecretKey: ConstantTimeEq;
     type EphemeralPublicKey;
+    type PreparedEphemeralPublicKey;
     type SharedSecret;
     type SymmetricKey: AsRef<[u8]>;
     type Note;
@@ -136,6 +137,9 @@ pub trait Domain {
     /// Extracts the `DiversifiedTransmissionKey` from the note.
     fn get_pk_d(note: &Self::Note) -> Self::DiversifiedTransmissionKey;
 
+    /// Prepare an ephemeral public key for more efficient scalar multiplication.
+    fn prepare_epk(epk: Self::EphemeralPublicKey) -> Self::PreparedEphemeralPublicKey;
+
     /// Derives `EphemeralPublicKey` from `esk` and the note's diversifier.
     fn ka_derive_public(
         note: &Self::Note,
@@ -152,7 +156,7 @@ pub trait Domain {
     /// decryption.
     fn ka_agree_dec(
         ivk: &Self::IncomingViewingKey,
-        epk: &Self::EphemeralPublicKey,
+        epk: &Self::PreparedEphemeralPublicKey,
     ) -> Self::SharedSecret;
 
     /// Derives the `SymmetricKey` used to encrypt the note plaintext.
@@ -306,10 +310,15 @@ pub trait BatchDomain: Domain {
     /// them.
     fn batch_epk(
         ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
-    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+    ) -> Vec<(Option<Self::PreparedEphemeralPublicKey>, EphemeralKeyBytes)> {
         // Default implementation: do the non-batched thing.
         ephemeral_keys
-            .map(|ephemeral_key| (Self::epk(&ephemeral_key), ephemeral_key))
+            .map(|ephemeral_key| {
+                (
+                    Self::epk(&ephemeral_key).map(Self::prepare_epk),
+                    ephemeral_key,
+                )
+            })
             .collect()
     }
 }
@@ -514,7 +523,7 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_S
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let ephemeral_key = output.ephemeral_key();
 
-    let epk = D::epk(&ephemeral_key)?;
+    let epk = D::prepare_epk(D::epk(&ephemeral_key)?);
     let shared_secret = D::ka_agree_dec(ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 
@@ -611,7 +620,7 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D, COMPACT_
 ) -> Option<(D::Note, D::Recipient)> {
     let ephemeral_key = output.ephemeral_key();
 
-    let epk = D::epk(&ephemeral_key)?;
+    let epk = D::prepare_epk(D::epk(&ephemeral_key)?);
     let shared_secret = D::ka_agree_dec(ivk, &epk);
     let key = D::kdf(shared_secret, &ephemeral_key);
 

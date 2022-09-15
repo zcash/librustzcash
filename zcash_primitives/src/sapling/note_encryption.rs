@@ -2,7 +2,7 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use group::{cofactor::CofactorGroup, GroupEncoding};
+use group::{cofactor::CofactorGroup, GroupEncoding, WnafBase, WnafScalar};
 use jubjub::{AffinePoint, ExtendedPoint};
 use rand_core::RngCore;
 
@@ -27,16 +27,39 @@ use crate::{
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
 
+const PREPARED_WINDOW_SIZE: usize = 4;
+type PreparedBase = WnafBase<jubjub::ExtendedPoint, PREPARED_WINDOW_SIZE>;
+type PreparedBaseSubgroup = WnafBase<jubjub::SubgroupPoint, PREPARED_WINDOW_SIZE>;
+type PreparedScalar = WnafScalar<jubjub::Scalar, PREPARED_WINDOW_SIZE>;
+
+/// A Sapling incoming viewing key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedIncomingViewingKey(PreparedScalar);
+
+impl PreparedIncomingViewingKey {
+    /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
+    pub fn new(ivk: &SaplingIvk) -> Self {
+        Self(PreparedScalar::new(&ivk.0))
+    }
+}
+
+/// A Sapling ephemeral public key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedEphemeralPublicKey(PreparedBase);
+
 /// Sapling key agreement for note encryption.
 ///
 /// Implements section 5.4.4.3 of the Zcash Protocol Specification.
 pub fn sapling_ka_agree(esk: &jubjub::Fr, pk_d: &jubjub::ExtendedPoint) -> jubjub::SubgroupPoint {
+    sapling_ka_agree_prepared(&PreparedScalar::new(esk), &PreparedBase::new(*pk_d))
+}
+
+fn sapling_ka_agree_prepared(esk: &PreparedScalar, pk_d: &PreparedBase) -> jubjub::SubgroupPoint {
     // [8 esk] pk_d
     // <ExtendedPoint as CofactorGroup>::clear_cofactor is implemented using
     // ExtendedPoint::mul_by_cofactor in the jubjub crate.
 
-    let mut wnaf = group::Wnaf::new();
-    wnaf.scalar(esk).base(*pk_d).clear_cofactor()
+    (pk_d * esk).clear_cofactor()
 }
 
 /// Sapling KDF for note encryption.
@@ -132,12 +155,13 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     // points must not be small-order, and all points with non-canonical serialization
     // are small-order.
     type EphemeralPublicKey = jubjub::ExtendedPoint;
+    type PreparedEphemeralPublicKey = PreparedEphemeralPublicKey;
     type SharedSecret = jubjub::SubgroupPoint;
     type SymmetricKey = Blake2bHash;
     type Note = Note;
     type Recipient = PaymentAddress;
     type DiversifiedTransmissionKey = jubjub::SubgroupPoint;
-    type IncomingViewingKey = SaplingIvk;
+    type IncomingViewingKey = PreparedIncomingViewingKey;
     type OutgoingViewingKey = OutgoingViewingKey;
     type ValueCommitment = jubjub::ExtendedPoint;
     type ExtractedCommitment = bls12_381::Scalar;
@@ -150,6 +174,10 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
 
     fn get_pk_d(note: &Self::Note) -> Self::DiversifiedTransmissionKey {
         note.pk_d
+    }
+
+    fn prepare_epk(epk: Self::EphemeralPublicKey) -> Self::PreparedEphemeralPublicKey {
+        PreparedEphemeralPublicKey(PreparedBase::new(epk))
     }
 
     fn ka_derive_public(
@@ -173,9 +201,9 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
 
     fn ka_agree_dec(
         ivk: &Self::IncomingViewingKey,
-        epk: &Self::EphemeralPublicKey,
+        epk: &Self::PreparedEphemeralPublicKey,
     ) -> Self::SharedSecret {
-        sapling_ka_agree(&ivk.0, epk)
+        sapling_ka_agree_prepared(&ivk.0, &epk.0)
     }
 
     /// Sapling KDF for note encryption.
@@ -253,7 +281,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(self, plaintext, |diversifier| {
-            Some(diversifier.g_d()? * ivk.0)
+            Some(&PreparedBaseSubgroup::new(diversifier.g_d()?) * &ivk.0)
         })
     }
 
@@ -332,13 +360,18 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 
     fn batch_epk(
         ephemeral_keys: impl Iterator<Item = EphemeralKeyBytes>,
-    ) -> Vec<(Option<Self::EphemeralPublicKey>, EphemeralKeyBytes)> {
+    ) -> Vec<(Option<Self::PreparedEphemeralPublicKey>, EphemeralKeyBytes)> {
         let ephemeral_keys: Vec<_> = ephemeral_keys.collect();
         let epks = jubjub::AffinePoint::batch_from_bytes(ephemeral_keys.iter().map(|b| b.0));
         epks.into_iter()
             .zip(ephemeral_keys.into_iter())
             .map(|(epk, ephemeral_key)| {
-                (epk.map(jubjub::ExtendedPoint::from).into(), ephemeral_key)
+                (
+                    epk.map(jubjub::ExtendedPoint::from)
+                        .map(Self::prepare_epk)
+                        .into(),
+                    ephemeral_key,
+                )
             })
             .collect()
     }
@@ -391,7 +424,7 @@ pub fn try_sapling_note_decryption<
 >(
     params: &P,
     height: BlockHeight,
-    ivk: &SaplingIvk,
+    ivk: &PreparedIncomingViewingKey,
     output: &Output,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
@@ -407,7 +440,7 @@ pub fn try_sapling_compact_note_decryption<
 >(
     params: &P,
     height: BlockHeight,
-    ivk: &SaplingIvk,
+    ivk: &PreparedIncomingViewingKey,
     output: &Output,
 ) -> Option<(Note, PaymentAddress)> {
     let domain = SaplingDomain {
@@ -493,7 +526,7 @@ mod tests {
         },
         keys::OutgoingViewingKey,
         memo::MemoBytes,
-        sapling::util::generate_random_rseed,
+        sapling::{note_encryption::PreparedIncomingViewingKey, util::generate_random_rseed},
         sapling::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
         transaction::components::{
             amount::Amount,
@@ -508,18 +541,21 @@ mod tests {
     ) -> (
         OutgoingViewingKey,
         OutgoingCipherKey,
-        SaplingIvk,
+        PreparedIncomingViewingKey,
         OutputDescription<sapling::GrothProofBytes>,
     ) {
         let ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
+        let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
 
         let (ovk, ock, output) = random_enc_ciphertext_with(height, &ivk, rng);
 
-        assert!(try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output).is_some());
+        assert!(
+            try_sapling_note_decryption(&TEST_NETWORK, height, &prepared_ivk, &output).is_some()
+        );
         assert!(try_sapling_compact_note_decryption(
             &TEST_NETWORK,
             height,
-            &ivk,
+            &prepared_ivk,
             &CompactOutputDescription::from(output.clone()),
         )
         .is_some());
@@ -532,7 +568,7 @@ mod tests {
         assert!(ock_output_recovery.is_some());
         assert_eq!(ovk_output_recovery, ock_output_recovery);
 
-        (ovk, ock, ivk, output)
+        (ovk, ock, prepared_ivk, output)
     }
 
     fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
@@ -685,7 +721,7 @@ mod tests {
                 try_sapling_note_decryption(
                     &TEST_NETWORK,
                     height,
-                    &SaplingIvk(jubjub::Fr::random(&mut rng)),
+                    &PreparedIncomingViewingKey::new(&SaplingIvk(jubjub::Fr::random(&mut rng))),
                     &output
                 ),
                 None
@@ -851,7 +887,7 @@ mod tests {
                 try_sapling_compact_note_decryption(
                     &TEST_NETWORK,
                     height,
-                    &SaplingIvk(jubjub::Fr::random(&mut rng)),
+                    &PreparedIncomingViewingKey::new(&SaplingIvk(jubjub::Fr::random(&mut rng))),
                     &CompactOutputDescription::from(output)
                 ),
                 None
@@ -1309,7 +1345,7 @@ mod tests {
             // Load the test vector components
             //
 
-            let ivk = SaplingIvk(read_jubjub_scalar!(tv.ivk));
+            let ivk = PreparedIncomingViewingKey::new(&SaplingIvk(read_jubjub_scalar!(tv.ivk)));
             let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
             let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_point!(tv.cv);
@@ -1439,7 +1475,7 @@ mod tests {
         let height = TEST_NETWORK.activation_height(Canopy).unwrap();
 
         // Test batch trial-decryption with multiple IVKs and outputs.
-        let invalid_ivk = SaplingIvk(jubjub::Fr::random(rng));
+        let invalid_ivk = PreparedIncomingViewingKey::new(&SaplingIvk(jubjub::Fr::random(rng)));
         let valid_ivk = SaplingIvk(jubjub::Fr::random(rng));
         let outputs: Vec<_> = (0..10)
             .map(|_| {
@@ -1449,6 +1485,7 @@ mod tests {
                 )
             })
             .collect();
+        let valid_ivk = PreparedIncomingViewingKey::new(&valid_ivk);
 
         // Check that batched trial decryptions with invalid_ivk fails.
         let res = batch::try_note_decryption(&[invalid_ivk.clone()], &outputs);
