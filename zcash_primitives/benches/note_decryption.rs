@@ -98,40 +98,42 @@ fn bench_note_decryption(c: &mut Criterion) {
     }
 
     {
-        let valid_ivks = vec![valid_ivk];
-        let invalid_ivks = vec![invalid_ivk];
-
-        // We benchmark with one IVK so the overall batch size is equal to the number of
-        // outputs.
-        let size = 10;
-        let outputs: Vec<_> = iter::repeat(output)
-            .take(size)
-            .map(|output| (SaplingDomain::for_height(TEST_NETWORK, height), output))
-            .collect();
-
         let mut group = c.benchmark_group("sapling-batch-note-decryption");
-        group.throughput(Throughput::Elements(size as u64));
 
-        group.bench_function(BenchmarkId::new("valid", size), |b| {
-            b.iter(|| batch::try_note_decryption(&valid_ivks, &outputs))
-        });
+        for (nivks, noutputs) in [(1, 10), (10, 1), (10, 10), (50, 50)] {
+            let invalid_ivks: Vec<_> = iter::repeat(invalid_ivk.clone()).take(nivks).collect();
+            let valid_ivks: Vec<_> = iter::repeat(valid_ivk.clone()).take(nivks).collect();
 
-        group.bench_function(BenchmarkId::new("invalid", size), |b| {
-            b.iter(|| batch::try_note_decryption(&invalid_ivks, &outputs))
-        });
+            let outputs: Vec<_> = iter::repeat(output.clone())
+                .take(noutputs)
+                .map(|output| (SaplingDomain::for_height(TEST_NETWORK, height), output))
+                .collect();
 
-        let compact: Vec<_> = outputs
-            .into_iter()
-            .map(|(domain, output)| (domain, CompactOutputDescription::from(output)))
-            .collect();
+            group.bench_function(
+                BenchmarkId::new(format!("valid-{}", nivks), noutputs),
+                |b| b.iter(|| batch::try_note_decryption(&valid_ivks, &outputs)),
+            );
 
-        group.bench_function(BenchmarkId::new("compact-valid", size), |b| {
-            b.iter(|| batch::try_compact_note_decryption(&valid_ivks, &compact))
-        });
+            group.bench_function(
+                BenchmarkId::new(format!("invalid-{}", nivks), noutputs),
+                |b| b.iter(|| batch::try_note_decryption(&invalid_ivks, &outputs)),
+            );
 
-        group.bench_function(BenchmarkId::new("compact-invalid", size), |b| {
-            b.iter(|| batch::try_compact_note_decryption(&invalid_ivks, &compact))
-        });
+            let compact: Vec<_> = outputs
+                .into_iter()
+                .map(|(domain, output)| (domain, CompactOutputDescription::from(output)))
+                .collect();
+
+            group.bench_function(
+                BenchmarkId::new(format!("compact-valid-{}", nivks), noutputs),
+                |b| b.iter(|| batch::try_compact_note_decryption(&valid_ivks, &compact)),
+            );
+
+            group.bench_function(
+                BenchmarkId::new(format!("compact-invalid-{}", nivks), noutputs),
+                |b| b.iter(|| batch::try_compact_note_decryption(&invalid_ivks, &compact)),
+            );
+        }
     }
 }
 
