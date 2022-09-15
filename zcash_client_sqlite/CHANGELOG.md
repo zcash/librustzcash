@@ -25,13 +25,21 @@ and this library adheres to Rust's notion of
 - An `unstable` feature flag; this is added to parts of the API that may change
   in any release. It enables `zcash_client_backend`'s `unstable` feature flag.
 - New summary views that may be directly accessed in the sqlite database.
-  The structure of these views should be considered unstable; they may 
+  The structure of these views should be considered unstable; they may
   be replaced by accessors provided by the data access API at some point
   in the future:
   - `v_transactions`
   - `v_tx_received`
   - `v_tx_sent`
 - `zcash_client_sqlite::wallet::init::WalletMigrationError`
+- A filesystem-backed `BlockSource` implementation
+  `zcash_client_sqlite::FsBlockDb`. This block source expects blocks to be
+  stored on disk in individual files named following the pattern
+  `<blockmeta_root>/blocks/<blockheight>-<blockhash>-compactblock`. A SQLite
+  database stored at `<blockmeta_root>/blockmeta.sqlite`stores metadata for
+  this block source.
+  - `zcash_client_sqlite::chain::init::init_blockmeta_db` creates the required
+    metadata cache database.
 
 ### Changed
 - Various **BREAKING CHANGES** have been made to the database tables. These will
@@ -85,6 +93,8 @@ and this library adheres to Rust's notion of
   - `get_extended_full_viewing_keys` (use
     `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
     instead).
+- `zcash_client_sqlite::with_blocks` (use
+  `zcash_client_backend::data_api::BlockSource::with_blocks` instead)
 
 ### Fixed
 - The `zcash_client_backend::data_api::WalletRead::get_address` implementation
