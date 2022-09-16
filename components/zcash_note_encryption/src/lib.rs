@@ -28,7 +28,10 @@ use chacha20::{
     cipher::{StreamCipher, StreamCipherSeek},
     ChaCha20,
 };
-use chacha20poly1305::{aead::AeadInPlace, ChaCha20Poly1305, KeyInit};
+use chacha20poly1305::{
+    aead::{AeadInPlace, KeyInit},
+    ChaCha20Poly1305,
+};
 use cipher::KeyIvInit;
 
 use rand_core::RngCore;
@@ -37,6 +40,13 @@ use subtle::{Choice, ConstantTimeEq};
 #[cfg(feature = "alloc")]
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub mod batch;
+
+#[cfg(feature = "encrypt-to-recipient")]
+use {
+    aead::{self, Aead, AeadCore, Nonce},
+    chacha20poly1305::XChaCha20Poly1305,
+    rand_core::CryptoRng,
+};
 
 /// The size of a compact note.
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
@@ -164,7 +174,7 @@ pub trait Domain {
     ///
     /// `ephemeral_key` is the byte encoding of the [`EphemeralPublicKey`] used to derive
     /// `secret`. During encryption it is derived via [`Self::epk_bytes`]; during trial
-    /// decryption it is obtained from [`ShieldedOutput::ephemeral_key`].
+    /// decryption it is obtained from [`KeyedOutput::ephemeral_key`].
     ///
     /// [`EphemeralPublicKey`]: Self::EphemeralPublicKey
     /// [`EphemeralSecretKey`]: Self::EphemeralSecretKey
@@ -304,20 +314,81 @@ pub trait BatchDomain: Domain {
     }
 }
 
-/// Trait that provides access to the components of an encrypted transaction output.
+/// An extension to the `Domain` trait that provides symmetric key derivation in a similar
+/// fashion to [`Domain::kdf`], but which allows the user to provide additional domain separation
+/// to the key derivation function. This is used in [`NoteEncryption::encrypt_to_note_recipient`] 
+/// to allow senders to encrypt an arbitrary payload such that it will be decryptable by the
+/// recipient of a shielded note while avoiding potential issues of key reuse.
 ///
-/// Implementations of this trait are required to define the length of their ciphertext
-/// field. In order to use the trial decryption APIs in this crate, the length must be
-/// either [`ENC_CIPHERTEXT_SIZE`] or [`COMPACT_NOTE_SIZE`].
-pub trait ShieldedOutput<D: Domain, const CIPHERTEXT_SIZE: usize> {
+/// In most cases, the personalization provided to [`PayloadEncryptionDomain::kdf_personalized`]
+/// will be used as a suffix to a protocol-specific prefix that is predetermined for each Zcash
+/// shielded protocol, to ensure that keys cannot be made to collide with those produced by the
+/// KDF used for note encryption.
+#[cfg(feature = "encrypt-to-recipient")]
+pub trait PayloadEncryptionDomain: Domain {
+    type KdfPersonalization;
+
+    /// Derives a `SymmetricKey` used to encrypt the an arbitrary payload distinct from the note
+    /// plaintext.
+    ///
+    /// This method provides the ability to use arbitrary personalization for the derivation of the
+    /// secret key, so as to provide domain separation of the symmetric key when encrypting a
+    /// payload to be readable by the recipient of a shielded note.
+    ///
+    /// `personalization` is a value to be used for domain separation of the symmetric key. The
+    /// value for this should be distinct from any value selected by the implementation of
+    /// [`Self::kdf`]
+    ///
+    /// `secret` is the `SharedSecret` obtained from [`Self::ka_agree_enc`] or
+    /// [`Self::ka_agree_dec`].
+    ///
+    /// `ephemeral_key` is the byte encoding of the [`EphemeralPublicKey`] used to derive
+    /// `secret`. During encryption it is derived via [`Self::epk_bytes`]; during trial
+    /// decryption it is obtained from [`KeyedOutput::ephemeral_key`].
+    ///
+    /// [`EphemeralPublicKey`]: Domain::EphemeralPublicKey
+    /// [`EphemeralSecretKey`]: Domain::EphemeralSecretKey
+    /// [`Self::kdf`]: Domain::kdf
+    /// [`Self::ka_agree_enc`]: Domain::ka_agree_enc
+    /// [`Self::ka_agree_dec`]: Domain::ka_agree_dec
+    /// [`Self::epk_bytes`]: Domain::epk_bytes
+    fn kdf_personalized(
+        personalization: &Self::KdfPersonalization,
+        secret: Self::SharedSecret,
+        ephemeral_key: &EphemeralKeyBytes,
+    ) -> Self::SymmetricKey;
+}
+
+/// Trait that provides access to the parts of an encrypted transaction output
+/// that are required to make the output recoverable using an incoming viewing
+/// key.
+pub trait KeyedOutput<D: Domain> {
     /// Exposes the `ephemeral_key` field of the output.
     fn ephemeral_key(&self) -> EphemeralKeyBytes;
 
     /// Exposes the `cmu_bytes` or `cmx_bytes` field of the output.
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
+}
 
+/// Trait that provides access to the components of an encrypted transaction output.
+///
+/// Implementations of this trait are required to define the length of their ciphertext
+/// field. In order to use the trial decryption APIs in this crate, the length must be
+/// either [`ENC_CIPHERTEXT_SIZE`] or [`COMPACT_NOTE_SIZE`].
+pub trait ShieldedOutput<D: Domain, const CIPHERTEXT_SIZE: usize>: KeyedOutput<D> {
     /// Exposes the note ciphertext of the output.
     fn enc_ciphertext(&self) -> &[u8; CIPHERTEXT_SIZE];
+}
+
+/// Trait that provides access to the parts of an encrypted transaction output
+/// that are required to make the output recoverable using an outgoing viewing
+/// key.
+pub trait RecoverableOutput<D: Domain, const CIPHERTEXT_SIZE: usize>:
+    ShieldedOutput<D, CIPHERTEXT_SIZE>
+{
+    fn cv(&self) -> &D::ValueCommitment;
+
+    fn out_ciphertext(&self) -> &[u8; OUT_CIPHERTEXT_SIZE];
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -433,6 +504,31 @@ impl<D: Domain> NoteEncryption<D> {
         output[OUT_PLAINTEXT_SIZE..].copy_from_slice(&tag);
 
         output
+    }
+}
+
+#[cfg(feature = "encrypt-to-recipient")]
+impl<D: PayloadEncryptionDomain> NoteEncryption<D> {
+    /// Encrypts a payload that may decrypted with the same shared secret and epk as can
+    /// be used to decrypt the note plaintext for a given note. Returns a newly generated
+    /// nonce that must be used in decryption along with the ciphertext.
+    ///
+    /// This can be used to make a separate payload passed out-of-band decryptable to the
+    /// recipient of a Zcash payment.
+    pub fn encrypt_to_note_recipient<R: RngCore + CryptoRng>(
+        &self,
+        rng: &mut R,
+        kdf_personalization: &D::KdfPersonalization,
+        data: &[u8],
+    ) -> Result<(Nonce<XChaCha20Poly1305>, Vec<u8>), aead::Error> {
+        let pk_d = D::get_pk_d(&self.note);
+        let shared_secret = D::ka_agree_enc(&self.esk, &pk_d);
+        let key = D::kdf_personalized(kdf_personalization, shared_secret, &D::epk_bytes(&self.epk));
+        let nonce = XChaCha20Poly1305::generate_nonce(rng);
+
+        XChaCha20Poly1305::new(key.as_ref().into())
+            .encrypt(&nonce, data)
+            .map(|ciphertext| (nonce, ciphertext))
     }
 }
 
@@ -589,15 +685,51 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D, COMPAC
 /// Implements [Zcash Protocol Specification section 4.19.3][decryptovk].
 ///
 /// [decryptovk]: https://zips.z.cash/protocol/nu5.pdf#decryptovk
-pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
+pub fn try_output_recovery_with_ovk<D: Domain, Output>(
     domain: &D,
     ovk: &D::OutgoingViewingKey,
     output: &Output,
-    cv: &D::ValueCommitment,
-    out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
-) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let ock = D::derive_ock(ovk, cv, &output.cmstar_bytes(), &output.ephemeral_key());
-    try_output_recovery_with_ock(domain, &ock, output, out_ciphertext)
+) -> Option<(D::Note, D::Recipient, D::Memo)>
+where
+    Output: RecoverableOutput<D, ENC_CIPHERTEXT_SIZE>,
+{
+    let ock = D::derive_ock(
+        ovk,
+        output.cv(),
+        &output.cmstar_bytes(),
+        &output.ephemeral_key(),
+    );
+    try_output_recovery_with_ock(domain, &ock, output)
+}
+
+fn try_recover_shared_secrets<D: Domain, Output>(
+    ock: &OutgoingCipherKey,
+    output: &Output,
+) -> Option<(
+    D::DiversifiedTransmissionKey,
+    D::EphemeralSecretKey,
+    D::SharedSecret,
+)>
+where
+    Output: RecoverableOutput<D, ENC_CIPHERTEXT_SIZE>,
+{
+    let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
+    op.0.copy_from_slice(&output.out_ciphertext()[..OUT_PLAINTEXT_SIZE]);
+
+    ChaCha20Poly1305::new(ock.as_ref().into())
+        .decrypt_in_place_detached(
+            [0u8; 12][..].into(),
+            &[],
+            &mut op.0,
+            output.out_ciphertext()[OUT_PLAINTEXT_SIZE..].into(),
+        )
+        .ok()?;
+
+    let pk_d = D::extract_pk_d(&op)?;
+    let esk = D::extract_esk(&op)?;
+    let shared_secret = D::ka_agree_enc(&esk, &pk_d);
+
+    Some((pk_d, esk, shared_secret))
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -609,36 +741,22 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D, ENC_CIP
 /// Implements part of section 4.19.3 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk).
 /// For decryption using a Full Viewing Key see [`try_output_recovery_with_ovk`].
-pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
+pub fn try_output_recovery_with_ock<D: Domain, Output>(
     domain: &D,
     ock: &OutgoingCipherKey,
     output: &Output,
-    out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
-) -> Option<(D::Note, D::Recipient, D::Memo)> {
-    let enc_ciphertext = output.enc_ciphertext();
-
-    let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
-    op.0.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
-
-    ChaCha20Poly1305::new(ock.as_ref().into())
-        .decrypt_in_place_detached(
-            [0u8; 12][..].into(),
-            &[],
-            &mut op.0,
-            out_ciphertext[OUT_PLAINTEXT_SIZE..].into(),
-        )
-        .ok()?;
-
-    let pk_d = D::extract_pk_d(&op)?;
-    let esk = D::extract_esk(&op)?;
-
+) -> Option<(D::Note, D::Recipient, D::Memo)>
+where
+    Output: RecoverableOutput<D, ENC_CIPHERTEXT_SIZE>,
+{
+    let (pk_d, esk, shared_secret) = try_recover_shared_secrets(ock, output)?;
     let ephemeral_key = output.ephemeral_key();
-    let shared_secret = D::ka_agree_enc(&esk, &pk_d);
     // The small-order point check at the point of output parsing rejects
     // non-canonical encodings, so reencoding here for the KDF should
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
+    let enc_ciphertext = output.enc_ciphertext();
     let mut plaintext = NotePlaintextBytes([0; NOTE_PLAINTEXT_SIZE]);
     plaintext
         .0
@@ -672,4 +790,50 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D, ENC_CIP
     } else {
         None
     }
+}
+
+#[cfg(feature = "encrypt-to-recipient")]
+pub fn decrypt_associated_ciphertext_ivk<D: PayloadEncryptionDomain, Output: KeyedOutput<D>>(
+    ivk: &D::IncomingViewingKey,
+    associated_output: &Output,
+    kdf_personalization: &D::KdfPersonalization,
+    nonce: &Nonce<XChaCha20Poly1305>,
+    ciphertext: &[u8],
+) -> Option<Vec<u8>> {
+    let ephemeral_key = associated_output.ephemeral_key();
+
+    let epk = D::prepare_epk(D::epk(&ephemeral_key)?);
+    let shared_secret = D::ka_agree_dec(ivk, &epk);
+    let key = D::kdf_personalized(kdf_personalization, shared_secret, &ephemeral_key);
+
+    XChaCha20Poly1305::new(key.as_ref().into())
+        .decrypt(nonce, ciphertext)
+        .ok()
+}
+
+#[cfg(feature = "encrypt-to-recipient")]
+pub fn decrypt_associated_ciphertext_ovk<
+    D: PayloadEncryptionDomain,
+    Output: RecoverableOutput<D, ENC_CIPHERTEXT_SIZE>,
+>(
+    ovk: &D::OutgoingViewingKey,
+    associated_output: &Output,
+    kdf_personalization: &D::KdfPersonalization,
+    nonce: &Nonce<XChaCha20Poly1305>,
+    ciphertext: &[u8],
+) -> Option<Vec<u8>> {
+    let ock = D::derive_ock(
+        ovk,
+        associated_output.cv(),
+        &associated_output.cmstar_bytes(),
+        &associated_output.ephemeral_key(),
+    );
+
+    let (_, _, shared_secret) = try_recover_shared_secrets(&ock, associated_output)?;
+    let ephemeral_key = associated_output.ephemeral_key();
+    let key = D::kdf_personalized(kdf_personalization, shared_secret, &ephemeral_key);
+
+    XChaCha20Poly1305::new(key.as_ref().into())
+        .decrypt(nonce, ciphertext)
+        .ok()
 }

@@ -19,6 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+aead = { version = "0.5.1", default-features = false }
 cipher = { version = "0.4", default-features = false }
 chacha20 = { version = "0.9", default-features = false }
 chacha20poly1305 = { version = "0.10", default-features = false }
@@ -29,6 +30,7 @@ subtle = { version = "2.3", default-features = false }
 default = ["alloc"]
 alloc = []
 pre-zip-212 = []
+encrypt-to-recipient = ["alloc", "aead/alloc", "aead/rand_core"]
 
 [lib]
 bench = false
