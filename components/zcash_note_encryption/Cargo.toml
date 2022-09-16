@@ -28,7 +28,6 @@ subtle = { version = "2.3", default-features = false }
 
 [dev-dependencies]
 ff = { version = "0.12", default-features = false }
-zcash_primitives = { version = "0.7", path = "../../zcash_primitives" }
 jubjub = "0.9"
 
 [features]

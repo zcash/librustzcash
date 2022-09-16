@@ -345,50 +345,6 @@ pub trait ShieldedOutput<D: Domain, const CIPHERTEXT_SIZE: usize> {
 ///
 /// Implements section 4.19 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#saplingandorchardinband)
-/// NB: the example code is only covering the post-Canopy case.
-///
-/// # Examples
-///
-/// ```
-/// extern crate ff;
-/// extern crate rand_core;
-/// extern crate zcash_primitives;
-///
-/// use ff::Field;
-/// use rand_core::OsRng;
-/// use zcash_primitives::{
-///     keys::{OutgoingViewingKey, prf_expand},
-///     consensus::{TEST_NETWORK, TestNetwork, NetworkUpgrade, Parameters},
-///     memo::MemoBytes,
-///     sapling::{
-///         note_encryption::sapling_note_encryption,
-///         util::generate_random_rseed,
-///         Diversifier, PaymentAddress, Rseed, ValueCommitment
-///     },
-/// };
-///
-/// let mut rng = OsRng;
-///
-/// let diversifier = Diversifier([0; 11]);
-/// let pk_d = diversifier.g_d().unwrap();
-/// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
-/// let ovk = Some(OutgoingViewingKey([0; 32]));
-///
-/// let value = 1000;
-/// let rcv = jubjub::Fr::random(&mut rng);
-/// let cv = ValueCommitment {
-///     value,
-///     randomness: rcv.clone(),
-/// };
-/// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
-/// let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
-/// let note = to.create_note(value, rseed).unwrap();
-/// let cmu = note.cmu();
-///
-/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
-/// let encCiphertext = enc.encrypt_note_plaintext();
-/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu, &mut rng);
-/// ```
 pub struct NoteEncryption<D: Domain> {
     epk: D::EphemeralPublicKey,
     esk: D::EphemeralSecretKey,
