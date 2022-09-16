@@ -25,13 +25,11 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use chacha20::{
-    cipher::{NewCipher, StreamCipher, StreamCipherSeek},
+    cipher::{StreamCipher, StreamCipherSeek},
     ChaCha20,
 };
-use chacha20poly1305::{
-    aead::{AeadInPlace, NewAead},
-    ChaCha20Poly1305,
-};
+use chacha20poly1305::{aead::AeadInPlace, ChaCha20Poly1305, KeyInit};
+use cipher::KeyIvInit;
 
 use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
