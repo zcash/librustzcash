@@ -89,7 +89,7 @@ use std::convert::Infallible;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    sapling::{self, note_encryption::PreparedIncomingViewingKey, Nullifier},
+    sapling::{self, keys::PreparedIncomingViewingKey, Nullifier},
     zip32::Scope,
 };
 

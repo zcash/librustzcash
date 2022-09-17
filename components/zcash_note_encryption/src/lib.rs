@@ -316,7 +316,7 @@ pub trait BatchDomain: Domain {
 
 /// An extension to the `Domain` trait that provides symmetric key derivation in a similar
 /// fashion to [`Domain::kdf`], but which allows the user to provide additional domain separation
-/// to the key derivation function. This is used in [`NoteEncryption::encrypt_to_note_recipient`] 
+/// to the key derivation function. This is used in [`NoteEncryption::encrypt_to_note_recipient`]
 /// to allow senders to encrypt an arbitrary payload such that it will be decryptable by the
 /// recipient of a shielded note while avoiding potential issues of key reuse.
 ///

@@ -8,9 +8,8 @@ use zcash_note_encryption::batch;
 use zcash_primitives::{
     consensus,
     sapling::{
-        self,
-        note_encryption::{PreparedIncomingViewingKey, SaplingDomain},
-        Node, Note, Nullifier, NullifierDerivingKey, SaplingIvk,
+        self, keys::PreparedIncomingViewingKey, note_encryption::SaplingDomain, Node, Note,
+        Nullifier, NullifierDerivingKey, SaplingIvk,
     },
     transaction::components::sapling::CompactOutputDescription,
     zip32::{sapling::DiversifiableFullViewingKey, AccountId, Scope},
@@ -396,7 +395,8 @@ mod tests {
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
         sapling::{
-            note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
+            keys::PreparedIncomingViewingKey,
+            note_encryption::{sapling_note_encryption, SaplingDomain},
             util::generate_random_rseed,
             value::NoteValue,
             CommitmentTree, Note, Nullifier, SaplingIvk,

@@ -5,10 +5,7 @@ use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     sapling::{
-        self,
-        note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
-        prover::TxProver as SaplingProver,
-        Node,
+        self, note_encryption::try_sapling_note_decryption, prover::TxProver as SaplingProver, Node,
     },
     transaction::{
         builder::Builder,
@@ -562,7 +559,8 @@ where
     // Build the transaction with the specified fee rule
     let (tx, sapling_build_meta) = builder.build(&prover, proposal.fee_rule())?;
 
-    let internal_ivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
+    let internal_ivk =
+        sapling::keys::PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
     let sapling_outputs =
         sapling_output_meta
             .into_iter()

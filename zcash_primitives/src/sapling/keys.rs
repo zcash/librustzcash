@@ -451,6 +451,19 @@ impl SharedSecret {
     /// [concretesaplingkdf]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkdf
     pub(crate) fn kdf_sapling(self, ephemeral_key: &EphemeralKeyBytes) -> Blake2bHash {
         Self::kdf_sapling_inner(
+            KDF_SAPLING_PERSONALIZATION,
+            jubjub::ExtendedPoint::from(self.0).to_affine(),
+            ephemeral_key,
+        )
+    }
+
+    pub(crate) fn kdf_sapling_personalized(
+        self,
+        personalization: &[u8; 16],
+        ephemeral_key: &EphemeralKeyBytes,
+    ) -> Blake2bHash {
+        Self::kdf_sapling_inner(
+            personalization,
             jubjub::ExtendedPoint::from(self.0).to_affine(),
             ephemeral_key,
         )
@@ -458,12 +471,13 @@ impl SharedSecret {
 
     /// Only for direct use in batched note encryption.
     pub(crate) fn kdf_sapling_inner(
+        personalization: &[u8; 16],
         secret: jubjub::AffinePoint,
         ephemeral_key: &EphemeralKeyBytes,
     ) -> Blake2bHash {
         Blake2bParams::new()
             .hash_length(32)
-            .personal(KDF_SAPLING_PERSONALIZATION)
+            .personal(personalization)
             .to_state()
             .update(&secret.to_bytes())
             .update(ephemeral_key.as_ref())

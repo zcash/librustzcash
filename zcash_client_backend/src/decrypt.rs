@@ -5,9 +5,8 @@ use zcash_primitives::{
     memo::MemoBytes,
     sapling::{
         self,
-        note_encryption::{
-            try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
-        },
+        keys::PreparedIncomingViewingKey,
+        note_encryption::{try_sapling_note_decryption, try_sapling_output_recovery},
     },
     transaction::Transaction,
     zip32::{AccountId, Scope},

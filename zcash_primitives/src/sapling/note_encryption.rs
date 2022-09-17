@@ -21,7 +21,7 @@ use crate::{
     sapling::{
         keys::{
             DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
-            SharedSecret,
+            PreparedEphemeralPublicKey, PreparedIncomingViewingKey, SharedSecret,
         },
         value::ValueCommitment,
         Diversifier, Note, PaymentAddress, Rseed,
@@ -34,7 +34,8 @@ use crate::{
 
 use super::note::ExtractedNoteCommitment;
 
-pub use crate::sapling::keys::{PreparedEphemeralPublicKey, PreparedIncomingViewingKey};
+#[cfg(feature = "encrypt-to-recipient")]
+use zcash_note_encryption::PayloadEncryptionDomain;
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
@@ -298,7 +299,13 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
         SharedSecret::batch_to_affine(shared_secrets)
             .zip(ephemeral_keys.into_iter())
             .map(|(secret, ephemeral_key)| {
-                secret.map(|dhsecret| SharedSecret::kdf_sapling_inner(dhsecret, ephemeral_key))
+                secret.map(|dhsecret| {
+                    SharedSecret::kdf_sapling_inner(
+                        KDF_SAPLING_PERSONALIZATION,
+                        dhsecret,
+                        ephemeral_key,
+                    )
+                })
             })
             .collect()
     }
@@ -319,6 +326,28 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
                 )
             })
             .collect()
+    }
+}
+
+#[cfg(feature = "encrypt-to-recipient")]
+const SAPLING_ASSOC_KEY_KDF_PERS_PREFIX: &[u8; 8] = b"ZcashSAK";
+
+/// This implementation of `PayloadEncryptionDomain` permits the use of an 8-byte personalization
+/// suffix. The personalization prefix is fixed to `b"ZcashSAK"` to ensure that no collision with
+/// key personalization used for note encryption or with Orchard associated keys is possible.
+#[cfg(feature = "encrypt-to-recipient")]
+impl<P: consensus::Parameters> PayloadEncryptionDomain for SaplingDomain<P> {
+    type KdfPersonalization = [u8; 8];
+
+    fn kdf_personalized(
+        personalization: &Self::KdfPersonalization,
+        secret: Self::SharedSecret,
+        ephemeral_key: &EphemeralKeyBytes,
+    ) -> Self::SymmetricKey {
+        let mut sak_pers = [0u8; 16];
+        sak_pers[..8].copy_from_slice(SAPLING_ASSOC_KEY_KDF_PERS_PREFIX);
+        sak_pers[8..].copy_from_slice(personalization);
+        SharedSecret::kdf_sapling_personalized(secret, &sak_pers, ephemeral_key)
     }
 }
 
@@ -453,7 +482,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
         height,
     };
 
-    try_output_recovery_with_ock(&domain, ock, output, output.out_ciphertext())
+    try_output_recovery_with_ock(&domain, ock, output)
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -475,7 +504,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
         height,
     };
 
-    try_output_recovery_with_ovk(&domain, ovk, output, output.cv(), output.out_ciphertext())
+    try_output_recovery_with_ovk(&domain, ovk, output)
 }
 
 #[cfg(test)]

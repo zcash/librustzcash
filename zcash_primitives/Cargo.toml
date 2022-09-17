@@ -104,6 +104,7 @@ transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
 temporary-zcashd = []
 test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
+encrypt-to-recipient = ["zcash_note_encryption/encrypt-to-recipient"]
 
 [lib]
 bench = false

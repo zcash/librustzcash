@@ -17,3 +17,8 @@ members = [
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+zcash_encoding = { path = "components/zcash_encoding" }
+zcash_note_encryption = { path = "components/zcash_note_encryption" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "082c8de59c666c2361b70aba0c4429c96c6c5b16" }

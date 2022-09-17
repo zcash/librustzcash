@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- Support for the `encrypt-to-recipient` feature for Sapling outputs.
+
 ## [0.12.0] - 2023-06-06
 ### Added
 - `zcash_primitives::transaction`:
