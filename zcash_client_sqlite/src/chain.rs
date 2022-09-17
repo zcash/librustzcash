@@ -12,7 +12,7 @@ use crate::{error::SqliteClientError, BlockDb};
 #[cfg(feature = "unstable")]
 use {
     crate::{BlockHash, FsBlockDb},
-    rusqlite::{Connection, OptionalExtension, NO_PARAMS},
+    rusqlite::{Connection, NO_PARAMS},
     std::fs::File,
     std::io::BufReader,
     std::path::{Path, PathBuf},
@@ -149,11 +149,12 @@ pub(crate) fn blockmetadb_get_max_cached_height(
         "SELECT MAX(height) FROM compactblocks_meta",
         NO_PARAMS,
         |row| {
-            let h: u32 = row.get(0)?;
-            Ok(BlockHeight::from(h))
+            // `SELECT MAX(_)` will always return a row, but it will return `null` if the
+            // table is empty, which has no integer type. We handle the optionality here.
+            let h: Option<u32> = row.get(0)?;
+            Ok(h.map(BlockHeight::from))
         },
     )
-    .optional()
 }
 
 /// Implements a traversal of `limit` blocks of the filesystem-backed
