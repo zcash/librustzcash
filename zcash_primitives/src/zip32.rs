@@ -98,7 +98,7 @@ impl FvkTag {
 }
 
 /// A child index for a derived key
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChildIndex {
     NonHardened(u32),
     Hardened(u32), // Hardened(n) == n + (1 << 31) == n' in path notation
@@ -125,7 +125,7 @@ impl ChildIndex {
 }
 
 /// A BIP-32 chain code
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChainCode([u8; 32]);
 
 impl ChainCode {
@@ -136,7 +136,7 @@ impl ChainCode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiversifierIndex(pub [u8; 11]);
 
 impl Default for DiversifierIndex {
@@ -154,7 +154,7 @@ impl From<u32> for DiversifierIndex {
 impl From<u64> for DiversifierIndex {
     fn from(i: u64) -> Self {
         let mut result = DiversifierIndex([0; 11]);
-        (&mut result.0[..8]).copy_from_slice(&i.to_le_bytes());
+        result.0[..8].copy_from_slice(&i.to_le_bytes());
         result
     }
 }
@@ -178,7 +178,7 @@ impl DiversifierIndex {
 }
 
 /// A key used to derive diversifiers for a particular child key
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiversifierKey([u8; 32]);
 
 impl DiversifierKey {
@@ -437,19 +437,19 @@ impl ExtendedSpendingKey {
         let depth = b[0];
 
         let mut parent_fvk_tag = FvkTag([0; 4]);
-        (&mut parent_fvk_tag.0[..]).copy_from_slice(&b[1..5]);
+        parent_fvk_tag.0[..].copy_from_slice(&b[1..5]);
 
         let mut ci_bytes = [0u8; 4];
-        (&mut ci_bytes[..]).copy_from_slice(&b[5..9]);
+        ci_bytes[..].copy_from_slice(&b[5..9]);
         let child_index = ChildIndex::from_index(u32::from_le_bytes(ci_bytes));
 
         let mut chain_code = ChainCode([0u8; 32]);
-        (&mut chain_code.0[..]).copy_from_slice(&b[9..41]);
+        chain_code.0[..].copy_from_slice(&b[9..41]);
 
         let expsk = ExpandedSpendingKey::from_bytes(&b[41..137])?;
 
         let mut dk = DiversifierKey([0u8; 32]);
-        (&mut dk.0[..]).copy_from_slice(&b[137..169]);
+        dk.0[..].copy_from_slice(&b[137..169]);
 
         Ok(ExtendedSpendingKey {
             depth,
@@ -489,11 +489,11 @@ impl ExtendedSpendingKey {
     pub fn to_bytes(&self) -> [u8; 169] {
         let mut result = [0u8; 169];
         result[0] = self.depth;
-        (&mut result[1..5]).copy_from_slice(&self.parent_fvk_tag.as_bytes()[..]);
-        (&mut result[5..9]).copy_from_slice(&self.child_index.value().to_le_bytes()[..]);
-        (&mut result[9..41]).copy_from_slice(&self.chain_code.as_bytes()[..]);
-        (&mut result[41..137]).copy_from_slice(&self.expsk.to_bytes()[..]);
-        (&mut result[137..169]).copy_from_slice(&self.dk.as_bytes()[..]);
+        result[1..5].copy_from_slice(&self.parent_fvk_tag.as_bytes()[..]);
+        result[5..9].copy_from_slice(&self.child_index.value().to_le_bytes()[..]);
+        result[9..41].copy_from_slice(&self.chain_code.as_bytes()[..]);
+        result[41..137].copy_from_slice(&self.expsk.to_bytes()[..]);
+        result[137..169].copy_from_slice(&self.dk.as_bytes()[..]);
         result
     }
 

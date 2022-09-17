@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     InvalidAmount,
     WitnessModeMismatch(u32, u32),
@@ -42,7 +42,7 @@ pub struct TzeBuilder<'a, BuildCtx> {
     vout: Vec<TzeOut>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Unauthorized;
 
 impl Authorization for Unauthorized {

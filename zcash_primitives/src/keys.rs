@@ -20,5 +20,5 @@ pub fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bHash {
 }
 
 /// An outgoing viewing key
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OutgoingViewingKey(pub [u8; 32]);

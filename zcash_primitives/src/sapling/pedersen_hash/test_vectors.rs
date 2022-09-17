@@ -3,7 +3,7 @@
 use super::{test::TestVector, Personalization};
 
 pub fn get_vectors<'a>() -> Vec<TestVector<'a>> {
-    return vec![
+    vec![
         TestVector {
             personalization: Personalization::NoteCommitment,
             input_bits: vec![1, 1, 1, 1, 1, 1],
@@ -711,5 +711,5 @@ pub fn get_vectors<'a>() -> Vec<TestVector<'a>> {
             hash_u: "0x329e3bb2ca31ea6e13a986730237f6fd16b842a510cbabe851bdbcf57d75ee0d",
             hash_v: "0x471d2109656afcb96d0609b371b132b97efcf72c6051064dd19fdc004799bfa9",
         },
-    ];
+    ]
 }

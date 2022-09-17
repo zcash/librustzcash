@@ -15,7 +15,7 @@ pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Authorized;
 
 impl Authorization for Authorized {
@@ -89,7 +89,7 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
@@ -156,7 +156,7 @@ impl TxIn<Authorized> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxOut {
     pub value: Amount,
     pub script_pubkey: Script,

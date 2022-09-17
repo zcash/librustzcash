@@ -57,7 +57,7 @@ impl SaplingVerificationContextInner {
         // Compute the signature's message for rk/spend_auth_sig
         let mut data_to_be_signed = [0u8; 64];
         data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
-        (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
+        data_to_be_signed[32..64].copy_from_slice(&sighash_value[..]);
 
         // Verify the spend_auth_sig
         let rk_affine = rk.0.to_affine();
@@ -158,7 +158,7 @@ impl SaplingVerificationContextInner {
         // Compute the signature's message for bvk/binding_sig
         let mut data_to_be_signed = [0u8; 64];
         data_to_be_signed[0..32].copy_from_slice(&bvk.0.to_bytes());
-        (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash_value[..]);
+        data_to_be_signed[32..64].copy_from_slice(&sighash_value[..]);
 
         // Verify the binding_sig
         binding_sig_verifier(bvk, data_to_be_signed, binding_sig)

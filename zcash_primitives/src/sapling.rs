@@ -71,7 +71,7 @@ pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
 }
 
 /// A node within the Sapling commitment tree.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Node {
     repr: [u8; 32],
 }
@@ -155,7 +155,7 @@ pub(crate) fn spend_sig_internal<R: RngCore>(
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
     data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash[..]);
+    data_to_be_signed[32..64].copy_from_slice(&sighash[..]);
 
     // Do the signing
     rsk.sign(&data_to_be_signed, rng, SPENDING_KEY_GENERATOR)
@@ -245,7 +245,7 @@ impl SaplingIvk {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Diversifier(pub [u8; 11]);
 
 impl Diversifier {
@@ -381,7 +381,7 @@ impl ConstantTimeEq for Nullifier {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NoteValue(u64);
 
 impl TryFrom<u64> for NoteValue {
@@ -436,9 +436,7 @@ impl Note {
         let mut note_contents = vec![];
 
         // Writing the value in little endian
-        (&mut note_contents)
-            .write_u64::<LittleEndian>(self.value)
-            .unwrap();
+        note_contents.write_u64::<LittleEndian>(self.value).unwrap();
 
         // Write g_d
         note_contents.extend_from_slice(&self.g_d.to_bytes());

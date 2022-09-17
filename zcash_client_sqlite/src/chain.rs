@@ -263,7 +263,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -280,7 +280,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -292,7 +292,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -309,7 +309,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -320,7 +320,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
     }
@@ -362,7 +362,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -386,7 +386,7 @@ mod tests {
         match validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         ) {
             Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
                 assert_eq!(lower_bound, sapling_activation_height() + 2)
@@ -432,7 +432,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -456,7 +456,7 @@ mod tests {
         match validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         ) {
             Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
                 assert_eq!(lower_bound, sapling_activation_height() + 3)

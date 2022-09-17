@@ -8,7 +8,7 @@ use crate::transaction::components::{
 };
 
 /// A typesafe wrapper for witness payloads
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthData(pub Vec<u8>);
 
 /// Binary parsing capability for TZE preconditions & witnesses.
@@ -37,7 +37,7 @@ pub trait ToPayload {
 /// used inside of a transaction, and extension-specific types. The payload field of this struct is
 /// treated as opaque to all but the extension corresponding to the encapsulated `extension_id`
 /// value.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Precondition {
     pub extension_id: u32,
     pub mode: u32,
@@ -69,7 +69,7 @@ impl Precondition {
 /// used inside of a transaction, and extension-specific types. The payload field of this struct is
 /// treated as opaque to all but the extension corresponding to the encapsulated `extension_id`
 /// value.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Witness<T> {
     pub extension_id: u32,
     pub mode: u32,
@@ -105,7 +105,7 @@ impl Witness<AuthData> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error<E> {
     InvalidExtensionId(u32),
     ProgramError(E),

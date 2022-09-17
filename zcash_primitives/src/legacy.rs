@@ -29,7 +29,7 @@ enum OpCode {
 }
 
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Script(pub Vec<u8>);
 
 impl Script {

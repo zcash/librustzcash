@@ -102,9 +102,9 @@ impl ExpandedSpendingKey {
     /// [ZIP 32](https://zips.z.cash/zip-0032)
     pub fn to_bytes(&self) -> [u8; 96] {
         let mut result = [0u8; 96];
-        (&mut result[0..32]).copy_from_slice(&self.ask.to_repr());
-        (&mut result[32..64]).copy_from_slice(&self.nsk.to_repr());
-        (&mut result[64..96]).copy_from_slice(&self.ovk.0);
+        result[0..32].copy_from_slice(&self.ask.to_repr());
+        result[32..64].copy_from_slice(&self.nsk.to_repr());
+        result[64..96].copy_from_slice(&self.ovk.0);
         result
     }
 }

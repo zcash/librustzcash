@@ -49,7 +49,7 @@ use crate::sapling::prover::mock::MockTxProver;
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     ChangeIsNegative(Amount),
     InvalidAmount,
