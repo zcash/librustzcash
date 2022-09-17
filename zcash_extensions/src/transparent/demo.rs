@@ -35,10 +35,10 @@ use zcash_primitives::{
 mod open {
     pub const MODE: u32 = 0;
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub struct Precondition(pub [u8; 32]);
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub struct Witness(pub [u8; 32]);
 }
 
@@ -46,15 +46,15 @@ mod open {
 mod close {
     pub const MODE: u32 = 1;
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub struct Precondition(pub [u8; 32]);
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub struct Witness(pub [u8; 32]);
 }
 
 /// The precondition type for the demo extension.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Precondition {
     Open(open::Precondition),
     Close(close::Precondition),
@@ -74,7 +74,7 @@ impl Precondition {
 
 /// Errors that may be produced during parsing and verification of demo preconditions and
 /// witnesses.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     /// Parse error indicating that the payload of the condition or the witness was
     /// not 32 bytes.
@@ -156,7 +156,7 @@ impl ToPayload for Precondition {
 }
 
 /// The witness type for the demo extension.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Witness {
     Open(open::Witness),
     Close(close::Witness),

@@ -412,10 +412,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = (&db_data)
-            .get_target_and_anchor_heights(10)
-            .unwrap()
-            .unwrap();
+        let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
         assert_eq!(
             get_balance_at(&db_data, AccountId::from(0), anchor_height).unwrap(),
@@ -428,10 +425,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Verified balance does not include the second note
-        let (_, anchor_height2) = (&db_data)
-            .get_target_and_anchor_heights(10)
-            .unwrap()
-            .unwrap();
+        let (_, anchor_height2) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
         assert_eq!(
             get_balance(&db_data, AccountId::from(0)).unwrap(),
             (value + value).unwrap()
@@ -790,10 +784,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = (&db_data)
-            .get_target_and_anchor_heights(10)
-            .unwrap()
-            .unwrap();
+        let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
         assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
         assert_eq!(
             get_balance_at(&db_data, AccountId::from(0), anchor_height).unwrap(),

@@ -54,9 +54,7 @@ fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash
 fn sequence_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(vin.len() * 4);
     for t_in in vin {
-        (&mut data)
-            .write_u32::<LittleEndian>(t_in.sequence)
-            .unwrap();
+        data.write_u32::<LittleEndian>(t_in.sequence).unwrap();
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -145,7 +143,7 @@ pub fn v4_signature_hash<
     let hash_type = signable_input.hash_type();
     if tx.version.has_overwinter() {
         let mut personal = [0; 16];
-        (&mut personal[..12]).copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
+        personal[..12].copy_from_slice(ZCASH_SIGHASH_PERSONALIZATION_PREFIX);
         (&mut personal[12..])
             .write_u32::<LittleEndian>(tx.consensus_branch_id.into())
             .unwrap();
@@ -252,8 +250,7 @@ pub fn v4_signature_hash<
                     bundle.vin[*index].prevout.write(&mut data).unwrap();
                     script_code.write(&mut data).unwrap();
                     data.extend_from_slice(&value.to_i64_le_bytes());
-                    (&mut data)
-                        .write_u32::<LittleEndian>(bundle.vin[*index].sequence)
+                    data.write_u32::<LittleEndian>(bundle.vin[*index].sequence)
                         .unwrap();
                     h.update(&data);
                 } else {

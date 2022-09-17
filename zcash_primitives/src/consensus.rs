@@ -187,7 +187,7 @@ pub trait Parameters: Clone {
 }
 
 /// Marker struct for the production network.
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct MainNetwork;
 
 pub const MAIN_NETWORK: MainNetwork = MainNetwork;
@@ -236,7 +236,7 @@ impl Parameters for MainNetwork {
 }
 
 /// Marker struct for the test network.
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct TestNetwork;
 
 pub const TEST_NETWORK: TestNetwork = TestNetwork;
@@ -284,7 +284,7 @@ impl Parameters for TestNetwork {
     }
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum Network {
     MainNetwork,
     TestNetwork,
@@ -445,7 +445,7 @@ pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 /// See [ZIP 200](https://zips.z.cash/zip-0200) for more details.
 ///
 /// [`signature_hash`]: crate::transaction::sighash::signature_hash
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BranchId {
     /// The consensus rules at the launch of Zcash.
     Sprout,

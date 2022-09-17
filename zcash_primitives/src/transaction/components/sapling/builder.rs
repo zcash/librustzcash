@@ -37,7 +37,7 @@ use crate::{
 /// with dummy outputs if necessary. See <https://github.com/zcash/zcash/issues/3615>.
 const MIN_SHIELDED_OUTPUTS: usize = 2;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     AnchorMismatch,
     BindingSig,
@@ -151,7 +151,7 @@ impl SaplingOutput {
 }
 
 /// Metadata about a transaction created by a [`SaplingBuilder`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaplingMetadata {
     spend_indices: Vec<usize>,
     output_indices: Vec<usize>,
@@ -560,7 +560,7 @@ pub mod testing {
         },
         merkle_tree::{testing::arb_commitment_tree, IncrementalWitness},
         sapling::{
-            prover::{mock::MockTxProver, TxProver},
+            prover::mock::MockTxProver,
             testing::{arb_node, arb_note, arb_positive_note_value},
             Diversifier,
         },
@@ -605,11 +605,10 @@ pub mod testing {
             }
 
             let prover = MockTxProver;
-            let mut ctx = prover.new_sapling_proving_context();
 
             let bundle = builder.build(
                 &prover,
-                &mut ctx,
+                &mut (),
                 &mut rng,
                 target_height.unwrap(),
                 None
@@ -617,7 +616,7 @@ pub mod testing {
 
             let (bundle, _) = bundle.apply_signatures(
                 &prover,
-                &mut ctx,
+                &mut (),
                 &mut rng,
                 &fake_sighash_bytes,
             ).unwrap();

@@ -28,7 +28,7 @@ pub trait Authorization: Debug {
     type AuthSig: Clone + Debug;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Unproven;
 
 impl Authorization for Unproven {

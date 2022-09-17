@@ -87,7 +87,7 @@ pub(crate) fn transparent_sequence_hash<TransparentAuth: transparent::Authorizat
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SEQUENCE_HASH_PERSONALIZATION);
     for t_in in vin {
-        (&mut h).write_u32::<LittleEndian>(t_in.sequence).unwrap();
+        h.write_u32::<LittleEndian>(t_in.sequence).unwrap();
     }
     h.finalize()
 }
@@ -368,7 +368,7 @@ pub(crate) fn to_hash(
     #[cfg(feature = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
 ) -> Blake2bHash {
     let mut personal = [0; 16];
-    (&mut personal[..12]).copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
+    personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
     (&mut personal[12..])
         .write_u32::<LittleEndian>(consensus_branch_id.into())
         .unwrap();
@@ -513,7 +513,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
         let digests = [transparent_digest, sapling_digest, orchard_digest];
 
         let mut personal = [0; 16];
-        (&mut personal[..12]).copy_from_slice(ZCASH_AUTH_PERSONALIZATION_PREFIX);
+        personal[..12].copy_from_slice(ZCASH_AUTH_PERSONALIZATION_PREFIX);
         (&mut personal[12..])
             .write_u32::<LittleEndian>(consensus_branch_id.into())
             .unwrap();

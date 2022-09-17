@@ -45,7 +45,7 @@ impl Amount {
     ///
     /// Returns an error if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
     pub fn from_i64(amount: i64) -> Result<Self, ()> {
-        if -MAX_MONEY <= amount && amount <= MAX_MONEY {
+        if (-MAX_MONEY..=MAX_MONEY).contains(&amount) {
             Ok(Amount(amount))
         } else {
             Err(())
