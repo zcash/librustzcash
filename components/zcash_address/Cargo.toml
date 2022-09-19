@@ -24,5 +24,8 @@ zcash_encoding = { version = "0.1", path = "../zcash_encoding" }
 assert_matches = "1.3.0"
 proptest = "1"
 
+[features]
+test-dependencies = []
+
 [lib]
 bench = false
