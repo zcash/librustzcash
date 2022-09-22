@@ -26,6 +26,7 @@ hex = "0.4"
 hdwallet = { version = "0.3.1", optional = true }
 jubjub = "0.9"
 log = "0.4"
+memuse = "0.2"
 nom = "7"
 orchard = "0.2"
 percent-encoding = "2.1.0"
