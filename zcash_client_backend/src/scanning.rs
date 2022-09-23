@@ -524,13 +524,13 @@ pub(crate) fn scan_block_with_runner<
                 let mut decrypted = runner.collect_results(cur_hash, txid);
                 (0..decoded.len())
                     .map(|i| {
-                        decrypted.remove(&(txid, i)).map(|d_note| {
-                            let a = d_note.ivk_tag.0;
-                            let nk = vks.get(&d_note.ivk_tag).expect(
+                        decrypted.remove(&(txid, i)).map(|d_out| {
+                            let a = d_out.ivk_tag.0;
+                            let nk = vks.get(&d_out.ivk_tag).expect(
                                 "The batch runner and scan_block must use the same set of IVKs.",
                             );
 
-                            (d_note.note, a, d_note.ivk_tag.1, (*nk).clone())
+                            (d_out.note, a, d_out.ivk_tag.1, (*nk).clone())
                         })
                     })
                     .collect()

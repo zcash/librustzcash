@@ -11,8 +11,8 @@ use memuse::DynamicUsage;
 use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
 use zcash_primitives::{block::BlockHash, transaction::TxId};
 
-/// A decrypted note.
-pub(crate) struct DecryptedNote<A, D: Domain> {
+/// A decrypted transaction output.
+pub(crate) struct DecryptedOutput<A, D: Domain> {
     /// The tag corresponding to the incoming viewing key used to decrypt the note.
     pub(crate) ivk_tag: A,
     /// The recipient of the note.
@@ -21,7 +21,7 @@ pub(crate) struct DecryptedNote<A, D: Domain> {
     pub(crate) note: D::Note,
 }
 
-impl<A, D: Domain> fmt::Debug for DecryptedNote<A, D>
+impl<A, D: Domain> fmt::Debug for DecryptedOutput<A, D>
 where
     A: fmt::Debug,
     D::IncomingViewingKey: fmt::Debug,
@@ -30,7 +30,7 @@ where
     D::Memo: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DecryptedNote")
+        f.debug_struct("DecryptedOutput")
             .field("ivk_tag", &self.ivk_tag)
             .field("recipient", &self.recipient)
             .field("note", &self.note)
@@ -46,7 +46,7 @@ struct OutputIndex<V> {
     value: V,
 }
 
-type OutputItem<A, D> = OutputIndex<DecryptedNote<A, D>>;
+type OutputItem<A, D> = OutputIndex<DecryptedOutput<A, D>>;
 
 /// The sender for the result of batch scanning a specific transaction output.
 struct OutputReplier<A, D: Domain>(OutputIndex<channel::Sender<OutputItem<A, D>>>);
@@ -307,7 +307,7 @@ where
             if let Some(((note, recipient), ivk_idx)) = decryption_result {
                 let result = OutputIndex {
                     output_index: replier.output_index,
-                    value: DecryptedNote {
+                    value: DecryptedOutput {
                         ivk_tag: tags[ivk_idx].clone(),
                         recipient,
                         note,
@@ -487,7 +487,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-    ) -> HashMap<(TxId, usize), DecryptedNote<A, D>> {
+    ) -> HashMap<(TxId, usize), DecryptedOutput<A, D>> {
         self.pending_results
             .remove(&ResultKey(block_tag, txid))
             // We won't have a pending result if the transaction didn't have outputs of
