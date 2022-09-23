@@ -542,7 +542,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use chacha20poly1305::{
-        aead::{AeadInPlace, NewAead},
+        aead::{AeadInPlace, KeyInit},
         ChaCha20Poly1305,
     };
     use ff::{Field, PrimeField};
