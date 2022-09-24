@@ -7,6 +7,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::{cofactor::CofactorGroup, GroupEncoding, WnafBase, WnafScalar};
 use jubjub::{AffinePoint, ExtendedPoint};
+use memuse::DynamicUsage;
 use rand_core::RngCore;
 
 use zcash_note_encryption::{
@@ -38,6 +39,16 @@ type PreparedScalar = WnafScalar<jubjub::Scalar, PREPARED_WINDOW_SIZE>;
 /// A Sapling incoming viewing key that has been precomputed for trial decryption.
 #[derive(Clone, Debug)]
 pub struct PreparedIncomingViewingKey(PreparedScalar);
+
+impl DynamicUsage for PreparedIncomingViewingKey {
+    fn dynamic_usage(&self) -> usize {
+        self.0.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        self.0.dynamic_usage_bounds()
+    }
+}
 
 impl PreparedIncomingViewingKey {
     /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
@@ -144,6 +155,21 @@ where
 pub struct SaplingDomain<P: consensus::Parameters> {
     params: P,
     height: BlockHeight,
+}
+
+impl<P: consensus::Parameters + DynamicUsage> DynamicUsage for SaplingDomain<P> {
+    fn dynamic_usage(&self) -> usize {
+        self.params.dynamic_usage() + self.height.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        let (params_lower, params_upper) = self.params.dynamic_usage_bounds();
+        let (height_lower, height_upper) = self.height.dynamic_usage_bounds();
+        (
+            params_lower + height_lower,
+            params_upper.zip(height_upper).map(|(a, b)| a + b),
+        )
+    }
 }
 
 impl<P: consensus::Parameters> SaplingDomain<P> {

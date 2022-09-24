@@ -1,6 +1,7 @@
 //! Structs and methods for handling Zcash block headers.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use memuse::DynamicUsage;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -11,6 +12,8 @@ pub use equihash;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
+
+memuse::impl_no_dynamic_usage!(BlockHash);
 
 impl fmt::Debug for BlockHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

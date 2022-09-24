@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
+use memuse::DynamicUsage;
 use orchard::value as orchard;
 
 pub const COIN: i64 = 1_0000_0000;
@@ -23,17 +24,7 @@ pub const DEFAULT_FEE: Amount = Amount(1000);
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Amount(i64);
 
-impl memuse::DynamicUsage for Amount {
-    #[inline(always)]
-    fn dynamic_usage(&self) -> usize {
-        0
-    }
-
-    #[inline(always)]
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        (0, Some(0))
-    }
-}
+memuse::impl_no_dynamic_usage!(Amount);
 
 impl Amount {
     /// Returns a zero-valued Amount.

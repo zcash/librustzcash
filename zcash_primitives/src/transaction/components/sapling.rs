@@ -2,6 +2,8 @@ use core::fmt::Debug;
 
 use ff::PrimeField;
 use group::GroupEncoding;
+use memuse::DynamicUsage;
+
 use std::io::{self, Read, Write};
 
 use zcash_note_encryption::{
@@ -261,6 +263,16 @@ pub struct OutputDescription<Proof> {
     pub zkproof: Proof,
 }
 
+impl<Proof: DynamicUsage> DynamicUsage for OutputDescription<Proof> {
+    fn dynamic_usage(&self) -> usize {
+        self.zkproof.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        self.zkproof.dynamic_usage_bounds()
+    }
+}
+
 impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>, ENC_CIPHERTEXT_SIZE>
     for OutputDescription<A>
 {
@@ -348,6 +360,8 @@ pub struct OutputDescriptionV5 {
     pub out_ciphertext: [u8; 80],
 }
 
+memuse::impl_no_dynamic_usage!(OutputDescriptionV5);
+
 impl OutputDescriptionV5 {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let cv = read_point(&mut reader, "cv")?;
@@ -394,6 +408,8 @@ pub struct CompactOutputDescription {
     pub cmu: bls12_381::Scalar,
     pub enc_ciphertext: [u8; COMPACT_NOTE_SIZE],
 }
+
+memuse::impl_no_dynamic_usage!(CompactOutputDescription);
 
 impl<A> From<OutputDescription<A>> for CompactOutputDescription {
     fn from(out: OutputDescription<A>) -> CompactOutputDescription {
