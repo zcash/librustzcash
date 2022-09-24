@@ -20,7 +20,7 @@ use zcash_primitives::{
 
 use crate::{
     proto::compact_formats::CompactBlock,
-    scan::BatchRunner,
+    scan::{Batch, BatchRunner, Tasks},
     wallet::{WalletShieldedOutput, WalletShieldedSpend, WalletTx},
 };
 
@@ -166,7 +166,7 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
 ) -> Vec<WalletTx<K::Nf>> {
-    scan_block_with_runner(
+    scan_block_with_runner::<_, _, ()>(
         params,
         block,
         vks,
@@ -177,16 +177,18 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
-type TaggedBatchRunner<P, S> =
-    BatchRunner<(AccountId, S), SaplingDomain<P>, CompactOutputDescription>;
+type TaggedBatch<P, S> = Batch<(AccountId, S), SaplingDomain<P>, CompactOutputDescription>;
+type TaggedBatchRunner<P, S, T> =
+    BatchRunner<(AccountId, S), SaplingDomain<P>, CompactOutputDescription, T>;
 
-pub(crate) fn add_block_to_runner<P, S>(
+pub(crate) fn add_block_to_runner<P, S, T>(
     params: &P,
     block: CompactBlock,
-    batch_runner: &mut TaggedBatchRunner<P, S>,
+    batch_runner: &mut TaggedBatchRunner<P, S, T>,
 ) where
     P: consensus::Parameters + Send + 'static,
     S: Clone + Send + 'static,
+    T: Tasks<TaggedBatch<P, S>>,
 {
     let block_hash = block.hash();
     let block_height = block.height();
@@ -211,14 +213,18 @@ pub(crate) fn add_block_to_runner<P, S>(
     }
 }
 
-pub(crate) fn scan_block_with_runner<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
+pub(crate) fn scan_block_with_runner<
+    P: consensus::Parameters + Send + 'static,
+    K: ScanningKey,
+    T: Tasks<TaggedBatch<P, K::Scope>> + Sync,
+>(
     params: &P,
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
     nullifiers: &[(AccountId, Nullifier)],
     tree: &mut CommitmentTree<Node>,
     existing_witnesses: &mut [&mut IncrementalWitness<Node>],
-    mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope>>,
+    mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,
 ) -> Vec<WalletTx<K::Nf>> {
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
     let block_height = block.height();
@@ -554,7 +560,7 @@ mod tests {
 
             let mut tree = CommitmentTree::empty();
             let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::new(
+                let mut runner = BatchRunner::<_, _, _, ()>::new(
                     10,
                     extfvk
                         .to_sapling_keys()
@@ -618,7 +624,7 @@ mod tests {
 
             let mut tree = CommitmentTree::empty();
             let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::new(
+                let mut runner = BatchRunner::<_, _, _, ()>::new(
                     10,
                     extfvk
                         .to_sapling_keys()

@@ -232,7 +232,7 @@ where
     // Get the nullifiers for the notes we are tracking
     let mut nullifiers = data.get_nullifiers()?;
 
-    let mut batch_runner = BatchRunner::new(
+    let mut batch_runner = BatchRunner::<_, _, _, ()>::new(
         100,
         dfvks
             .iter()
