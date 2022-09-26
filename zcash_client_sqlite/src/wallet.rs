@@ -183,12 +183,12 @@ pub(crate) fn get_max_account_id<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Option<AccountId>, SqliteClientError> {
     // This returns the most recently generated address.
-    Ok(wdb
-        .conn
+    wdb.conn
         .query_row("SELECT MAX(account) FROM accounts", NO_PARAMS, |row| {
-            row.get::<_, u32>(0).map(AccountId::from)
+            let account_id: Option<u32> = row.get(0)?;
+            Ok(account_id.map(AccountId::from))
         })
-        .optional()?)
+        .map_err(SqliteClientError::from)
 }
 
 pub(crate) fn add_account<P: consensus::Parameters>(
