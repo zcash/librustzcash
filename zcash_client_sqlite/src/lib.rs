@@ -55,11 +55,13 @@ use zcash_primitives::{
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
     data_api::{
-        BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
+        BlockSource, DecryptedTransaction, PrunedBlock, Recipient, SentTransaction, WalletRead,
+        WalletWrite,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::SpendableNote,
+    TransferType,
 };
 
 use crate::error::SqliteClientError;
@@ -529,29 +531,38 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             let mut spending_account_id: Option<AccountId> = None;
             for output in d_tx.sapling_outputs {
-                if output.outgoing {
-                    wallet::put_sent_note(
-                        up,
-                        tx_ref,
-                        output.index,
-                        output.account,
-                        &output.to,
-                        Amount::from_u64(output.note.value)
-                            .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-                        Some(&output.memo),
-                    )?;
-                } else {
-                    match spending_account_id {
-                        Some(id) =>
-                            if id != output.account {
-                                panic!("Unable to determine a unique account identifier for z->t spend.");
-                            }
-                        None => {
-                            spending_account_id = Some(output.account);
-                        }
-                    }
+                match output.transfer_type {
+                    TransferType::Outgoing | TransferType::WalletInternal => {
+                        let recipient = if output.transfer_type == TransferType::Outgoing {
+                            Recipient::Address(RecipientAddress::Shielded(output.to.clone()))
+                        } else {
+                            Recipient::InternalAccount(output.account)
+                        };
 
-                    wallet::put_received_note(up, output, tx_ref)?;
+                        wallet::put_sent_note(
+                            up,
+                            tx_ref,
+                            output.index,
+                            output.account,
+                            &recipient,
+                            Amount::from_u64(output.note.value)
+                                .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
+                            Some(&output.memo),
+                        )?;
+                    }
+                    TransferType::Incoming => {
+                        match spending_account_id {
+                            Some(id) =>
+                                if id != output.account {
+                                    panic!("Unable to determine a unique account identifier for z->t spend.");
+                                }
+                            None => {
+                                spending_account_id = Some(output.account);
+                            }
+                        }
+
+                        wallet::put_received_note(up, output, tx_ref)?;
+                    }
                 }
             }
 
@@ -611,34 +622,25 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             for output in &sent_tx.outputs {
-                match output.recipient_address {
-                    // TODO: Store the entire UA, not just the Sapling component.
-                    // This will require more info about the output index.
-                    RecipientAddress::Unified(ua) => wallet::insert_sent_note(
+                match &output.recipient {
+                    Recipient::Address(RecipientAddress::Transparent(addr)) => {
+                        wallet::insert_sent_utxo(
+                            up,
+                            tx_ref,
+                            output.output_index,
+                            sent_tx.account,
+                            addr,
+                            output.value,
+                        )?
+                    }
+                    shielded_recipient => wallet::insert_sent_note(
                         up,
                         tx_ref,
                         output.output_index,
                         sent_tx.account,
-                        ua.sapling().expect("TODO: Add Orchard support"),
+                        shielded_recipient,
                         output.value,
                         output.memo.as_ref(),
-                    )?,
-                    RecipientAddress::Shielded(addr) => wallet::insert_sent_note(
-                        up,
-                        tx_ref,
-                        output.output_index,
-                        sent_tx.account,
-                        addr,
-                        output.value,
-                        output.memo.as_ref(),
-                    )?,
-                    RecipientAddress::Transparent(addr) => wallet::insert_sent_utxo(
-                        up,
-                        tx_ref,
-                        output.output_index,
-                        sent_tx.account,
-                        addr,
-                        output.value,
                     )?,
                 }
             }

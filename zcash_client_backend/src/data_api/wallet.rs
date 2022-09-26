@@ -23,7 +23,8 @@ use {
 use crate::{
     address::RecipientAddress,
     data_api::{
-        error::Error, DecryptedTransaction, SentTransaction, SentTransactionOutput, WalletWrite,
+        error::Error, DecryptedTransaction, Recipient, SentTransaction, SentTransactionOutput,
+        WalletWrite,
     },
     decrypt_transaction,
     wallet::OvkPolicy,
@@ -394,7 +395,7 @@ where
 
         SentTransactionOutput {
             output_index: idx,
-            recipient_address: &payment.recipient_address,
+            recipient: Recipient::Address(payment.recipient_address.clone()),
             value: payment.amount,
             memo: payment.memo.clone()
         }
@@ -512,12 +513,7 @@ where
 
     // add the sapling output to shield the funds
     builder
-        .add_sapling_output(
-            Some(ovk),
-            shielding_address.clone(),
-            amount_to_shield,
-            memo.clone(),
-        )
+        .add_sapling_output(Some(ovk), shielding_address, amount_to_shield, memo.clone())
         .map_err(Error::Builder)?;
 
     let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
@@ -531,8 +527,8 @@ where
         account,
         outputs: vec![SentTransactionOutput {
             output_index,
-            recipient_address: &RecipientAddress::Shielded(shielding_address),
             value: amount_to_shield,
+            recipient: Recipient::InternalAccount(account),
             memo: Some(memo.clone()),
         }],
         fee_amount: fee,

@@ -10,10 +10,21 @@ use zcash_primitives::{
         Note, PaymentAddress,
     },
     transaction::Transaction,
-    zip32::AccountId,
+    zip32::{AccountId, Scope},
 };
 
 use crate::keys::UnifiedFullViewingKey;
+
+/// An enumeration of the possible relationships a TXO can have to the wallet.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TransferType {
+    /// The transfer was received on one of the wallet's external addresses.
+    Incoming,
+    /// The transfer was received on one of the wallet's internal-only addresses.
+    WalletInternal,
+    /// The transfer was decrypted using one of the wallet's outgoing viewing keys.
+    Outgoing,
+}
 
 /// A decrypted shielded output.
 pub struct DecryptedOutput {
@@ -33,7 +44,7 @@ pub struct DecryptedOutput {
     /// this is a logical output of the transaction.
     ///
     /// [`OutgoingViewingKey`]: zcash_primitives::keys::OutgoingViewingKey
-    pub outgoing: bool,
+    pub transfer_type: TransferType,
 }
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
@@ -49,19 +60,29 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     if let Some(bundle) = tx.sapling_bundle() {
         for (account, ufvk) in ufvks.iter() {
             if let Some(dfvk) = ufvk.sapling() {
-                let ivk = PreparedIncomingViewingKey::new(&dfvk.fvk().vk.ivk());
+                let ivk_external = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External));
+                let ivk_internal = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
                 let ovk = dfvk.fvk().ovk;
 
                 for (index, output) in bundle.shielded_outputs.iter().enumerate() {
-                    let ((note, to, memo), outgoing) =
-                        match try_sapling_note_decryption(params, height, &ivk, output) {
-                            Some(ret) => (ret, false),
-                            None => match try_sapling_output_recovery(params, height, &ovk, output)
-                            {
-                                Some(ret) => (ret, true),
-                                None => continue,
-                            },
-                        };
+                    let decryption_result =
+                        try_sapling_note_decryption(params, height, &ivk_external, output)
+                            .map(|ret| (ret, TransferType::Incoming))
+                            .or_else(|| {
+                                try_sapling_note_decryption(params, height, &ivk_internal, output)
+                                    .map(|ret| (ret, TransferType::WalletInternal))
+                            })
+                            .or_else(|| {
+                                try_sapling_output_recovery(params, height, &ovk, output)
+                                    .map(|ret| (ret, TransferType::Outgoing))
+                            });
+
+                    let ((note, to, memo), transfer_type) = match decryption_result {
+                        Some(result) => result,
+                        None => {
+                            continue;
+                        }
+                    };
 
                     decrypted.push(DecryptedOutput {
                         index,
@@ -69,7 +90,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                         account: *account,
                         to,
                         memo,
-                        outgoing,
+                        transfer_type,
                     })
                 }
             }

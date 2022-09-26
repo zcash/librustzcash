@@ -248,13 +248,19 @@ pub struct SentTransaction<'a> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,
     pub account: AccountId,
-    pub outputs: Vec<SentTransactionOutput<'a>>,
+    pub outputs: Vec<SentTransactionOutput>,
     pub fee_amount: Amount,
     #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
 }
 
-pub struct SentTransactionOutput<'a> {
+#[derive(Debug, Clone)]
+pub enum Recipient {
+    Address(RecipientAddress),
+    InternalAccount(AccountId),
+}
+
+pub struct SentTransactionOutput {
     /// The index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
@@ -262,7 +268,7 @@ pub struct SentTransactionOutput<'a> {
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
     pub output_index: usize,
-    pub recipient_address: &'a RecipientAddress,
+    pub recipient: Recipient,
     pub value: Amount,
     pub memo: Option<MemoBytes>,
 }

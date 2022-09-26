@@ -27,8 +27,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
-    data_api::error::Error,
-    encoding::{encode_payment_address_p, encode_transparent_address_p},
+    data_api::{error::Error, Recipient},
     keys::UnifiedFullViewingKey,
     wallet::{WalletShieldedOutput, WalletTx},
     DecryptedOutput,
@@ -1163,14 +1162,14 @@ pub fn put_sent_note<'a, P: consensus::Parameters>(
     tx_ref: i64,
     output_index: usize,
     account: AccountId,
-    to: &PaymentAddress,
+    to: &Recipient,
     value: Amount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
     // Try updating an existing sent note.
     if !stmts.stmt_update_sent_note(
         account,
-        &encode_payment_address_p(&stmts.wallet_db.params, to),
+        to,
         value,
         memo,
         tx_ref,
@@ -1203,7 +1202,7 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
     // Try updating an existing sent UTXO.
     if !stmts.stmt_update_sent_note(
         account,
-        &encode_transparent_address_p(&stmts.wallet_db.params, to),
+        &Recipient::Address(RecipientAddress::Transparent(*to)),
         value,
         None,
         tx_ref,
@@ -1225,26 +1224,21 @@ pub fn put_sent_utxo<'a, P: consensus::Parameters>(
 ///   transaction.
 /// - If `to` is a transparent address, this is an index into the transparent outputs of
 ///   the transaction.
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_sent_tx instead."
-)]
-pub fn insert_sent_note<'a, P: consensus::Parameters>(
+pub(crate) fn insert_sent_note<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
     output_index: usize,
-    account: AccountId,
-    to: &PaymentAddress,
+    from_account: AccountId,
+    to: &Recipient,
     value: Amount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
-    let to_str = encode_payment_address_p(&stmts.wallet_db.params, to);
-
     stmts.stmt_insert_sent_note(
         tx_ref,
         PoolType::Sapling,
         output_index,
-        account,
-        &to_str,
+        from_account,
+        to,
         value,
         memo,
     )
@@ -1264,14 +1258,12 @@ pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
     to: &TransparentAddress,
     value: Amount,
 ) -> Result<(), SqliteClientError> {
-    let to_str = encode_transparent_address_p(&stmts.wallet_db.params, to);
-
     stmts.stmt_insert_sent_note(
         tx_ref,
         PoolType::Transparent,
         output_index,
         account,
-        &to_str,
+        &Recipient::Address(RecipientAddress::Transparent(*to)),
         value,
         None,
     )

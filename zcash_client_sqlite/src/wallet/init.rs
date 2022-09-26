@@ -122,8 +122,13 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     seed: Option<SecretVec<u8>>,
     target_migration: Option<Uuid>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
+    // Turn off foreign keys, and ensure that table replacement/modification
+    // does not break views
     wdb.conn
-        .execute("PRAGMA foreign_keys = OFF", [])
+        .execute_batch(
+            "PRAGMA foreign_keys = OFF;
+                        PRAGMA legacy_alter_table = TRUE;",
+        )
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
@@ -375,11 +380,13 @@ mod tests {
                 output_pool INTEGER NOT NULL ,
                 output_index INTEGER NOT NULL,
                 from_account INTEGER NOT NULL,
-                address TEXT NOT NULL,
+                to_address TEXT,
+                to_account INTEGER,
                 value INTEGER NOT NULL,
                 memo BLOB,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (from_account) REFERENCES accounts(account),
+                FOREIGN KEY (to_account) REFERENCES accounts(account),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
             )",
             "CREATE TABLE transactions (
