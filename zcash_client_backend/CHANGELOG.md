@@ -54,6 +54,13 @@ and this library adheres to Rust's notion of
   - `KeyError`
   - `AddressCodec` implementations for `sapling::PaymentAddress` and
     `UnifiedAddress`
+- `zcash_client_backend::fees`
+  - `ChangeError`
+  - `ChangeStrategy`
+  - `ChangeValue`
+  - `TransactionBalance`
+  - `BasicFixedFeeChangeStrategy` - a `ChangeStrategy` implementation that
+    reproduces current wallet change behavior
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:
@@ -105,6 +112,8 @@ and this library adheres to Rust's notion of
 - `data_api::ReceivedTransaction` has been renamed to `DecryptedTransaction`,
   and its `outputs` field has been renamed to `sapling_outputs`.
 - `data_api::error::Error` has the following additional cases:
+  - `Error::BalanceError` in the case of amount addition overflow
+    or subtraction underflow.
   - `Error::MemoForbidden` to report the condition where a memo was
     specified to be sent to a transparent recipient.
   - `Error::TransparentInputsNotSupported` to represent the condition

@@ -6,7 +6,11 @@ use zcash_address::unified::Typecode;
 use zcash_primitives::{
     consensus::BlockHeight,
     sapling::Node,
-    transaction::{builder, components::amount::Amount, TxId},
+    transaction::{
+        builder,
+        components::amount::{Amount, BalanceError},
+        TxId,
+    },
     zip32::AccountId,
 };
 
@@ -33,8 +37,8 @@ pub enum Error<NoteId> {
     /// No account with the given identifier was found in the wallet.
     AccountNotFound(AccountId),
 
-    /// The amount specified exceeds the allowed range.
-    InvalidAmount,
+    /// Zcash amount computation encountered an overflow or underflow.
+    BalanceError(BalanceError),
 
     /// Unable to create a new spend because the wallet balance is not sufficient.
     /// The first argument is the amount available, the second is the amount needed
@@ -113,9 +117,9 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::AccountNotFound(account) => {
                 write!(f, "Wallet does not contain account {}", u32::from(*account))
             }
-            Error::InvalidAmount => write!(
+            Error::BalanceError(e) => write!(
                 f,
-                "The value lies outside the valid range of Zcash amounts."
+                "The value lies outside the valid range of Zcash amounts: {:?}.", e
             ),
             Error::InsufficientBalance(have, need) => write!(
                 f,
