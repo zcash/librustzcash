@@ -6,6 +6,7 @@ use aes::Aes256;
 use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
+use memuse::DynamicUsage;
 use std::ops::AddAssign;
 use subtle::{Choice, ConditionallySelectable};
 
@@ -30,6 +31,8 @@ pub const ZIP32_SAPLING_INT_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingInt";
 /// A type-safe wrapper for account identifiers.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountId(u32);
+
+memuse::impl_no_dynamic_usage!(AccountId);
 
 impl From<u32> for AccountId {
     fn from(id: u32) -> Self {

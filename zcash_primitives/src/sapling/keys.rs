@@ -13,6 +13,7 @@ use crate::{
 };
 use ff::PrimeField;
 use group::{Group, GroupEncoding};
+use memuse::DynamicUsage;
 use subtle::CtOption;
 
 use super::{NullifierDerivingKey, PaymentAddress, ProofGenerationKey, SaplingIvk, ViewingKey};
@@ -200,6 +201,8 @@ pub enum Scope {
     /// auto-shielding, and note management.
     Internal,
 }
+
+memuse::impl_no_dynamic_usage!(Scope);
 
 /// A Sapling key that provides the capability to view incoming and outgoing transactions.
 ///

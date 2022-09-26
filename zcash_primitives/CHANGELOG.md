@@ -36,6 +36,20 @@ and this library adheres to Rust's notion of
   - `JSDescription::net_value`
 - Added in `zcash_primitives::transaction::components::transparent`
   - `Bundle::value_balance`
+- Implementations of `memuse::DynamicUsage` for the following types:
+  - `zcash_primitives::block::BlockHash`
+  - `zcash_primitives::consensus`:
+    - `BlockHeight`
+    - `MainNetwork`, `TestNetwork`, `Network`
+    - `NetworkUpgrade`, `BranchId`
+  - `zcash_primitives::sapling`:
+    - `keys::Scope`
+    - `note_encryption::SaplingDomain`
+  - `zcash_primitives::transaction`:
+    - `TxId`
+    - `components::sapling::CompactOutputDescription`
+    - `components::sapling::{OutputDescription, OutputDescriptionV5}`
+  - `zcash_primitives::zip32::AccountId`
 
 ### Changed
 - Migrated to `group 0.13`.
