@@ -164,7 +164,7 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, BranchId, Parameters},
+        consensus::{BlockHeight, BranchId},
         legacy::TransparentAddress,
         sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, Transaction},
@@ -173,12 +173,9 @@ mod tests {
         },
     };
 
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_primitives::legacy::keys as transparent;
-
     use zcash_client_backend::{
         data_api::{chain::scan_cached_blocks, wallet::create_spend_to_address, WalletRead},
-        keys::{sapling, UnifiedFullViewingKey},
+        keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
         wallet::OvkPolicy,
     };
 
@@ -211,53 +208,26 @@ mod tests {
         let acct1 = AccountId::from(1);
 
         // Add two accounts to the wallet
-        let extsk0 = sapling::spending_key(&[0u8; 32], network().coin_type(), acct0);
-        let extsk1 = sapling::spending_key(&[1u8; 32], network().coin_type(), acct1);
-        let dfvk0 = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk0));
-        let dfvk1 = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk1));
+        let usk0 = UnifiedSpendingKey::from_seed(&network(), &[0u8; 32], acct0).unwrap();
+        let usk1 = UnifiedSpendingKey::from_seed(&network(), &[1u8; 32], acct1).unwrap();
+        let dfvk0 = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(usk0.sapling()));
 
-        #[cfg(feature = "transparent-inputs")]
-        let ufvks = {
-            let tsk0 =
-                transparent::AccountPrivKey::from_seed(&network(), &[0u8; 32], acct0).unwrap();
-            let tsk1 =
-                transparent::AccountPrivKey::from_seed(&network(), &[1u8; 32], acct1).unwrap();
-            HashMap::from([
-                (
-                    acct0,
-                    UnifiedFullViewingKey::new(Some(tsk0.to_account_pubkey()), Some(dfvk0), None)
-                        .unwrap(),
-                ),
-                (
-                    acct1,
-                    UnifiedFullViewingKey::new(Some(tsk1.to_account_pubkey()), Some(dfvk1), None)
-                        .unwrap(),
-                ),
-            ])
-        };
-        #[cfg(not(feature = "transparent-inputs"))]
         let ufvks = HashMap::from([
-            (
-                acct0,
-                UnifiedFullViewingKey::new(Some(dfvk0), None).unwrap(),
-            ),
-            (
-                acct1,
-                UnifiedFullViewingKey::new(Some(dfvk1), None).unwrap(),
-            ),
+            (acct0, usk0.to_unified_full_viewing_key()),
+            (acct1, usk1.to_unified_full_viewing_key()),
         ]);
 
         init_accounts_table(&db_data, &ufvks).unwrap();
-        let to = extsk0.default_address().1.into();
+        let to = dfvk0.default_address().1.into();
 
-        // Invalid extsk for the given account should cause an error
+        // Invalid usk for the given account should cause an error
         let mut db_write = db_data.get_update_ops().unwrap();
         match create_spend_to_address(
             &mut db_write,
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk1,
+            &usk1,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -273,7 +243,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(1),
-            &extsk0,
+            &usk0,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -293,8 +263,9 @@ mod tests {
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let usk = UnifiedSpendingKey::from_seed(&network(), &[0u8; 32], account_id).unwrap();
+        let extsk = usk.sapling();
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(extsk));
 
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
@@ -311,7 +282,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -339,8 +310,9 @@ mod tests {
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let usk = UnifiedSpendingKey::from_seed(&network(), &[0u8; 32], account_id).unwrap();
+        let extsk = usk.sapling();
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
@@ -362,7 +334,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(1).unwrap(),
             None,
@@ -389,8 +361,9 @@ mod tests {
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let usk = UnifiedSpendingKey::from_seed(&network(), &[0u8; 32], account_id).unwrap();
+        let extsk = usk.sapling();
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
@@ -442,7 +415,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
@@ -471,7 +444,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
@@ -496,7 +469,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(70000).unwrap(),
             None,
@@ -518,8 +491,9 @@ mod tests {
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let usk = UnifiedSpendingKey::from_seed(&network(), &[0u8; 32], account_id).unwrap();
+        let extsk = usk.sapling();
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
@@ -548,7 +522,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(15000).unwrap(),
             None,
@@ -563,7 +537,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
@@ -596,7 +570,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
@@ -626,7 +600,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(2000).unwrap(),
             None,
@@ -649,8 +623,9 @@ mod tests {
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
-        let extsk = sapling::spending_key(&[0u8; 32], network.coin_type(), account_id);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account_id).unwrap();
+        let extsk = usk.sapling();
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
@@ -681,7 +656,7 @@ mod tests {
                 &tests::network(),
                 test_prover(),
                 AccountId::from(0),
-                &extsk,
+                &usk,
                 &to,
                 Amount::from_u64(15000).unwrap(),
                 None,
@@ -761,8 +736,9 @@ mod tests {
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
-        let extsk = sapling::spending_key(&[0u8; 32], network().coin_type(), account_id);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let usk = UnifiedSpendingKey::from_seed(&network(), &[0u8; 32], account_id).unwrap();
+        let extsk = usk.sapling();
+        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(extsk));
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk.clone()), None).unwrap();
         #[cfg(not(feature = "transparent-inputs"))]
@@ -796,7 +772,7 @@ mod tests {
             &tests::network(),
             test_prover(),
             AccountId::from(0),
-            &extsk,
+            &usk,
             &to,
             Amount::from_u64(50000).unwrap(),
             None,

@@ -8,16 +8,13 @@ use zcash_primitives::{
         components::{amount::DEFAULT_FEE, Amount},
         Transaction,
     },
-    zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey},
+    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_address::unified::Typecode,
-    zcash_primitives::{
-        legacy::keys::{self as transparent, IncomingViewingKey},
-        sapling::keys::OutgoingViewingKey,
-    },
+    zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey},
 };
 
 use crate::{
@@ -26,6 +23,7 @@ use crate::{
         error::Error, DecryptedTransaction, SentTransaction, SentTransactionOutput, WalletWrite,
     },
     decrypt_transaction,
+    keys::UnifiedSpendingKey,
     wallet::OvkPolicy,
     zip321::{Payment, TransactionRequest},
 };
@@ -128,7 +126,7 @@ where
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
-///     keys::sapling,
+///     keys::{UnifiedSpendingKey},
 ///     data_api::{wallet::create_spend_to_address, error::Error, testing},
 ///     wallet::OvkPolicy,
 /// };
@@ -147,8 +145,8 @@ where
 /// };
 ///
 /// let account = AccountId::from(0);
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, account);
-/// let to = extsk.default_address().1.into();
+/// let usk = UnifiedSpendingKey::from_seed(&Network::TestNetwork, &[0; 32][..], account).unwrap();
+/// let to = usk.to_unified_full_viewing_key().default_address().0.into();
 ///
 /// let mut db_read = testing::MockWalletDb {
 ///     network: Network::TestNetwork
@@ -159,7 +157,7 @@ where
 ///     &Network::TestNetwork,
 ///     tx_prover,
 ///     account,
-///     &extsk,
+///     &usk,
 ///     &to,
 ///     Amount::from_u64(1).unwrap(),
 ///     None,
@@ -176,7 +174,7 @@ pub fn create_spend_to_address<E, N, P, D, R>(
     params: &P,
     prover: impl TxProver,
     account: AccountId,
-    extsk: &ExtendedSpendingKey,
+    usk: &UnifiedSpendingKey,
     to: &RecipientAddress,
     amount: Amount,
     memo: Option<MemoBytes>,
@@ -205,7 +203,7 @@ where
         wallet_db,
         params,
         prover,
-        extsk,
+        usk,
         account,
         &req,
         ovk_policy,
@@ -247,7 +245,7 @@ where
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
 /// * `prover`: The TxProver to use in constructing the shielded transaction.
-/// * `extsk`: The extended spending key that controls the funds that will be spent
+/// * `usk`: The unified spending key that controls the funds that will be spent
 ///   in the resulting transaction.
 /// * `account`: The ZIP32 account identifier associated with the extended spending
 ///   key that controls the funds to be used in creating this transaction.  This
@@ -264,7 +262,7 @@ pub fn spend<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    extsk: &ExtendedSpendingKey,
+    usk: &UnifiedSpendingKey,
     account: AccountId,
     request: &TransactionRequest,
     ovk_policy: OvkPolicy,
@@ -278,7 +276,8 @@ where
 {
     // Check that the ExtendedSpendingKey we have been given corresponds to the
     // ExtendedFullViewingKey for the account we are spending from.
-    let extfvk = ExtendedFullViewingKey::from(extsk);
+    // For now, just check the Sapling extfvk against the account
+    let extfvk = ExtendedFullViewingKey::from(usk.sapling());
     if !wallet_db.is_valid_account_extfvk(account, &extfvk)? {
         return Err(E::from(Error::InvalidExtSk(account)));
     }
@@ -334,7 +333,12 @@ where
         let merkle_path = selected.witness.path().expect("the tree is not empty");
 
         builder
-            .add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)
+            .add_sapling_spend(
+                usk.sapling().clone(),
+                selected.diversifier,
+                note,
+                merkle_path,
+            )
             .map_err(Error::Builder)?;
     }
 
@@ -442,7 +446,7 @@ pub fn shield_transparent_funds<E, N, P, D, R, U>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    sk: &transparent::AccountPrivKey,
+    usk: &UnifiedSpendingKey,
     account: AccountId,
     memo: &MemoBytes,
     min_confirmations: u32,
@@ -474,7 +478,7 @@ where
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
-    let account_pubkey = sk.to_account_pubkey();
+    let account_pubkey = usk.transparent().to_account_pubkey();
     let ovk = OutgoingViewingKey(account_pubkey.internal_ovk().as_bytes());
 
     // derive the t-address for the extpubkey at the minimum valid child index
@@ -500,7 +504,10 @@ where
 
     let mut builder = Builder::new_with_fee(params.clone(), latest_scanned_height, fee);
 
-    let secret_key = sk.derive_external_secret_key(child_index).unwrap();
+    let secret_key = usk
+        .transparent()
+        .derive_external_secret_key(child_index)
+        .unwrap();
     for utxo in &utxos {
         builder
             .add_transparent_input(secret_key, utxo.outpoint.clone(), utxo.txout.clone())
