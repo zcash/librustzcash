@@ -3,8 +3,10 @@
 use alloc::vec::Vec; // module is alloc only
 
 use crate::{
-    try_compact_note_decryption_inner, try_note_decryption_inner, BatchDomain, EphemeralKeyBytes,
-    ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
+    try_compact_note_decryption_inner, try_note_decryption_inner,
+    BatchDomain, EphemeralKeyBytes,
+    ShieldedOutput,
+    // COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
 };
 
 /// Trial decryption of a batch of notes with a set of recipients.
@@ -16,7 +18,7 @@ use crate::{
 /// provided, along with the index in the `ivks` slice associated with
 /// the IVK that successfully decrypted the output.
 #[allow(clippy::type_complexity)]
-pub fn try_note_decryption<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>>(
+pub fn try_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
 ) -> Vec<Option<((D::Note, D::Recipient, D::Memo), usize)>> {
@@ -32,14 +34,14 @@ pub fn try_note_decryption<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERT
 /// provided, along with the index in the `ivks` slice associated with
 /// the IVK that successfully decrypted the output.
 #[allow(clippy::type_complexity)]
-pub fn try_compact_note_decryption<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>>(
+pub fn try_compact_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
 ) -> Vec<Option<((D::Note, D::Recipient), usize)>> {
     batch_note_decryption(ivks, outputs, try_compact_note_decryption_inner)
 }
 
-fn batch_note_decryption<D: BatchDomain, Output: ShieldedOutput<D, CS>, F, FR, const CS: usize>(
+fn batch_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>, F, FR>(
     ivks: &[D::IncomingViewingKey],
     outputs: &[(D, Output)],
     decrypt_inner: F,
