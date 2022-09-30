@@ -6,7 +6,6 @@ use crate::{
     try_compact_note_decryption_inner, try_note_decryption_inner,
     BatchDomain, EphemeralKeyBytes,
     ShieldedOutput,
-    // COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
 };
 
 /// Trial decryption of a batch of notes with a set of recipients.

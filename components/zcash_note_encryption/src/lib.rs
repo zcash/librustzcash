@@ -104,14 +104,6 @@ enum NoteValidity {
     Invalid,
 }
 
-// /// Enum for the note plaintext.
-// /// The variants represent whether the note is a full note or a compact note.
-// #[derive(Copy, Clone, PartialEq, Eq)]
-// enum NotePlaintext<D: Domain> {
-//     Full(D::NotePlaintextBytes),
-//     Compact(D::CompactNotePlaintextBytes),
-// }
-
 /// Enum for the note ciphertext.
 /// The variants represent whether the encrypted note is a full note or a compact note.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -119,24 +111,6 @@ pub enum NoteCiphertext<D: Domain> {
     Full(D::EncNoteCiphertextBytes),
     Compact(D::CompactEncNoteCiphertextBytes),
 }
-
-// /// Function to extract the full note plaintext from the `NotePlaintext` enum.
-// /// Returns `None` if the enum variant is `Compact`.
-// pub fn extract_full_note_plaintext<D: Domain>(np: NotePlaintext<D>) -> Option<D::NotePlaintextBytes> {
-//     match np {
-//         NotePlaintext::Full(x) => Some(x),
-//         NotePlaintext::Compact(_) => None,
-//     }
-// }
-
-// /// Function to extract the compact note plaintext from the `NotePlaintext` enum.
-// /// Returns `None` if the enum variant is `Full`.
-// pub fn extract_compact_note_plaintext<D: Domain>(np: NotePlaintext<D>) -> Option<D::CompactNotePlaintextBytes> {
-//     match np {
-//         NotePlaintext::Full(_) => None,
-//         NotePlaintext::Compact(x) => Some(x),
-//     }
-// }
 
 /// Function to extract the full encrypted note ciphertext from the `NoteCiphertext` enum.
 /// Returns `None` if the enum variant is `Compact`.
@@ -542,18 +516,6 @@ impl<D: Domain> NoteEncryption<D> {
         let input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
 
         D::encrypt_with_key(key, input)
-        // let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
-        // output[..NOTE_PLAINTEXT_SIZE].copy_from_slice(&input.0);
-        // let tag = ChaCha20Poly1305::new(key.as_ref().into())
-        //     .encrypt_in_place_detached(
-        //         [0u8; 12][..].into(),
-        //         &[],
-        //         &mut output[..NOTE_PLAINTEXT_SIZE],
-        //     )
-        //     .unwrap();
-        // output[NOTE_PLAINTEXT_SIZE..].copy_from_slice(&tag);
-        //
-        // output
     }
 
     /// Generates `outCiphertext` for this note.
@@ -638,17 +600,6 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 
     let plaintext = D::decrypt_with_key(key, enc_ciphertext);
     let compact_plaintext = D::convert_to_compact_plaintext(&plaintext);
-    // let mut plaintext =
-    //     NotePlaintextBytes(enc_ciphertext[..NOTE_PLAINTEXT_SIZE].try_into().unwrap());
-    //
-    // ChaCha20Poly1305::new(key.as_ref().into())
-    //     .decrypt_in_place_detached(
-    //         [0u8; 12][..].into(),
-    //         &[],
-    //         &mut plaintext.0,
-    //         enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
-    //     )
-    //     .ok()?;
 
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
@@ -753,12 +704,6 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     }
 
     let plaintext = D::decrypt_compact_with_key(key, enc_ciphertext);
-    // // Start from block 1 to skip over Poly1305 keying output
-    // let mut plaintext = [0; COMPACT_NOTE_SIZE];
-    // plaintext.copy_from_slice(output.enc_ciphertext());
-    // let mut keystream = ChaCha20::new(key.as_ref().into(), [0u8; 12][..].into());
-    // keystream.seek(64);
-    // keystream.apply_keystream(&mut plaintext);
 
     parse_note_plaintext_without_memo_ivk(
         domain,
@@ -842,19 +787,6 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
 
     let plaintext = D::decrypt_with_key(&key, enc_ciphertext);
     let compact_plaintext = D::convert_to_compact_plaintext(&plaintext);
-    // let mut plaintext = NotePlaintextBytes([0; NOTE_PLAINTEXT_SIZE]);
-    // plaintext
-    //     .0
-    //     .copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
-    //
-    // ChaCha20Poly1305::new(key.as_ref().into())
-    //     .decrypt_in_place_detached(
-    //         [0u8; 12][..].into(),
-    //         &[],
-    //         &mut plaintext.0,
-    //         enc_ciphertext[NOTE_PLAINTEXT_SIZE..].into(),
-    //     )
-    //     .ok()?;
 
     let (note, to) =
         domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &compact_plaintext)?;
