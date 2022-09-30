@@ -55,47 +55,52 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     tx: &Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Vec<DecryptedOutput> {
-    let mut decrypted = vec![];
+    tx.sapling_bundle()
+        .iter()
+        .flat_map(|bundle| {
+            ufvks
+                .iter()
+                .flat_map(move |(account, ufvk)| {
+                    ufvk.sapling().into_iter().map(|dfvk| (*account, dfvk))
+                })
+                .flat_map(move |(account, dfvk)| {
+                    let ivk_external =
+                        PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External));
+                    let ivk_internal =
+                        PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
+                    let ovk = dfvk.fvk().ovk;
 
-    if let Some(bundle) = tx.sapling_bundle() {
-        for (account, ufvk) in ufvks.iter() {
-            if let Some(dfvk) = ufvk.sapling() {
-                let ivk_external = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External));
-                let ivk_internal = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
-                let ovk = dfvk.fvk().ovk;
-
-                for (index, output) in bundle.shielded_outputs.iter().enumerate() {
-                    let decryption_result =
-                        try_sapling_note_decryption(params, height, &ivk_external, output)
-                            .map(|ret| (ret, TransferType::Incoming))
-                            .or_else(|| {
-                                try_sapling_note_decryption(params, height, &ivk_internal, output)
+                    bundle
+                        .shielded_outputs
+                        .iter()
+                        .enumerate()
+                        .flat_map(move |(index, output)| {
+                            try_sapling_note_decryption(params, height, &ivk_external, output)
+                                .map(|ret| (ret, TransferType::Incoming))
+                                .or_else(|| {
+                                    try_sapling_note_decryption(
+                                        params,
+                                        height,
+                                        &ivk_internal,
+                                        output,
+                                    )
                                     .map(|ret| (ret, TransferType::WalletInternal))
-                            })
-                            .or_else(|| {
-                                try_sapling_output_recovery(params, height, &ovk, output)
-                                    .map(|ret| (ret, TransferType::Outgoing))
-                            });
-
-                    let ((note, to, memo), transfer_type) = match decryption_result {
-                        Some(result) => result,
-                        None => {
-                            continue;
-                        }
-                    };
-
-                    decrypted.push(DecryptedOutput {
-                        index,
-                        note,
-                        account: *account,
-                        to,
-                        memo,
-                        transfer_type,
-                    })
-                }
-            }
-        }
-    }
-
-    decrypted
+                                })
+                                .or_else(|| {
+                                    try_sapling_output_recovery(params, height, &ovk, output)
+                                        .map(|ret| (ret, TransferType::Outgoing))
+                                })
+                                .into_iter()
+                                .map(move |((note, to, memo), transfer_type)| DecryptedOutput {
+                                    index,
+                                    note,
+                                    account,
+                                    to,
+                                    memo,
+                                    transfer_type,
+                                })
+                        })
+                })
+        })
+        .collect()
 }
