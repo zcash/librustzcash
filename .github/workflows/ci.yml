@@ -16,6 +16,8 @@ jobs:
         with:
           toolchain: 1.56.1
           override: true
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
 
       - name: Fetch path to Zcash parameters
         working-directory: ./zcash_proofs
@@ -35,13 +37,13 @@ jobs:
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
-          command: test
-          args: --all-features --verbose --release --all
-      - name: Run slow tests
+          command: nextest
+          args: run --all-features --release --workspace --run-ignored=all
+      - name: Run doc tests
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --all-features --verbose --release --all -- --ignored
+          args: --doc --all-features --release --workspace
 
   build:
     name: Build target ${{ matrix.target }}
