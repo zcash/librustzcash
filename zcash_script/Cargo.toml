@@ -1,0 +1,16 @@
+[package]
+name = "zcash_script"
+description = ""
+version = "0.0.0"
+authors = [
+    "Sean Bowe <ewillbefull@gmail.com>",
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository = "https://github.com/zcash/librustzcash"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+categories = ["cryptography::cryptocurrencies"]
+publish = false
+
+[dependencies]
