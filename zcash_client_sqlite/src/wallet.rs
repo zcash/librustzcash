@@ -12,9 +12,6 @@ use rusqlite::{named_params, OptionalExtension, ToSql};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
-#[cfg(feature = "transparent-inputs")]
-use std::collections::HashSet;
-
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -41,7 +38,8 @@ use zcash_primitives::legacy::TransparentAddress;
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
-    rusqlite::params,
+    rusqlite::{params, Connection},
+    std::collections::HashSet,
     zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
     zcash_primitives::{
         legacy::{keys::IncomingViewingKey, Script},
@@ -276,20 +274,19 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
 
 #[cfg(feature = "transparent-inputs")]
 pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
-    wdb: &WalletDb<P>,
+    params: &P,
+    conn: &Connection,
     account: AccountId,
 ) -> Result<HashSet<TransparentAddress>, SqliteClientError> {
     let mut ret = HashSet::new();
 
     // Get all UAs derived
-    let mut ua_query = wdb
-        .conn
-        .prepare("SELECT address FROM addresses WHERE account = :account")?;
+    let mut ua_query = conn.prepare("SELECT address FROM addresses WHERE account = :account")?;
     let mut rows = ua_query.query(named_params![":account": &u32::from(account)])?;
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
-        let ua = RecipientAddress::decode(&wdb.params, &ua_str)
+        let ua = RecipientAddress::decode(params, &ua_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
             })
@@ -306,12 +303,12 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     }
 
     // Get the UFVK for the account.
-    let ufvk_str: String = wdb.conn.query_row(
+    let ufvk_str: String = conn.query_row(
         "SELECT ufvk FROM accounts WHERE account = :account",
         [u32::from(account)],
         |row| row.get(0),
     )?;
-    let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
+    let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
         .map_err(SqliteClientError::CorruptedData)?;
 
     // Derive the default transparent address (if it wasn't already part of a derived UA).

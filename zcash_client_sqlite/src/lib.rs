@@ -252,7 +252,7 @@ impl<P: consensus::Parameters> WalletReadTransparent for WalletDb<P> {
         &self,
         account: AccountId,
     ) -> Result<HashSet<TransparentAddress>, Self::Error> {
-        wallet::get_transparent_receivers(self, account)
+        wallet::get_transparent_receivers(&self.params, &self.conn, account)
     }
 
     fn get_unspent_transparent_outputs(

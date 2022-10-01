@@ -394,8 +394,9 @@ mod tests {
                 fee INTEGER,
                 FOREIGN KEY (block) REFERENCES blocks(height)
             )",
-            "CREATE TABLE utxos (
+            "CREATE TABLE \"utxos\" (
                 id_utxo INTEGER PRIMARY KEY,
+                received_by_account INTEGER NOT NULL,
                 address TEXT NOT NULL,
                 prevout_txid BLOB NOT NULL,
                 prevout_idx INTEGER NOT NULL,
@@ -403,6 +404,7 @@ mod tests {
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
                 spent_in_tx INTEGER,
+                FOREIGN KEY (received_by_account) REFERENCES accounts(account),
                 FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
             )",
