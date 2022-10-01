@@ -111,7 +111,7 @@ impl fmt::Display for NoteId {
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct UtxoId(pub i64);
 
 /// A wrapper for the SQLite connection to the wallet database.

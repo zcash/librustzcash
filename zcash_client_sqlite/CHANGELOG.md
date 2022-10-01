@@ -17,7 +17,7 @@ and this library adheres to Rust's notion of
   - `SqliteClientError::RequestedRewindInvalid`, to report when requested
     rewinds exceed supported bounds.
   - `SqliteClientError::DiversifierIndexOutOfRange`, to report when the space
-    of available diversifier indices has been exhausted. 
+    of available diversifier indices has been exhausted.
   - `SqliteClientError::AccountIdDiscontinuity`, to report when a user attempts
     to initialize the accounts table with a noncontiguous set of account identifiers.
   - `SqliteClientError::AccountIdOutOfRange`, to report when the maximum account
@@ -93,6 +93,8 @@ and this library adheres to Rust's notion of
   - `get_extended_full_viewing_keys` (use
     `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
     instead).
+  - `delete_utxos_above` (use
+    `zcash_client_backend::data_api::WalletWrite::rewind_to_height` instead)
 - `zcash_client_sqlite::with_blocks` (use
   `zcash_client_backend::data_api::BlockSource::with_blocks` instead)
 
@@ -125,7 +127,6 @@ and this library adheres to Rust's notion of
     - `put_tx_meta`
     - `put_tx_data`
     - `mark_sapling_note_spent`
-    - `delete_utxos_above`
     - `put_receiverd_note`
     - `insert_witness`
     - `prune_witnesses`

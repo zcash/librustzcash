@@ -917,7 +917,9 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     max_height: BlockHeight,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
-        "SELECT u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height, tx.block as block
+        "SELECT u.received_by_account,
+                u.prevout_txid, u.prevout_idx, u.script,
+                u.value_zat, u.height, tx.block as block
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
@@ -929,16 +931,19 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     let addr_str = address.encode(&wdb.params);
 
     let rows = stmt_blocks.query_map(params![addr_str, u32::from(max_height)], |row| {
-        let id: Vec<u8> = row.get(0)?;
+        let received_by_account: u32 = row.get(0)?;
 
+        let txid: Vec<u8> = row.get(1)?;
         let mut txid_bytes = [0u8; 32];
-        txid_bytes.copy_from_slice(&id);
-        let index: u32 = row.get(1)?;
-        let script_pubkey = Script(row.get(2)?);
-        let value = Amount::from_i64(row.get(3)?).unwrap();
-        let height: u32 = row.get(4)?;
+        txid_bytes.copy_from_slice(&txid);
+
+        let index: u32 = row.get(2)?;
+        let script_pubkey = Script(row.get(3)?);
+        let value = Amount::from_i64(row.get(4)?).unwrap();
+        let height: u32 = row.get(5)?;
 
         Ok(WalletTransparentOutput {
+            received_by_account: AccountId::from(received_by_account),
             outpoint: OutPoint::new(txid_bytes, index),
             txout: TxOut {
                 value,
@@ -1048,23 +1053,11 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
-    stmts
-        .stmt_insert_received_transparent_utxo(output)
-        .map(UtxoId)
-}
-
-/// Removes all records of UTXOs that were recorded as having been received
-/// at block heights greater than the given height.
-#[cfg(feature = "transparent-inputs")]
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::rewind_to_height instead."
-)]
-pub fn delete_utxos_above<'a, P: consensus::Parameters>(
-    stmts: &mut DataConnStmtCache<'a, P>,
-    taddr: &TransparentAddress,
-    height: BlockHeight,
-) -> Result<usize, SqliteClientError> {
-    stmts.stmt_delete_utxos(taddr, height)
+    let update_result = stmts.stmt_update_received_transparent_utxo(output)?;
+    match update_result {
+        None => stmts.stmt_insert_received_transparent_utxo(output),
+        Some(id) => Ok(id),
+    }
 }
 
 /// Records the specified shielded output as having been received.
@@ -1295,6 +1288,15 @@ mod tests {
 
     use super::{get_address, get_balance};
 
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        zcash_client_backend::{data_api::WalletWrite, wallet::WalletTransparentOutput},
+        zcash_primitives::{
+            consensus::BlockHeight,
+            transaction::components::{OutPoint, TxOut},
+        },
+    };
+
     #[test]
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
@@ -1319,5 +1321,60 @@ mod tests {
             get_balance(&db_data, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn put_received_transparent_utxo() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        // Add an account to the wallet
+        let mut ops = db_data.get_update_ops().unwrap();
+        let seed = Secret::new([0u8; 32].to_vec());
+        let (account_id, usk) = ops.create_account(&seed).unwrap();
+        let (uaddr, _) = usk.to_unified_full_viewing_key().default_address();
+        let taddr = uaddr.transparent().unwrap();
+
+        let mut utxo = WalletTransparentOutput {
+            received_by_account: account_id,
+            outpoint: OutPoint::new([1u8; 32], 1),
+            txout: TxOut {
+                value: Amount::from_u64(100000).unwrap(),
+                script_pubkey: taddr.script(),
+            },
+            height: BlockHeight::from_u32(12345),
+        };
+
+        let res0 = super::put_received_transparent_utxo(&mut ops, &utxo);
+        assert!(matches!(res0, Ok(_)));
+
+        // Change something about the UTXO and upsert; we should get back
+        // the same utxoid
+        utxo.height = BlockHeight::from_u32(34567);
+        let res1 = super::put_received_transparent_utxo(&mut ops, &utxo);
+        assert!(matches!(res1, Ok(id) if id == res0.unwrap()));
+
+        assert!(matches!(
+            super::get_unspent_transparent_outputs(
+                &db_data,
+                taddr,
+                BlockHeight::from_u32(12345)
+            ),
+            Ok(utxos) if utxos.is_empty()
+        ));
+
+        assert!(matches!(
+            super::get_unspent_transparent_outputs(
+                &db_data,
+                taddr,
+                BlockHeight::from_u32(34567)
+            ),
+            Ok(utxos) if {
+                utxos.len() == 1 &&
+                utxos.iter().any(|rutxo| rutxo.height == utxo.height)
+            }
+        ));
     }
 }

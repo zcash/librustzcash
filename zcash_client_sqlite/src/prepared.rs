@@ -24,10 +24,10 @@ use crate::{error::SqliteClientError, wallet::PoolType, NoteId, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    crate::UtxoId,
+    rusqlite::{named_params, OptionalExtension},
     zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
-    zcash_primitives::{
-        legacy::TransparentAddress, transaction::components::transparent::OutPoint,
-    },
+    zcash_primitives::transaction::components::transparent::OutPoint,
 };
 
 /// The primary type used to implement [`WalletWrite`] for the SQLite database.
@@ -55,7 +55,7 @@ pub struct DataConnStmtCache<'a, P> {
     #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
     #[cfg(feature = "transparent-inputs")]
-    stmt_delete_utxos: Statement<'a>,
+    stmt_update_received_transparent_utxo: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,
@@ -112,12 +112,27 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 )?,
                 #[cfg(feature = "transparent-inputs")]
                 stmt_insert_received_transparent_utxo: wallet_db.conn.prepare(
-                    "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
-                    VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
+                    "INSERT INTO utxos (
+                        received_by_account, address,
+                        prevout_txid, prevout_idx, script,
+                        value_zat, height)
+                    VALUES (
+                        :received_by_account, :address,
+                        :prevout_txid, :prevout_idx, :script,
+                        :value_zat, :height)
+                    RETURNING id_utxo"
                 )?,
                 #[cfg(feature = "transparent-inputs")]
-                stmt_delete_utxos: wallet_db.conn.prepare(
-                    "DELETE FROM utxos WHERE address = :address AND height > :above_height"
+                stmt_update_received_transparent_utxo: wallet_db.conn.prepare(
+                    "UPDATE utxos
+                    SET received_by_account = :received_by_account,
+                        height = :height,
+                        address = :address,
+                        script = :script,
+                        value_zat = :value_zat
+                    WHERE prevout_txid = :prevout_txid
+                      AND prevout_idx = :prevout_idx
+                    RETURNING id_utxo"
                 )?,
                 stmt_insert_received_note: wallet_db.conn.prepare(
                     "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
@@ -339,40 +354,53 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     pub(crate) fn stmt_insert_received_transparent_utxo(
         &mut self,
         output: &WalletTransparentOutput,
-    ) -> Result<i64, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":address", &output.address().encode(&self.wallet_db.params)),
-            (":prevout_txid", &output.outpoint.hash().to_vec()),
-            (":prevout_idx", &output.outpoint.n()),
-            (":script", &output.txout.script_pubkey.0),
-            (":value_zat", &i64::from(output.txout.value)),
-            (":height", &u32::from(output.height)),
-        ];
-
+    ) -> Result<UtxoId, SqliteClientError> {
         self.stmt_insert_received_transparent_utxo
-            .execute(sql_args)?;
-
-        Ok(self.wallet_db.conn.last_insert_rowid())
+            .query_row(
+                named_params![
+                    ":received_by_account": &u32::from(output.received_by_account),
+                    ":address": &output.address().encode(&self.wallet_db.params),
+                    ":prevout_txid": &output.outpoint.hash().to_vec(),
+                    ":prevout_idx": &output.outpoint.n(),
+                    ":script": &output.txout.script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout.value),
+                    ":height": &u32::from(output.height),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .map_err(SqliteClientError::from)
     }
 
-    /// Removes all records of UTXOs that were recorded as having been received at block
-    /// heights greater than the given height.
+    /// Adds the given received UTXO to the datastore.
     ///
-    /// Returns the number of UTXOs that were removed.
+    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
+    /// exists.
     #[cfg(feature = "transparent-inputs")]
-    pub(crate) fn stmt_delete_utxos(
+    pub(crate) fn stmt_update_received_transparent_utxo(
         &mut self,
-        taddr: &TransparentAddress,
-        height: BlockHeight,
-    ) -> Result<usize, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":address", &taddr.encode(&self.wallet_db.params)),
-            (":above_height", &u32::from(height)),
-        ];
-
-        let rows = self.stmt_delete_utxos.execute(sql_args)?;
-
-        Ok(rows)
+        output: &WalletTransparentOutput,
+    ) -> Result<Option<UtxoId>, SqliteClientError> {
+        self.stmt_update_received_transparent_utxo
+            .query_row(
+                named_params![
+                    ":prevout_txid": &output.outpoint.hash().to_vec(),
+                    ":prevout_idx": &output.outpoint.n(),
+                    ":received_by_account": &u32::from(output.received_by_account),
+                    ":address": &output.address().encode(&self.wallet_db.params),
+                    ":script": &output.txout.script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout.value),
+                    ":height": &u32::from(output.height),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .optional()
+            .map_err(SqliteClientError::from)
     }
 
     /// Adds the given address and diversifier index to the addresses table.
