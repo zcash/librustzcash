@@ -1,6 +1,6 @@
 use bellman::gadgets::boolean::Boolean;
 use bellman::{ConstraintSystem, SynthesisError};
-use ff::PrimeField;
+use group::ff::PrimeField;
 
 use super::commitment::note_comm;
 use super::prfs::*;

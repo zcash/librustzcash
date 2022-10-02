@@ -13,7 +13,7 @@
 use bellman::gadgets::boolean::{AllocatedBit, Boolean};
 use bellman::gadgets::multipack::pack_into_inputs;
 use bellman::{Circuit, ConstraintSystem, LinearCombination, SynthesisError};
-use ff::PrimeField;
+use group::ff::PrimeField;
 
 mod commitment;
 mod input;

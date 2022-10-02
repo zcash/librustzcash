@@ -1,8 +1,7 @@
 //! Various constants used for the Zcash proofs.
 
 use bls12_381::Scalar;
-use ff::Field;
-use group::{Curve, Group};
+use group::{ff::Field, Curve, Group};
 use jubjub::ExtendedPoint;
 use lazy_static::lazy_static;
 use zcash_primitives::constants::{PEDERSEN_HASH_CHUNKS_PER_GENERATOR, PEDERSEN_HASH_GENERATORS};

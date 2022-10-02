@@ -3,8 +3,7 @@ use bellman::{
     groth16::{create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof},
 };
 use bls12_381::Bls12;
-use ff::Field;
-use group::{Curve, GroupEncoding};
+use group::{ff::Field, Curve, GroupEncoding};
 use rand_core::OsRng;
 use std::ops::{AddAssign, Neg};
 use zcash_primitives::{

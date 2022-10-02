@@ -22,7 +22,6 @@ blake2b_simd = "1"
 bls12_381 = "0.7"
 byteorder = "1"
 directories = { version = "4", optional = true }
-ff = "0.12"
 group = "0.12"
 jubjub = "0.9"
 lazy_static = "1"
