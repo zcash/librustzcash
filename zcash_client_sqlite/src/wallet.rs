@@ -8,7 +8,7 @@
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
 
 use group::ff::PrimeField;
-use rusqlite::{OptionalExtension, ToSql, NO_PARAMS};
+use rusqlite::{named_params, OptionalExtension, ToSql};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -164,7 +164,7 @@ pub fn get_address<P: consensus::Parameters>(
         FROM addresses WHERE account = ?
         ORDER BY diversifier_index_be DESC
         LIMIT 1",
-        &[u32::from(account)],
+        [u32::from(account)],
         |row| row.get(0),
     )?;
 
@@ -184,7 +184,7 @@ pub(crate) fn get_max_account_id<P>(
 ) -> Result<Option<AccountId>, SqliteClientError> {
     // This returns the most recently generated address.
     wdb.conn
-        .query_row("SELECT MAX(account) FROM accounts", NO_PARAMS, |row| {
+        .query_row("SELECT MAX(account) FROM accounts", [], |row| {
             let account_id: Option<u32> = row.get(0)?;
             Ok(account_id.map(AccountId::from))
         })
@@ -207,12 +207,12 @@ pub(crate) fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::E
     key: &UnifiedFullViewingKey,
 ) -> Result<(), E> {
     let ufvk_str: String = key.encode(network);
-    conn.execute_named(
+    conn.execute(
         &format!(
             "INSERT INTO {} (account, ufvk) VALUES (:account, :ufvk)",
             accounts_table
         ),
-        &[(":account", &<u32>::from(account)), (":ufvk", &ufvk_str)],
+        named_params![":account": &<u32>::from(account), ":ufvk": &ufvk_str],
     )?;
 
     // Always derive the default Unified Address for the account.
@@ -220,13 +220,13 @@ pub(crate) fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::E
     let address_str: String = address.encode(network);
     // the diversifier index is stored in big-endian order to allow sorting
     idx.0.reverse();
-    conn.execute_named(
+    conn.execute(
         "INSERT INTO addresses (account, diversifier_index_be, address)
         VALUES (:account, :diversifier_index_be, :address)",
-        &[
-            (":account", &<u32>::from(account)),
-            (":diversifier_index_be", &&idx.0[..]),
-            (":address", &address_str),
+        named_params![
+            ":account": &<u32>::from(account),
+            ":diversifier_index_be": &&idx.0[..],
+            ":address": &address_str,
         ],
     )?;
 
@@ -240,12 +240,12 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
     // This returns the most recently generated address.
     let addr: Option<(String, Vec<u8>)> = wdb
         .conn
-        .query_row_named(
+        .query_row(
             "SELECT address, diversifier_index_be
             FROM addresses WHERE account = :account
             ORDER BY diversifier_index_be DESC
             LIMIT 1",
-            &[(":account", &u32::from(account))],
+            named_params![":account": &u32::from(account)],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -285,7 +285,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let mut ua_query = wdb
         .conn
         .prepare("SELECT address FROM addresses WHERE account = :account")?;
-    let mut rows = ua_query.query_named(&[(":account", &u32::from(account))])?;
+    let mut rows = ua_query.query(named_params![":account": &u32::from(account)])?;
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
@@ -308,7 +308,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     // Get the UFVK for the account.
     let ufvk_str: String = wdb.conn.query_row(
         "SELECT ufvk FROM accounts WHERE account = :account",
-        &[u32::from(account)],
+        [u32::from(account)],
         |row| row.get(0),
     )?;
     let ufvk = UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
@@ -333,7 +333,7 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
         .conn
         .prepare("SELECT account, ufvk FROM accounts ORDER BY account ASC")?;
 
-    let rows = stmt_fetch_accounts.query_map(NO_PARAMS, |row| {
+    let rows = stmt_fetch_accounts.query_map([], |row| {
         let acct: u32 = row.get(0)?;
         let account = AccountId::from(acct);
         let ufvk_str: String = row.get(1)?;
@@ -366,7 +366,7 @@ pub fn is_valid_account_extfvk<P: consensus::Parameters>(
 ) -> Result<bool, SqliteClientError> {
     wdb.conn
         .prepare("SELECT ufvk FROM accounts WHERE account = ?")?
-        .query_row(&[u32::from(account).to_sql()?], |row| {
+        .query_row([u32::from(account).to_sql()?], |row| {
             row.get(0).map(|ufvk_str: String| {
                 UnifiedFullViewingKey::decode(&wdb.params, &ufvk_str)
                     .map_err(SqliteClientError::CorruptedData)
@@ -419,7 +419,7 @@ pub fn get_balance<P>(wdb: &WalletDb<P>, account: AccountId) -> Result<Amount, S
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block IS NOT NULL",
-        &[u32::from(account)],
+        [u32::from(account)],
         |row| row.get(0).or(Ok(0)),
     )?;
 
@@ -464,7 +464,7 @@ pub fn get_balance_at<P>(
         "SELECT SUM(value) FROM received_notes
         INNER JOIN transactions ON transactions.id_tx = received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block <= ?",
-        &[u32::from(account), u32::from(anchor_height)],
+        [u32::from(account), u32::from(anchor_height)],
         |row| row.get(0).or(Ok(0)),
     )?;
 
@@ -503,7 +503,7 @@ pub fn get_received_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, Sql
     let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM received_notes
         WHERE id_note = ?",
-        &[id_note],
+        [id_note],
         |row| row.get(0),
     )?;
 
@@ -520,7 +520,7 @@ pub(crate) fn get_transaction<P: Parameters>(
     let (tx_bytes, block_height): (Vec<_>, BlockHeight) = wdb.conn.query_row(
         "SELECT raw, block FROM transactions
         WHERE id_tx = ?",
-        &[id_tx],
+        [id_tx],
         |row| {
             let h: u32 = row.get(1)?;
             Ok((row.get(0)?, BlockHeight::from(h)))
@@ -561,7 +561,7 @@ pub fn get_sent_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteC
     let memo_bytes: Vec<_> = wdb.conn.query_row(
         "SELECT memo FROM sent_notes
         WHERE id_note = ?",
-        &[id_note],
+        [id_note],
         |row| row.get(0),
     )?;
 
@@ -593,18 +593,14 @@ pub fn block_height_extrema<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
     wdb.conn
-        .query_row(
-            "SELECT MIN(height), MAX(height) FROM blocks",
-            NO_PARAMS,
-            |row| {
-                let min_height: u32 = row.get(0)?;
-                let max_height: u32 = row.get(1)?;
-                Ok(Some((
-                    BlockHeight::from(min_height),
-                    BlockHeight::from(max_height),
-                )))
-            },
-        )
+        .query_row("SELECT MIN(height), MAX(height) FROM blocks", [], |row| {
+            let min_height: u32 = row.get(0)?;
+            let max_height: u32 = row.get(1)?;
+            Ok(Some((
+                BlockHeight::from(min_height),
+                BlockHeight::from(max_height),
+            )))
+        })
         //.optional() doesn't work here because a failed aggregate function
         //produces a runtime error, not an empty set of rows.
         .or(Ok(None))
@@ -638,7 +634,7 @@ pub fn get_tx_height<P>(
     wdb.conn
         .query_row(
             "SELECT block FROM transactions WHERE txid = ?",
-            &[txid.as_ref().to_vec()],
+            [txid.as_ref().to_vec()],
             |row| row.get(0).map(u32::into),
         )
         .optional()
@@ -671,7 +667,7 @@ pub fn get_block_hash<P>(
     wdb.conn
         .query_row(
             "SELECT hash FROM blocks WHERE height = ?",
-            &[u32::from(block_height)],
+            [u32::from(block_height)],
             |row| {
                 let row_data = row.get::<_, Vec<_>>(0)?;
                 Ok(BlockHash::from_slice(&row_data))
@@ -690,7 +686,7 @@ pub fn get_rewind_height<P>(wdb: &WalletDb<P>) -> Result<Option<BlockHeight>, Sq
              FROM received_notes n
              JOIN transactions tx ON tx.id_tx = n.tx
              WHERE n.spent IS NULL",
-            NO_PARAMS,
+            [],
             |row| {
                 row.get(0)
                     .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
@@ -715,13 +711,13 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
         .ok_or(SqliteClientError::BackendError(Error::SaplingNotActive))?;
 
     // Recall where we synced up to previously.
-    let last_scanned_height =
-        wdb.conn
-            .query_row("SELECT MAX(height) FROM blocks", NO_PARAMS, |row| {
-                row.get(0)
-                    .map(|h: u32| h.into())
-                    .or_else(|_| Ok(sapling_activation_height - 1))
-            })?;
+    let last_scanned_height = wdb
+        .conn
+        .query_row("SELECT MAX(height) FROM blocks", [], |row| {
+            row.get(0)
+                .map(|h: u32| h.into())
+                .or_else(|_| Ok(sapling_activation_height - 1))
+        })?;
 
     if block_height < last_scanned_height - PRUNING_HEIGHT {
         #[allow(deprecated)]
@@ -737,7 +733,7 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
         // Decrement witnesses.
         wdb.conn.execute(
             "DELETE FROM sapling_witnesses WHERE block > ?",
-            &[u32::from(block_height)],
+            [u32::from(block_height)],
         )?;
 
         // Rewind received notes
@@ -750,7 +746,7 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
                     ON tx.id_tx = rn.tx
                     WHERE tx.block IS NOT NULL AND tx.block > ?
                 );",
-            &[u32::from(block_height)],
+            [u32::from(block_height)],
         )?;
 
         // Do not delete sent notes; this can contain data that is not recoverable
@@ -760,19 +756,19 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
         // Rewind utxos
         wdb.conn.execute(
             "DELETE FROM utxos WHERE height > ?",
-            &[u32::from(block_height)],
+            [u32::from(block_height)],
         )?;
 
         // Un-mine transactions.
         wdb.conn.execute(
             "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block IS NOT NULL AND block > ?",
-            &[u32::from(block_height)],
+            [u32::from(block_height)],
         )?;
 
         // Now that they aren't depended on, delete scanned blocks.
         wdb.conn.execute(
             "DELETE FROM blocks WHERE height > ?",
-            &[u32::from(block_height)],
+            [u32::from(block_height)],
         )?;
     }
 
@@ -806,7 +802,7 @@ pub fn get_commitment_tree<P>(
     wdb.conn
         .query_row_and_then(
             "SELECT sapling_tree FROM blocks WHERE height = ?",
-            &[u32::from(block_height)],
+            [u32::from(block_height)],
             |row| {
                 let row_data: Vec<u8> = row.get(0)?;
                 CommitmentTree::read(&row_data[..]).map_err(|e| {
@@ -850,7 +846,7 @@ pub fn get_witnesses<P>(
         .conn
         .prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
     let witnesses = stmt_fetch_witnesses
-        .query_map(&[u32::from(block_height)], |row| {
+        .query_map([u32::from(block_height)], |row| {
             let id_note = NoteId::ReceivedNoteId(row.get(0)?);
             let wdb: Vec<u8> = row.get(1)?;
             Ok(IncrementalWitness::read(&wdb[..]).map(|witness| (id_note, witness)))
@@ -879,7 +875,7 @@ pub fn get_nullifiers<P>(
             ON tx.id_tx = rn.spent
             WHERE block IS NULL",
     )?;
-    let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
+    let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
         let account: u32 = row.get(1)?;
         let nf_bytes: Vec<u8> = row.get(2)?;
         Ok((
@@ -901,7 +897,7 @@ pub(crate) fn get_all_nullifiers<P>(
         "SELECT rn.id_note, rn.account, rn.nf
             FROM received_notes rn",
     )?;
-    let nullifiers = stmt_fetch_nullifiers.query_map(NO_PARAMS, |row| {
+    let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
         let account: u32 = row.get(1)?;
         let nf_bytes: Vec<u8> = row.get(2)?;
         Ok((

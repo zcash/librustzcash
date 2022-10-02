@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use rusqlite::{self, types::ToSql, NO_PARAMS};
+use rusqlite::{self, types::ToSql};
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
@@ -123,7 +123,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     target_migration: Option<Uuid>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
     wdb.conn
-        .execute("PRAGMA foreign_keys = OFF", NO_PARAMS)
+        .execute("PRAGMA foreign_keys = OFF", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
@@ -134,7 +134,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
         .expect("Wallet migration registration should have been successful.");
     migrator.up(target_migration)?;
     wdb.conn
-        .execute("PRAGMA foreign_keys = ON", NO_PARAMS)
+        .execute("PRAGMA foreign_keys = ON", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     Ok(())
 }
@@ -201,7 +201,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     keys: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
-    if empty_check.exists(NO_PARAMS)? {
+    if empty_check.exists([])? {
         return Err(SqliteClientError::TableNotEmpty);
     }
 
@@ -213,11 +213,11 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     }
 
     // Insert accounts atomically
-    wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    wdb.conn.execute("BEGIN IMMEDIATE", [])?;
     for (account, key) in keys.iter() {
         wallet::add_account(wdb, *account, key)?;
     }
-    wdb.conn.execute("COMMIT", NO_PARAMS)?;
+    wdb.conn.execute("COMMIT", [])?;
 
     Ok(())
 }
@@ -262,14 +262,14 @@ pub fn init_blocks_table<P>(
     sapling_tree: &[u8],
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM blocks LIMIT 1")?;
-    if empty_check.exists(NO_PARAMS)? {
+    if empty_check.exists([])? {
         return Err(SqliteClientError::TableNotEmpty);
     }
 
     wdb.conn.execute(
         "INSERT INTO blocks (height, hash, time, sapling_tree)
         VALUES (?, ?, ?, ?)",
-        &[
+        [
             u32::from(height).to_sql()?,
             hash.0.to_sql()?,
             time.to_sql()?,
@@ -283,7 +283,7 @@ pub fn init_blocks_table<P>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use rusqlite::{self, ToSql, NO_PARAMS};
+    use rusqlite::{self, ToSql};
     use secrecy::Secret;
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
@@ -412,7 +412,7 @@ mod tests {
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
             .unwrap();
-        let mut rows = tables_query.query(NO_PARAMS).unwrap();
+        let mut rows = tables_query.query([]).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
@@ -519,7 +519,7 @@ mod tests {
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
             .unwrap();
-        let mut rows = views_query.query(NO_PARAMS).unwrap();
+        let mut rows = views_query.query([]).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
@@ -544,7 +544,7 @@ mod tests {
                     extfvk TEXT NOT NULL,
                     address TEXT NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE blocks (
@@ -553,7 +553,7 @@ mod tests {
                     time INTEGER NOT NULL,
                     sapling_tree BLOB NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE transactions (
@@ -566,7 +566,7 @@ mod tests {
                     raw BLOB,
                     FOREIGN KEY (block) REFERENCES blocks(height)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE received_notes (
@@ -586,7 +586,7 @@ mod tests {
                     FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sapling_witnesses (
@@ -598,7 +598,7 @@ mod tests {
                     FOREIGN KEY (block) REFERENCES blocks(height),
                     CONSTRAINT witness_height UNIQUE (note, block)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sent_notes (
@@ -613,7 +613,7 @@ mod tests {
                     FOREIGN KEY (from_account) REFERENCES accounts(account),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
 
             let address = encode_payment_address(
@@ -627,7 +627,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO accounts (account, extfvk, address)
                 VALUES (?, ?, ?)",
-                &[
+                [
                     u32::from(account).to_sql()?,
                     extfvk.to_sql()?,
                     address.to_sql()?,
@@ -661,7 +661,7 @@ mod tests {
                     address TEXT NOT NULL,
                     transparent_address TEXT NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE blocks (
@@ -670,7 +670,7 @@ mod tests {
                     time INTEGER NOT NULL,
                     sapling_tree BLOB NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE transactions (
@@ -683,7 +683,7 @@ mod tests {
                     raw BLOB,
                     FOREIGN KEY (block) REFERENCES blocks(height)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE received_notes (
@@ -703,7 +703,7 @@ mod tests {
                     FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sapling_witnesses (
@@ -715,7 +715,7 @@ mod tests {
                     FOREIGN KEY (block) REFERENCES blocks(height),
                     CONSTRAINT witness_height UNIQUE (note, block)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sent_notes (
@@ -730,7 +730,7 @@ mod tests {
                     FOREIGN KEY (from_account) REFERENCES accounts(account),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE utxos (
@@ -745,7 +745,7 @@ mod tests {
                     FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
                 )",
-                NO_PARAMS,
+                [],
             )?;
 
             let address = encode_payment_address(
@@ -759,7 +759,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO accounts (account, extfvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
-                &[
+                [
                     u32::from(account).to_sql()?,
                     extfvk.to_sql()?,
                     address.to_sql()?,
@@ -769,7 +769,7 @@ mod tests {
             // add a sapling sent note
             wdb.conn.execute(
                 "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
-                NO_PARAMS,
+                [],
             )?;
 
             let tx = TransactionData::from_parts(
@@ -794,7 +794,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO sent_notes (tx, output_index, from_account, address, value)
                 VALUES (0, 0, ?, ?, 0)",
-                &[u32::from(account).to_sql()?, address.to_sql()?],
+                [u32::from(account).to_sql()?, address.to_sql()?],
             )?;
 
             Ok(())
@@ -824,7 +824,7 @@ mod tests {
                     address TEXT,
                     transparent_address TEXT
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE blocks (
@@ -833,7 +833,7 @@ mod tests {
                     time INTEGER NOT NULL,
                     sapling_tree BLOB NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE transactions (
@@ -846,7 +846,7 @@ mod tests {
                     raw BLOB,
                     FOREIGN KEY (block) REFERENCES blocks(height)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE received_notes (
@@ -866,7 +866,7 @@ mod tests {
                     FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sapling_witnesses (
@@ -878,7 +878,7 @@ mod tests {
                     FOREIGN KEY (block) REFERENCES blocks(height),
                     CONSTRAINT witness_height UNIQUE (note, block)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sent_notes (
@@ -894,7 +894,7 @@ mod tests {
                     FOREIGN KEY (from_account) REFERENCES accounts(account),
                     CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE utxos (
@@ -909,7 +909,7 @@ mod tests {
                     FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
                 )",
-                NO_PARAMS,
+                [],
             )?;
 
             let ufvk_str = ufvk.encode(&tests::network());
@@ -918,7 +918,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
-                &[
+                [
                     u32::from(account).to_sql()?,
                     ufvk_str.to_sql()?,
                     address_str.to_sql()?,
@@ -933,16 +933,16 @@ mod tests {
                         .encode(&tests::network());
                 wdb.conn.execute(
                     "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
-                    NO_PARAMS,
+                    [],
                 )?;
                 wdb.conn.execute(
                     "INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '')",
-                    NO_PARAMS,
+                    [],
                 )?;
                 wdb.conn.execute(
                     "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
                     VALUES (0, ?, 0, ?, ?, 0)",
-                    &[PoolType::Transparent.typecode().to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
+                    [PoolType::Transparent.typecode().to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
             }
 
             Ok(())

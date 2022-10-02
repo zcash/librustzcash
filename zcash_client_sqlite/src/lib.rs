@@ -40,7 +40,7 @@ use std::path::Path;
 #[cfg(feature = "transparent-inputs")]
 use std::collections::HashSet;
 
-use rusqlite::{Connection, NO_PARAMS};
+use rusqlite::Connection;
 
 use zcash_primitives::{
     block::BlockHash,
@@ -385,14 +385,14 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     where
         F: FnOnce(&mut Self) -> Result<A, SqliteClientError>,
     {
-        self.wallet_db.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+        self.wallet_db.conn.execute("BEGIN IMMEDIATE", [])?;
         match f(self) {
             Ok(result) => {
-                self.wallet_db.conn.execute("COMMIT", NO_PARAMS)?;
+                self.wallet_db.conn.execute("COMMIT", [])?;
                 Ok(result)
             }
             Err(error) => {
-                match self.wallet_db.conn.execute("ROLLBACK", NO_PARAMS) {
+                match self.wallet_db.conn.execute("ROLLBACK", []) {
                     Ok(_) => Err(error),
                     Err(e) =>
                         // Panicking here is probably the right thing to do, because it

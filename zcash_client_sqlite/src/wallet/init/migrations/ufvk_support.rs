@@ -1,7 +1,7 @@
 //! Migration that adds support for unified full viewing keys.
 use std::collections::HashSet;
 
-use rusqlite::{self, params, NO_PARAMS};
+use rusqlite::{self, named_params, params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
@@ -67,7 +67,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut stmt_fetch_accounts =
             transaction.prepare("SELECT account, address FROM accounts")?;
 
-        let mut rows = stmt_fetch_accounts.query(NO_PARAMS)?;
+        let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             // We only need to check for the presence of the seed if we have keys that
             // need to be migrated; otherwise, it's fine to not supply the seed if this
@@ -137,14 +137,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 #[cfg(not(feature = "transparent-inputs"))]
                 let taddress_str: Option<String> = None;
 
-                transaction.execute_named(
+                transaction.execute(
                     "INSERT INTO accounts_new (account, ufvk, address, transparent_address)
                     VALUES (:account, :ufvk, :address, :transparent_address)",
-                    &[
-                        (":account", &<u32>::from(account)),
-                        (":ufvk", &ufvk_str),
-                        (":address", &address_str),
-                        (":transparent_address", &taddress_str),
+                    named_params![
+                        ":account": &<u32>::from(account),
+                        ":ufvk": &ufvk_str,
+                        ":address": &address_str,
+                        ":transparent_address": &taddress_str,
                     ],
                 )?;
             } else {
@@ -182,7 +182,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // dropped and doesn't maintain a lock on the table.
         let has_output_pool = {
             let mut stmt_fetch_columns = transaction.prepare("PRAGMA TABLE_INFO('sent_notes')")?;
-            let mut col_names = stmt_fetch_columns.query_map(NO_PARAMS, |row| {
+            let mut col_names = stmt_fetch_columns.query_map([], |row| {
                 let col_name: String = row.get(1)?;
                 Ok(col_name)
             })?;
@@ -209,7 +209,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )?;
 
-            let mut rows = stmt_fetch_sent_notes.query(NO_PARAMS)?;
+            let mut rows = stmt_fetch_sent_notes.query([])?;
             while let Some(row) = rows.next()? {
                 let id_note: i64 = row.get(0)?;
                 let tx_ref: i64 = row.get(1)?;
