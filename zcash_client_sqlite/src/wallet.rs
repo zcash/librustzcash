@@ -20,9 +20,12 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{keys::DiversifiableFullViewingKey, Node, Note, Nullifier, PaymentAddress},
+    sapling::{Node, Note, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
-    zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
+    zip32::{
+        sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+        AccountId, DiversifierIndex,
+    },
 };
 
 use zcash_client_backend::{

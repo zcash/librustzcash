@@ -524,11 +524,12 @@ pub mod testing {
     use proptest::prelude::*;
     use std::cmp::min;
 
-    use crate::{
-        transaction::components::amount::MAX_MONEY, zip32::testing::arb_extended_spending_key,
-    };
+    use crate::transaction::components::amount::MAX_MONEY;
 
-    use super::{Node, Note, NoteValue, PaymentAddress, Rseed};
+    use super::{
+        keys::testing::arb_full_viewing_key, Diversifier, Node, Note, NoteValue, PaymentAddress,
+        Rseed, SaplingIvk,
+    };
 
     prop_compose! {
         pub fn arb_note_value()(value in 0u64..=MAX_MONEY as u64) -> NoteValue {
@@ -545,8 +546,19 @@ pub mod testing {
         }
     }
 
+    prop_compose! {
+        pub fn arb_incoming_viewing_key()(fvk in arb_full_viewing_key()) -> SaplingIvk {
+            fvk.vk.ivk()
+        }
+    }
+
     pub fn arb_payment_address() -> impl Strategy<Value = PaymentAddress> {
-        arb_extended_spending_key().prop_map(|sk| sk.default_address().1)
+        arb_incoming_viewing_key().prop_flat_map(|ivk: SaplingIvk| {
+            any::<[u8; 11]>().prop_filter_map(
+                "Sampled diversifier must generate a valid Sapling payment address.",
+                move |d| ivk.to_payment_address(Diversifier(d)),
+            )
+        })
     }
 
     prop_compose! {

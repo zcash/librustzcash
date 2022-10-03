@@ -85,7 +85,8 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
-    sapling::{keys::Scope, note_encryption::PreparedIncomingViewingKey, Nullifier},
+    sapling::{note_encryption::PreparedIncomingViewingKey, Nullifier},
+    zip32::Scope,
 };
 
 use crate::{

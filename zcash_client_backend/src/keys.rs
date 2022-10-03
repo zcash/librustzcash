@@ -25,11 +25,10 @@ use {
 };
 
 pub mod sapling {
-    use zcash_primitives::zip32::{AccountId, ChildIndex};
-    pub use zcash_primitives::{
-        sapling::keys::DiversifiableFullViewingKey,
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    pub use zcash_primitives::zip32::sapling::{
+        DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,
     };
+    use zcash_primitives::zip32::{AccountId, ChildIndex};
 
     /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
     /// given seed.
