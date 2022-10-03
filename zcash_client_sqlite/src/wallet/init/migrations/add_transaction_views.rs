@@ -1,10 +1,9 @@
-//! Functions for initializing the various databases.
+//! Migration that adds transaction summary views & add fee information to transactions.
+use std::collections::HashSet;
+
 use rusqlite::{self, types::ToSql, OptionalExtension, NO_PARAMS};
 use schemer::{self};
 use schemer_rusqlite::RusqliteMigration;
-
-use std::collections::HashSet;
-
 use uuid::Uuid;
 
 use zcash_primitives::{
@@ -12,11 +11,15 @@ use zcash_primitives::{
     transaction::{components::amount::Amount, Transaction},
 };
 
-use super::super::{WalletMigration2, WalletMigrationError};
+use super::{ufvk_support, utxos_table};
+use crate::wallet::init::WalletMigrationError;
 
-pub(crate) fn migration_id() -> Uuid {
-    Uuid::parse_str("282fad2e-8372-4ca0-8bed-71821320909f").unwrap()
-}
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
+    0x282fad2e,
+    0x8372,
+    0x4ca0,
+    b"\x8b\xed\x71\x82\x13\x20\x90\x9f",
+);
 
 pub(crate) struct Migration<P> {
     pub(super) params: P,
@@ -24,13 +27,13 @@ pub(crate) struct Migration<P> {
 
 impl<P> schemer::Migration for Migration<P> {
     fn id(&self) -> Uuid {
-        migration_id()
+        MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        let mut deps = HashSet::new();
-        deps.insert(WalletMigration2::<P>::id());
-        deps
+        [ufvk_support::MIGRATION_ID, utxos_table::MIGRATION_ID]
+            .into_iter()
+            .collect()
     }
 
     fn description(&self) -> &'static str {
@@ -216,11 +219,11 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::wallet::init::WalletMigration2,
+        crate::wallet::init::migrations::ufvk_support,
         rusqlite::params,
         zcash_client_backend::{encoding::AddressCodec, keys::UnifiedSpendingKey},
         zcash_primitives::{
-            consensus::{BlockHeight, BranchId, Network},
+            consensus::{BlockHeight, BranchId},
             legacy::{keys::IncomingViewingKey, Script},
             transaction::{
                 components::{
@@ -235,10 +238,7 @@ mod tests {
 
     use crate::{
         tests,
-        wallet::init::{
-            init_wallet_db, init_wallet_db_internal,
-            migrations::addresses_table::ADDRESSES_TABLE_MIGRATION,
-        },
+        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
         WalletDb,
     };
 
@@ -246,7 +246,7 @@ mod tests {
     fn transaction_views() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, Some(ADDRESSES_TABLE_MIGRATION)).unwrap();
+        init_wallet_db_internal(&mut db_data, None, Some(addresses_table::MIGRATION_ID)).unwrap();
 
         db_data.conn.execute_batch(
             "INSERT INTO accounts (account, ufvk) VALUES (0, '');
@@ -327,8 +327,7 @@ mod tests {
     fn migrate_from_wm2() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, Some(WalletMigration2::<Network>::id()))
-            .unwrap();
+        init_wallet_db_internal(&mut db_data, None, Some(ufvk_support::MIGRATION_ID)).unwrap();
 
         // create a UTXO to spend
         let tx = TransactionData::from_parts(
