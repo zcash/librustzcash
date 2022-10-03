@@ -161,6 +161,13 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_unified_full_viewing_keys(self)
     }
 
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<AccountId>, Self::Error> {
+        wallet::get_account_for_ufvk(self, ufvk)
+    }
+
     fn get_current_address(
         &self,
         account: AccountId,
@@ -285,6 +292,13 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
         self.wallet_db.get_unified_full_viewing_keys()
+    }
+
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<AccountId>, Self::Error> {
+        self.wallet_db.get_account_for_ufvk(ufvk)
     }
 
     fn get_current_address(

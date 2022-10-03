@@ -355,6 +355,25 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     Ok(res)
 }
 
+/// Returns the account id corresponding to a given [`UnifiedFullViewingKey`],
+/// if any.
+pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
+    wdb: &WalletDb<P>,
+    ufvk: &UnifiedFullViewingKey,
+) -> Result<Option<AccountId>, SqliteClientError> {
+    wdb.conn
+        .query_row(
+            "SELECT account FROM accounts WHERE ufvk = ?",
+            [&ufvk.encode(&wdb.params)],
+            |row| {
+                let acct: u32 = row.get(0)?;
+                Ok(AccountId::from(acct))
+            },
+        )
+        .optional()
+        .map_err(SqliteClientError::from)
+}
+
 /// Checks whether the specified [`ExtendedFullViewingKey`] is valid and corresponds to the
 /// specified account.
 ///

@@ -8,14 +8,10 @@ use zcash_primitives::{
         components::{amount::DEFAULT_FEE, Amount},
         Transaction,
     },
-    zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    zcash_address::unified::Typecode,
-    zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey},
-};
+use zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey};
 
 use crate::{
     address::RecipientAddress,
@@ -156,7 +152,6 @@ where
 ///     &mut db_read,
 ///     &Network::TestNetwork,
 ///     tx_prover,
-///     account,
 ///     &usk,
 ///     &to,
 ///     Amount::from_u64(1).unwrap(),
@@ -173,7 +168,6 @@ pub fn create_spend_to_address<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    account: AccountId,
     usk: &UnifiedSpendingKey,
     to: &RecipientAddress,
     amount: Amount,
@@ -204,7 +198,6 @@ where
         params,
         prover,
         usk,
-        account,
         &req,
         ovk_policy,
         min_confirmations,
@@ -263,7 +256,6 @@ pub fn spend<E, N, P, D, R>(
     params: &P,
     prover: impl TxProver,
     usk: &UnifiedSpendingKey,
-    account: AccountId,
     request: &TransactionRequest,
     ovk_policy: OvkPolicy,
     min_confirmations: u32,
@@ -274,13 +266,11 @@ where
     R: Copy + Debug,
     D: WalletWrite<Error = E, TxRef = R>,
 {
-    // Check that the ExtendedSpendingKey we have been given corresponds to the
-    // ExtendedFullViewingKey for the account we are spending from.
-    // For now, just check the Sapling extfvk against the account
-    let extfvk = ExtendedFullViewingKey::from(usk.sapling());
-    if !wallet_db.is_valid_account_extfvk(account, &extfvk)? {
-        return Err(E::from(Error::InvalidExtSk(account)));
-    }
+    let account = wallet_db
+        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())?
+        .ok_or(Error::KeyNotRecognized)?;
+
+    let extfvk = usk.sapling().to_extended_full_viewing_key();
 
     // Apply the outgoing viewing key policy.
     let ovk = match ovk_policy {
@@ -447,7 +437,6 @@ pub fn shield_transparent_funds<E, N, P, D, R, U>(
     params: &P,
     prover: impl TxProver,
     usk: &UnifiedSpendingKey,
-    account: AccountId,
     memo: &MemoBytes,
     min_confirmations: u32,
 ) -> Result<D::TxRef, E>
@@ -457,23 +446,15 @@ where
     R: Copy + Debug,
     D: WalletWrite<Error = E, TxRef = R> + WalletWriteTransparent<UtxoRef = U>,
 {
-    // Obtain the UFVK for the specified account & use its internal change address
-    // as the destination for shielded funds.
-    let shielding_address = wallet_db
-        .get_unified_full_viewing_keys()
-        .and_then(|ufvks| {
-            ufvks
-                .get(&account)
-                .ok_or_else(|| E::from(Error::AccountNotFound(account)))
-                .and_then(|ufvk| {
-                    // TODO: select the most preferred shielded receiver once we have the ability to
-                    // spend Orchard funds.
-                    ufvk.sapling()
-                        .map(|dfvk| dfvk.change_address().1)
-                        .ok_or_else(|| E::from(Error::KeyNotFound(account, Typecode::Sapling)))
-                })
-        })?;
+    let account = wallet_db
+        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())?
+        .ok_or(Error::KeyNotRecognized)?;
 
+    let shielding_address = usk
+        .sapling()
+        .to_diversifiable_full_viewing_key()
+        .change_address()
+        .1;
     let (latest_scanned_height, latest_anchor) = wallet_db
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;

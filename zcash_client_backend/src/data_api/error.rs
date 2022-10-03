@@ -24,6 +24,9 @@ pub enum ChainInvalid {
 
 #[derive(Debug)]
 pub enum Error<NoteId> {
+    /// No account could be found corresponding to a provided spending key.
+    KeyNotRecognized,
+
     /// No account with the given identifier was found in the wallet.
     AccountNotFound(AccountId),
 
@@ -90,6 +93,9 @@ impl ChainInvalid {
 impl<N: fmt::Display> fmt::Display for Error<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            Error::KeyNotRecognized => {
+                write!(f, "Wallet does not contain an account corresponding to the provided spending key")
+            }
             Error::AccountNotFound(account) => {
                 write!(f, "Wallet does not contain account {}", u32::from(*account))
             }
