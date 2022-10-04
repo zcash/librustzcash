@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use rusqlite::{Transaction, NO_PARAMS};
+use rusqlite::Transaction;
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
@@ -64,7 +64,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut stmt_fetch_accounts = transaction
             .prepare("SELECT account, ufvk, address, transparent_address FROM accounts")?;
 
-        let mut rows = stmt_fetch_accounts.query(NO_PARAMS)?;
+        let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             let account: u32 = row.get(0)?;
             let account = AccountId::from(account);

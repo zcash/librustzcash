@@ -271,7 +271,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":fee", &fee.map(i64::from)),
             (":txid", &&txid.as_ref()[..]),
         ];
-        match self.stmt_update_tx_data.execute_named(sql_args)? {
+        match self.stmt_update_tx_data.execute(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("txid column is marked as UNIQUE"),
@@ -322,10 +322,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":prevout_idx", &outpoint.n()),
         ];
 
-        match self
-            .stmt_mark_transparent_utxo_spent
-            .execute_named(sql_args)?
-        {
+        match self.stmt_mark_transparent_utxo_spent.execute(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("tx_outpoint constraint is marked as UNIQUE"),
@@ -353,7 +350,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         ];
 
         self.stmt_insert_received_transparent_utxo
-            .execute_named(sql_args)?;
+            .execute(sql_args)?;
 
         Ok(self.wallet_db.conn.last_insert_rowid())
     }
@@ -373,7 +370,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
             (":above_height", &u32::from(height)),
         ];
 
-        let rows = self.stmt_delete_utxos.execute_named(sql_args)?;
+        let rows = self.stmt_delete_utxos.execute(sql_args)?;
 
         Ok(rows)
     }
@@ -394,7 +391,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
             (":address", &address.encode(&self.wallet_db.params)),
         ];
 
-        self.stmt_insert_address.execute_named(sql_args)?;
+        self.stmt_insert_address.execute(sql_args)?;
 
         Ok(self.wallet_db.conn.last_insert_rowid())
     }
@@ -439,7 +436,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":is_change", &is_change),
         ];
 
-        self.stmt_insert_received_note.execute_named(sql_args)?;
+        self.stmt_insert_received_note.execute(sql_args)?;
 
         Ok(NoteId::ReceivedNoteId(
             self.wallet_db.conn.last_insert_rowid(),
@@ -483,7 +480,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":output_index", &(output_index as i64)),
         ];
 
-        match self.stmt_update_received_note.execute_named(sql_args)? {
+        match self.stmt_update_received_note.execute(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("tx_output constraint is marked as UNIQUE"),
@@ -536,7 +533,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     .map(|m| m.as_slice()),
             ),
         ];
-        self.stmt_insert_sent_note.execute_named(sql_args)?;
+        self.stmt_insert_sent_note.execute(sql_args)?;
         Ok(())
     }
 
@@ -568,7 +565,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":output_pool", &pool_type.typecode()),
             (":output_index", &i64::try_from(output_index).unwrap()),
         ];
-        match self.stmt_update_sent_note.execute_named(sql_args)? {
+        match self.stmt_update_sent_note.execute(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("tx_output constraint is marked as UNIQUE"),
@@ -605,14 +602,14 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         below_height: BlockHeight,
     ) -> Result<(), SqliteClientError> {
         self.stmt_prune_witnesses
-            .execute(&[u32::from(below_height)])?;
+            .execute([u32::from(below_height)])?;
         Ok(())
     }
 
     /// Marks notes that have not been mined in transactions as expired, up to the given
     /// block height.
     pub fn stmt_update_expired(&mut self, height: BlockHeight) -> Result<(), SqliteClientError> {
-        self.stmt_update_expired.execute(&[u32::from(height)])?;
+        self.stmt_update_expired.execute([u32::from(height)])?;
         Ok(())
     }
 }

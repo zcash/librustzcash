@@ -1,7 +1,7 @@
 //! Migration that adds transaction summary views & add fee information to transactions.
 use std::collections::HashSet;
 
-use rusqlite::{self, types::ToSql, OptionalExtension, NO_PARAMS};
+use rusqlite::{self, types::ToSql, OptionalExtension};
 use schemer::{self};
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
@@ -56,7 +56,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut stmt_find_utxo_value = transaction
             .prepare("SELECT value_zat FROM utxos WHERE prevout_txid = ? AND prevout_idx = ?")?;
 
-        let mut tx_rows = stmt_list_txs.query(NO_PARAMS)?;
+        let mut tx_rows = stmt_list_txs.query([])?;
         while let Some(row) = tx_rows.next()? {
             let id_tx: i64 = row.get(0)?;
             let tx_bytes: Option<Vec<u8>> = row.get(1)?;
@@ -77,7 +77,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                 let fee_paid = tx.fee_paid(|op| {
                     let op_amount = stmt_find_utxo_value
-                        .query_row(&[op.hash().to_sql()?, op.n().to_sql()?], |row| {
+                        .query_row([op.hash().to_sql()?, op.n().to_sql()?], |row| {
                             row.get::<_, i64>(0)
                         })
                         .optional()
@@ -101,7 +101,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     )
                 })?;
 
-                stmt_set_fee.execute(&[i64::from(fee_paid), id_tx])?;
+                stmt_set_fee.execute([i64::from(fee_paid), id_tx])?;
             }
         }
 
@@ -214,7 +214,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::{self, NO_PARAMS};
     use tempfile::NamedTempFile;
 
     #[cfg(feature = "transparent-inputs")]
@@ -274,7 +273,7 @@ mod tests {
             .conn
             .prepare("SELECT received_total, received_note_count, memo_count FROM v_tx_received")
             .unwrap();
-        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut rows = q.query([]).unwrap();
         let mut row_count = 0;
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
@@ -291,7 +290,7 @@ mod tests {
             .conn
             .prepare("SELECT sent_total, sent_note_count, memo_count FROM v_tx_sent")
             .unwrap();
-        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut rows = q.query([]).unwrap();
         let mut row_count = 0;
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
@@ -308,7 +307,7 @@ mod tests {
             .conn
             .prepare("SELECT net_value, has_change, memo_count FROM v_transactions")
             .unwrap();
-        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut rows = q.query([]).unwrap();
         let mut row_count = 0;
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
@@ -384,7 +383,7 @@ mod tests {
         db_data.conn.execute(
             "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
             VALUES (?, X'0101010101010101010101010101010101010101010101010101010101010101', 1, X'', 1400000000, 1)",
-            &[taddr]
+            [taddr]
         ).unwrap();
         db_data
             .conn
@@ -398,11 +397,9 @@ mod tests {
 
         let fee = db_data
             .conn
-            .query_row(
-                "SELECT fee FROM transactions WHERE id_tx = 0",
-                NO_PARAMS,
-                |row| Ok(Amount::from_i64(row.get(0)?).unwrap()),
-            )
+            .query_row("SELECT fee FROM transactions WHERE id_tx = 0", [], |row| {
+                Ok(Amount::from_i64(row.get(0)?).unwrap())
+            })
             .unwrap();
 
         assert_eq!(fee, Amount::from_i64(300000000).unwrap());

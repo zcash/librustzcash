@@ -23,3 +23,5 @@ zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "33f1c1141e50adb68715f3359bd75378b4756cca" }
 group = { git = "https://github.com/zkcrypto/group.git", rev = "f61e3e420ed1220c8f1f80988f8c6c5e202d8715" }
+schemer = { git = "https://github.com/nuttycom/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }
+schemer-rusqlite = { git = "https://github.com/nuttycom/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }

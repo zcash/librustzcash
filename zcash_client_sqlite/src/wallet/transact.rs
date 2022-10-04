@@ -79,7 +79,7 @@ pub fn get_spendable_sapling_notes<P>(
     )?;
 
     // Select notes
-    let notes = stmt_select_notes.query_and_then_named::<_, SqliteClientError, _>(
+    let notes = stmt_select_notes.query_and_then(
         named_params![
             ":account": &u32::from(account),
             ":anchor_height": &u32::from(anchor_height),
@@ -140,7 +140,7 @@ pub fn select_spendable_sapling_notes<P>(
     )?;
 
     // Select notes
-    let notes = stmt_select_notes.query_and_then_named::<_, SqliteClientError, _>(
+    let notes = stmt_select_notes.query_and_then(
         named_params![
             ":account": &u32::from(account),
             ":anchor_height": &u32::from(anchor_height),
@@ -698,7 +698,7 @@ mod tests {
                 .query_row(
                     "SELECT raw FROM transactions
                     WHERE id_tx = ?",
-                    &[tx_row],
+                    [tx_row],
                     |row| row.get(0),
                 )
                 .unwrap();
@@ -711,7 +711,7 @@ mod tests {
                 .query_row(
                     "SELECT output_index FROM sent_notes
                     WHERE tx = ?",
-                    &[tx_row],
+                    [tx_row],
                     |row| row.get(0),
                 )
                 .unwrap();
