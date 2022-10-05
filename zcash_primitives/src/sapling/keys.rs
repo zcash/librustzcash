@@ -8,15 +8,13 @@ use std::io::{self, Read, Write};
 
 use crate::{
     constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
-    keys::{prf_expand, OutgoingViewingKey},
-    zip32,
+    keys::prf_expand,
 };
 use ff::PrimeField;
 use group::{Group, GroupEncoding};
-use memuse::DynamicUsage;
 use subtle::CtOption;
 
-use super::{NullifierDerivingKey, PaymentAddress, ProofGenerationKey, SaplingIvk, ViewingKey};
+use super::{NullifierDerivingKey, ProofGenerationKey, ViewingKey};
 
 /// Errors that can occur in the decoding of Sapling spending keys.
 pub enum DecodingError {
@@ -28,18 +26,15 @@ pub enum DecodingError {
     InvalidNsk,
 }
 
+/// An outgoing viewing key
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutgoingViewingKey(pub [u8; 32]);
+
 /// A Sapling expanded spending key
 #[derive(Clone)]
 pub struct ExpandedSpendingKey {
     pub ask: jubjub::Fr,
     pub nsk: jubjub::Fr,
-    pub ovk: OutgoingViewingKey,
-}
-
-/// A Sapling key that provides the capability to view incoming and outgoing transactions.
-#[derive(Debug)]
-pub struct FullViewingKey {
-    pub vk: ViewingKey,
     pub ovk: OutgoingViewingKey,
 }
 
@@ -108,6 +103,13 @@ impl ExpandedSpendingKey {
         result[64..96].copy_from_slice(&self.ovk.0);
         result
     }
+}
+
+/// A Sapling key that provides the capability to view incoming and outgoing transactions.
+#[derive(Debug)]
+pub struct FullViewingKey {
+    pub vk: ViewingKey,
+    pub ovk: OutgoingViewingKey,
 }
 
 impl Clone for FullViewingKey {
@@ -184,199 +186,29 @@ impl FullViewingKey {
     }
 }
 
-/// The scope of a viewing key or address.
-///
-/// A "scope" narrows the visibility or usage to a level below "full".
-///
-/// Consistent usage of `Scope` enables the user to provide consistent views over a wallet
-/// to other people. For example, a user can give an external [`SaplingIvk`] to a merchant
-/// terminal, enabling it to only detect "real" transactions from customers and not
-/// internal transactions from the wallet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Scope {
-    /// A scope used for wallet-external operations, namely deriving addresses to give to
-    /// other users in order to receive funds.
-    External,
-    /// A scope used for wallet-internal operations, such as creating change notes,
-    /// auto-shielding, and note management.
-    Internal,
-}
-
-memuse::impl_no_dynamic_usage!(Scope);
-
-/// A Sapling key that provides the capability to view incoming and outgoing transactions.
-///
-/// This key is useful anywhere you need to maintain accurate balance, but do not want the
-/// ability to spend funds (such as a view-only wallet).
-///
-/// It comprises the subset of the ZIP 32 extended full viewing key that is used for the
-/// Sapling item in a [ZIP 316 Unified Full Viewing Key][zip-0316-ufvk].
-///
-/// [zip-0316-ufvk]: https://zips.z.cash/zip-0316#encoding-of-unified-full-incoming-viewing-keys
-#[derive(Clone, Debug)]
-pub struct DiversifiableFullViewingKey {
-    fvk: FullViewingKey,
-    dk: zip32::DiversifierKey,
-}
-
-impl From<zip32::ExtendedFullViewingKey> for DiversifiableFullViewingKey {
-    fn from(extfvk: zip32::ExtendedFullViewingKey) -> Self {
-        Self {
-            fvk: extfvk.fvk,
-            dk: extfvk.dk,
-        }
-    }
-}
-
-impl DiversifiableFullViewingKey {
-    /// Parses a `DiversifiableFullViewingKey` from its raw byte encoding.
-    ///
-    /// Returns `None` if the bytes do not contain a valid encoding of a diversifiable
-    /// Sapling full viewing key.
-    pub fn from_bytes(bytes: &[u8; 128]) -> Option<Self> {
-        FullViewingKey::read(&bytes[..96]).ok().map(|fvk| Self {
-            fvk,
-            dk: zip32::DiversifierKey::from_bytes(bytes[96..].try_into().unwrap()),
-        })
-    }
-
-    /// Returns the raw encoding of this `DiversifiableFullViewingKey`.
-    pub fn to_bytes(&self) -> [u8; 128] {
-        let mut bytes = [0; 128];
-        self.fvk
-            .write(&mut bytes[..96])
-            .expect("slice should be the correct length");
-        bytes[96..].copy_from_slice(&self.dk.as_bytes()[..]);
-        bytes
-    }
-
-    /// Derives the internal `DiversifiableFullViewingKey` corresponding to `self` (which
-    /// is assumed here to be an external DFVK).
-    fn derive_internal(&self) -> Self {
-        let (fvk, dk) = zip32::sapling_derive_internal_fvk(&self.fvk, &self.dk);
-        Self { fvk, dk }
-    }
-
-    /// Exposes the external [`FullViewingKey`] component of this diversifiable full viewing key.
-    pub fn fvk(&self) -> &FullViewingKey {
-        &self.fvk
-    }
-
-    /// Derives a nullifier-deriving key for the provided scope.
-    ///
-    /// This API is provided so that nullifiers for change notes can be correctly computed.
-    pub fn to_nk(&self, scope: Scope) -> NullifierDerivingKey {
-        match scope {
-            Scope::External => self.fvk.vk.nk,
-            Scope::Internal => self.derive_internal().fvk.vk.nk,
-        }
-    }
-
-    /// Derives an incoming viewing key corresponding to this full viewing key.
-    pub fn to_ivk(&self, scope: Scope) -> SaplingIvk {
-        match scope {
-            Scope::External => self.fvk.vk.ivk(),
-            Scope::Internal => self.derive_internal().fvk.vk.ivk(),
-        }
-    }
-
-    /// Derives an outgoing viewing key corresponding to this full viewing key.
-    pub fn to_ovk(&self, scope: Scope) -> OutgoingViewingKey {
-        match scope {
-            Scope::External => self.fvk.ovk,
-            Scope::Internal => self.derive_internal().fvk.ovk,
-        }
-    }
-
-    /// Attempts to produce a valid payment address for the given diversifier index.
-    ///
-    /// Returns `None` if the diversifier index does not produce a valid diversifier for
-    /// this `DiversifiableFullViewingKey`.
-    pub fn address(&self, j: zip32::DiversifierIndex) -> Option<PaymentAddress> {
-        zip32::sapling_address(&self.fvk, &self.dk, j)
-    }
-
-    /// Finds the next valid payment address starting from the given diversifier index.
-    ///
-    /// This searches the diversifier space starting at `j` and incrementing, to find an
-    /// index which will produce a valid diversifier (a 50% probability for each index).
-    ///
-    /// Returns the index at which the valid diversifier was found along with the payment
-    /// address constructed using that diversifier, or `None` if the maximum index was
-    /// reached and no valid diversifier was found.
-    pub fn find_address(
-        &self,
-        j: zip32::DiversifierIndex,
-    ) -> Option<(zip32::DiversifierIndex, PaymentAddress)> {
-        zip32::sapling_find_address(&self.fvk, &self.dk, j)
-    }
-
-    /// Returns the payment address corresponding to the smallest valid diversifier index,
-    /// along with that index.
-    pub fn default_address(&self) -> (zip32::DiversifierIndex, PaymentAddress) {
-        zip32::sapling_default_address(&self.fvk, &self.dk)
-    }
-
-    /// Returns the internal address corresponding to the smallest valid diversifier index,
-    /// along with that index.
-    ///
-    /// This address **MUST NOT** be encoded and exposed to end users. User interfaces
-    /// should instead mark these notes as "change notes" or "internal wallet operations".
-    pub fn change_address(&self) -> (zip32::DiversifierIndex, PaymentAddress) {
-        let internal_dfvk = self.derive_internal();
-        zip32::sapling_default_address(&internal_dfvk.fvk, &internal_dfvk.dk)
-    }
-
-    /// Attempts to decrypt the given address's diversifier with this full viewing key.
-    ///
-    /// This method extracts the diversifier from the given address and decrypts it as a
-    /// diversifier index, then verifies that this diversifier index produces the same
-    /// address. Decryption is attempted using both the internal and external parts of the
-    /// full viewing key.
-    ///
-    /// Returns the decrypted diversifier index and its scope, or `None` if the address
-    /// was not generated from this key.
-    pub fn decrypt_diversifier(
-        &self,
-        addr: &PaymentAddress,
-    ) -> Option<(zip32::DiversifierIndex, Scope)> {
-        let j_external = self.dk.diversifier_index(addr.diversifier());
-        if self.address(j_external).as_ref() == Some(addr) {
-            return Some((j_external, Scope::External));
-        }
-
-        let j_internal = self
-            .derive_internal()
-            .dk
-            .diversifier_index(addr.diversifier());
-        if self.address(j_internal).as_ref() == Some(addr) {
-            return Some((j_internal, Scope::Internal));
-        }
-
-        None
-    }
-}
-
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;
-    use proptest::prelude::{any, prop_compose};
+    use proptest::prelude::*;
+    use std::fmt::{self, Debug, Formatter};
 
-    use crate::{
-        sapling::PaymentAddress,
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
-    };
+    use super::{ExpandedSpendingKey, FullViewingKey};
 
-    prop_compose! {
-        pub fn arb_extended_spending_key()(v in vec(any::<u8>(), 32..252)) -> ExtendedSpendingKey {
-            ExtendedSpendingKey::master(&v)
+    impl Debug for ExpandedSpendingKey {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "Spending keys cannot be Debug-formatted.")
         }
     }
 
     prop_compose! {
-        pub fn arb_shielded_addr()(extsk in arb_extended_spending_key()) -> PaymentAddress {
-            let extfvk = ExtendedFullViewingKey::from(&extsk);
-            extfvk.default_address().1
+        pub fn arb_expanded_spending_key()(v in vec(any::<u8>(), 32..252)) -> ExpandedSpendingKey {
+            ExpandedSpendingKey::from_spending_key(&v)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_full_viewing_key()(sk in arb_expanded_spending_key()) -> FullViewingKey {
+            FullViewingKey::from_expanded_spending_key(&sk)
         }
     }
 }
@@ -385,8 +217,8 @@ pub mod testing {
 mod tests {
     use group::{Group, GroupEncoding};
 
-    use super::{DiversifiableFullViewingKey, FullViewingKey};
-    use crate::{constants::SPENDING_KEY_GENERATOR, zip32};
+    use super::FullViewingKey;
+    use crate::constants::SPENDING_KEY_GENERATOR;
 
     #[test]
     fn ak_must_be_prime_order() {
@@ -409,25 +241,5 @@ mod tests {
 
         // nk is allowed to be the identity.
         assert!(FullViewingKey::read(&buf[..]).is_ok());
-    }
-
-    #[test]
-    fn dfvk_round_trip() {
-        let dfvk = {
-            let extsk = zip32::ExtendedSpendingKey::master(&[]);
-            let extfvk = zip32::ExtendedFullViewingKey::from(&extsk);
-            DiversifiableFullViewingKey::from(extfvk)
-        };
-
-        // Check value -> bytes -> parsed round trip.
-        let dfvk_bytes = dfvk.to_bytes();
-        let dfvk_parsed = DiversifiableFullViewingKey::from_bytes(&dfvk_bytes).unwrap();
-        assert_eq!(dfvk_parsed.fvk.vk.ak, dfvk.fvk.vk.ak);
-        assert_eq!(dfvk_parsed.fvk.vk.nk, dfvk.fvk.vk.nk);
-        assert_eq!(dfvk_parsed.fvk.ovk, dfvk.fvk.ovk);
-        assert_eq!(dfvk_parsed.dk, dfvk.dk);
-
-        // Check bytes -> parsed -> bytes round trip.
-        assert_eq!(dfvk_parsed.to_bytes(), dfvk_bytes);
     }
 }

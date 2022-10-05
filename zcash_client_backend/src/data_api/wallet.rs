@@ -15,7 +15,8 @@ use zcash_primitives::{
 use {
     zcash_address::unified::Typecode,
     zcash_primitives::{
-        keys::OutgoingViewingKey, legacy::keys as transparent, legacy::keys::IncomingViewingKey,
+        legacy::keys::{self as transparent, IncomingViewingKey},
+        sapling::keys::OutgoingViewingKey,
     },
 };
 

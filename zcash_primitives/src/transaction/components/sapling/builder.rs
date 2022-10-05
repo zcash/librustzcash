@@ -568,7 +568,7 @@ pub mod testing {
             amount::MAX_MONEY,
             sapling::{Authorized, Bundle},
         },
-        zip32::testing::arb_extended_spending_key,
+        zip32::sapling::testing::arb_extended_spending_key,
     };
 
     use super::SaplingBuilder;

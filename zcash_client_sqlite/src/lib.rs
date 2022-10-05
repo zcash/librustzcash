@@ -902,11 +902,11 @@ mod tests {
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{
-            keys::DiversifiableFullViewingKey, note_encryption::sapling_note_encryption,
-            util::generate_random_rseed, Note, Nullifier, PaymentAddress,
+            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
+            PaymentAddress,
         },
         transaction::components::Amount,
-        zip32::ExtendedFullViewingKey,
+        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
     };
 
     use zcash_client_backend::{

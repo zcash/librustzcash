@@ -13,7 +13,6 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::sapling::NullifierDerivingKey`
 - Added in `zcash_primitives::sapling::keys`
   - `DecodingError`
-  - `DiversifiableFullViewingKey`
   - `Scope`
   - `ExpandedSpendingKey::from_bytes`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`
@@ -22,10 +21,14 @@ and this library adheres to Rust's notion of
   - `PreparedEphemeralPublicKey`
 - Added in `zcash_primitives::zip32`
   - `ChainCode::as_bytes`
-  - `DiversifierKey::{from_bytes, as_bytes}`
   - `DiversifierIndex::{as_bytes}`
-  - `ExtendedSpendingKey::{from_bytes, to_bytes}`
   - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
+- `zcash_primitives::zip32::sapling` has been added and now contains 
+  all of the Sapling zip32 key types that were previously located in
+  `zcash_primitives::zip32` directly. The base `zip32` module reexports 
+  the moved types for backwards compatibility.
+  - `DiversifierKey::{from_bytes, as_bytes}`
+  - `ExtendedSpendingKey::{from_bytes, to_bytes}`
 - `zcash_primitives::transaction::Builder` constructors:
   - `Builder::new_with_fee`
   - `Builder::new_with_rng_and_fee`

@@ -166,12 +166,11 @@ mod tests {
         block::BlockHash,
         consensus::{BlockHeight, BranchId, Parameters},
         legacy::TransparentAddress,
-        sapling::{
-            keys::DiversifiableFullViewingKey, note_encryption::try_sapling_output_recovery,
-            prover::TxProver,
-        },
+        sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, Transaction},
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        zip32::sapling::{
+            DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,
+        },
     };
 
     #[cfg(feature = "transparent-inputs")]

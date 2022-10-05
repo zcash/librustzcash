@@ -11,12 +11,14 @@ use zcash_primitives::{
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{
         self,
-        keys::{DiversifiableFullViewingKey, Scope},
         note_encryption::{PreparedIncomingViewingKey, SaplingDomain},
         Node, Note, Nullifier, NullifierDerivingKey, SaplingIvk,
     },
     transaction::components::sapling::CompactOutputDescription,
-    zip32::{AccountId, ExtendedFullViewingKey},
+    zip32::{
+        sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+        AccountId, Scope,
+    },
 };
 
 use crate::{

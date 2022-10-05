@@ -297,9 +297,8 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, BranchId, Parameters},
-        sapling::keys::DiversifiableFullViewingKey,
         transaction::{TransactionData, TxVersion},
-        zip32::ExtendedFullViewingKey,
+        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
     };
 
     use crate::{
