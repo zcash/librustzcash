@@ -45,8 +45,10 @@ pub const COMPACT_NOTE_SIZE: usize = 1 + // version
     11 + // diversifier
     8  + // value
     32; // rseed (or rcm prior to ZIP 212)
-/// The size of [`NotePlaintextBytes`].
-pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + 512;
+/// The size of the memo.
+const MEMO_SIZE: usize = 512;
+/// The size of the original encoding of NotePlaintextBytes.
+pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + MEMO_SIZE;
 /// The size of [`OutPlaintextBytes`].
 pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
@@ -110,24 +112,6 @@ enum NoteValidity {
 pub enum NoteCiphertext<D: Domain> {
     Full(D::EncNoteCiphertextBytes),
     Compact(D::CompactEncNoteCiphertextBytes),
-}
-
-/// Function to extract the full encrypted note ciphertext from the `NoteCiphertext` enum.
-/// Returns `None` if the enum variant is `Compact`.
-pub fn extract_full_note_ciphertext<D: Domain>(nc: NoteCiphertext<D>) -> Option<D::EncNoteCiphertextBytes> {
-    match nc {
-        NoteCiphertext::Full(x) => Some(x),
-        NoteCiphertext::Compact(_) => None,
-    }
-}
-
-/// Function to extract the compact encrypted note ciphertext from the `NoteCiphertext` enum.
-/// Returns `None` if the enum variant is `Full`.
-pub fn extract_compact_note_ciphertext<D: Domain>(nc: NoteCiphertext<D>) -> Option<D::CompactEncNoteCiphertextBytes> {
-    match nc {
-        NoteCiphertext::Full(_) => None,
-        NoteCiphertext::Compact(x) => Some(x),
-    }
 }
 
 /// Trait that encapsulates protocol-specific note encryption types and logic.
@@ -308,12 +292,6 @@ pub trait Domain {
     /// Returns `None` if `out_plaintext` does not contain a valid byte encoding of an
     /// `EphemeralSecretKey`.
     fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
-
-    /// Returns a vector with the bytes of the note plaintext.
-    fn vec_note_plaintext(plaintext: &Self::NotePlaintextBytes) -> Vec<u8>;
-
-    /// Returns a vector with the bytes of the encrypted note ciphertext.
-    fn vec_enc_note_ciphertext(enc_note_ciphertext: &Self::EncNoteCiphertextBytes) -> Vec<u8>;
 
     /// Performs the inner encryption logic given the key and the note plaintext, and returns
     /// the encrypted note ciphertext.
@@ -592,10 +570,9 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
     let enc_ciphertext: D::EncNoteCiphertextBytes;
-    if let Some(x) = extract_full_note_ciphertext(output.enc_ciphertext()) {
-        enc_ciphertext = x;
-    } else {
-        return None;
+    match output.enc_ciphertext() {
+        NoteCiphertext::Full(x) => enc_ciphertext = x,
+        NoteCiphertext::Compact(_) => return None,
     }
 
     let plaintext = D::decrypt_with_key(key, enc_ciphertext);
@@ -697,10 +674,9 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 ) -> Option<(D::Note, D::Recipient)> {
 
     let enc_ciphertext: D::CompactEncNoteCiphertextBytes;
-    if let Some(x) = extract_compact_note_ciphertext(output.enc_ciphertext()) {
-        enc_ciphertext = x;
-    } else {
-        return None;
+    match output.enc_ciphertext() {
+        NoteCiphertext::<D>::Compact(x) => enc_ciphertext = x,
+        NoteCiphertext::<D>::Full(_) => return None,
     }
 
     let plaintext = D::decrypt_compact_with_key(key, enc_ciphertext);
@@ -757,10 +733,9 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
     let enc_ciphertext: D::EncNoteCiphertextBytes;
-    if let Some(x) = extract_full_note_ciphertext(output.enc_ciphertext()) {
-        enc_ciphertext = x;
-    } else {
-        return None;
+    match output.enc_ciphertext() {
+        NoteCiphertext::<D>::Full(x) => enc_ciphertext = x,
+        NoteCiphertext::<D>::Compact(_) => return None,
     }
 
     let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
