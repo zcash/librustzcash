@@ -44,25 +44,30 @@ impl io::Read for ResponseLazyReader {
 
                 // Read from the response
                 Response(response) => {
-                    // minreq has a very limited lazy reading interface.
-                    match &mut response.next() {
-                        // Read one byte into the buffer.
-                        // We ignore the expected length, because we have no way of telling the BufReader.
-                        Some(Ok((byte, _length))) => {
-                            buf[0] = *byte;
-                            return Ok(1);
+                    for i in 0..buf.len() {
+                        match response.next() {
+                            // Load a byte into the buffer.
+                            Some(Ok((byte, _length))) => {
+                                buf[i] = byte;
+                            }
+
+                            // We're finished with the whole response.
+                            None => {
+                                *self = Complete(Ok(()));
+                                return Ok(i);
+                            }
+
+                            // The response is corrupted.
+                            Some(Err(error)) => {
+                                let error = format!("download response failed: {:?}", error);
+
+                                *self = Complete(Err(error.clone()));
+                                return Err(io::Error::new(io::ErrorKind::Other, error));
+                            }
                         }
-
-                        // Reading failed.
-                        Some(Err(error)) => {
-                            let error = Err(format!("download response failed: {:?}", error));
-
-                            *self = Complete(error);
-                        }
-
-                        // Finished reading.
-                        None => *self = Complete(Ok(())),
                     }
+
+                    return Ok(buf.len());
                 }
 
                 Complete(result) => {
