@@ -19,7 +19,7 @@ use zcash_primitives::legacy::keys::IncomingViewingKey;
 use zcash_client_backend::encoding::AddressCodec;
 
 use crate::wallet::{
-    init::{migrations::utxos_table, WalletMigrationError},
+    init::{migrations::initial_setup, WalletMigrationError},
     pool_code,
 };
 
@@ -41,7 +41,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [utxos_table::MIGRATION_ID].into_iter().collect()
+        [initial_setup::MIGRATION_ID].into_iter().collect()
     }
 
     fn description(&self) -> &'static str {
