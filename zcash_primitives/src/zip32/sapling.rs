@@ -62,7 +62,7 @@ pub fn sapling_default_address(
     sapling_find_address(fvk, dk, DiversifierIndex::new()).unwrap()
 }
 
-/// Convenience function cfor child OVK derivation
+/// Convenience function for child OVK derivation
 fn derive_child_ovk(parent: &OutgoingViewingKey, i_l: &[u8]) -> OutgoingViewingKey {
     let mut ovk = [0u8; 32];
     ovk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x15], &parent.0]).as_bytes()[..32]);
@@ -357,7 +357,7 @@ impl ExtendedSpendingKey {
         result
     }
 
-    /// Writes the encoded form of the extended spending key as define in
+    /// Writes the encoded form of the extended spending key as defined in
     /// [ZIP 32](https://zips.z.cash/zip-0032) to the provided writer.
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.to_bytes())

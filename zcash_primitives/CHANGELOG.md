@@ -26,7 +26,7 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::zip32::sapling` has been added and now contains 
   all of the Sapling zip32 key types that were previously located in
   `zcash_primitives::zip32` directly. The base `zip32` module reexports 
-  the moved types for backwards compability.
+  the moved types for backwards compatibility.
   - `DiversifierKey::{from_bytes, as_bytes}`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`
 - `zcash_primitives::transaction::Builder` constructors:
