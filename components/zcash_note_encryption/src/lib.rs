@@ -127,7 +127,7 @@ pub trait Domain {
     type Note;
     type NotePlaintextBytes: AsMut<[u8]>;
     type EncNoteCiphertextBytes;
-    type CompactNotePlaintextBytes;
+    type CompactNotePlaintextBytes: From<Self::NotePlaintextBytes>;
     type CompactEncNoteCiphertextBytes;
     type Recipient;
     type DiversifiedTransmissionKey;
@@ -241,7 +241,6 @@ pub trait Domain {
     /// [ZIP 212]: https://zips.z.cash/zip-0212
     ///
     /// This function only takes in plaintext bytes with the memo removed, as in compact notes.
-    /// If working with full notes, first convert to compact note using `convert_to_compact_plaintext`.
     fn parse_note_plaintext_without_memo_ivk(
         &self,
         ivk: &Self::IncomingViewingKey,
@@ -264,7 +263,6 @@ pub trait Domain {
     /// [ZIP 212]: https://zips.z.cash/zip-0212
     ///
     /// This function only takes in plaintext bytes with the memo removed, as in compact notes.
-    /// If working with full notes, first convert to compact note using `convert_to_compact_plaintext`.
     fn parse_note_plaintext_without_memo_ovk(
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
@@ -313,8 +311,6 @@ pub trait Domain {
         key: &Self::SymmetricKey,
         enc_ciphertext: Self::CompactEncNoteCiphertextBytes,
     ) -> Self::CompactNotePlaintextBytes;
-
-    fn convert_to_compact_plaintext(full_note: &Self::NotePlaintextBytes) -> Self::CompactNotePlaintextBytes;
 
     fn ciphertext_from_enc_plaintext_and_tag(enc_plaintext: Self::NotePlaintextBytes, tag: &[u8]) -> Self::EncNoteCiphertextBytes;
 
@@ -601,22 +597,21 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
         .ok()?;
 
     // let plaintext = D::decrypt_with_key(key, enc_ciphertext);
-    let compact_plaintext = D::convert_to_compact_plaintext(&plaintext);
+
+    let memo = domain.extract_memo(&plaintext);
 
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
         ephemeral_key,
         &output.cmstar_bytes(),
-        &compact_plaintext,
+        &plaintext.into(),
     )?;
-    let memo = domain.extract_memo(&plaintext);
 
     Some((note, to, memo))
 }
 
 /// This function only takes in plaintext bytes with the memo removed, as in compact notes.
-/// If working with full notes, first convert to compact note using `convert_to_compact_plaintext`.
 fn parse_note_plaintext_without_memo_ivk<D: Domain>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -786,11 +781,11 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     let key = D::kdf(shared_secret, &ephemeral_key);
 
     let plaintext = D::decrypt_with_key(&key, enc_ciphertext);
-    let compact_plaintext = D::convert_to_compact_plaintext(&plaintext);
+
+    let memo = domain.extract_memo(&plaintext);
 
     let (note, to) =
-        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &compact_plaintext)?;
-    let memo = domain.extract_memo(&plaintext);
+        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &plaintext.into())?;
 
     // ZIP 212: Check that the esk provided to this function is consistent with the esk we
     // can derive from the note.
