@@ -125,7 +125,7 @@ pub trait Domain {
     type SharedSecret;
     type SymmetricKey: AsRef<[u8]>;
     type Note;
-    type NotePlaintextBytes;
+    type NotePlaintextBytes: AsMut<[u8]>;
     type EncNoteCiphertextBytes;
     type CompactNotePlaintextBytes;
     type CompactEncNoteCiphertextBytes;
@@ -315,6 +315,8 @@ pub trait Domain {
     ) -> Self::CompactNotePlaintextBytes;
 
     fn convert_to_compact_plaintext(full_note: &Self::NotePlaintextBytes) -> Self::CompactNotePlaintextBytes;
+
+    fn ciphertext_from_enc_plaintext_and_tag(enc_plaintext: Self::NotePlaintextBytes, tag: &[u8]) -> Self::EncNoteCiphertextBytes;
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -493,7 +495,16 @@ impl<D: Domain> NoteEncryption<D> {
         let key = D::kdf(shared_secret, &D::epk_bytes(&self.epk));
         let input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
 
-        D::encrypt_with_key(key, input)
+        let mut input_copy = input;
+
+        let tag = ChaCha20Poly1305::new(key.as_ref().into())
+            .encrypt_in_place_detached(
+                [0u8; 12][..].into(),
+                &[],
+                input_copy.as_mut(),
+            )
+            .unwrap();
+        D::ciphertext_from_enc_plaintext_and_tag(input_copy, &tag)
     }
 
     /// Generates `outCiphertext` for this note.
