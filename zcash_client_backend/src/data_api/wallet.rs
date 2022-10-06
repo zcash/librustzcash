@@ -122,7 +122,7 @@ where
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
-///     keys::{UnifiedSpendingKey},
+///     keys::UnifiedSpendingKey,
 ///     data_api::{wallet::create_spend_to_address, error::Error, testing},
 ///     wallet::OvkPolicy,
 /// };

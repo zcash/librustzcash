@@ -130,7 +130,8 @@ pub trait WalletRead {
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error>;
 
-    /// Returns all unified full viewing keys known to this wallet.
+    /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`],
+    /// if any.
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
@@ -467,7 +468,6 @@ pub mod testing {
             Ok(HashMap::new())
         }
 
-        /// Returns all unified full viewing keys known to this wallet.
         fn get_account_for_ufvk(
             &self,
             _ufvk: &UnifiedFullViewingKey,
