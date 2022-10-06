@@ -317,6 +317,8 @@ pub trait Domain {
     fn convert_to_compact_plaintext(full_note: &Self::NotePlaintextBytes) -> Self::CompactNotePlaintextBytes;
 
     fn ciphertext_from_enc_plaintext_and_tag(enc_plaintext: Self::NotePlaintextBytes, tag: &[u8]) -> Self::EncNoteCiphertextBytes;
+
+    fn separate_tag_from_ciphertext(enc_ciphertext: Self::EncNoteCiphertextBytes) -> (Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE]);
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -586,7 +588,19 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
         NoteCiphertext::Compact(_) => return None,
     }
 
-    let plaintext = D::decrypt_with_key(key, enc_ciphertext);
+    let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(enc_ciphertext);
+    let mut plaintext = enc_plaintext;
+
+    ChaCha20Poly1305::new(key.as_ref().into())
+        .decrypt_in_place_detached(
+            [0u8; 12][..].into(),
+            &[],
+            plaintext.as_mut(),
+            &tag.into(),
+        )
+        .ok()?;
+
+    // let plaintext = D::decrypt_with_key(key, enc_ciphertext);
     let compact_plaintext = D::convert_to_compact_plaintext(&plaintext);
 
     let (note, to) = parse_note_plaintext_without_memo_ivk(
