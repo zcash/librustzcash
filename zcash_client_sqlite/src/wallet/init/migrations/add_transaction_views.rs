@@ -8,7 +8,10 @@ use uuid::Uuid;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight, BranchId},
-    transaction::{components::amount::Amount, Transaction},
+    transaction::{
+        components::amount::{Amount, BalanceError},
+        Transaction,
+    },
 };
 
 use super::{ufvk_support, utxos_table};
@@ -45,6 +48,25 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
+        enum FeeError {
+            Db(rusqlite::Error),
+            UtxoNotFound,
+            Balance(BalanceError),
+            CorruptedData(String),
+        }
+
+        impl From<BalanceError> for FeeError {
+            fn from(e: BalanceError) -> Self {
+                FeeError::Balance(e)
+            }
+        }
+
+        impl From<rusqlite::Error> for FeeError {
+            fn from(e: rusqlite::Error) -> Self {
+                FeeError::Db(e)
+            }
+        }
+
         transaction.execute_batch("ALTER TABLE transactions ADD COLUMN fee INTEGER;")?;
 
         let mut stmt_list_txs =
@@ -81,27 +103,38 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             row.get::<_, i64>(0)
                         })
                         .optional()
-                        .map_err(WalletMigrationError::DbError)?;
+                        .map_err(FeeError::Db)?;
 
                     op_amount.map_or_else(
-                        || {
-                            Err(WalletMigrationError::CorruptedData(format!(
-                                "Unable to find UTXO corresponding to outpoint {:?}",
-                                op
-                            )))
-                        },
+                        || Err(FeeError::UtxoNotFound),
                         |i| {
                             Amount::from_i64(i).map_err(|_| {
-                                WalletMigrationError::CorruptedData(format!(
+                                FeeError::CorruptedData(format!(
                                     "UTXO amount out of range in outpoint {:?}",
                                     op
                                 ))
                             })
                         },
                     )
-                })?;
+                });
 
-                stmt_set_fee.execute([i64::from(fee_paid), id_tx])?;
+                match fee_paid {
+                    Ok(fee_paid) => {
+                        stmt_set_fee.execute([i64::from(fee_paid), id_tx])?;
+                    }
+                    Err(FeeError::UtxoNotFound) => {
+                        // The fee and net value will end up being null in the transactions view.
+                    }
+                    Err(FeeError::Db(e)) => {
+                        return Err(WalletMigrationError::from(e));
+                    }
+                    Err(FeeError::Balance(e)) => {
+                        return Err(WalletMigrationError::from(e));
+                    }
+                    Err(FeeError::CorruptedData(s)) => {
+                        return Err(WalletMigrationError::CorruptedData(s));
+                    }
+                }
             }
         }
 
