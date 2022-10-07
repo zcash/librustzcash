@@ -33,6 +33,14 @@ use chacha20poly1305::{
     ChaCha20Poly1305,
 };
 
+use chacha20::ChaCha20;
+
+use cipher::{
+    KeyIvInit,
+    StreamCipher,
+    StreamCipherSeek,
+};
+
 use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
 
@@ -127,7 +135,7 @@ pub trait Domain {
     type Note;
     type NotePlaintextBytes: AsMut<[u8]>;
     type EncNoteCiphertextBytes;
-    type CompactNotePlaintextBytes: From<Self::NotePlaintextBytes>;
+    type CompactNotePlaintextBytes: From<Self::NotePlaintextBytes> + AsMut<[u8]>;
     type CompactEncNoteCiphertextBytes;
     type Recipient;
     type DiversifiedTransmissionKey;
@@ -291,30 +299,11 @@ pub trait Domain {
     /// `EphemeralSecretKey`.
     fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
 
-    /// Performs the inner encryption logic given the key and the note plaintext, and returns
-    /// the encrypted note ciphertext.
-    fn encrypt_with_key(
-        key: Self::SymmetricKey,
-        input: Self::NotePlaintextBytes,
-    ) -> Self::EncNoteCiphertextBytes;
-
-    /// Performs the inner decryption logic given the key and the encrypted note ciphertext,
-    /// and returns the note plaintext.
-    fn decrypt_with_key(
-        key: &Self::SymmetricKey,
-        enc_ciphertext: Self::EncNoteCiphertextBytes,
-    ) -> Self::NotePlaintextBytes;
-
-    /// Performs the inner decryption logic for compct notes given the key and the
-    /// compact encrypted note ciphertext, and returns the compact note plaintext.
-    fn decrypt_compact_with_key(
-        key: &Self::SymmetricKey,
-        enc_ciphertext: Self::CompactEncNoteCiphertextBytes,
-    ) -> Self::CompactNotePlaintextBytes;
-
     fn ciphertext_from_enc_plaintext_and_tag(enc_plaintext: Self::NotePlaintextBytes, tag: &[u8]) -> Self::EncNoteCiphertextBytes;
 
     fn separate_tag_from_ciphertext(enc_ciphertext: Self::EncNoteCiphertextBytes) -> (Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE]);
+
+    fn convert_to_compact_plaintext_type(enc_ciphertext: Self::CompactEncNoteCiphertextBytes) -> Self::CompactNotePlaintextBytes;
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -491,18 +480,16 @@ impl<D: Domain> NoteEncryption<D> {
         let pk_d = D::get_pk_d(&self.note);
         let shared_secret = D::ka_agree_enc(&self.esk, &pk_d);
         let key = D::kdf(shared_secret, &D::epk_bytes(&self.epk));
-        let input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
-
-        let mut input_copy = input;
+        let mut input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
 
         let tag = ChaCha20Poly1305::new(key.as_ref().into())
             .encrypt_in_place_detached(
                 [0u8; 12][..].into(),
                 &[],
-                input_copy.as_mut(),
+                input.as_mut(),
             )
             .unwrap();
-        D::ciphertext_from_enc_plaintext_and_tag(input_copy, &tag)
+        D::ciphertext_from_enc_plaintext_and_tag(input, &tag)
     }
 
     /// Generates `outCiphertext` for this note.
@@ -699,7 +686,11 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
         NoteCiphertext::<D>::Full(_) => return None,
     }
 
-    let plaintext = D::decrypt_compact_with_key(key, enc_ciphertext);
+    // Start from block 1 to skip over Poly1305 keying output
+    let mut plaintext = D::convert_to_compact_plaintext_type(enc_ciphertext);
+    let mut keystream = ChaCha20::new(key.as_ref().into(), [0u8; 12][..].into());
+    keystream.seek(64);
+    keystream.apply_keystream(plaintext.as_mut());
 
     parse_note_plaintext_without_memo_ivk(
         domain,
@@ -780,7 +771,17 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let plaintext = D::decrypt_with_key(&key, enc_ciphertext);
+    let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(enc_ciphertext);
+    let mut plaintext = enc_plaintext;
+
+    ChaCha20Poly1305::new(key.as_ref().into())
+        .decrypt_in_place_detached(
+            [0u8; 12][..].into(),
+            &[],
+            plaintext.as_mut(),
+            &tag.into(),
+        )
+        .ok()?;
 
     let memo = domain.extract_memo(&plaintext);
 
