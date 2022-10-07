@@ -44,14 +44,14 @@ impl io::Read for ResponseLazyReader {
 
                 // Read from the response
                 Response(response) => {
-                    for i in 0..buf.len() {
+                    for (i, buf_byte) in buf.iter_mut().enumerate() {
                         match response.next() {
                             // Load a byte into the buffer.
                             Some(Ok((byte, _length))) => {
-                                buf[i] = byte;
+                                *buf_byte = byte;
                             }
 
-                            // We're finished with the whole response.
+                            // The whole response has been processed.
                             None => {
                                 *self = Complete(Ok(()));
                                 return Ok(i);
