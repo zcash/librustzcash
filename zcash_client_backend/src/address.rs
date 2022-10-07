@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn ua_parsing() {
         for tv in test_vectors::UNIFIED {
-            match RecipientAddress::decode(&MAIN_NETWORK, &tv.unified_addr) {
+            match RecipientAddress::decode(&MAIN_NETWORK, tv.unified_addr) {
                 Some(RecipientAddress::Unified(ua)) => {
                     assert_eq!(
                         ua.transparent().is_some(),

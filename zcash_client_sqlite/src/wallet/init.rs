@@ -288,6 +288,8 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
+    use zcash_address::test_vectors;
+
     use zcash_client_backend::{
         address::RecipientAddress,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
@@ -296,16 +298,19 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, BranchId, Parameters},
+        consensus::{BlockHeight, BranchId, Network, Parameters},
         transaction::{TransactionData, TxVersion},
-        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+        zip32::{
+            sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+            DiversifierIndex,
+        },
     };
 
     use crate::{
         error::SqliteClientError,
         tests::{self, network},
-        wallet::get_address,
-        AccountId, WalletDb,
+        wallet::{self, get_address},
+        AccountId, WalletDb, WalletWrite,
     };
 
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
@@ -1056,7 +1061,7 @@ mod tests {
     fn init_accounts_table_stores_correct_address() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
 
         let seed = [0u8; 32];
 
@@ -1071,5 +1076,41 @@ mod tests {
         // The account's address should be in the data DB
         let pa = get_address(&db_data, AccountId::from(0)).unwrap();
         assert_eq!(pa.unwrap(), expected_address);
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn account_produces_expected_ua_sequence() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::MainNetwork).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        let mut ops = db_data.get_update_ops().unwrap();
+        let seed = test_vectors::UNIFIED[0].root_seed;
+        let (account, _usk) = ops.create_account(&Secret::new(seed.to_vec())).unwrap();
+        assert_eq!(account, AccountId::from(0u32));
+
+        for tv in &test_vectors::UNIFIED[..3] {
+            if let Some(RecipientAddress::Unified(tvua)) =
+                RecipientAddress::decode(&Network::MainNetwork, tv.unified_addr)
+            {
+                let (ua, di) = wallet::get_current_address(&db_data, account)
+                    .unwrap()
+                    .expect("create_account generated the first address");
+                assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
+                assert_eq!(tvua.transparent(), ua.transparent());
+                assert_eq!(tvua.sapling(), ua.sapling());
+                assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
+
+                ops.get_next_available_address(account)
+                    .unwrap()
+                    .expect("get_next_available_address generated an address");
+            } else {
+                panic!(
+                    "{} did not decode to a valid unified address",
+                    tv.unified_addr
+                );
+            }
+        }
     }
 }

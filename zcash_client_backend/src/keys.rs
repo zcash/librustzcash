@@ -591,10 +591,14 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::encoding::AddressCodec,
-        zcash_primitives::legacy::{
-            self,
-            keys::{AccountPrivKey, IncomingViewingKey},
+        crate::{address::RecipientAddress, encoding::AddressCodec},
+        zcash_address::test_vectors,
+        zcash_primitives::{
+            legacy::{
+                self,
+                keys::{AccountPrivKey, IncomingViewingKey},
+            },
+            zip32::DiversifierIndex,
         },
     };
 
@@ -697,6 +701,50 @@ mod tests {
         );
         #[cfg(not(feature = "transparent-inputs"))]
         assert_eq!(decoded_with_t.unknown.len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn ufvk_derivation() {
+        for tv in test_vectors::UNIFIED {
+            let usk = UnifiedSpendingKey::from_seed(
+                &MAIN_NETWORK,
+                &tv.root_seed,
+                AccountId::from(tv.account),
+            )
+            .expect("seed produced a valid unified spending key");
+
+            let d_idx = DiversifierIndex::from(tv.diversifier_index);
+            let ufvk = usk.to_unified_full_viewing_key();
+
+            // The test vectors contain some diversifier indices that do not generate
+            // valid Sapling addresses, so skip those.
+            if ufvk.sapling().unwrap().address(d_idx).is_none() {
+                continue;
+            }
+
+            let ua = ufvk.address(d_idx).unwrap_or_else(|| panic!("diversifier index {} should have produced a valid unified address for account {}",
+                tv.diversifier_index, tv.account));
+
+            match RecipientAddress::decode(&MAIN_NETWORK, tv.unified_addr) {
+                Some(RecipientAddress::Unified(tvua)) => {
+                    // We always derive transparent and Sapling receivers, but not
+                    // every value in the test vectors have these present.
+                    if tvua.transparent().is_some() {
+                        assert_eq!(tvua.transparent(), ua.transparent());
+                    }
+                    if tvua.sapling().is_some() {
+                        assert_eq!(tvua.sapling(), ua.sapling());
+                    }
+                }
+                _other => {
+                    panic!(
+                        "{} did not decode to a valid unified address",
+                        tv.unified_addr
+                    );
+                }
+            }
+        }
     }
 
     proptest! {
