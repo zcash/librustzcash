@@ -228,6 +228,7 @@ fn stream_params_downloads_to_disk(
     expected_bytes: u64,
     timeout: Option<u64>,
 ) -> Result<(), minreq::Error> {
+    use downloadreader::ResponseLazyReader;
     use std::io::{BufWriter, Read};
 
     // Fail early if the directory isn't writeable.
@@ -252,8 +253,8 @@ fn stream_params_downloads_to_disk(
 
     // Download the responses and write them to a new file,
     // verifying the hash as bytes are read.
-    let params_download_1 = downloadreader::ResponseLazyReader::from(params_download_1);
-    let params_download_2 = downloadreader::ResponseLazyReader::from(params_download_2);
+    let params_download_1 = ResponseLazyReader::from(params_download_1);
+    let params_download_2 = ResponseLazyReader::from(params_download_2);
 
     // Limit the download size to avoid DoS.
     // This also avoids launching the second request, if the first request provides enough bytes.
