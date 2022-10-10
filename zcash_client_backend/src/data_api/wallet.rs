@@ -23,8 +23,8 @@ use {
 use crate::{
     address::RecipientAddress,
     data_api::{
-        error::Error, DecryptedTransaction, Recipient, SentTransaction, SentTransactionOutput,
-        WalletWrite,
+        error::Error, DecryptedTransaction, PoolType, Recipient, SentTransaction,
+        SentTransactionOutput, WalletWrite,
     },
     decrypt_transaction,
     wallet::OvkPolicy,
@@ -374,14 +374,17 @@ where
     let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
 
     let sent_outputs = request.payments().iter().enumerate().map(|(i, payment)| {
-        let idx = match &payment.recipient_address {
+        let (output_index, output_pool) = match &payment.recipient_address {
             // Sapling outputs are shuffled, so we need to look up where the output ended up.
-            // TODO: When we add Orchard support, we will need to trial-decrypt to find them.
-            RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) =>
-                tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment."),
+            // TODO: When we add Orchard support, we will need to trial-decrypt to find them,
+            // and return the appropriate pool type.
+            RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) => {
+                let idx = tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment.");
+                (idx, PoolType::Sapling)
+            }
             RecipientAddress::Transparent(addr) => {
                 let script = addr.script();
-                tx.transparent_bundle()
+                let idx = tx.transparent_bundle()
                     .and_then(|b| {
                         b.vout
                             .iter()
@@ -389,12 +392,15 @@ where
                             .find(|(_, tx_out)| tx_out.script_pubkey == script)
                     })
                     .map(|(index, _)| index)
-                    .expect("An output should exist in the transaction for each transparent payment.")
+                    .expect("An output should exist in the transaction for each transparent payment.");
+
+                (idx, PoolType::Transparent)
             }
         };
 
         SentTransactionOutput {
-            output_index: idx,
+            output_pool,
+            output_index,
             recipient: Recipient::Address(payment.recipient_address.clone()),
             value: payment.amount,
             memo: payment.memo.clone()
@@ -526,6 +532,7 @@ where
         created: time::OffsetDateTime::now_utc(),
         account,
         outputs: vec![SentTransactionOutput {
+            output_pool: PoolType::Sapling,
             output_index,
             value: amount_to_shield,
             recipient: Recipient::InternalAccount(account),

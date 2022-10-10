@@ -309,7 +309,7 @@ mod tests {
     use crate::{
         error::SqliteClientError,
         tests::{self, network},
-        wallet::get_address,
+        wallet::{get_address, pool_code},
         AccountId, WalletDb,
     };
 
@@ -387,7 +387,11 @@ mod tests {
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (from_account) REFERENCES accounts(account),
                 FOREIGN KEY (to_account) REFERENCES accounts(account),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
+                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
+                CONSTRAINT note_recipient CHECK (
+                    (to_address IS NOT NULL OR to_account IS NOT NULL)
+                    AND NOT (to_address IS NOT NULL AND to_account IS NOT NULL)
+                )
             )",
             "CREATE TABLE transactions (
                 id_tx INTEGER PRIMARY KEY,
@@ -950,7 +954,7 @@ mod tests {
                 wdb.conn.execute(
                     "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
                     VALUES (0, ?, 0, ?, ?, 0)",
-                    [PoolType::Transparent.typecode().to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
+                    [pool_code(PoolType::Transparent).to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
             }
 
             Ok(())

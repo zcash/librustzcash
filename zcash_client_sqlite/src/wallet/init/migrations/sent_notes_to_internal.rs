@@ -42,10 +42,8 @@ impl RusqliteMigration for Migration {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch("ALTER TABLE sent_notes ADD COLUMN to_account INTEGER;")?;
-
-        // `to_account` should be null for all migrated rows, since internal addresses
-        // have not been used for change or shielding prior to this migration.
+        // Adds the `to_account` column to the `sent_notes` table and establishes the
+        // foreign key relationship with the `account` table.
         transaction.execute_batch(
             "CREATE TABLE sent_notes_new (
                 id_note INTEGER PRIMARY KEY,
@@ -60,7 +58,11 @@ impl RusqliteMigration for Migration {
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (from_account) REFERENCES accounts(account),
                 FOREIGN KEY (to_account) REFERENCES accounts(account),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
+                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
+                CONSTRAINT note_recipient CHECK (
+                    (to_address IS NOT NULL OR to_account IS NOT NULL)
+                    AND NOT (to_address IS NOT NULL AND to_account IS NOT NULL)
+                )
             );
             INSERT INTO sent_notes_new (
                 id_note, tx, output_pool, output_index,

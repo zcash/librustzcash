@@ -89,12 +89,15 @@ and this library adheres to Rust's notion of
   migration process.
 
 ### Removed
-- `zcash_client_sqlite::wallet`:
-  - `get_extended_full_viewing_keys` (use
-    `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
-    instead).
-  - `delete_utxos_above` (use
-    `zcash_client_backend::data_api::WalletWrite::rewind_to_height` instead)
+- The following functions have been removed from the public interface of
+  `zcash_client_sqlite::wallet`. Prefer methods defined on 
+  `zcash_client_backend::data_api::{WalletRead, WalletWrite}` instead.
+  - `get_extended_full_viewing_keys` (use `WalletRead::get_unified_full_viewing_keys` instead).
+  - `insert_sent_note` (use `WalletWrite::store_sent_tx` instead)
+  - `insert_sent_utxo` (use `WalletWrite::store_sent_tx` instead)
+  - `put_sent_note` (use `WalletWrite::store_decrypted_tx` instead)
+  - `put_sent_utxo` (use `WalletWrite::store_decrypted_tx` instead)
+  - `delete_utxos_above` (use `WalletWrite::rewind_to_height` instead)
 - `zcash_client_sqlite::with_blocks` (use
   `zcash_client_backend::data_api::BlockSource::with_blocks` instead)
 
@@ -131,7 +134,6 @@ and this library adheres to Rust's notion of
     - `insert_witness`
     - `prune_witnesses`
     - `update_expired_notes`
-    - `put_sent_note`
     - `put_sent_utxo`
     - `insert_sent_note`
     - `insert_sent_utxo`

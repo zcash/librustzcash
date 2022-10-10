@@ -18,9 +18,12 @@ use zcash_primitives::{
     zip32::{AccountId, DiversifierIndex},
 };
 
-use zcash_client_backend::{address::UnifiedAddress, data_api::Recipient};
+use zcash_client_backend::{
+    address::UnifiedAddress,
+    data_api::{PoolType, Recipient},
+};
 
-use crate::{error::SqliteClientError, wallet::PoolType, NoteId, WalletDb};
+use crate::{error::SqliteClientError, wallet::pool_code, NoteId, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -60,8 +63,8 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,
 
-    stmt_insert_sent_note: Statement<'a>,
-    stmt_update_sent_note: Statement<'a>,
+    stmt_insert_sent_output: Statement<'a>,
+    stmt_update_sent_output: Statement<'a>,
 
     stmt_insert_witness: Statement<'a>,
     stmt_prune_witnesses: Statement<'a>,
@@ -152,9 +155,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 stmt_select_received_note: wallet_db.conn.prepare(
                     "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
                 )?,
-                stmt_update_sent_note: wallet_db.conn.prepare(
+                stmt_update_sent_output: wallet_db.conn.prepare(
                     "UPDATE sent_notes
-                    SET from_account = :account,
+                    SET from_account = :from_account,
                         to_address = :to_address,
                         to_account = :to_account,
                         value = :value,
@@ -163,7 +166,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                       AND output_pool = :output_pool
                       AND output_index = :output_index",
                 )?,
-                stmt_insert_sent_note: wallet_db.conn.prepare(
+                stmt_insert_sent_output: wallet_db.conn.prepare(
                     "INSERT INTO sent_notes (
                         tx, output_pool, output_index, from_account,
                         to_address, to_account, value, memo)
@@ -362,7 +365,7 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     /// - If `to` is an internal account, this is an index into the Sapling outputs of the
     ///   transaction.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_insert_sent_note(
+    pub(crate) fn stmt_insert_sent_output(
         &mut self,
         tx_ref: i64,
         pool_type: PoolType,
@@ -373,13 +376,13 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         memo: Option<&MemoBytes>,
     ) -> Result<(), SqliteClientError> {
         let (to_address, to_account) = match to {
-            Recipient::Address(addr) => (Some(addr.encode(&self.wallet_db.params)), None),
             Recipient::InternalAccount(id) => (None, Some(u32::from(*id))),
+            Recipient::Address(shielded) => (Some(shielded.encode(&self.wallet_db.params)), None),
         };
 
-        self.stmt_insert_sent_note.execute(named_params![
+        self.stmt_insert_sent_output.execute(named_params![
             ":tx": &tx_ref,
-            ":output_pool": &pool_type.typecode(),
+            ":output_pool": &pool_code(pool_type),
             ":output_index": &i64::try_from(output_index).unwrap(),
             ":from_account": &u32::from(from_account),
             ":to_address": &to_address,
@@ -395,9 +398,9 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     ///
     /// Returns `false` if the transaction doesn't exist in the wallet.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_update_sent_note(
+    pub(crate) fn stmt_update_sent_output(
         &mut self,
-        account: AccountId,
+        from_account: AccountId,
         to: &Recipient,
         value: Amount,
         memo: Option<&MemoBytes>,
@@ -406,17 +409,17 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         output_index: usize,
     ) -> Result<bool, SqliteClientError> {
         let (to_address, to_account) = match to {
-            Recipient::Address(addr) => (Some(addr.encode(&self.wallet_db.params)), None),
             Recipient::InternalAccount(id) => (None, Some(u32::from(*id))),
+            Recipient::Address(shielded) => (Some(shielded.encode(&self.wallet_db.params)), None),
         };
-        match self.stmt_update_sent_note.execute(named_params![
-            ":account": &u32::from(account),
+        match self.stmt_update_sent_output.execute(named_params![
+            ":from_account": &u32::from(from_account),
             ":to_address": &to_address,
             ":to_account": &to_account,
             ":value": &i64::from(value),
             ":memo": &memo.filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
             ":tx": &tx_ref,
-            ":output_pool": &pool_type.typecode(),
+            ":output_pool": &pool_code(pool_type),
             ":output_index": &i64::try_from(output_index).unwrap(),
         ])? {
             0 => Ok(false),

@@ -55,8 +55,8 @@ use zcash_primitives::{
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
     data_api::{
-        BlockSource, DecryptedTransaction, PrunedBlock, Recipient, SentTransaction, WalletRead,
-        WalletWrite,
+        BlockSource, DecryptedTransaction, PoolType, PrunedBlock, Recipient, SentTransaction,
+        WalletRead, WalletWrite,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -539,15 +539,15 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                             Recipient::InternalAccount(output.account)
                         };
 
-                        wallet::put_sent_note(
+                        wallet::put_sent_output(
                             up,
-                            tx_ref,
-                            output.index,
                             output.account,
+                            tx_ref,
+                            PoolType::Sapling,
+                            output.index,
                             &recipient,
-                            Amount::from_u64(output.note.value)
-                                .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-                            Some(&output.memo),
+                            Amount::from_u64(output.note.value).unwrap(),
+                            Some(&output.memo)
                         )?;
                     }
                     TransferType::Incoming => {
@@ -577,13 +577,16 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         .any(|input| *nf == input.nullifier)
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
-                        wallet::put_sent_utxo(
+                        let recipient = Recipient::Address(RecipientAddress::Transparent(txout.script_pubkey.address().unwrap()));
+                        wallet::put_sent_output(
                             up,
-                            tx_ref,
-                            output_index,
                             *account_id,
-                            &txout.script_pubkey.address().unwrap(),
+                            tx_ref,
+                            PoolType::Transparent,
+                            output_index,
+                            &recipient,
                             txout.value,
+                            None
                         )?;
                     }
                 }
@@ -622,27 +625,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             for output in &sent_tx.outputs {
-                match &output.recipient {
-                    Recipient::Address(RecipientAddress::Transparent(addr)) => {
-                        wallet::insert_sent_utxo(
-                            up,
-                            tx_ref,
-                            output.output_index,
-                            sent_tx.account,
-                            addr,
-                            output.value,
-                        )?
-                    }
-                    shielded_recipient => wallet::insert_sent_note(
-                        up,
-                        tx_ref,
-                        output.output_index,
-                        sent_tx.account,
-                        shielded_recipient,
-                        output.value,
-                        output.memo.as_ref(),
-                    )?,
-                }
+                wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
             }
 
             // Return the row number of the transaction, so the caller can fetch it for sending.

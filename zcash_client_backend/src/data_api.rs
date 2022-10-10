@@ -255,12 +255,24 @@ pub struct SentTransaction<'a> {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Recipient {
     Address(RecipientAddress),
     InternalAccount(AccountId),
 }
 
+/// A value pool to which the wallet supports sending transaction outputs.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PoolType {
+    /// The transparent value pool
+    Transparent,
+    /// The Sapling value pool
+    Sapling,
+}
+
 pub struct SentTransactionOutput {
+    /// The value in which the output has been created
+    pub output_pool: PoolType,
     /// The index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
@@ -268,8 +280,12 @@ pub struct SentTransactionOutput {
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
     pub output_index: usize,
+    /// The recipient address of the transaction, or the account
+    /// id for wallet-internal transactions.
     pub recipient: Recipient,
+    /// The value of the newly created output
     pub value: Amount,
+    /// The memo that was attached to the output, if any
     pub memo: Option<MemoBytes>,
 }
 
