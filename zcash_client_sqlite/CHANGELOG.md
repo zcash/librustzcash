@@ -90,7 +90,7 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - The following functions have been removed from the public interface of
-  `zcash_client_sqlite::wallet`. Prefer methods defined on 
+  `zcash_client_sqlite::wallet`. Prefer methods defined on
   `zcash_client_backend::data_api::{WalletRead, WalletWrite}` instead.
   - `get_extended_full_viewing_keys` (use `WalletRead::get_unified_full_viewing_keys` instead).
   - `insert_sent_note` (use `WalletWrite::store_sent_tx` instead)
