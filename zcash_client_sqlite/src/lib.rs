@@ -111,7 +111,7 @@ impl fmt::Display for NoteId {
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct UtxoId(pub i64);
 
 /// A wrapper for the SQLite connection to the wallet database.
@@ -252,7 +252,7 @@ impl<P: consensus::Parameters> WalletReadTransparent for WalletDb<P> {
         &self,
         account: AccountId,
     ) -> Result<HashSet<TransparentAddress>, Self::Error> {
-        wallet::get_transparent_receivers(self, account)
+        wallet::get_transparent_receivers(&self.params, &self.conn, account)
     }
 
     fn get_unspent_transparent_outputs(

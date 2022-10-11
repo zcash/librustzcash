@@ -1,4 +1,5 @@
 mod add_transaction_views;
+mod add_utxo_account;
 mod addresses_table;
 mod initial_setup;
 mod ufvk_support;
@@ -26,6 +27,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(add_transaction_views::Migration {
             params: params.clone(),
+        }),
+        Box::new(add_utxo_account::Migration {
+            _params: params.clone(),
         }),
     ]
 }

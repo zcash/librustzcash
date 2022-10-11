@@ -247,13 +247,22 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::{self, params};
     use tempfile::NamedTempFile;
+
+    use zcash_client_backend::keys::UnifiedSpendingKey;
+    use zcash_primitives::zip32::AccountId;
+
+    use crate::{
+        tests,
+        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
+        WalletDb,
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::wallet::init::migrations::ufvk_support,
-        rusqlite::params,
-        zcash_client_backend::{encoding::AddressCodec, keys::UnifiedSpendingKey},
+        zcash_client_backend::encoding::AddressCodec,
         zcash_primitives::{
             consensus::{BlockHeight, BranchId},
             legacy::{keys::IncomingViewingKey, Script},
@@ -264,14 +273,7 @@ mod tests {
                 },
                 TransactionData, TxVersion,
             },
-            zip32::AccountId,
         },
-    };
-
-    use crate::{
-        tests,
-        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
-        WalletDb,
     };
 
     #[test]
@@ -279,10 +281,21 @@ mod tests {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db_internal(&mut db_data, None, Some(addresses_table::MIGRATION_ID)).unwrap();
+        let usk =
+            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
+                .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
+                params![ufvk.encode(&tests::network())],
+            )
+            .unwrap();
 
         db_data.conn.execute_batch(
-            "INSERT INTO accounts (account, ufvk) VALUES (0, '');
-            INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
 
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
