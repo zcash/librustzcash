@@ -18,11 +18,14 @@ use crate::keys::UnifiedFullViewingKey;
 /// An enumeration of the possible relationships a TXO can have to the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TransferType {
-    /// The transfer was received on one of the wallet's external addresses.
+    /// The output was received on one of the wallet's external addresses via decryption using the
+    /// associated incoming viewing key, or at one of the wallet's transparent addresses.
     Incoming,
-    /// The transfer was received on one of the wallet's internal-only addresses.
+    /// The output was received on one of the wallet's internal-only shielded addresses via trial
+    /// decryption using one of the wallet's internal incoming viewing keys.
     WalletInternal,
-    /// The transfer was decrypted using one of the wallet's outgoing viewing keys.
+    /// The output was decrypted using one of the wallet's outgoing viewing keys, or was created
+    /// in a transaction constructed by this wallet.
     Outgoing,
 }
 

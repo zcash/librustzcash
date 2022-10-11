@@ -127,7 +127,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb.conn
         .execute_batch(
             "PRAGMA foreign_keys = OFF;
-                        PRAGMA legacy_alter_table = TRUE;",
+             PRAGMA legacy_alter_table = TRUE;",
         )
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
