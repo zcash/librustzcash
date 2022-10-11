@@ -1154,7 +1154,6 @@ pub(crate) fn insert_sent_output<'a, P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     stmts.stmt_insert_sent_output(
         tx_ref,
-        output.output_pool,
         output.output_index,
         from_account,
         &output.recipient,
@@ -1171,24 +1170,14 @@ pub(crate) fn put_sent_output<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     from_account: AccountId,
     tx_ref: i64,
-    output_pool: PoolType,
     output_index: usize,
     recipient: &Recipient,
     value: Amount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
-    if !stmts.stmt_update_sent_output(
-        from_account,
-        recipient,
-        value,
-        memo,
-        tx_ref,
-        output_pool,
-        output_index,
-    )? {
+    if !stmts.stmt_update_sent_output(from_account, recipient, value, memo, tx_ref, output_index)? {
         stmts.stmt_insert_sent_output(
             tx_ref,
-            output_pool,
             output_index,
             from_account,
             recipient,

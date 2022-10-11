@@ -53,7 +53,7 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::{RecipientAddress, UnifiedAddress},
+    address::UnifiedAddress,
     data_api::{
         BlockSource, DecryptedTransaction, PoolType, PrunedBlock, Recipient, SentTransaction,
         WalletRead, WalletWrite,
@@ -534,16 +534,15 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Address(RecipientAddress::Shielded(output.to.clone()))
+                            Recipient::Sapling(output.to.clone())
                         } else {
-                            Recipient::InternalAccount(output.account)
+                            Recipient::InternalAccount(output.account, PoolType::Sapling)
                         };
 
                         wallet::put_sent_output(
                             up,
                             output.account,
                             tx_ref,
-                            PoolType::Sapling,
                             output.index,
                             &recipient,
                             Amount::from_u64(output.note.value).unwrap(),
@@ -577,12 +576,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         .any(|input| *nf == input.nullifier)
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
-                        let recipient = Recipient::Address(RecipientAddress::Transparent(txout.script_pubkey.address().unwrap()));
+                        let recipient = Recipient::Transparent(txout.script_pubkey.address().unwrap());
                         wallet::put_sent_output(
                             up,
                             *account_id,
                             tx_ref,
-                            PoolType::Transparent,
                             output_index,
                             &recipient,
                             txout.value,

@@ -309,14 +309,17 @@ mod tests {
     use crate::{
         error::SqliteClientError,
         tests::{self, network},
-        wallet::{get_address, pool_code},
+        wallet::get_address,
         AccountId, WalletDb,
     };
 
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
 
     #[cfg(feature = "transparent-inputs")]
-    use {crate::wallet::PoolType, zcash_primitives::legacy::keys as transparent};
+    use {
+        crate::wallet::{pool_code, PoolType},
+        zcash_primitives::legacy::keys as transparent,
+    };
 
     #[test]
     fn verify_schema() {

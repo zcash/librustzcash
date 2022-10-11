@@ -21,15 +21,15 @@ use zcash_primitives::{
 use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{PoolType, Recipient},
+    encoding::AddressCodec,
 };
 
 use crate::{error::SqliteClientError, wallet::pool_code, NoteId, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::UtxoId,
-    rusqlite::OptionalExtension,
-    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
+    crate::UtxoId, rusqlite::OptionalExtension,
+    zcash_client_backend::wallet::WalletTransparentOutput,
     zcash_primitives::transaction::components::transparent::OutPoint,
 };
 
@@ -368,16 +368,27 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     pub(crate) fn stmt_insert_sent_output(
         &mut self,
         tx_ref: i64,
-        pool_type: PoolType,
         output_index: usize,
         from_account: AccountId,
         to: &Recipient,
         value: Amount,
         memo: Option<&MemoBytes>,
     ) -> Result<(), SqliteClientError> {
-        let (to_address, to_account) = match to {
-            Recipient::InternalAccount(id) => (None, Some(u32::from(*id))),
-            Recipient::Address(shielded) => (Some(shielded.encode(&self.wallet_db.params)), None),
+        let (to_address, to_account, pool_type) = match to {
+            Recipient::Transparent(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Transparent,
+            ),
+            Recipient::Sapling(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Sapling,
+            ),
+            Recipient::Unified(addr, pool) => {
+                (Some(addr.encode(&self.wallet_db.params)), None, *pool)
+            }
+            Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
         };
 
         self.stmt_insert_sent_output.execute(named_params![
@@ -405,13 +416,25 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         value: Amount,
         memo: Option<&MemoBytes>,
         tx_ref: i64,
-        pool_type: PoolType,
         output_index: usize,
     ) -> Result<bool, SqliteClientError> {
-        let (to_address, to_account) = match to {
-            Recipient::InternalAccount(id) => (None, Some(u32::from(*id))),
-            Recipient::Address(shielded) => (Some(shielded.encode(&self.wallet_db.params)), None),
+        let (to_address, to_account, pool_type) = match to {
+            Recipient::Transparent(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Transparent,
+            ),
+            Recipient::Sapling(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Sapling,
+            ),
+            Recipient::Unified(addr, pool) => {
+                (Some(addr.encode(&self.wallet_db.params)), None, *pool)
+            }
+            Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
         };
+
         match self.stmt_update_sent_output.execute(named_params![
             ":from_account": &u32::from(from_account),
             ":to_address": &to_address,

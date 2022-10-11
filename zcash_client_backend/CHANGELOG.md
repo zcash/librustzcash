@@ -31,6 +31,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
 - `zcash_client_backend::data_api`:
+  - `Recipient`
+  - `SentTransactionOutput`
   - `WalletRead::get_unified_full_viewing_keys`
   - `WalletRead::get_current_address`
   - `WalletRead::get_all_nullifiers`
