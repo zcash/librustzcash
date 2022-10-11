@@ -141,7 +141,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: install
-          args: --git https://github.com/xd009642/tarpaulin.git --branch feat/llvm-profparser-integration cargo-tarpaulin
+          args: cargo-tarpaulin
 
       - name: Fetch path to Zcash parameters
         working-directory: ./zcash_proofs
