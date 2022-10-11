@@ -31,12 +31,17 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
 - `zcash_client_backend::data_api`:
+  - `PoolType`
+  - `Recipient`
+  - `SentTransactionOutput`
   - `WalletRead::get_unified_full_viewing_keys`
   - `WalletRead::get_current_address`
   - `WalletRead::get_all_nullifiers`
   - `WalletWrite::create_account`
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
   - `WalletWrite::get_next_available_address`
+- `zcash_client_backend::decrypt`:
+  - `TransferType`
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`
@@ -44,7 +49,10 @@ and this library adheres to Rust's notion of
   - `TransactionRequest::new` for constructing a request from `Vec<Payment>`.
   - `TransactionRequest::payments` for accessing the `Payments` that make up a
     request.
-- `zcash_client_backend::encoding::KeyError` 
+- `zcash_client_backend::encoding`
+  - `KeyError`
+  - `AddressCodec` implementations for `sapling::PaymentAddress` and
+    `UnifiedAddress`
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:

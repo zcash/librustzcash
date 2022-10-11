@@ -122,8 +122,13 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     seed: Option<SecretVec<u8>>,
     target_migration: Option<Uuid>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
+    // Turn off foreign keys, and ensure that table replacement/modification
+    // does not break views
     wdb.conn
-        .execute("PRAGMA foreign_keys = OFF", [])
+        .execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             PRAGMA legacy_alter_table = TRUE;",
+        )
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
@@ -311,7 +316,10 @@ mod tests {
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
 
     #[cfg(feature = "transparent-inputs")]
-    use {crate::wallet::PoolType, zcash_primitives::legacy::keys as transparent};
+    use {
+        crate::wallet::{pool_code, PoolType},
+        zcash_primitives::legacy::keys as transparent,
+    };
 
     #[test]
     fn verify_schema() {
@@ -375,12 +383,17 @@ mod tests {
                 output_pool INTEGER NOT NULL ,
                 output_index INTEGER NOT NULL,
                 from_account INTEGER NOT NULL,
-                address TEXT NOT NULL,
+                to_address TEXT,
+                to_account INTEGER,
                 value INTEGER NOT NULL,
                 memo BLOB,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (from_account) REFERENCES accounts(account),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
+                FOREIGN KEY (to_account) REFERENCES accounts(account),
+                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
+                CONSTRAINT note_recipient CHECK (
+                    (to_address IS NOT NULL) != (to_account IS NOT NULL)
+                )
             )",
             "CREATE TABLE transactions (
                 id_tx INTEGER PRIMARY KEY,
@@ -943,7 +956,7 @@ mod tests {
                 wdb.conn.execute(
                     "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
                     VALUES (0, ?, 0, ?, ?, 0)",
-                    [PoolType::Transparent.typecode().to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
+                    [pool_code(PoolType::Transparent).to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
             }
 
             Ok(())

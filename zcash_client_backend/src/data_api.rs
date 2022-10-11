@@ -11,15 +11,16 @@ use secrecy::SecretVec;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
+    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier},
+    sapling::{Node, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
-    address::{RecipientAddress, UnifiedAddress},
+    address::UnifiedAddress,
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -27,10 +28,7 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    crate::wallet::WalletTransparentOutput,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
-};
+use {crate::wallet::WalletTransparentOutput, zcash_primitives::transaction::components::OutPoint};
 
 pub mod chain;
 pub mod error;
@@ -248,13 +246,34 @@ pub struct SentTransaction<'a> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,
     pub account: AccountId,
-    pub outputs: Vec<SentTransactionOutput<'a>>,
+    pub outputs: Vec<SentTransactionOutput>,
     pub fee_amount: Amount,
     #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
 }
 
-pub struct SentTransactionOutput<'a> {
+/// A value pool to which the wallet supports sending transaction outputs.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PoolType {
+    /// The transparent value pool
+    Transparent,
+    /// The Sapling value pool
+    Sapling,
+}
+
+/// A type that represents the recipient of a transaction output; a recipient address (and, for
+/// unified addresses, the pool to which the payment is sent) in the case of outgoing output, or an
+/// internal account ID and the pool to which funds were sent in the case of a wallet-internal
+/// output.
+#[derive(Debug, Clone)]
+pub enum Recipient {
+    Transparent(TransparentAddress),
+    Sapling(PaymentAddress),
+    Unified(UnifiedAddress, PoolType),
+    InternalAccount(AccountId, PoolType),
+}
+
+pub struct SentTransactionOutput {
     /// The index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
@@ -262,8 +281,12 @@ pub struct SentTransactionOutput<'a> {
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
     pub output_index: usize,
-    pub recipient_address: &'a RecipientAddress,
+    /// The recipient address of the transaction, or the account
+    /// id for wallet-internal transactions.
+    pub recipient: Recipient,
+    /// The value of the newly created output
     pub value: Amount,
+    /// The memo that was attached to the output, if any
     pub memo: Option<MemoBytes>,
 }
 

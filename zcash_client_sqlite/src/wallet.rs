@@ -27,16 +27,13 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
-    data_api::error::Error,
-    encoding::{encode_payment_address_p, encode_transparent_address_p},
+    data_api::{error::Error, PoolType, Recipient, SentTransactionOutput},
     keys::UnifiedFullViewingKey,
     wallet::{WalletShieldedOutput, WalletTx},
     DecryptedOutput,
 };
 
 use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb, PRUNING_HEIGHT};
-
-use zcash_primitives::legacy::TransparentAddress;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -45,7 +42,7 @@ use {
     std::collections::HashSet,
     zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
     zcash_primitives::{
-        legacy::{keys::IncomingViewingKey, Script},
+        legacy::{keys::IncomingViewingKey, Script, TransparentAddress},
         transaction::components::{OutPoint, TxOut},
     },
 };
@@ -53,20 +50,13 @@ use {
 pub mod init;
 pub mod transact;
 
-pub(crate) enum PoolType {
-    Transparent,
-    Sapling,
-}
-
-impl PoolType {
-    pub(crate) fn typecode(&self) -> i64 {
-        // These constants are *incidentally* shared with the typecodes
-        // for unified addresses, but this is exclusively an internal
-        // implementation detail.
-        match self {
-            PoolType::Transparent => 0i64,
-            PoolType::Sapling => 2i64,
-        }
+pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
+    // These constants are *incidentally* shared with the typecodes
+    // for unified addresses, but this is exclusively an internal
+    // implementation detail.
+    match pool_type {
+        PoolType::Transparent => 0i64,
+        PoolType::Sapling => 2i64,
     }
 }
 
@@ -1153,128 +1143,50 @@ pub fn update_expired_notes<P>(
     stmts.stmt_update_expired(height)
 }
 
-/// Records information about a note that your wallet created.
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_decrypted_tx instead."
-)]
-#[allow(deprecated)]
-pub fn put_sent_note<'a, P: consensus::Parameters>(
+/// Records information about a transaction output that your wallet created.
+///
+/// This is a crate-internal convenience method.
+pub(crate) fn insert_sent_output<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     tx_ref: i64,
-    output_index: usize,
-    account: AccountId,
-    to: &PaymentAddress,
-    value: Amount,
-    memo: Option<&MemoBytes>,
+    from_account: AccountId,
+    output: &SentTransactionOutput,
 ) -> Result<(), SqliteClientError> {
-    // Try updating an existing sent note.
-    if !stmts.stmt_update_sent_note(
-        account,
-        &encode_payment_address_p(&stmts.wallet_db.params, to),
-        value,
-        memo,
+    stmts.stmt_insert_sent_output(
         tx_ref,
-        PoolType::Sapling,
-        output_index,
-    )? {
-        // It isn't there, so insert.
-        insert_sent_note(stmts, tx_ref, output_index, account, to, value, memo)?
-    }
-
-    Ok(())
-}
-
-/// Adds information about a sent transparent UTXO to the database if it does not already
-/// exist, or updates it if a record for the UTXO already exists.
-///
-/// `output_index` is the index within transparent UTXOs of the transaction that contains the recipient output.
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_decrypted_tx instead."
-)]
-#[allow(deprecated)]
-pub fn put_sent_utxo<'a, P: consensus::Parameters>(
-    stmts: &mut DataConnStmtCache<'a, P>,
-    tx_ref: i64,
-    output_index: usize,
-    account: AccountId,
-    to: &TransparentAddress,
-    value: Amount,
-) -> Result<(), SqliteClientError> {
-    // Try updating an existing sent UTXO.
-    if !stmts.stmt_update_sent_note(
-        account,
-        &encode_transparent_address_p(&stmts.wallet_db.params, to),
-        value,
-        None,
-        tx_ref,
-        PoolType::Transparent,
-        output_index,
-    )? {
-        // It isn't there, so insert.
-        insert_sent_utxo(stmts, tx_ref, output_index, account, to, value)?
-    }
-
-    Ok(())
-}
-
-/// Inserts a sent note into the wallet database.
-///
-/// `output_index` is the index within the transaction that contains the recipient output:
-///
-/// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
-///   transaction.
-/// - If `to` is a transparent address, this is an index into the transparent outputs of
-///   the transaction.
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_sent_tx instead."
-)]
-pub fn insert_sent_note<'a, P: consensus::Parameters>(
-    stmts: &mut DataConnStmtCache<'a, P>,
-    tx_ref: i64,
-    output_index: usize,
-    account: AccountId,
-    to: &PaymentAddress,
-    value: Amount,
-    memo: Option<&MemoBytes>,
-) -> Result<(), SqliteClientError> {
-    let to_str = encode_payment_address_p(&stmts.wallet_db.params, to);
-
-    stmts.stmt_insert_sent_note(
-        tx_ref,
-        PoolType::Sapling,
-        output_index,
-        account,
-        &to_str,
-        value,
-        memo,
+        output.output_index,
+        from_account,
+        &output.recipient,
+        output.value,
+        output.memo.as_ref(),
     )
 }
 
-/// Inserts information about a sent transparent UTXO into the wallet database.
+/// Records information about a transaction output that your wallet created.
 ///
-/// `output_index` is the index within transparent UTXOs of the transaction that contains the recipient output.
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletWrite::store_sent_tx instead."
-)]
-pub fn insert_sent_utxo<'a, P: consensus::Parameters>(
+/// This is a crate-internal convenience method.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn put_sent_output<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
+    from_account: AccountId,
     tx_ref: i64,
     output_index: usize,
-    account: AccountId,
-    to: &TransparentAddress,
+    recipient: &Recipient,
     value: Amount,
+    memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
-    let to_str = encode_transparent_address_p(&stmts.wallet_db.params, to);
+    if !stmts.stmt_update_sent_output(from_account, recipient, value, memo, tx_ref, output_index)? {
+        stmts.stmt_insert_sent_output(
+            tx_ref,
+            output_index,
+            from_account,
+            recipient,
+            value,
+            memo,
+        )?;
+    }
 
-    stmts.stmt_insert_sent_note(
-        tx_ref,
-        PoolType::Transparent,
-        output_index,
-        account,
-        &to_str,
-        value,
-        None,
-    )
+    Ok(())
 }
 
 #[cfg(test)]

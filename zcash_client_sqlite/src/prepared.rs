@@ -7,7 +7,7 @@
 //! - Build the statement in [`DataConnStmtCache::new`].
 //! - Add a crate-private helper method to `DataConnStmtCache` for running the statement.
 
-use rusqlite::{params, Statement, ToSql};
+use rusqlite::{named_params, params, Statement, ToSql};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -18,15 +18,18 @@ use zcash_primitives::{
     zip32::{AccountId, DiversifierIndex},
 };
 
-use zcash_client_backend::address::UnifiedAddress;
+use zcash_client_backend::{
+    address::UnifiedAddress,
+    data_api::{PoolType, Recipient},
+    encoding::AddressCodec,
+};
 
-use crate::{error::SqliteClientError, wallet::PoolType, NoteId, WalletDb};
+use crate::{error::SqliteClientError, wallet::pool_code, NoteId, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::UtxoId,
-    rusqlite::{named_params, OptionalExtension},
-    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
+    crate::UtxoId, rusqlite::OptionalExtension,
+    zcash_client_backend::wallet::WalletTransparentOutput,
     zcash_primitives::transaction::components::transparent::OutPoint,
 };
 
@@ -60,8 +63,8 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,
 
-    stmt_insert_sent_note: Statement<'a>,
-    stmt_update_sent_note: Statement<'a>,
+    stmt_insert_sent_output: Statement<'a>,
+    stmt_update_sent_output: Statement<'a>,
 
     stmt_insert_witness: Statement<'a>,
     stmt_prune_witnesses: Statement<'a>,
@@ -152,19 +155,24 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 stmt_select_received_note: wallet_db.conn.prepare(
                     "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
                 )?,
-                stmt_update_sent_note: wallet_db.conn.prepare(
+                stmt_update_sent_output: wallet_db.conn.prepare(
                     "UPDATE sent_notes
-                    SET from_account = :account,
-                        address = :address,
+                    SET from_account = :from_account,
+                        to_address = :to_address,
+                        to_account = :to_account,
                         value = :value,
                         memo = IFNULL(:memo, memo)
                     WHERE tx = :tx
                       AND output_pool = :output_pool
                       AND output_index = :output_index",
                 )?,
-                stmt_insert_sent_note: wallet_db.conn.prepare(
-                    "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
-                    VALUES (:tx, :output_pool, :output_index, :from_account, :address, :value, :memo)"
+                stmt_insert_sent_output: wallet_db.conn.prepare(
+                    "INSERT INTO sent_notes (
+                        tx, output_pool, output_index, from_account,
+                        to_address, to_account, value, memo)
+                    VALUES (
+                        :tx, :output_pool, :output_index, :from_account,
+                        :to_address, :to_account, :value, :memo)"
                 )?,
                 stmt_insert_witness: wallet_db.conn.prepare(
                     "INSERT INTO sapling_witnesses (note, block, witness)
@@ -346,6 +354,105 @@ impl<'a, P> DataConnStmtCache<'a, P> {
 }
 
 impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
+    /// Inserts a sent note into the wallet database.
+    ///
+    /// `output_index` is the index within the transaction that contains the recipient output:
+    ///
+    /// - If `to` is a Unified address, this is an index into the outputs of the transaction
+    ///   within the bundle associated with the recipient's output pool.
+    /// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
+    ///   transaction.
+    /// - If `to` is a transparent address, this is an index into the transparent outputs of
+    ///   the transaction.
+    /// - If `to` is an internal account, this is an index into the Sapling outputs of the
+    ///   transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stmt_insert_sent_output(
+        &mut self,
+        tx_ref: i64,
+        output_index: usize,
+        from_account: AccountId,
+        to: &Recipient,
+        value: Amount,
+        memo: Option<&MemoBytes>,
+    ) -> Result<(), SqliteClientError> {
+        let (to_address, to_account, pool_type) = match to {
+            Recipient::Transparent(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Transparent,
+            ),
+            Recipient::Sapling(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Sapling,
+            ),
+            Recipient::Unified(addr, pool) => {
+                (Some(addr.encode(&self.wallet_db.params)), None, *pool)
+            }
+            Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
+        };
+
+        self.stmt_insert_sent_output.execute(named_params![
+            ":tx": &tx_ref,
+            ":output_pool": &pool_code(pool_type),
+            ":output_index": &i64::try_from(output_index).unwrap(),
+            ":from_account": &u32::from(from_account),
+            ":to_address": &to_address,
+            ":to_account": &to_account,
+            ":value": &i64::from(value),
+            ":memo": &memo.filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+        ])?;
+
+        Ok(())
+    }
+
+    /// Updates the data for the given sent note.
+    ///
+    /// Returns `false` if the transaction doesn't exist in the wallet.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stmt_update_sent_output(
+        &mut self,
+        from_account: AccountId,
+        to: &Recipient,
+        value: Amount,
+        memo: Option<&MemoBytes>,
+        tx_ref: i64,
+        output_index: usize,
+    ) -> Result<bool, SqliteClientError> {
+        let (to_address, to_account, pool_type) = match to {
+            Recipient::Transparent(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Transparent,
+            ),
+            Recipient::Sapling(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Sapling,
+            ),
+            Recipient::Unified(addr, pool) => {
+                (Some(addr.encode(&self.wallet_db.params)), None, *pool)
+            }
+            Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
+        };
+
+        match self.stmt_update_sent_output.execute(named_params![
+            ":from_account": &u32::from(from_account),
+            ":to_address": &to_address,
+            ":to_account": &to_account,
+            ":value": &i64::from(value),
+            ":memo": &memo.filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+            ":tx": &tx_ref,
+            ":output_pool": &pool_code(pool_type),
+            ":output_index": &i64::try_from(output_index).unwrap(),
+        ])? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => unreachable!("tx_output constraint is marked as UNIQUE"),
+        }
+    }
+
     /// Adds the given received UTXO to the datastore.
     ///
     /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
@@ -526,78 +633,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 row.get(0).map(NoteId::ReceivedNoteId)
             })
             .map_err(SqliteClientError::from)
-    }
-
-    /// Inserts a sent note into the wallet database.
-    ///
-    /// `output_index` is the index within the transaction that contains the recipient output:
-    ///
-    /// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
-    ///   transaction.
-    /// - If `to` is a transparent address, this is an index into the transparent outputs of
-    ///   the transaction.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_insert_sent_note(
-        &mut self,
-        tx_ref: i64,
-        pool_type: PoolType,
-        output_index: usize,
-        account: AccountId,
-        to_str: &str,
-        value: Amount,
-        memo: Option<&MemoBytes>,
-    ) -> Result<(), SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":tx", &tx_ref),
-            (":output_pool", &pool_type.typecode()),
-            (":output_index", &i64::try_from(output_index).unwrap()),
-            (":from_account", &u32::from(account)),
-            (":address", &to_str),
-            (":value", &i64::from(value)),
-            (
-                ":memo",
-                &memo
-                    .filter(|m| *m != &MemoBytes::empty())
-                    .map(|m| m.as_slice()),
-            ),
-        ];
-        self.stmt_insert_sent_note.execute(sql_args)?;
-        Ok(())
-    }
-
-    /// Updates the data for the given sent note.
-    ///
-    /// Returns `false` if the transaction doesn't exist in the wallet.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_update_sent_note(
-        &mut self,
-        account: AccountId,
-        to_str: &str,
-        value: Amount,
-        memo: Option<&MemoBytes>,
-        tx_ref: i64,
-        pool_type: PoolType,
-        output_index: usize,
-    ) -> Result<bool, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":account", &u32::from(account)),
-            (":address", &to_str),
-            (":value", &i64::from(value)),
-            (
-                ":memo",
-                &memo
-                    .filter(|m| *m != &MemoBytes::empty())
-                    .map(|m| m.as_slice()),
-            ),
-            (":tx", &tx_ref),
-            (":output_pool", &pool_type.typecode()),
-            (":output_index", &i64::try_from(output_index).unwrap()),
-        ];
-        match self.stmt_update_sent_note.execute(sql_args)? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => unreachable!("tx_output constraint is marked as UNIQUE"),
-        }
     }
 
     /// Records the incremental witness for the specified note, as of the given block

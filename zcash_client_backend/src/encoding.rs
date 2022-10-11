@@ -5,14 +5,16 @@
 //!
 //! [constants]: zcash_primitives::constants
 
+use crate::address::UnifiedAddress;
 use bech32::{self, Error, FromBase32, ToBase32, Variant};
 use bs58::{self, decode::Error as Bs58Error};
 use std::fmt;
 use std::io::{self, Write};
+use zcash_address::unified::{self, Encoding};
 use zcash_primitives::{
     consensus,
     legacy::TransparentAddress,
-    sapling::PaymentAddress,
+    sapling,
     zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
 };
 
@@ -132,6 +134,41 @@ impl<P: consensus::Parameters> AddressCodec<P> for TransparentAddress {
     }
 }
 
+impl<P: consensus::Parameters> AddressCodec<P> for sapling::PaymentAddress {
+    type Error = Bech32DecodeError;
+
+    fn encode(&self, params: &P) -> String {
+        encode_payment_address(params.hrp_sapling_payment_address(), self)
+    }
+
+    fn decode(params: &P, address: &str) -> Result<Self, Bech32DecodeError> {
+        decode_payment_address(params.hrp_sapling_payment_address(), address)
+    }
+}
+
+impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
+    type Error = String;
+
+    fn encode(&self, params: &P) -> String {
+        self.encode(params)
+    }
+
+    fn decode(params: &P, address: &str) -> Result<Self, String> {
+        unified::Address::decode(address)
+            .map_err(|e| format!("{}", e))
+            .and_then(|(network, addr)| {
+                if params.address_network() == Some(network) {
+                    UnifiedAddress::try_from(addr).map_err(|e| e.to_owned())
+                } else {
+                    Err(format!(
+                        "Address {} is for a different network: {:?}",
+                        address, network
+                    ))
+                }
+            })
+    }
+}
+
 /// Writes an [`ExtendedSpendingKey`] as a Bech32-encoded string.
 ///
 /// # Examples
@@ -232,16 +269,18 @@ pub fn decode_extended_full_viewing_key(
 /// );
 /// ```
 /// [`PaymentAddress`]: zcash_primitives::sapling::PaymentAddress
-pub fn encode_payment_address(hrp: &str, addr: &PaymentAddress) -> String {
+pub fn encode_payment_address(hrp: &str, addr: &sapling::PaymentAddress) -> String {
     bech32_encode(hrp, |w| w.write_all(&addr.to_bytes()))
 }
 
 /// Writes a [`PaymentAddress`] as a Bech32-encoded string
 /// using the human-readable prefix values defined in the specified
 /// network parameters.
+///
+/// [`PaymentAddress`]: zcash_primitives::sapling::PaymentAddress
 pub fn encode_payment_address_p<P: consensus::Parameters>(
     params: &P,
-    addr: &PaymentAddress,
+    addr: &sapling::PaymentAddress,
 ) -> String {
     encode_payment_address(params.hrp_sapling_payment_address(), addr)
 }
@@ -259,7 +298,7 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 ///     encoding::decode_payment_address,
 /// };
 /// use zcash_primitives::{
-///     constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
+///     consensus::{TEST_NETWORK, Parameters},
 ///     sapling::{Diversifier, PaymentAddress},
 /// };
 ///
@@ -276,14 +315,17 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 ///
 /// assert_eq!(
 ///     decode_payment_address(
-///         HRP_SAPLING_PAYMENT_ADDRESS,
+///         TEST_NETWORK.hrp_sapling_payment_address(),
 ///         "ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk",
 ///     ),
 ///     Ok(pa),
 /// );
 /// ```
 /// [`PaymentAddress`]: zcash_primitives::sapling::PaymentAddress
-pub fn decode_payment_address(hrp: &str, s: &str) -> Result<PaymentAddress, Bech32DecodeError> {
+pub fn decode_payment_address(
+    hrp: &str,
+    s: &str,
+) -> Result<sapling::PaymentAddress, Bech32DecodeError> {
     bech32_decode(hrp, s, |data| {
         if data.len() != 43 {
             return None;
@@ -291,7 +333,7 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<PaymentAddress, Bech
 
         let mut bytes = [0; 43];
         bytes.copy_from_slice(&data);
-        PaymentAddress::from_bytes(&bytes)
+        sapling::PaymentAddress::from_bytes(&bytes)
     })
 }
 
@@ -304,14 +346,14 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<PaymentAddress, Bech
 ///     encoding::encode_transparent_address,
 /// };
 /// use zcash_primitives::{
-///     constants::testnet::{B58_PUBKEY_ADDRESS_PREFIX, B58_SCRIPT_ADDRESS_PREFIX},
+///     consensus::{TEST_NETWORK, Parameters},
 ///     legacy::TransparentAddress,
 /// };
 ///
 /// assert_eq!(
 ///     encode_transparent_address(
-///         &B58_PUBKEY_ADDRESS_PREFIX,
-///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         &TEST_NETWORK.b58_pubkey_address_prefix(),
+///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         &TransparentAddress::PublicKey([0; 20]),
 ///     ),
 ///     "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
@@ -319,8 +361,8 @@ pub fn decode_payment_address(hrp: &str, s: &str) -> Result<PaymentAddress, Bech
 ///
 /// assert_eq!(
 ///     encode_transparent_address(
-///         &B58_PUBKEY_ADDRESS_PREFIX,
-///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         &TEST_NETWORK.b58_pubkey_address_prefix(),
+///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         &TransparentAddress::Script([0; 20]),
 ///     ),
 ///     "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
@@ -369,7 +411,7 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///
 /// ```
 /// use zcash_primitives::{
-///     constants::testnet::{B58_PUBKEY_ADDRESS_PREFIX, B58_SCRIPT_ADDRESS_PREFIX},
+///     consensus::{TEST_NETWORK, Parameters},
 /// };
 /// use zcash_client_backend::{
 ///     encoding::decode_transparent_address,
@@ -378,8 +420,8 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///
 /// assert_eq!(
 ///     decode_transparent_address(
-///         &B58_PUBKEY_ADDRESS_PREFIX,
-///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         &TEST_NETWORK.b58_pubkey_address_prefix(),
+///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
 ///     ),
 ///     Ok(Some(TransparentAddress::PublicKey([0; 20]))),
@@ -387,8 +429,8 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///
 /// assert_eq!(
 ///     decode_transparent_address(
-///         &B58_PUBKEY_ADDRESS_PREFIX,
-///         &B58_SCRIPT_ADDRESS_PREFIX,
+///         &TEST_NETWORK.b58_pubkey_address_prefix(),
+///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
 ///     ),
 ///     Ok(Some(TransparentAddress::Script([0; 20]))),
