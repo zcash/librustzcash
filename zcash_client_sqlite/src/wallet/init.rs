@@ -392,8 +392,7 @@ mod tests {
                 FOREIGN KEY (to_account) REFERENCES accounts(account),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
                 CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL OR to_account IS NOT NULL)
-                    AND NOT (to_address IS NOT NULL AND to_account IS NOT NULL)
+                    (to_address IS NOT NULL) != (to_account IS NOT NULL)
                 )
             )",
             "CREATE TABLE transactions (
