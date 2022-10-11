@@ -545,8 +545,9 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                             tx_ref,
                             output.index,
                             &recipient,
-                            Amount::from_u64(output.note.value).unwrap(),
-                            Some(&output.memo)
+                            Amount::from_u64(output.note.value).map_err(|_|
+                                SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
+                            Some(&output.memo),
                         )?;
                     }
                     TransferType::Incoming => {

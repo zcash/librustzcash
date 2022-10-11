@@ -376,13 +376,13 @@ where
     let sent_outputs = request.payments().iter().enumerate().map(|(i, payment)| {
         let (output_index, recipient) = match &payment.recipient_address {
             // Sapling outputs are shuffled, so we need to look up where the output ended up.
-            // TODO: When we add Orchard support, we will need to trial-decrypt to find them,
-            // and return the appropriate pool type.
             RecipientAddress::Shielded(addr) => {
                 let idx = tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment.");
                 (idx, Recipient::Sapling(addr.clone()))
             }
             RecipientAddress::Unified(addr) => {
+                // TODO: When we add Orchard support, we will need to trial-decrypt to find them,
+                // and return the appropriate pool type.
                 let idx = tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment.");
                 (idx, Recipient::Unified(addr.clone(), PoolType::Sapling))
             }

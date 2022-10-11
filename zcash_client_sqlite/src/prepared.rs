@@ -358,6 +358,8 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     ///
     /// `output_index` is the index within the transaction that contains the recipient output:
     ///
+    /// - If `to` is a Unified address, this is an index into the outputs of the transaction
+    ///   within the bundle associated with the recipient's output pool.
     /// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
     ///   transaction.
     /// - If `to` is a transparent address, this is an index into the transparent outputs of

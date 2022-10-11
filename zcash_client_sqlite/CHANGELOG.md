@@ -76,11 +76,6 @@ and this library adheres to Rust's notion of
   - `zcash_client_sqlite::wallet`:
     - `get_spendable_notes` to `get_spendable_sapling_notes`.
     - `select_spendable_notes` to `select_spendable_sapling_notes`.
-- Altered the arguments to `zcash_client_sqlite::wallet::put_sent_note`
-  to take the components of a `DecryptedOutput` value to allow this
-  method to be used in contexts where a transaction has just been
-  constructed, rather than only in the case that a transaction has
-  been decrypted after being retrieved from the network.
 - `zcash_client_sqlite::wallet::init_wallet_db` has been modified to
   take the wallet seed as an argument so that it can correctly perform
   migrations that require re-deriving key material. In particular for
@@ -114,7 +109,6 @@ and this library adheres to Rust's notion of
   `zcash_client_backend::data_api` traits mentioned above instead.
   - Deprecated in `zcash_client_sqlite::wallet`:
     - `get_address`
-    - `get_extended_full_viewing_keys`
     - `is_valid_account_extfvk`
     - `get_balance`
     - `get_balance_at`
@@ -134,9 +128,6 @@ and this library adheres to Rust's notion of
     - `insert_witness`
     - `prune_witnesses`
     - `update_expired_notes`
-    - `put_sent_utxo`
-    - `insert_sent_note`
-    - `insert_sent_utxo`
     - `get_address`
   - Deprecated in `zcash_client_sqlite::wallet::transact`:
     - `get_spendable_sapling_notes`
