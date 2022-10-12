@@ -54,6 +54,7 @@ proptest = "1.0.0"
 rand_xorshift = "0.3"
 tempfile = "3.1.0"
 zcash_proofs = { version = "0.7", path = "../zcash_proofs" }
+zcash_address = { version = "0.1", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
 transparent-inputs = ["ripemd", "hdwallet", "sha2", "secp256k1", "zcash_primitives/transparent-inputs"]

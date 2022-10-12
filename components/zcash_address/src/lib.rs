@@ -2,8 +2,8 @@ mod convert;
 mod encoding;
 mod kind;
 
-#[cfg(test)]
-mod test_vectors;
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod test_vectors;
 
 pub use convert::{
     ConversionError, ToAddress, TryFromAddress, TryFromRawAddress, UnsupportedAddress,
