@@ -454,7 +454,7 @@ mod tests {
                    notes.raw,
                    SUM(notes.value) + MAX(notes.fee) AS net_value,
                    MAX(notes.fee)                    AS fee_paid,
-                   SUM(notes.is_wallet_internal) > 0 AS is_wallet_internal,
+                   SUM(notes.sent_count) == 0        AS is_wallet_internal,
                    SUM(notes.is_change) > 0          AS has_change,
                    SUM(notes.sent_count)             AS sent_note_count,
                    SUM(notes.received_count)         AS received_note_count,
@@ -472,7 +472,7 @@ mod tests {
                             WHEN received_notes.is_change THEN 0
                             ELSE value
                        END AS value,
-                       0                             AS is_wallet_internal,
+                       0                             AS sent_count,
                        CASE
                             WHEN received_notes.is_change THEN 1
                             ELSE 0
@@ -481,7 +481,6 @@ mod tests {
                             WHEN received_notes.is_change THEN 0
                             ELSE 1
                        END AS received_count,
-                       0                             AS sent_count,
                        CASE
                            WHEN received_notes.memo IS NULL THEN 0
                            ELSE 1
@@ -498,12 +497,11 @@ mod tests {
                        transactions.fee              AS fee,
                        -sent_notes.value             AS value,
                        CASE
-                           WHEN sent_notes.from_account = sent_notes.to_account THEN 1
-                           ELSE 0
-                       END AS is_wallet_internal,
+                           WHEN sent_notes.from_account = sent_notes.to_account THEN 0
+                           ELSE 1
+                       END AS sent_count,
                        0                             AS is_change,
                        0                             AS received_count,
-                       1                             AS sent_count,
                        CASE
                            WHEN sent_notes.memo IS NULL THEN 0
                            ELSE 1
