@@ -35,6 +35,7 @@ and this library adheres to Rust's notion of
   - `Recipient`
   - `SentTransactionOutput`
   - `WalletRead::get_unified_full_viewing_keys`
+  - `WalletRead::get_account_for_ufvk`
   - `WalletRead::get_current_address`
   - `WalletRead::get_all_nullifiers`
   - `WalletWrite::create_account`
@@ -132,6 +133,8 @@ and this library adheres to Rust's notion of
   - `decode_extended_spending_key`
   - `decode_extended_full_viewing_key`
   - `decode_payment_address`
+- `data_api::wallet::create_spend_to_address` has been modified to use a unified
+  spending key rather than a Sapling extended spending key.
 
 ### Removed
 - `zcash_client_backend::data_api`:
