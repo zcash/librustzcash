@@ -114,13 +114,13 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, None)
+    init_wallet_db_internal(wdb, seed, &[])
 }
 
 fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: Option<SecretVec<u8>>,
-    target_migration: Option<Uuid>,
+    target_migrations: &[Uuid],
 ) -> Result<(), MigratorError<WalletMigrationError>> {
     // Turn off foreign keys, and ensure that table replacement/modification
     // does not break views
@@ -137,7 +137,13 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     migrator
         .register_multiple(migrations::all_migrations(&wdb.params, seed))
         .expect("Wallet migration registration should have been successful.");
-    migrator.up(target_migration)?;
+    if target_migrations.is_empty() {
+        migrator.up(None)?;
+    } else {
+        for target_migration in target_migrations {
+            migrator.up(Some(*target_migration))?;
+        }
+    }
     wdb.conn
         .execute("PRAGMA foreign_keys = ON", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
@@ -385,7 +391,7 @@ mod tests {
             "CREATE TABLE \"sent_notes\" (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
-                output_pool INTEGER NOT NULL ,
+                output_pool INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
                 from_account INTEGER NOT NULL,
                 to_address TEXT,
@@ -443,16 +449,22 @@ mod tests {
         }
 
         let expected_views = vec![
+            // v_transactions
             "CREATE VIEW v_transactions AS
-            SELECT id_tx,
-                   mined_height,
-                   tx_index,
-                   txid,
-                   expiry_height,
-                   raw,
-                   SUM(value) + MAX(fee) AS net_value,
-                   SUM(is_change) > 0 AS has_change,
-                   SUM(memo_present) AS memo_count
+            SELECT notes.id_tx,
+                   notes.mined_height,
+                   notes.tx_index,
+                   notes.txid,
+                   notes.expiry_height,
+                   notes.raw,
+                   SUM(notes.value) + MAX(notes.fee) AS net_value,
+                   MAX(notes.fee)                    AS fee_paid,
+                   SUM(notes.sent_count) == 0        AS is_wallet_internal,
+                   SUM(notes.is_change) > 0          AS has_change,
+                   SUM(notes.sent_count)             AS sent_note_count,
+                   SUM(notes.received_count)         AS received_note_count,
+                   SUM(notes.memo_present)           AS memo_count,
+                   blocks.time                       AS block_time
             FROM (
                 SELECT transactions.id_tx            AS id_tx,
                        transactions.block            AS mined_height,
@@ -465,7 +477,15 @@ mod tests {
                             WHEN received_notes.is_change THEN 0
                             ELSE value
                        END AS value,
-                       received_notes.is_change      AS is_change,
+                       0                             AS sent_count,
+                       CASE
+                            WHEN received_notes.is_change THEN 1
+                            ELSE 0
+                       END AS is_change,
+                       CASE
+                            WHEN received_notes.is_change THEN 0
+                            ELSE 1
+                       END AS received_count,
                        CASE
                            WHEN received_notes.memo IS NULL THEN 0
                            ELSE 1
@@ -481,20 +501,30 @@ mod tests {
                        transactions.raw              AS raw,
                        transactions.fee              AS fee,
                        -sent_notes.value             AS value,
-                       false                         AS is_change,
+                       CASE
+                           WHEN sent_notes.from_account = sent_notes.to_account THEN 0
+                           ELSE 1
+                       END AS sent_count,
+                       0                             AS is_change,
+                       0                             AS received_count,
                        CASE
                            WHEN sent_notes.memo IS NULL THEN 0
                            ELSE 1
                        END AS memo_present
                 FROM   transactions
                        JOIN sent_notes ON transactions.id_tx = sent_notes.tx
-            )
-            GROUP BY id_tx",
+            ) AS notes
+            LEFT JOIN blocks ON notes.mined_height = blocks.height
+            GROUP BY notes.id_tx",
+            // v_tx_received
             "CREATE VIEW v_tx_received AS
             SELECT transactions.id_tx            AS id_tx,
                    transactions.block            AS mined_height,
                    transactions.tx_index         AS tx_index,
                    transactions.txid             AS txid,
+                   transactions.expiry_height    AS expiry_height,
+                   transactions.raw              AS raw,
+                   MAX(received_notes.account)   AS received_by_account,
                    SUM(received_notes.value)     AS received_total,
                    COUNT(received_notes.id_note) AS received_note_count,
                    SUM(
@@ -509,29 +539,31 @@ mod tests {
                           ON transactions.id_tx = received_notes.tx
                    LEFT JOIN blocks
                           ON transactions.block = blocks.height
-            GROUP BY received_notes.tx",
+            GROUP BY received_notes.tx, received_notes.account",
+            // v_tx_received
             "CREATE VIEW v_tx_sent AS
-            SELECT transactions.id_tx         AS id_tx,
-                   transactions.block         AS mined_height,
-                   transactions.tx_index      AS tx_index,
-                   transactions.txid          AS txid,
-                   transactions.expiry_height AS expiry_height,
-                   transactions.raw           AS raw,
-                   SUM(sent_notes.value)      AS sent_total,
-                   COUNT(sent_notes.id_note)  AS sent_note_count,
+            SELECT transactions.id_tx           AS id_tx,
+                   transactions.block           AS mined_height,
+                   transactions.tx_index        AS tx_index,
+                   transactions.txid            AS txid,
+                   transactions.expiry_height   AS expiry_height,
+                   transactions.raw             AS raw,
+                   MAX(sent_notes.from_account) AS sent_from_account,
+                   SUM(sent_notes.value)        AS sent_total,
+                   COUNT(sent_notes.id_note)    AS sent_note_count,
                    SUM(
                        CASE
                            WHEN sent_notes.memo IS NULL THEN 0
                            ELSE 1
                        END
                    ) AS memo_count,
-                   blocks.time                AS block_time
+                   blocks.time                  AS block_time
             FROM   transactions
                    JOIN sent_notes
                           ON transactions.id_tx = sent_notes.tx
                    LEFT JOIN blocks
                           ON transactions.block = blocks.height
-            GROUP BY sent_notes.tx",
+            GROUP BY sent_notes.tx, sent_notes.from_account",
         ];
 
         let mut views_query = db_data
