@@ -729,7 +729,7 @@ mod tests {
             match RecipientAddress::decode(&MAIN_NETWORK, tv.unified_addr) {
                 Some(RecipientAddress::Unified(tvua)) => {
                     // We always derive transparent and Sapling receivers, but not
-                    // every value in the test vectors have these present.
+                    // every value in the test vectors has these present.
                     if tvua.transparent().is_some() {
                         assert_eq!(tvua.transparent(), ua.transparent());
                     }
