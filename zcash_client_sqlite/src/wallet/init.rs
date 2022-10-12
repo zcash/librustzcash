@@ -114,13 +114,13 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, None)
+    init_wallet_db_internal(wdb, seed, &[])
 }
 
 fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: Option<SecretVec<u8>>,
-    target_migration: Option<Uuid>,
+    target_migrations: &[Uuid],
 ) -> Result<(), MigratorError<WalletMigrationError>> {
     // Turn off foreign keys, and ensure that table replacement/modification
     // does not break views
@@ -137,7 +137,13 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     migrator
         .register_multiple(migrations::all_migrations(&wdb.params, seed))
         .expect("Wallet migration registration should have been successful.");
-    migrator.up(target_migration)?;
+    if target_migrations.is_empty() {
+        migrator.up(None)?;
+    } else {
+        for target_migration in target_migrations {
+            migrator.up(Some(*target_migration))?;
+        }
+    }
     wdb.conn
         .execute("PRAGMA foreign_keys = ON", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;

@@ -34,9 +34,12 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [add_utxo_account::MIGRATION_ID, sent_notes_to_internal::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        [
+            add_utxo_account::MIGRATION_ID,
+            sent_notes_to_internal::MIGRATION_ID,
+        ]
+        .into_iter()
+        .collect()
     }
 
     fn description(&self) -> &'static str {
@@ -292,7 +295,7 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::wallet::init::migrations::ufvk_support,
+        crate::wallet::init::migrations::{ufvk_support, utxos_table},
         zcash_client_backend::encoding::AddressCodec,
         zcash_primitives::{
             consensus::{BlockHeight, BranchId},
@@ -311,7 +314,7 @@ mod tests {
     fn transaction_views() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, Some(addresses_table::MIGRATION_ID)).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID]).unwrap();
         let usk =
             UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
                 .unwrap();
@@ -403,7 +406,12 @@ mod tests {
     fn migrate_from_wm2() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, Some(ufvk_support::MIGRATION_ID)).unwrap();
+        init_wallet_db_internal(
+            &mut db_data,
+            None,
+            &[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
+        )
+        .unwrap();
 
         // create a UTXO to spend
         let tx = TransactionData::from_parts(

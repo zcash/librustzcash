@@ -7,7 +7,7 @@ use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
-use super::{ufvk_support};
+use super::ufvk_support;
 use crate::wallet::init::WalletMigrationError;
 
 /// This migration adds the `to_account` field to the `sent_notes` table.
@@ -28,9 +28,7 @@ impl schemer::Migration for Migration {
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        [ufvk_support::MIGRATION_ID]
-            .into_iter()
-            .collect()
+        [ufvk_support::MIGRATION_ID].into_iter().collect()
     }
 
     fn description(&self) -> &'static str {
