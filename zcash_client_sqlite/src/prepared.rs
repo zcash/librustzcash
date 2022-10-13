@@ -67,6 +67,7 @@ impl<'a> InsertAddress<'a> {
         mut diversifier_index: DiversifierIndex,
         address: &UnifiedAddress,
     ) -> Result<(), rusqlite::Error> {
+        // the diversifier index is stored in big-endian order to allow sorting
         diversifier_index.0.reverse();
         self.stmt.execute(named_params![
             ":account": &u32::from(account),
