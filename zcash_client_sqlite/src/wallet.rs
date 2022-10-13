@@ -1212,7 +1212,9 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_client_backend::{data_api::WalletWrite, wallet::WalletTransparentOutput},
+        zcash_client_backend::{
+            data_api::WalletWrite, encoding::AddressCodec, wallet::WalletTransparentOutput,
+        },
         zcash_primitives::{
             consensus::BlockHeight,
             transaction::components::{OutPoint, TxOut},
@@ -1297,5 +1299,18 @@ mod tests {
                 utxos.iter().any(|rutxo| rutxo.height == utxo.height)
             }
         ));
+
+        // Artificially delete the address from the addresses table so that
+        // we can ensure the update fails if the join doesn't work.
+        db_data
+            .conn
+            .execute(
+                "DELETE FROM addresses WHERE cached_transparent_receiver_address = ?",
+                [Some(taddr.encode(&db_data.params))],
+            )
+            .unwrap();
+
+        let res2 = super::put_received_transparent_utxo(&mut ops, &utxo);
+        assert!(matches!(res2, Err(_)));
     }
 }
