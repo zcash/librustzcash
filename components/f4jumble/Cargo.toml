@@ -16,6 +16,9 @@ rust-version = "1.51"
 categories = ["encoding"]
 keywords = ["feistel"]
 
+[package.metadata.cargo-udeps.ignore]
+development = ["hex"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
