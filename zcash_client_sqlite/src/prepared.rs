@@ -33,6 +33,53 @@ use {
     zcash_primitives::transaction::components::transparent::OutPoint,
 };
 
+pub(crate) struct InsertAddress<'a> {
+    stmt: Statement<'a>,
+}
+
+impl<'a> InsertAddress<'a> {
+    pub(crate) fn new(conn: &'a rusqlite::Connection) -> Result<Self, rusqlite::Error> {
+        Ok(InsertAddress {
+            stmt: conn.prepare(
+                "INSERT INTO addresses (
+                    account,
+                    diversifier_index_be,
+                    address,
+                    cached_transparent_receiver_address
+                )
+                VALUES (
+                    :account,
+                    :diversifier_index_be,
+                    :address,
+                    :cached_transparent_receiver_address
+                )",
+            )?,
+        })
+    }
+
+    /// Adds the given address and diversifier index to the addresses table.
+    ///
+    /// Returns the database row for the newly-inserted address.
+    pub(crate) fn execute<P: consensus::Parameters>(
+        &mut self,
+        params: &P,
+        account: AccountId,
+        mut diversifier_index: DiversifierIndex,
+        address: &UnifiedAddress,
+    ) -> Result<(), rusqlite::Error> {
+        // the diversifier index is stored in big-endian order to allow sorting
+        diversifier_index.0.reverse();
+        self.stmt.execute(named_params![
+            ":account": &u32::from(account),
+            ":diversifier_index_be": &&diversifier_index.0[..],
+            ":address": &address.encode(params),
+            ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
+        ])?;
+
+        Ok(())
+    }
+}
+
 /// The primary type used to implement [`WalletWrite`] for the SQLite database.
 ///
 /// A data structure that stores the SQLite prepared statements that are
@@ -70,7 +117,7 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_prune_witnesses: Statement<'a>,
     stmt_update_expired: Statement<'a>,
 
-    stmt_insert_address: Statement<'a>,
+    stmt_insert_address: InsertAddress<'a>,
 }
 
 impl<'a, P> DataConnStmtCache<'a, P> {
@@ -119,22 +166,26 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                         received_by_account, address,
                         prevout_txid, prevout_idx, script,
                         value_zat, height)
-                    VALUES (
-                        :received_by_account, :address,
+                    SELECT
+                        addresses.account, :address,
                         :prevout_txid, :prevout_idx, :script,
-                        :value_zat, :height)
+                        :value_zat, :height
+                    FROM addresses
+                    WHERE addresses.cached_transparent_receiver_address = :address
                     RETURNING id_utxo"
                 )?,
                 #[cfg(feature = "transparent-inputs")]
                 stmt_update_received_transparent_utxo: wallet_db.conn.prepare(
                     "UPDATE utxos
-                    SET received_by_account = :received_by_account,
+                    SET received_by_account = addresses.account,
                         height = :height,
                         address = :address,
                         script = :script,
                         value_zat = :value_zat
+                    FROM addresses
                     WHERE prevout_txid = :prevout_txid
                       AND prevout_idx = :prevout_idx
+                      AND addresses.cached_transparent_receiver_address = :address
                     RETURNING id_utxo"
                 )?,
                 stmt_insert_received_note: wallet_db.conn.prepare(
@@ -187,10 +238,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                         WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
                 )?,
-                stmt_insert_address: wallet_db.conn.prepare(
-                    "INSERT INTO addresses (account, diversifier_index_be, address)
-                    VALUES (:account, :diversifier_index_be, :address)",
-                )?,
+                stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
             }
         )
     }
@@ -465,7 +513,6 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         self.stmt_insert_received_transparent_utxo
             .query_row(
                 named_params![
-                    ":received_by_account": &u32::from(output.received_by_account),
                     ":address": &output.address().encode(&self.wallet_db.params),
                     ":prevout_txid": &output.outpoint.hash().to_vec(),
                     ":prevout_idx": &output.outpoint.n(),
@@ -495,7 +542,6 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
                 named_params![
                     ":prevout_txid": &output.outpoint.hash().to_vec(),
                     ":prevout_idx": &output.outpoint.n(),
-                    ":received_by_account": &u32::from(output.received_by_account),
                     ":address": &output.address().encode(&self.wallet_db.params),
                     ":script": &output.txout.script_pubkey.0,
                     ":value_zat": &i64::from(output.txout.value),
@@ -516,19 +562,17 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     pub(crate) fn stmt_insert_address(
         &mut self,
         account: AccountId,
-        mut diversifier_index: DiversifierIndex,
+        diversifier_index: DiversifierIndex,
         address: &UnifiedAddress,
-    ) -> Result<i64, SqliteClientError> {
-        diversifier_index.0.reverse();
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":account", &u32::from(account)),
-            (":diversifier_index_be", &&diversifier_index.0[..]),
-            (":address", &address.encode(&self.wallet_db.params)),
-        ];
+    ) -> Result<(), SqliteClientError> {
+        self.stmt_insert_address.execute(
+            &self.wallet_db.params,
+            account,
+            diversifier_index,
+            address,
+        )?;
 
-        self.stmt_insert_address.execute(sql_args)?;
-
-        Ok(self.wallet_db.conn.last_insert_rowid())
+        Ok(())
     }
 }
 
