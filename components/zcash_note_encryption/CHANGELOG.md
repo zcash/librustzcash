@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.0] - 2022-10-13
 ### Added
 - `zcash_note_encryption::Domain`:
   - `Domain::PreparedEphemeralPublicKey` associated type.
@@ -13,7 +15,6 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.56.1.
-- Migrated to `group 0.13`.
 - `zcash_note_encryption::Domain` now requires `epk` to be converted to
   `Domain::PreparedEphemeralPublicKey` before being passed to
   `Domain::ka_agree_dec`.
