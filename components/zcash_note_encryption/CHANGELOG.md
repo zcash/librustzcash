@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.0] - 2022-10-13
 ### Added
 - `zcash_note_encryption::Domain`:
   - `Domain::PreparedEphemeralPublicKey` associated type.

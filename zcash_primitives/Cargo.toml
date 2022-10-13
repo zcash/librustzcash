@@ -50,7 +50,7 @@ zcash_address = { version = "0.1", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.1", path = "../components/zcash_encoding" }
 
 [dependencies.zcash_note_encryption]
-version = "0.1"
+version = "0.2"
 path = "../components/zcash_note_encryption"
 features = ["pre-zip-212"]
 
