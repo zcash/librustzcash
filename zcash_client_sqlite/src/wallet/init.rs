@@ -299,8 +299,6 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
 
-    use zcash_address::test_vectors;
-
     use zcash_client_backend::{
         address::RecipientAddress,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
@@ -309,27 +307,30 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, BranchId, Network, Parameters},
+        consensus::{BlockHeight, BranchId, Parameters},
         transaction::{TransactionData, TxVersion},
-        zip32::{
-            sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
-            DiversifierIndex,
-        },
+        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
     };
 
     use crate::{
         error::SqliteClientError,
         tests::{self, network},
-        wallet::{self, get_address},
-        AccountId, WalletDb, WalletWrite,
+        wallet::get_address,
+        AccountId, WalletDb,
     };
 
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::wallet::{pool_code, PoolType},
-        zcash_primitives::legacy::keys as transparent,
+        crate::{
+            wallet::{self, pool_code, PoolType},
+            WalletWrite,
+        },
+        zcash_address::test_vectors,
+        zcash_primitives::{
+            consensus::Network, legacy::keys as transparent, zip32::DiversifierIndex,
+        },
     };
 
     #[test]
@@ -350,6 +351,7 @@ mod tests {
                 account INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
+                cached_transparent_receiver_address TEXT,
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
             )",

@@ -31,7 +31,6 @@ pub struct WalletTx<N> {
 
 #[cfg(feature = "transparent-inputs")]
 pub struct WalletTransparentOutput {
-    pub received_by_account: AccountId,
     pub outpoint: OutPoint,
     pub txout: TxOut,
     pub height: BlockHeight,

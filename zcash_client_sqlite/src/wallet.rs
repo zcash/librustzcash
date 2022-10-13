@@ -33,7 +33,10 @@ use zcash_client_backend::{
     DecryptedOutput,
 };
 
-use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb, PRUNING_HEIGHT};
+use crate::{
+    error::SqliteClientError, prepared::InsertAddress, DataConnStmtCache, NoteId, WalletDb,
+    PRUNING_HEIGHT,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -207,19 +210,8 @@ pub(crate) fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::E
     )?;
 
     // Always derive the default Unified Address for the account.
-    let (address, mut idx) = key.default_address();
-    let address_str: String = address.encode(network);
-    // the diversifier index is stored in big-endian order to allow sorting
-    idx.0.reverse();
-    conn.execute(
-        "INSERT INTO addresses (account, diversifier_index_be, address)
-        VALUES (:account, :diversifier_index_be, :address)",
-        named_params![
-            ":account": &<u32>::from(account),
-            ":diversifier_index_be": &&idx.0[..],
-            ":address": &address_str,
-        ],
-    )?;
+    let (address, d_idx) = key.default_address();
+    InsertAddress::new(conn)?.execute(network, account, d_idx, &address)?;
 
     Ok(())
 }
@@ -929,8 +921,7 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     max_height: BlockHeight,
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
-        "SELECT u.received_by_account,
-                u.prevout_txid, u.prevout_idx, u.script,
+        "SELECT u.prevout_txid, u.prevout_idx, u.script,
                 u.value_zat, u.height, tx.block as block
          FROM utxos u
          LEFT OUTER JOIN transactions tx
@@ -943,19 +934,16 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     let addr_str = address.encode(&wdb.params);
 
     let rows = stmt_blocks.query_map(params![addr_str, u32::from(max_height)], |row| {
-        let received_by_account: u32 = row.get(0)?;
-
-        let txid: Vec<u8> = row.get(1)?;
+        let txid: Vec<u8> = row.get(0)?;
         let mut txid_bytes = [0u8; 32];
         txid_bytes.copy_from_slice(&txid);
 
-        let index: u32 = row.get(2)?;
-        let script_pubkey = Script(row.get(3)?);
-        let value = Amount::from_i64(row.get(4)?).unwrap();
-        let height: u32 = row.get(5)?;
+        let index: u32 = row.get(1)?;
+        let script_pubkey = Script(row.get(2)?);
+        let value = Amount::from_i64(row.get(3)?).unwrap();
+        let height: u32 = row.get(4)?;
 
         Ok(WalletTransparentOutput {
-            received_by_account: AccountId::from(received_by_account),
             outpoint: OutPoint::new(txid_bytes, index),
             txout: TxOut {
                 value,
@@ -1267,12 +1255,11 @@ mod tests {
         // Add an account to the wallet
         let mut ops = db_data.get_update_ops().unwrap();
         let seed = Secret::new([0u8; 32].to_vec());
-        let (account_id, usk) = ops.create_account(&seed).unwrap();
-        let (uaddr, _) = usk.to_unified_full_viewing_key().default_address();
+        let (account_id, _usk) = ops.create_account(&seed).unwrap();
+        let uaddr = db_data.get_current_address(account_id).unwrap().unwrap();
         let taddr = uaddr.transparent().unwrap();
 
         let mut utxo = WalletTransparentOutput {
-            received_by_account: account_id,
             outpoint: OutPoint::new([1u8; 32], 1),
             txout: TxOut {
                 value: Amount::from_u64(100000).unwrap(),

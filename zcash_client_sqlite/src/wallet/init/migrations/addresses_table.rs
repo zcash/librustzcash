@@ -52,6 +52,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 account INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
+                cached_transparent_receiver_address TEXT,
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
             );
