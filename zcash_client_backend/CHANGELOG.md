@@ -14,8 +14,7 @@ and this library adheres to Rust's notion of
     to facilitate the automatic shielding of transparent funds received
     by the wallet.
   - A `zcash_client_backend::wallet::WalletTransparentOutput` type
-    has been added under the `transparent-inputs` feature flag in support
-    of autoshielding functionality.
+    in support of `transparent-inputs` functionality.
 - A new `data_api::wallet::spend` method has been added, which is
   intended to supersede the `data_api::wallet::create_spend_to_address`
   method. This new method now constructs transactions via interpretation

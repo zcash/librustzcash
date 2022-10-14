@@ -30,15 +30,44 @@ pub struct WalletTx<N> {
     pub shielded_outputs: Vec<WalletShieldedOutput<N>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct WalletTransparentOutput {
-    pub outpoint: OutPoint,
-    pub txout: TxOut,
-    pub height: BlockHeight,
+    outpoint: OutPoint,
+    txout: TxOut,
+    height: BlockHeight,
+    recipient_address: TransparentAddress,
 }
 
 impl WalletTransparentOutput {
-    pub fn address(&self) -> TransparentAddress {
-        self.txout.script_pubkey.address().unwrap()
+    pub fn from_parts(
+        outpoint: OutPoint,
+        txout: TxOut,
+        height: BlockHeight,
+    ) -> Option<WalletTransparentOutput> {
+        txout
+            .recipient_address()
+            .map(|recipient_address| WalletTransparentOutput {
+                outpoint,
+                txout,
+                height,
+                recipient_address,
+            })
+    }
+
+    pub fn outpoint(&self) -> &OutPoint {
+        &self.outpoint
+    }
+
+    pub fn txout(&self) -> &TxOut {
+        &self.txout
+    }
+
+    pub fn height(&self) -> BlockHeight {
+        self.height
+    }
+
+    pub fn recipient_address(&self) -> &TransparentAddress {
+        &self.recipient_address
     }
 }
 

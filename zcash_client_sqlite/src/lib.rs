@@ -596,16 +596,17 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         .any(|input| *nf == input.nullifier)
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
-                        let recipient = Recipient::Transparent(txout.script_pubkey.address().unwrap());
-                        wallet::put_sent_output(
-                            up,
-                            *account_id,
-                            tx_ref,
-                            output_index,
-                            &recipient,
-                            txout.value,
-                            None
-                        )?;
+                        if let Some(address) = txout.recipient_address() {
+                            wallet::put_sent_output(
+                                up,
+                                *account_id,
+                                tx_ref,
+                                output_index,
+                                &Recipient::Transparent(address),
+                                txout.value,
+                                None
+                            )?;
+                        }
                     }
                 }
             }

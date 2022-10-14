@@ -933,7 +933,9 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
 
     let addr_str = address.encode(&wdb.params);
 
-    let rows = stmt_blocks.query_map(params![addr_str, u32::from(max_height)], |row| {
+    let mut utxos = Vec::<WalletTransparentOutput>::new();
+    let mut rows = stmt_blocks.query(params![addr_str, u32::from(max_height)])?;
+    while let Some(row) = rows.next()? {
         let txid: Vec<u8> = row.get(0)?;
         let mut txid_bytes = [0u8; 32];
         txid_bytes.copy_from_slice(&txid);
@@ -943,21 +945,24 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
         let value = Amount::from_i64(row.get(3)?).unwrap();
         let height: u32 = row.get(4)?;
 
-        Ok(WalletTransparentOutput {
-            outpoint: OutPoint::new(txid_bytes, index),
-            txout: TxOut {
+        let output = WalletTransparentOutput::from_parts(
+            OutPoint::new(txid_bytes, index),
+            TxOut {
                 value,
                 script_pubkey,
             },
-            height: BlockHeight::from(height),
-        })
-    })?;
+            BlockHeight::from(height),
+        )
+        .ok_or_else(|| {
+            SqliteClientError::CorruptedData(
+                "Txout script_pubkey value did not correspond to a P2PKH or P2SH address"
+                    .to_string(),
+            )
+        })?;
 
-    let mut utxos = Vec::<WalletTransparentOutput>::new();
-
-    for utxo in rows {
-        utxos.push(utxo.unwrap())
+        utxos.push(output);
     }
+
     Ok(utxos)
 }
 
@@ -1261,22 +1266,31 @@ mod tests {
         let uaddr = db_data.get_current_address(account_id).unwrap().unwrap();
         let taddr = uaddr.transparent().unwrap();
 
-        let mut utxo = WalletTransparentOutput {
-            outpoint: OutPoint::new([1u8; 32], 1),
-            txout: TxOut {
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new([1u8; 32], 1),
+            TxOut {
                 value: Amount::from_u64(100000).unwrap(),
                 script_pubkey: taddr.script(),
             },
-            height: BlockHeight::from_u32(12345),
-        };
+            BlockHeight::from_u32(12345),
+        )
+        .unwrap();
 
         let res0 = super::put_received_transparent_utxo(&mut ops, &utxo);
         assert!(matches!(res0, Ok(_)));
 
-        // Change something about the UTXO and upsert; we should get back
+        // Change the mined height of the UTXO and upsert; we should get back
         // the same utxoid
-        utxo.height = BlockHeight::from_u32(34567);
-        let res1 = super::put_received_transparent_utxo(&mut ops, &utxo);
+        let utxo2 = WalletTransparentOutput::from_parts(
+            OutPoint::new([1u8; 32], 1),
+            TxOut {
+                value: Amount::from_u64(100000).unwrap(),
+                script_pubkey: taddr.script(),
+            },
+            BlockHeight::from_u32(34567),
+        )
+        .unwrap();
+        let res1 = super::put_received_transparent_utxo(&mut ops, &utxo2);
         assert!(matches!(res1, Ok(id) if id == res0.unwrap()));
 
         assert!(matches!(
@@ -1296,7 +1310,7 @@ mod tests {
             ),
             Ok(utxos) if {
                 utxos.len() == 1 &&
-                utxos.iter().any(|rutxo| rutxo.height == utxo.height)
+                utxos.iter().any(|rutxo| rutxo.height() == utxo2.height())
             }
         ));
 
@@ -1310,7 +1324,7 @@ mod tests {
             )
             .unwrap();
 
-        let res2 = super::put_received_transparent_utxo(&mut ops, &utxo);
+        let res2 = super::put_received_transparent_utxo(&mut ops, &utxo2);
         assert!(matches!(res2, Err(_)));
     }
 }

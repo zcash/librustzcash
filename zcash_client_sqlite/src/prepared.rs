@@ -513,12 +513,12 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         self.stmt_insert_received_transparent_utxo
             .query_row(
                 named_params![
-                    ":address": &output.address().encode(&self.wallet_db.params),
-                    ":prevout_txid": &output.outpoint.hash().to_vec(),
-                    ":prevout_idx": &output.outpoint.n(),
-                    ":script": &output.txout.script_pubkey.0,
-                    ":value_zat": &i64::from(output.txout.value),
-                    ":height": &u32::from(output.height),
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
                 ],
                 |row| {
                     let id = row.get(0)?;
@@ -540,12 +540,12 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         self.stmt_update_received_transparent_utxo
             .query_row(
                 named_params![
-                    ":prevout_txid": &output.outpoint.hash().to_vec(),
-                    ":prevout_idx": &output.outpoint.n(),
-                    ":address": &output.address().encode(&self.wallet_db.params),
-                    ":script": &output.txout.script_pubkey.0,
-                    ":value_zat": &i64::from(output.txout.value),
-                    ":height": &u32::from(output.height),
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
                 ],
                 |row| {
                     let id = row.get(0)?;

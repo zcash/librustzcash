@@ -39,6 +39,7 @@ and this library adheres to Rust's notion of
   - `JSDescription::net_value`
 - Added in `zcash_primitives::transaction::components::transparent`
   - `Bundle::value_balance`
+  - `TxOut::recipient_address`
 - Implementations of `memuse::DynamicUsage` for the following types:
   - `zcash_primitives::block::BlockHash`
   - `zcash_primitives::consensus`:
@@ -72,6 +73,12 @@ and this library adheres to Rust's notion of
     instead of `SaplingIvk`.
   - `try_sapling_note_decryption` and `try_sapling_compact_note_decryption` now
     take `&PreparedIncomingViewingKey` instead of `&SaplingIvk`.
+
+### Removed
+- `zcash_primitives::legacy::Script::address` This method was not generally
+  safe to use on arbitrary scripts, only on script_pubkey values. Its
+  functionality is now available via
+  `zcash_primitives::transaction::components::transparent::TxOut::recipient_address`
 
 ## [0.7.0] - 2022-06-24
 ### Changed
