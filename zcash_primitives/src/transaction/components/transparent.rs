@@ -5,7 +5,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 
-use crate::legacy::Script;
+use crate::legacy::{Script, TransparentAddress};
 
 use super::amount::{Amount, BalanceError};
 
@@ -181,6 +181,11 @@ impl TxOut {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.value.to_i64_le_bytes())?;
         self.script_pubkey.write(&mut writer)
+    }
+
+    /// Returns the address to which the TxOut was sent, if this is a valid P2SH or P2PKH output.
+    pub fn recipient_address(&self) -> Option<TransparentAddress> {
+        self.script_pubkey.address()
     }
 }
 

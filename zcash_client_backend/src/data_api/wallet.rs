@@ -10,9 +10,6 @@ use zcash_primitives::{
     },
 };
 
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey};
-
 use crate::{
     address::RecipientAddress,
     data_api::{
@@ -24,6 +21,9 @@ use crate::{
     wallet::OvkPolicy,
     zip321::{Payment, TransactionRequest},
 };
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey};
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
@@ -50,14 +50,10 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .ok_or(Error::SaplingNotActive)?;
 
-    let sapling_outputs = decrypt_transaction(params, height, tx, &ufvks);
-
-    if !(sapling_outputs.is_empty() && tx.transparent_bundle().iter().all(|b| b.vout.is_empty())) {
-        data.store_decrypted_tx(&DecryptedTransaction {
-            tx,
-            sapling_outputs: &sapling_outputs,
-        })?;
-    }
+    data.store_decrypted_tx(&DecryptedTransaction {
+        tx,
+        sapling_outputs: &decrypt_transaction(params, height, tx, &ufvks),
+    })?;
 
     Ok(())
 }
@@ -479,7 +475,7 @@ where
     let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
     let total_amount = utxos
         .iter()
-        .map(|utxo| utxo.txout.value)
+        .map(|utxo| utxo.txout().value)
         .sum::<Option<Amount>>()
         .ok_or_else(|| E::from(Error::InvalidAmount))?;
 
@@ -498,7 +494,7 @@ where
         .unwrap();
     for utxo in &utxos {
         builder
-            .add_transparent_input(secret_key, utxo.outpoint.clone(), utxo.txout.clone())
+            .add_transparent_input(secret_key, utxo.outpoint().clone(), utxo.txout().clone())
             .map_err(Error::Builder)?;
     }
 
@@ -526,6 +522,6 @@ where
             memo: Some(memo.clone()),
         }],
         fee_amount: fee,
-        utxos_spent: utxos.iter().map(|utxo| utxo.outpoint.clone()).collect(),
+        utxos_spent: utxos.iter().map(|utxo| utxo.outpoint().clone()).collect(),
     })
 }

@@ -538,7 +538,6 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         &mut self,
         d_tx: &DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error> {
-        let nullifiers = self.wallet_db.get_all_nullifiers()?;
         self.transactionally(|up| {
             let tx_ref = wallet::put_tx_data(up, d_tx.tx, None, None)?;
 
@@ -579,8 +578,15 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 }
             }
 
+            // If any of the utxos spent in the transaction are ours, mark them as spent.
+            #[cfg(feature = "transparent-inputs")]
+            for txin in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
+                wallet::mark_transparent_utxo_spent(up, tx_ref, &txin.prevout)?;
+            }
+
             // If we have some transparent outputs:
             if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
+                let nullifiers = self.wallet_db.get_all_nullifiers()?;
                 // If the transaction contains shielded spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address. 
@@ -590,16 +596,17 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         .any(|input| *nf == input.nullifier)
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
-                        let recipient = Recipient::Transparent(txout.script_pubkey.address().unwrap());
-                        wallet::put_sent_output(
-                            up,
-                            *account_id,
-                            tx_ref,
-                            output_index,
-                            &recipient,
-                            txout.value,
-                            None
-                        )?;
+                        if let Some(address) = txout.recipient_address() {
+                            wallet::put_sent_output(
+                                up,
+                                *account_id,
+                                tx_ref,
+                                output_index,
+                                &Recipient::Transparent(address),
+                                txout.value,
+                                None
+                            )?;
+                        }
                     }
                 }
             }
