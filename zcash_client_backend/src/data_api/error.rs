@@ -78,6 +78,11 @@ pub enum Error<NoteId> {
     /// An error occurred deriving a spending key from a seed and an account
     /// identifier.
     KeyDerivationError(AccountId),
+
+    /// An error indicating that a call was attempted to a method providing
+    /// support
+    #[cfg(not(feature = "transparent-inputs"))]
+    TransparentInputsNotSupported,
 }
 
 impl ChainInvalid {
@@ -133,6 +138,11 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::SaplingNotActive => write!(f, "Could not determine Sapling upgrade activation height."),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
             Error::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
+
+            #[cfg(not(feature = "transparent-inputs"))]
+            Error::TransparentInputsNotSupported => {
+                write!(f, "This wallet does not support spending or manipulating transparent UTXOs.")
+            }
         }
     }
 }

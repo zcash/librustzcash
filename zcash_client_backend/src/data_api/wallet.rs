@@ -25,9 +25,6 @@ use crate::{
     zip321::{Payment, TransactionRequest},
 };
 
-#[cfg(feature = "transparent-inputs")]
-use crate::data_api::WalletWriteTransparent;
-
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
 pub fn decrypt_and_store_transaction<N, E, P, D>(
@@ -454,7 +451,7 @@ where
     E: From<Error<N>>,
     P: consensus::Parameters,
     R: Copy + Debug,
-    D: WalletWrite<Error = E, TxRef = R> + WalletWriteTransparent<UtxoRef = U>,
+    D: WalletWrite<Error = E, TxRef = R>,
 {
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())?

@@ -13,10 +13,6 @@ and this library adheres to Rust's notion of
   - A new `data_api::wallet::shield_transparent_funds` method has been added
     to facilitate the automatic shielding of transparent funds received
     by the wallet.
-  - `zcash_client_backend::data_api::WalletReadTransparent` read-only operations
-    related to information the wallet maintains about transparent funds.
-  - `zcash_client_backend::data_api::WalletWriteTransparent` operations
-    related persisting information the wallet maintains about transparent funds.
   - A `zcash_client_backend::wallet::WalletTransparentOutput` type
     has been added under the `transparent-inputs` feature flag in support
     of autoshielding functionality.
@@ -38,9 +34,12 @@ and this library adheres to Rust's notion of
   - `WalletRead::get_account_for_ufvk`
   - `WalletRead::get_current_address`
   - `WalletRead::get_all_nullifiers`
+  - `WalletRead::get_transparent_receivers`
+  - `WalletRead::get_unspent_transparent_outputs`
   - `WalletWrite::create_account`
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
   - `WalletWrite::get_next_available_address`
+  - `WalletWrite::put_received_transparent_utxo`
 - `zcash_client_backend::decrypt`:
   - `TransferType`
 - `zcash_client_backend::proto`:
