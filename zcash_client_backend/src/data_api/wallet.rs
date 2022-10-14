@@ -447,7 +447,7 @@ where
     E: From<Error<N>>,
     P: consensus::Parameters,
     R: Copy + Debug,
-    D: WalletWrite<Error = E, TxRef = R>,
+    D: WalletWrite<Error = E, TxRef = R, UtxoRef = U>,
 {
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())?
