@@ -10,9 +10,6 @@ use zcash_primitives::{
     },
 };
 
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey};
-
 use crate::{
     address::RecipientAddress,
     data_api::{
@@ -24,6 +21,9 @@ use crate::{
     wallet::OvkPolicy,
     zip321::{Payment, TransactionRequest},
 };
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey};
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
@@ -50,14 +50,10 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .ok_or(Error::SaplingNotActive)?;
 
-    let sapling_outputs = decrypt_transaction(params, height, tx, &ufvks);
-
-    if !(sapling_outputs.is_empty() && tx.transparent_bundle().iter().all(|b| b.vout.is_empty())) {
-        data.store_decrypted_tx(&DecryptedTransaction {
-            tx,
-            sapling_outputs: &sapling_outputs,
-        })?;
-    }
+    data.store_decrypted_tx(&DecryptedTransaction {
+        tx,
+        sapling_outputs: &decrypt_transaction(params, height, tx, &ufvks),
+    })?;
 
     Ok(())
 }
