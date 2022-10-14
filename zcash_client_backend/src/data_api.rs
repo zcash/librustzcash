@@ -1,11 +1,8 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
 use std::cmp;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-
-#[cfg(feature = "transparent-inputs")]
-use std::collections::HashSet;
 
 use secrecy::SecretVec;
 use zcash_primitives::{
@@ -24,11 +21,11 @@ use crate::{
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::{SpendableNote, WalletTx},
+    wallet::{SpendableNote, WalletTransparentOutput, WalletTx},
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {crate::wallet::WalletTransparentOutput, zcash_primitives::transaction::components::OutPoint};
+use zcash_primitives::transaction::components::transparent::OutPoint;
 
 pub mod chain;
 pub mod error;
@@ -201,10 +198,7 @@ pub trait WalletRead {
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
-}
 
-#[cfg(feature = "transparent-inputs")]
-pub trait WalletReadTransparent: WalletRead {
     /// Returns the set of all transparent receivers associated with the given account.
     ///
     /// The set contains all transparent receivers that are known to have been derived
@@ -300,6 +294,9 @@ pub struct SentTransactionOutput {
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// The type of identifiers used to look up transparent UTXOs.
+    type UtxoRef;
+
     /// Tells the wallet to track the next available account-level spend authority, given
     /// the current set of [ZIP 316] account identifiers known to the wallet database.
     ///
@@ -373,12 +370,8 @@ pub trait WalletWrite: WalletRead {
     ///
     /// There may be restrictions on how far it is possible to rewind.
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
-}
 
-#[cfg(feature = "transparent-inputs")]
-pub trait WalletWriteTransparent: WalletWrite + WalletReadTransparent {
-    type UtxoRef;
-
+    /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
         output: &WalletTransparentOutput,
@@ -432,9 +425,6 @@ pub mod testing {
         error::Error, BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead,
         WalletWrite,
     };
-
-    #[cfg(feature = "transparent-inputs")]
-    use super::WalletReadTransparent;
 
     pub struct MockBlockSource {}
 
@@ -561,10 +551,7 @@ pub mod testing {
         ) -> Result<Vec<SpendableNote>, Self::Error> {
             Ok(Vec::new())
         }
-    }
 
-    #[cfg(feature = "transparent-inputs")]
-    impl WalletReadTransparent for MockWalletDb {
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
@@ -582,6 +569,8 @@ pub mod testing {
     }
 
     impl WalletWrite for MockWalletDb {
+        type UtxoRef = u32;
+
         fn create_account(
             &mut self,
             seed: &SecretVec<u8>,
@@ -629,6 +618,14 @@ pub mod testing {
 
         fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
             Ok(())
+        }
+
+        /// Adds a transparent UTXO received by the wallet to the data store.
+        fn put_received_transparent_utxo(
+            &mut self,
+            _output: &WalletTransparentOutput,
+        ) -> Result<Self::UtxoRef, Self::Error> {
+            Ok(0)
         }
     }
 }

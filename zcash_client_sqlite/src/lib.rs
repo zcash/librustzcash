@@ -32,19 +32,16 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+use rusqlite::Connection;
 use secrecy::{ExposeSecret, SecretVec};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
-
-#[cfg(feature = "transparent-inputs")]
-use std::collections::HashSet;
-
-use rusqlite::Connection;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    legacy::TransparentAddress,
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier},
@@ -60,20 +57,14 @@ use zcash_client_backend::{
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::SpendableNote,
+    wallet::{SpendableNote, WalletTransparentOutput},
     TransferType,
 };
 
 use crate::error::SqliteClientError;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::{
-        data_api::{WalletReadTransparent, WalletWriteTransparent},
-        wallet::WalletTransparentOutput,
-    },
-    zcash_primitives::legacy::TransparentAddress,
-};
+#[cfg(not(feature = "transparent-inputs"))]
+use zcash_client_backend::data_api::error::Error;
 
 #[cfg(feature = "unstable")]
 use {
@@ -253,23 +244,32 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         #[allow(deprecated)]
         wallet::transact::select_spendable_sapling_notes(self, account, target_value, anchor_height)
     }
-}
 
-#[cfg(feature = "transparent-inputs")]
-impl<P: consensus::Parameters> WalletReadTransparent for WalletDb<P> {
     fn get_transparent_receivers(
         &self,
-        account: AccountId,
+        _account: AccountId,
     ) -> Result<HashSet<TransparentAddress>, Self::Error> {
-        wallet::get_transparent_receivers(&self.params, &self.conn, account)
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::get_transparent_receivers(&self.params, &self.conn, _account);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(SqliteClientError::BackendError(
+            Error::TransparentInputsNotSupported,
+        ));
     }
 
     fn get_unspent_transparent_outputs(
         &self,
-        address: &TransparentAddress,
-        max_height: BlockHeight,
+        _address: &TransparentAddress,
+        _max_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        wallet::get_unspent_transparent_outputs(self, address, max_height)
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::get_unspent_transparent_outputs(self, _address, _max_height);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(SqliteClientError::BackendError(
+            Error::TransparentInputsNotSupported,
+        ));
     }
 }
 
@@ -375,10 +375,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db
             .select_spendable_sapling_notes(account, target_value, anchor_height)
     }
-}
 
-#[cfg(feature = "transparent-inputs")]
-impl<'a, P: consensus::Parameters> WalletReadTransparent for DataConnStmtCache<'a, P> {
     fn get_transparent_receivers(
         &self,
         account: AccountId,
@@ -426,6 +423,8 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 
 #[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
+    type UtxoRef = UtxoId;
+
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
@@ -708,17 +707,18 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
         wallet::rewind_to_height(self.wallet_db, block_height)
     }
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl<'a, P: consensus::Parameters> WalletWriteTransparent for DataConnStmtCache<'a, P> {
-    type UtxoRef = UtxoId;
 
     fn put_received_transparent_utxo(
         &mut self,
-        output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput,
     ) -> Result<Self::UtxoRef, Self::Error> {
-        wallet::put_received_transparent_utxo(self, output)
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::put_received_transparent_utxo(self, _output);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(SqliteClientError::BackendError(
+            Error::TransparentInputsNotSupported,
+        ));
     }
 }
 
@@ -1162,7 +1162,6 @@ mod tests {
     fn transparent_receivers() {
         use secrecy::Secret;
         use tempfile::NamedTempFile;
-        use zcash_client_backend::data_api::WalletReadTransparent;
 
         use crate::{chain::init::init_cache_database, wallet::init::init_wallet_db};
 
