@@ -10,6 +10,7 @@ and this library adheres to Rust's notion of
 - `zcash_address::ConversionError`
 - `zcash_address::TryFromAddress`
 - `zcash_address::TryFromRawAddress`
+- `zcash_address::ZcashAddress::network`
 - `zcash_address::ZcashAddress::convert_if_network`
 - A `TryFrom<Typecode>` implementation for `usize`.
 

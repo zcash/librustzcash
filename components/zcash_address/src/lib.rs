@@ -43,6 +43,11 @@ enum AddressKind {
 }
 
 impl ZcashAddress {
+    /// Returns the network for which the address was constructed.
+    pub fn network(&self) -> Network {
+        self.net
+    }
+
     /// Encodes this Zcash address in its canonical string representation.
     ///
     /// This provides the encoded string representation of the address as defined by the
