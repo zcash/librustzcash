@@ -14,11 +14,12 @@ use zcash_primitives::{
 
 use zcash_client_backend::wallet::SpendableNote;
 
-use crate::{error::SqliteClientError, WalletDb};
+use crate::{error::SqliteClientError, NoteId, WalletDb};
 
-fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
+fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientError> {
+    let note_id = NoteId::ReceivedNoteId(row.get(0)?);
     let diversifier = {
-        let d: Vec<_> = row.get(0)?;
+        let d: Vec<_> = row.get(1)?;
         if d.len() != 11 {
             return Err(SqliteClientError::CorruptedData(
                 "Invalid diversifier length".to_string(),
@@ -29,10 +30,10 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
         Diversifier(tmp)
     };
 
-    let note_value = Amount::from_i64(row.get(1)?).unwrap();
+    let note_value = Amount::from_i64(row.get(2)?).unwrap();
 
     let rseed = {
-        let rcm_bytes: Vec<_> = row.get(2)?;
+        let rcm_bytes: Vec<_> = row.get(3)?;
 
         // We store rcm directly in the data DB, regardless of whether the note
         // used a v1 or v2 note plaintext, so for the purposes of spending let's
@@ -47,11 +48,12 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote, SqliteClientError> {
     };
 
     let witness = {
-        let d: Vec<_> = row.get(3)?;
+        let d: Vec<_> = row.get(4)?;
         IncrementalWitness::read(&d[..])?
     };
 
     Ok(SpendableNote {
+        note_id,
         diversifier,
         note_value,
         rseed,
@@ -66,9 +68,9 @@ pub fn get_spendable_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
     anchor_height: BlockHeight,
-) -> Result<Vec<SpendableNote>, SqliteClientError> {
+) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
     let mut stmt_select_notes = wdb.conn.prepare(
-        "SELECT diversifier, value, rcm, witness
+        "SELECT id_note, diversifier, value, rcm, witness
             FROM received_notes
             INNER JOIN transactions ON transactions.id_tx = received_notes.tx
             INNER JOIN sapling_witnesses ON sapling_witnesses.note = received_notes.id_note
@@ -98,7 +100,7 @@ pub fn select_spendable_sapling_notes<P>(
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
-) -> Result<Vec<SpendableNote>, SqliteClientError> {
+) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the
     // selected notes. This is achieved in several steps:
@@ -134,7 +136,7 @@ pub fn select_spendable_sapling_notes<P>(
             SELECT note, witness FROM sapling_witnesses
             WHERE block = :anchor_height
         )
-        SELECT selected.diversifier, selected.value, selected.rcm, witnesses.witness
+        SELECT selected.id_note, selected.diversifier, selected.value, selected.rcm, witnesses.witness
         FROM selected
         INNER JOIN witnesses ON selected.id_note = witnesses.note",
     )?;
@@ -220,7 +222,7 @@ mod tests {
 
         // Attempting to spend with a USK that is not in the wallet results in an error
         let mut db_write = db_data.get_update_ops().unwrap();
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -232,10 +234,8 @@ mod tests {
                 OvkPolicy::Sender,
                 10,
             ),
-            Err(crate::SqliteClientError::BackendError(
-                data_api::error::Error::KeyNotRecognized
-            ))
-        ));
+            Err(data_api::error::Error::KeyNotRecognized)
+        );
     }
 
     #[test]
@@ -253,7 +253,7 @@ mod tests {
 
         // We cannot do anything if we aren't synchronised
         let mut db_write = db_data.get_update_ops().unwrap();
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -265,10 +265,8 @@ mod tests {
                 OvkPolicy::Sender,
                 10,
             ),
-            Err(crate::SqliteClientError::BackendError(
-                data_api::error::Error::ScanRequired
-            ))
-        ));
+            Err(data_api::error::Error::ScanRequired)
+        );
     }
 
     #[test]
@@ -300,7 +298,7 @@ mod tests {
 
         // We cannot spend anything
         let mut db_write = db_data.get_update_ops().unwrap();
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -312,14 +310,12 @@ mod tests {
                 OvkPolicy::Sender,
                 10,
             ),
-            Err(crate::SqliteClientError::BackendError(
-                data_api::error::Error::InsufficientBalance(
-                    available,
-                    required
-                )
-            ))
+            Err(data_api::error::Error::InsufficientFunds {
+                available,
+                required
+            })
             if available == Amount::zero() && required == Amount::from_u64(1001).unwrap()
-        ));
+        );
     }
 
     #[test]
@@ -384,7 +380,7 @@ mod tests {
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().1.into();
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -396,15 +392,13 @@ mod tests {
                 OvkPolicy::Sender,
                 10,
             ),
-            Err(crate::SqliteClientError::BackendError(
-                data_api::error::Error::InsufficientBalance(
-                    available,
-                    required
-                )
-            ))
+            Err(data_api::error::Error::InsufficientFunds {
+                available,
+                required
+            })
             if available == Amount::from_u64(50000).unwrap()
                 && required == Amount::from_u64(71000).unwrap()
-        ));
+        );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
@@ -421,7 +415,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Second spend still fails
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -433,15 +427,13 @@ mod tests {
                 OvkPolicy::Sender,
                 10,
             ),
-            Err(crate::SqliteClientError::BackendError(
-                data_api::error::Error::InsufficientBalance(
-                    available,
-                    required
-                )
-            ))
+            Err(data_api::error::Error::InsufficientFunds {
+                available,
+                required
+            })
             if available == Amount::from_u64(50000).unwrap()
                 && required == Amount::from_u64(71000).unwrap()
-        ));
+        );
 
         // Mine block 11 so that the second note becomes verified
         let (cb, _) = fake_compact_block(
@@ -455,7 +447,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Second spend should now succeed
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -468,7 +460,7 @@ mod tests {
                 10,
             ),
             Ok(_)
-        ));
+        );
     }
 
     #[test]
@@ -504,7 +496,7 @@ mod tests {
         // Send some of the funds to another address
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().1.into();
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -517,10 +509,10 @@ mod tests {
                 10,
             ),
             Ok(_)
-        ));
+        );
 
         // A second spend fails because there are no usable notes
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -532,14 +524,12 @@ mod tests {
                 OvkPolicy::Sender,
                 10,
             ),
-            Err(crate::SqliteClientError::BackendError(
-                data_api::error::Error::InsufficientBalance(
-                    available,
-                    required
-                )
-            ))
+            Err(data_api::error::Error::InsufficientFunds {
+                available,
+                required
+            })
             if available == Amount::zero() && required == Amount::from_u64(3000).unwrap()
-        ));
+        );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 21 (that don't send us funds)
         // until just before the first transaction expires
@@ -556,7 +546,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Second spend still fails
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -568,14 +558,12 @@ mod tests {
                 OvkPolicy::Sender,
                 10,
             ),
-            Err(crate::SqliteClientError::BackendError(
-                data_api::error::Error::InsufficientBalance(
-                    available,
-                    required
-                )
-            ))
+            Err(data_api::error::Error::InsufficientFunds {
+                available,
+                required
+            })
             if available == Amount::zero() && required == Amount::from_u64(3000).unwrap()
-        ));
+        );
 
         // Mine block SAPLING_ACTIVATION_HEIGHT + 22 so that the first transaction expires
         let (cb, _) = fake_compact_block(
@@ -804,7 +792,7 @@ mod tests {
         );
 
         let to = TransparentAddress::PublicKey([7; 20]).into();
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -817,6 +805,6 @@ mod tests {
                 10,
             ),
             Ok(_)
-        ));
+        );
     }
 }

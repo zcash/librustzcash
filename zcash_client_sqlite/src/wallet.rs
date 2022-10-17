@@ -27,7 +27,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
-    data_api::{error::Error, PoolType, Recipient, SentTransactionOutput},
+    data_api::{PoolType, Recipient, SentTransactionOutput},
     keys::UnifiedFullViewingKey,
     wallet::{WalletShieldedOutput, WalletTx},
     DecryptedOutput,
@@ -745,7 +745,7 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
     let sapling_activation_height = wdb
         .params
         .activation_height(NetworkUpgrade::Sapling)
-        .ok_or(SqliteClientError::BackendError(Error::SaplingNotActive))?;
+        .expect("Sapling activation height mutst be available.");
 
     // Recall where we synced up to previously.
     let last_scanned_height = wdb

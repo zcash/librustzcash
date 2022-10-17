@@ -20,7 +20,6 @@ use crate::{
     address::{AddressMetadata, UnifiedAddress},
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-    proto::compact_formats::CompactBlock,
     wallet::{SpendableNote, WalletTransparentOutput, WalletTx},
 };
 
@@ -44,14 +43,14 @@ pub trait WalletRead {
     ///
     /// For example, this might be a database identifier type
     /// or a UUID.
-    type NoteRef: Copy + Debug;
+    type NoteRef: Copy + Debug + Eq + Ord;
 
     /// Backend-specific transaction identifier.
     ///
     /// For example, this might be a database identifier type
     /// or a TxId if the backend is able to support that type
     /// directly.
-    type TxRef: Copy + Debug;
+    type TxRef: Copy + Debug + Eq + Ord;
 
     /// Returns the minimum and maximum block heights for stored blocks.
     ///
@@ -188,7 +187,7 @@ pub trait WalletRead {
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error>;
+    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error>;
 
     /// Returns a list of spendable Sapling notes sufficient to cover the specified
     /// target value, if possible.
@@ -197,7 +196,7 @@ pub trait WalletRead {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error>;
+    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error>;
 
     /// Returns the set of all transparent receivers associated with the given account.
     ///
@@ -227,7 +226,9 @@ pub trait WalletRead {
 }
 
 /// The subset of information that is relevant to this wallet that has been
-/// decrypted and extracted from a [CompactBlock].
+/// decrypted and extracted from a [`CompactBlock`].
+///
+/// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 pub struct PrunedBlock<'a> {
     pub block_height: BlockHeight,
     pub block_hash: BlockHash,
@@ -268,6 +269,7 @@ pub enum PoolType {
     Transparent,
     /// The Sapling value pool
     Sapling,
+    // TODO: Orchard
 }
 
 /// A type that represents the recipient of a transaction output; a recipient address (and, for
@@ -386,23 +388,6 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<Self::UtxoRef, Self::Error>;
 }
 
-/// This trait provides sequential access to raw blockchain data via a callback-oriented
-/// API.
-pub trait BlockSource {
-    type Error;
-
-    /// Scan the specified `limit` number of blocks from the blockchain, starting at
-    /// `from_height`, applying the provided callback to each block.
-    fn with_blocks<F>(
-        &self,
-        from_height: BlockHeight,
-        limit: Option<u32>,
-        with_row: F,
-    ) -> Result<(), Self::Error>
-    where
-        F: FnMut(CompactBlock) -> Result<(), Self::Error>;
-}
-
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
@@ -422,39 +407,17 @@ pub mod testing {
     use crate::{
         address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-        proto::compact_formats::CompactBlock,
         wallet::{SpendableNote, WalletTransparentOutput},
     };
 
-    use super::{
-        error::Error, BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead,
-        WalletWrite,
-    };
-
-    pub struct MockBlockSource {}
-
-    impl BlockSource for MockBlockSource {
-        type Error = Error<u32>;
-
-        fn with_blocks<F>(
-            &self,
-            _from_height: BlockHeight,
-            _limit: Option<u32>,
-            _with_row: F,
-        ) -> Result<(), Self::Error>
-        where
-            F: FnMut(CompactBlock) -> Result<(), Self::Error>,
-        {
-            Ok(())
-        }
-    }
+    use super::{DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite};
 
     pub struct MockWalletDb {
         pub network: Network,
     }
 
     impl WalletRead for MockWalletDb {
-        type Error = Error<u32>;
+        type Error = ();
         type NoteRef = u32;
         type TxRef = TxId;
 
@@ -514,7 +477,7 @@ pub mod testing {
         }
 
         fn get_transaction(&self, _id_tx: Self::TxRef) -> Result<Transaction, Self::Error> {
-            Err(Error::ScanRequired) // wrong error but we'll fix it later.
+            Err(())
         }
 
         fn get_commitment_tree(
@@ -544,7 +507,7 @@ pub mod testing {
             &self,
             _account: AccountId,
             _anchor_height: BlockHeight,
-        ) -> Result<Vec<SpendableNote>, Self::Error> {
+        ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -553,7 +516,7 @@ pub mod testing {
             _account: AccountId,
             _target_value: Amount,
             _anchor_height: BlockHeight,
-        ) -> Result<Vec<SpendableNote>, Self::Error> {
+        ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -591,7 +554,7 @@ pub mod testing {
             let account = AccountId::from(0);
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
                 .map(|k| (account, k))
-                .map_err(|_| Error::KeyDerivationError(account))
+                .map_err(|_| ())
         }
 
         fn get_next_available_address(

@@ -1,7 +1,6 @@
 //! Structs for building transactions.
 
 use std::cmp::Ordering;
-use std::convert::Infallible;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
@@ -20,7 +19,7 @@ use crate::{
     sapling::{prover::TxProver, Diversifier, Node, Note, PaymentAddress},
     transaction::{
         components::{
-            amount::Amount,
+            amount::{Amount, BalanceError},
             sapling::{
                 self,
                 builder::{SaplingBuilder, SaplingMetadata},
@@ -54,15 +53,17 @@ const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// Errors that can occur during transaction construction.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error {
+pub enum Error<FeeError> {
     /// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
     InsufficientFunds(Amount),
     /// The transaction has inputs in excess of outputs and fees; the user must
     /// add a change output.
     ChangeRequired(Amount),
+    /// An error occurred in computing the fees for a transaction.
+    Fee(FeeError),
     /// An overflow or underflow occurred when computing value balances
-    InvalidAmount,
+    Balance(BalanceError),
     /// An error occurred in constructing the transparent parts of a transaction.
     TransparentBuild(transparent::builder::Error),
     /// An error occurred in constructing the Sapling parts of a transaction.
@@ -72,7 +73,7 @@ pub enum Error {
     TzeBuild(tze::builder::Error),
 }
 
-impl fmt::Display for Error {
+impl<FE: fmt::Display> fmt::Display for Error<FE> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::InsufficientFunds(amount) => write!(
@@ -85,7 +86,8 @@ impl fmt::Display for Error {
                 "The transaction requires an additional change output of {:?} zatoshis",
                 amount
             ),
-            Error::InvalidAmount => write!(f, "Invalid amount (overflow or underflow)"),
+            Error::Balance(e) => write!(f, "Invalid amount {:?}", e),
+            Error::Fee(e) => write!(f, "An error occurred in fee calculation: {}", e),
             Error::TransparentBuild(err) => err.fmt(f),
             Error::SaplingBuild(err) => err.fmt(f),
             #[cfg(feature = "zfuture")]
@@ -94,11 +96,11 @@ impl fmt::Display for Error {
     }
 }
 
-impl error::Error for Error {}
+impl<FE: fmt::Debug + fmt::Display> error::Error for Error<FE> {}
 
-impl From<Infallible> for Error {
-    fn from(_: Infallible) -> Error {
-        unreachable!()
+impl<FE> From<BalanceError> for Error<FE> {
+    fn from(e: BalanceError) -> Self {
+        Error::Balance(e)
     }
 }
 
@@ -239,10 +241,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         diversifier: Diversifier,
         note: Note,
         merkle_path: MerklePath<Node>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), sapling::builder::Error> {
         self.sapling_builder
             .add_spend(&mut self.rng, extsk, diversifier, note, merkle_path)
-            .map_err(Error::SaplingBuild)
     }
 
     /// Adds a Sapling address to send funds to.
@@ -252,10 +253,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         to: PaymentAddress,
         value: Amount,
         memo: MemoBytes,
-    ) -> Result<(), Error> {
+    ) -> Result<(), sapling::builder::Error> {
         self.sapling_builder
             .add_output(&mut self.rng, ovk, to, value, memo)
-            .map_err(Error::SaplingBuild)
     }
 
     /// Adds a transparent coin to be spent in this transaction.
@@ -266,10 +266,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         sk: secp256k1::SecretKey,
         utxo: transparent::OutPoint,
         coin: TxOut,
-    ) -> Result<(), Error> {
-        self.transparent_builder
-            .add_input(sk, utxo, coin)
-            .map_err(Error::TransparentBuild)
+    ) -> Result<(), transparent::builder::Error> {
+        self.transparent_builder.add_input(sk, utxo, coin)
     }
 
     /// Adds a transparent address to send funds to.
@@ -277,10 +275,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         &mut self,
         to: &TransparentAddress,
         value: Amount,
-    ) -> Result<(), Error> {
-        self.transparent_builder
-            .add_output(to, value)
-            .map_err(Error::TransparentBuild)
+    ) -> Result<(), transparent::builder::Error> {
+        self.transparent_builder.add_output(to, value)
     }
 
     /// Sets the notifier channel, where progress of building the transaction is sent.
@@ -294,22 +290,18 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     }
 
     /// Returns the sum of the transparent, Sapling, and TZE value balances.
-    fn value_balance(&self) -> Result<Amount, Error> {
+    fn value_balance(&self) -> Result<Amount, BalanceError> {
         let value_balances = [
-            self.transparent_builder
-                .value_balance()
-                .ok_or(Error::InvalidAmount)?,
+            self.transparent_builder.value_balance()?,
             self.sapling_builder.value_balance(),
             #[cfg(feature = "zfuture")]
-            self.tze_builder
-                .value_balance()
-                .ok_or(Error::InvalidAmount)?,
+            self.tze_builder.value_balance()?,
         ];
 
         value_balances
             .into_iter()
             .sum::<Option<_>>()
-            .ok_or(Error::InvalidAmount)
+            .ok_or(BalanceError::Overflow)
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -320,18 +312,17 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         self,
         prover: &impl TxProver,
         fee_rule: &FR,
-    ) -> Result<(Transaction, SaplingMetadata), Error>
-    where
-        Error: From<FR::Error>,
-    {
-        let fee = fee_rule.fee_required(
-            &self.params,
-            self.target_height,
-            self.transparent_builder.inputs(),
-            self.transparent_builder.outputs(),
-            self.sapling_builder.inputs(),
-            self.sapling_builder.outputs(),
-        )?;
+    ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
+        let fee = fee_rule
+            .fee_required(
+                &self.params,
+                self.target_height,
+                self.transparent_builder.inputs(),
+                self.transparent_builder.outputs(),
+                self.sapling_builder.inputs().len(),
+                self.sapling_builder.outputs().len(),
+            )
+            .map_err(Error::Fee)?;
         self.build_internal(prover, fee)
     }
 
@@ -344,28 +335,28 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         self,
         prover: &impl TxProver,
         fee_rule: &FR,
-    ) -> Result<(Transaction, SaplingMetadata), Error>
-    where
-        Error: From<FR::Error>,
-    {
-        let fee = fee_rule.fee_required_zfuture(
-            &self.params,
-            self.target_height,
-            self.transparent_builder.inputs(),
-            self.transparent_builder.outputs(),
-            self.sapling_builder.inputs(),
-            self.sapling_builder.outputs(),
-            self.tze_builder.inputs(),
-            self.tze_builder.outputs(),
-        )?;
+    ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
+        let fee = fee_rule
+            .fee_required_zfuture(
+                &self.params,
+                self.target_height,
+                self.transparent_builder.inputs(),
+                self.transparent_builder.outputs(),
+                self.sapling_builder.inputs().len(),
+                self.sapling_builder.outputs().len(),
+                self.tze_builder.inputs(),
+                self.tze_builder.outputs(),
+            )
+            .map_err(Error::Fee)?;
+
         self.build_internal(prover, fee)
     }
 
-    fn build_internal(
+    fn build_internal<FE>(
         self,
         prover: &impl TxProver,
         fee: Amount,
-    ) -> Result<(Transaction, SaplingMetadata), Error> {
+    ) -> Result<(Transaction, SaplingMetadata), Error<FE>> {
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
 
         // determine transaction version
@@ -376,7 +367,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees = (self.value_balance()? - fee).ok_or(Error::InvalidAmount)?;
+        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&Amount::zero()) {
             Ordering::Less => {
@@ -514,6 +505,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
 #[cfg(any(test, feature = "test-dependencies"))]
 mod testing {
     use rand::RngCore;
+    use std::convert::Infallible;
 
     use super::{Builder, Error, SaplingMetadata};
     use crate::{
@@ -536,7 +528,7 @@ mod testing {
             Self::new_internal(params, rng, height)
         }
 
-        pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error> {
+        pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
             self.build(&MockTxProver, &FixedFeeRule::new(DEFAULT_FEE))
         }
     }
@@ -599,7 +591,7 @@ mod tests {
                 Amount::from_i64(-1).unwrap(),
                 MemoBytes::empty()
             ),
-            Err(Error::SaplingBuild(build_s::Error::InvalidAmount))
+            Err(build_s::Error::InvalidAmount)
         );
     }
 
@@ -714,7 +706,7 @@ mod tests {
                 &TransparentAddress::PublicKey([0; 20]),
                 Amount::from_i64(-1).unwrap(),
             ),
-            Err(Error::TransparentBuild(build_t::Error::InvalidAmount))
+            Err(build_t::Error::InvalidAmount)
         );
     }
 

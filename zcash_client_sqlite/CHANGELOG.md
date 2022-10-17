@@ -22,6 +22,8 @@ and this library adheres to Rust's notion of
     to initialize the accounts table with a noncontiguous set of account identifiers.
   - `SqliteClientError::AccountIdOutOfRange`, to report when the maximum account
     identifier has been reached.
+  - `SqliteClientError::Protobuf`, to support handling of errors in serialized
+    protobuf data decoding.
 - An `unstable` feature flag; this is added to parts of the API that may change
   in any release. It enables `zcash_client_backend`'s `unstable` feature flag.
 - New summary views that may be directly accessed in the sqlite database.
@@ -40,6 +42,7 @@ and this library adheres to Rust's notion of
   this block source.
   - `zcash_client_sqlite::chain::init::init_blockmeta_db` creates the required
     metadata cache database.
+- Implementations of `PartialEq`, `Eq`, `PartialOrd`, and `Ord` for `NoteId`
 
 ### Changed
 - Various **BREAKING CHANGES** have been made to the database tables. These will
@@ -95,6 +98,10 @@ and this library adheres to Rust's notion of
   - `delete_utxos_above` (use `WalletWrite::rewind_to_height` instead)
 - `zcash_client_sqlite::with_blocks` (use
   `zcash_client_backend::data_api::BlockSource::with_blocks` instead)
+- `zcash_client_sqlite::error::SqliteClientError` variants:
+  - `SqliteClientError::IncorrectHrpExtFvk`
+  - `SqliteClientError::Base58`
+  - `SqliteClientError::BackendError`
 
 ### Fixed
 - The `zcash_client_backend::data_api::WalletRead::get_address` implementation

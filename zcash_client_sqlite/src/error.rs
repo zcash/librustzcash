@@ -3,13 +3,10 @@
 use std::error;
 use std::fmt;
 
-use zcash_client_backend::{
-    data_api,
-    encoding::{Bech32DecodeError, TransparentCodecError},
-};
+use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
 use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
-use crate::{NoteId, PRUNING_HEIGHT};
+use crate::PRUNING_HEIGHT;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::TransparentAddress;
@@ -23,8 +20,8 @@ pub enum SqliteClientError {
     /// Decoding of a stored value from its serialized form has failed.
     CorruptedData(String),
 
-    /// Decoding of the extended full viewing key has failed (for the specified network)
-    IncorrectHrpExtFvk,
+    /// An error occurred decoding a protobuf message.
+    Protobuf(prost::DecodeError),
 
     /// The rcm value for a note cannot be decoded to a valid JubJub point.
     InvalidNote,
@@ -43,14 +40,12 @@ pub enum SqliteClientError {
     /// A Bech32-encoded key or address decoding error
     Bech32DecodeError(Bech32DecodeError),
 
-    /// Base58 decoding error
-    Base58(bs58::decode::Error),
-
-    ///
+    /// An error produced in legacy transparent address derivation
     #[cfg(feature = "transparent-inputs")]
     HdwalletError(hdwallet::error::Error),
 
-    /// Base58 decoding error
+    /// An error encountered in decoding a transparent address from its
+    /// serialized form.
     TransparentAddress(TransparentCodecError),
 
     /// Wrapper for rusqlite errors.
@@ -66,9 +61,6 @@ pub enum SqliteClientError {
     /// storage layer. The payload returned with this error is
     /// (safe rewind height, requested height).
     RequestedRewindInvalid(BlockHeight, BlockHeight),
-
-    /// Wrapper for errors from zcash_client_backend
-    BackendError(data_api::error::Error<NoteId>),
 
     /// The space of allocatable diversifier indices has been exhausted for
     /// the given account.
@@ -109,14 +101,13 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::CorruptedData(reason) => {
                 write!(f, "Data DB is corrupted: {}", reason)
             }
-            SqliteClientError::IncorrectHrpExtFvk => write!(f, "Incorrect HRP for extfvk"),
+            SqliteClientError::Protobuf(e) => write!(f, "Failed to parse protobuf-encoded record: {}", e),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
             SqliteClientError::InvalidNoteId =>
                 write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::RequestedRewindInvalid(h, r) =>
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_HEIGHT, h, r),
             SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),
-            SqliteClientError::Base58(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
@@ -126,7 +117,6 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::DbError(e) => write!(f, "{}", e),
             SqliteClientError::Io(e) => write!(f, "{}", e),
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
-            SqliteClientError::BackendError(e) => write!(f, "{}", e),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
@@ -155,9 +145,9 @@ impl From<Bech32DecodeError> for SqliteClientError {
     }
 }
 
-impl From<bs58::decode::Error> for SqliteClientError {
-    fn from(e: bs58::decode::Error) -> Self {
-        SqliteClientError::Base58(e)
+impl From<prost::DecodeError> for SqliteClientError {
+    fn from(e: prost::DecodeError) -> Self {
+        SqliteClientError::Protobuf(e)
     }
 }
 
@@ -177,11 +167,5 @@ impl From<TransparentCodecError> for SqliteClientError {
 impl From<zcash_primitives::memo::Error> for SqliteClientError {
     fn from(e: zcash_primitives::memo::Error) -> Self {
         SqliteClientError::InvalidMemo(e)
-    }
-}
-
-impl From<data_api::error::Error<NoteId>> for SqliteClientError {
-    fn from(e: data_api::error::Error<NoteId>) -> Self {
-        SqliteClientError::BackendError(e)
     }
 }

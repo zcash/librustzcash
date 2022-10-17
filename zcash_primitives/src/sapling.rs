@@ -280,6 +280,8 @@ impl PartialEq for PaymentAddress {
     }
 }
 
+impl Eq for PaymentAddress {}
+
 impl PaymentAddress {
     /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
     ///

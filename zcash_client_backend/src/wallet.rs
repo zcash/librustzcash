@@ -10,7 +10,8 @@ use zcash_primitives::{
     sapling::{Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed},
     transaction::{
         components::{
-            transparent::{OutPoint, TxOut},
+            sapling,
+            transparent::{self, OutPoint, TxOut},
             Amount,
         },
         TxId,
@@ -69,6 +70,19 @@ impl WalletTransparentOutput {
     pub fn recipient_address(&self) -> &TransparentAddress {
         &self.recipient_address
     }
+
+    pub fn value(&self) -> Amount {
+        self.txout.value
+    }
+}
+
+impl transparent::fees::InputView for WalletTransparentOutput {
+    fn outpoint(&self) -> &OutPoint {
+        &self.outpoint
+    }
+    fn coin(&self) -> &TxOut {
+        &self.txout
+    }
 }
 
 /// A subset of a [`SpendDescription`] relevant to wallets and light clients.
@@ -97,11 +111,18 @@ pub struct WalletShieldedOutput<N> {
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
-pub struct SpendableNote {
+pub struct SpendableNote<NoteRef> {
+    pub note_id: NoteRef,
     pub diversifier: Diversifier,
     pub note_value: Amount,
     pub rseed: Rseed,
     pub witness: IncrementalWitness<Node>,
+}
+
+impl<NoteRef> sapling::fees::InputView for SpendableNote<NoteRef> {
+    fn value(&self) -> Amount {
+        self.note_value
+    }
 }
 
 /// Describes a policy for which outgoing viewing key should be able to decrypt

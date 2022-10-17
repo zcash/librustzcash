@@ -10,9 +10,12 @@ and this library adheres to Rust's notion of
 ### Added
 - Added in `zcash_primitives::zip32`
   - An implementation of `TryFrom<DiversifierIndex>` for `u32`
+- `zcash_primitives::transaction::components::amount::NonNegativeAmount`
 - Added to `zcash_primitives::transaction::builder`
   - `Error::InsufficientFunds`
   - `Error::ChangeRequired`
+  - `Error::Balance`
+  - `Error::Fee`
   - `Builder` state accessor methods:
     - `Builder::params()`
     - `Builder::target_height()`
@@ -33,14 +36,21 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::sapling::Note::commitment`
 - Added to `zcash_primitives::zip32::sapling::DiversifiableFullViewingKey`
   - `DiversifiableFullViewingKey::{diversified_address, diversified_change_address}`
+- `impl Eq for zcash_primitves::sapling::PaymentAddress`
 
 ### Changed
 - `zcash_primitives::transaction::builder::Builder::build` now takes a `FeeRule`
   argument which is used to compute the fee for the transaction as part of the
   build process.
+- `zcash_primitives::transaction::builder::Builder::value_balance` now
+  returns `Result<Amount, BalanceError>` instead of `Option<Amount>`.
 - `zcash_primitives::transaction::builder::Builder::{new, new_with_rng}` no
   longer fixes the fee for transactions to 0.00001 ZEC; the builder instead
   computes the fee using a `FeeRule` implementation at build time.
+- `zcash_primitives::transaction::builder::Error` now is parameterized by the
+  types that can now be produced by fee calculation.
+- `zcash_primitives::transaction::components::tze::builder::Builder::value_balance` now
+  returns `Result<Amount, BalanceError>` instead of `Option<Amount>`.
 
 ### Deprecated
 - `zcash_primitives::zip32::sapling::to_extended_full_viewing_key` Use
@@ -48,13 +58,14 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - Removed from `zcash_primitives::transaction::builder::Builder`
-  - `Builder::{new_with_fee, new_with_rng_and_fee`} (use `Builder::{new, new_with_rng}` 
+  - `Builder::{new_with_fee, new_with_rng_and_fee`} (use `Builder::{new, new_with_rng}`
     instead along with a `FeeRule` implementation passed to `Builder::build`.)
   - `Builder::send_change_to` has been removed. Change outputs must be added to the
     builder by the caller, just like any other output.
 - Removed from `zcash_primitives::transaction::builder::Error`
   - `Error::ChangeIsNegative`
   - `Error::NoChangeAddress`
+  - `Error::InvalidAmount` (replaced by `Error::BalanceError`)
 - `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder::get_candidate_change_address`
    has been removed; change outputs must now be added by the caller.
 - The `From<&ExtendedSpendingKey>` instance for `ExtendedFullViewingKey` has been

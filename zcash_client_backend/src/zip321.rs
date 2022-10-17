@@ -115,6 +115,11 @@ pub struct TransactionRequest {
 }
 
 impl TransactionRequest {
+    /// Constructs a new empty transaction request.
+    pub fn empty() -> Self {
+        Self { payments: vec![] }
+    }
+
     /// Constructs a new transaction request that obeys the ZIP-321 invariants
     pub fn new(payments: Vec<Payment>) -> Result<TransactionRequest, Zip321Error> {
         let request = TransactionRequest { payments };

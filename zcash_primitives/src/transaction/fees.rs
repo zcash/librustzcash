@@ -2,9 +2,7 @@
 
 use crate::{
     consensus::{self, BlockHeight},
-    transaction::components::{
-        amount::Amount, sapling::fees as sapling, transparent::fees as transparent,
-    },
+    transaction::components::{amount::Amount, transparent::fees as transparent},
 };
 
 #[cfg(feature = "zfuture")]
@@ -26,8 +24,8 @@ pub trait FeeRule {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling_input_count: usize,
+        sapling_output_count: usize,
     ) -> Result<Amount, Self::Error>;
 }
 
@@ -47,8 +45,8 @@ pub trait FutureFeeRule: FeeRule {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling_input_count: usize,
+        sapling_output_count: usize,
         tze_inputs: &[impl tze::InputView],
         tze_outputs: &[impl tze::OutputView],
     ) -> Result<Amount, Self::Error>;
@@ -56,6 +54,7 @@ pub trait FutureFeeRule: FeeRule {
 
 /// A fee rule that always returns a fixed fee, irrespective of the structure of
 /// the transaction being constructed.
+#[derive(Clone, Copy, Debug)]
 pub struct FixedFeeRule {
     fixed_fee: Amount,
 }
@@ -76,8 +75,8 @@ impl FeeRule for FixedFeeRule {
         _target_height: BlockHeight,
         _transparent_inputs: &[impl transparent::InputView],
         _transparent_outputs: &[impl transparent::OutputView],
-        _sapling_inputs: &[impl sapling::InputView],
-        _sapling_outputs: &[impl sapling::OutputView],
+        _sapling_input_count: usize,
+        _sapling_output_count: usize,
     ) -> Result<Amount, Self::Error> {
         Ok(self.fixed_fee)
     }
@@ -91,8 +90,8 @@ impl FutureFeeRule for FixedFeeRule {
         _target_height: BlockHeight,
         _transparent_inputs: &[impl transparent::InputView],
         _transparent_outputs: &[impl transparent::OutputView],
-        _sapling_inputs: &[impl sapling::InputView],
-        _sapling_outputs: &[impl sapling::OutputView],
+        _sapling_input_count: usize,
+        _sapling_output_count: usize,
         _tze_inputs: &[impl tze::InputView],
         _tze_outputs: &[impl tze::OutputView],
     ) -> Result<Amount, Self::Error> {

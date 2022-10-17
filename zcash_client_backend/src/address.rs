@@ -36,7 +36,7 @@ impl AddressMetadata {
 }
 
 /// A Unified Address.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnifiedAddress {
     orchard: Option<orchard::Address>,
     sapling: Option<PaymentAddress>,
