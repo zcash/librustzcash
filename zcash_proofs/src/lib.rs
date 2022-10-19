@@ -232,7 +232,7 @@ fn stream_params_downloads_to_disk(
     use std::io::{BufWriter, Read};
 
     // Fail early if the directory isn't writeable.
-    let new_params_file = File::create(&params_path)?;
+    let new_params_file = File::create(params_path)?;
     let new_params_file = BufWriter::with_capacity(1024 * 1024, new_params_file);
 
     // Set up the download requests.
@@ -441,7 +441,7 @@ fn verify_file_size(
     name: &str,
     params_source: &str,
 ) -> Result<(), io::Error> {
-    let file_size = std::fs::metadata(&params_path)?.len();
+    let file_size = std::fs::metadata(params_path)?.len();
 
     if file_size != expected_bytes {
         return Err(io::Error::new(

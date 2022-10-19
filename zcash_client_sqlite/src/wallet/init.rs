@@ -842,7 +842,7 @@ mod tests {
             tx.write(&mut tx_bytes).unwrap();
             wdb.conn.execute(
                 "INSERT INTO transactions (block, id_tx, txid, raw) VALUES (0, 0, '', ?)",
-                &[&tx_bytes[..]],
+                [&tx_bytes[..]],
             )?;
             wdb.conn.execute(
                 "INSERT INTO sent_notes (tx, output_index, from_account, address, value)

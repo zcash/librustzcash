@@ -352,7 +352,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
     /// Finds the database row for the given `txid`, if the transaction is in the wallet.
     pub(crate) fn stmt_select_tx_ref(&mut self, txid: &TxId) -> Result<i64, SqliteClientError> {
         self.stmt_select_tx_ref
-            .query_row(&[&txid.as_ref()[..]], |row| row.get(0))
+            .query_row([&txid.as_ref()[..]], |row| row.get(0))
             .map_err(SqliteClientError::from)
     }
 

@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.8.0] - 2022-10-19
+### Changed
+- Bumped dependencies to `zcash_primitives 0.8`.
+
 ## [0.7.1] - 2022-07-05
 ### Added
 - `zcash_proofs::sapling::BatchValidator`
