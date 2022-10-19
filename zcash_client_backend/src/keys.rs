@@ -612,7 +612,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn seed() -> Vec<u8> {
         let seed_hex = "6ef5f84def6f4b9d38f466586a8380a38593bd47c8cda77f091856176da47f26b5bd1c8d097486e5635df5a66e820d28e1d73346f499801c86228d43f390304f";
-        hex::decode(&seed_hex).unwrap()
+        hex::decode(seed_hex).unwrap()
     }
 
     #[test]

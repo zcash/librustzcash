@@ -84,10 +84,10 @@ impl Shl<&[u8]> for Script {
             self.0.push(data.len() as u8);
         } else if data.len() <= 0xffff {
             self.0.push(OpCode::PushData2 as u8);
-            self.0.extend(&(data.len() as u16).to_le_bytes());
+            self.0.extend((data.len() as u16).to_le_bytes());
         } else {
             self.0.push(OpCode::PushData4 as u8);
-            self.0.extend(&(data.len() as u32).to_le_bytes());
+            self.0.extend((data.len() as u32).to_le_bytes());
         }
         self.0.extend(data);
         self

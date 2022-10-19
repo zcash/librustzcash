@@ -159,8 +159,8 @@ pub fn verify_proof(
     public_input.extend(mac2);
     public_input.extend(cm1);
     public_input.extend(cm2);
-    public_input.extend(&vpub_old.to_le_bytes());
-    public_input.extend(&vpub_new.to_le_bytes());
+    public_input.extend(vpub_old.to_le_bytes());
+    public_input.extend(vpub_new.to_le_bytes());
 
     let public_input = multipack::bytes_to_bits(&public_input);
     let public_input = multipack::compute_multipacking(&public_input);
