@@ -83,7 +83,8 @@ and this library adheres to Rust's notion of
   `zcash_primitives::transaction::components::transparent::TxOut::recipient_address`
 
 ## [0.8.0] - 2022-10-19
-This release was yanked.
+This release was yanked because it depended on the wrong versions of `zcash_address`
+and `zcash_encoding`.
 
 ## [0.7.0] - 2022-06-24
 ### Changed
