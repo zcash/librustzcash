@@ -7,9 +7,6 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-### Changed
-- MSRV is now 1.56.1.
-
 ## [0.3.0] - 2022-05-11
 ### Added
 - Support for multiple history tree versions:
@@ -19,6 +16,7 @@ and this library adheres to Rust's notion of
 - `zcash_history::Entry::new_leaf`
 
 ### Changed
+- MSRV is now 1.56.1.
 - `zcash_history::{Entry, IndexedNode, Tree}` now have a `Version` parameter.
 
 ### Removed
