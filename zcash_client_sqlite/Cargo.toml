@@ -36,7 +36,7 @@ regex = "1.4"
 tempfile = "3"
 zcash_proofs = { version = "0.8", path = "../zcash_proofs" }
 zcash_primitives = { version = "0.8", path = "../zcash_primitives", features = ["test-dependencies"] }
-zcash_address = { version = "0.1", path = "../components/zcash_address", features = ["test-dependencies"] }
+zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
 mainnet = []

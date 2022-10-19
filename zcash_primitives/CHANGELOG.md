@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.8.0] - 2022-10-19
+## [0.8.1] - 2022-10-19
 ### Added
 - `zcash_primitives::legacy`:
   - `impl {Copy, Eq, Ord} for TransparentAddress`
@@ -58,8 +58,7 @@ and this library adheres to Rust's notion of
   - `zcash_primitives::zip32::AccountId`
 
 ### Changed
-- Migrated to `group 0.13`.
-- Migrated to `orchard 0.3`.
+- Migrated to `group 0.13`, `orchard 0.3`, `zcash_address 0.2`, `zcash_encoding 0.2`.
 - `zcash_primitives::sapling::ViewingKey` now stores `nk` as a
   `NullifierDerivingKey` instead of as a bare `jubjub::SubgroupPoint`.
 - The signature of `zcash_primitives::sapling::Note::nf` has changed to
@@ -82,6 +81,10 @@ and this library adheres to Rust's notion of
   safe to use on arbitrary scripts, only on script_pubkey values. Its
   functionality is now available via
   `zcash_primitives::transaction::components::transparent::TxOut::recipient_address`
+
+## [0.8.0] - 2022-10-19
+This release was yanked because it depended on the wrong versions of `zcash_address`
+and `zcash_encoding`.
 
 ## [0.7.0] - 2022-06-24
 ### Changed
