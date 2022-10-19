@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.8.0] - 2022-10-19
 ### Added
 - `zcash_primitives::legacy`:
   - `impl {Copy, Eq, Ord} for TransparentAddress`
@@ -57,6 +59,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Migrated to `group 0.13`.
+- Migrated to `orchard 0.3`.
 - `zcash_primitives::sapling::ViewingKey` now stores `nk` as a
   `NullifierDerivingKey` instead of as a bare `jubjub::SubgroupPoint`.
 - The signature of `zcash_primitives::sapling::Note::nf` has changed to
