@@ -33,14 +33,6 @@ use chacha20poly1305::{
     ChaCha20Poly1305,
 };
 
-use chacha20::ChaCha20;
-
-use cipher::{
-    KeyIvInit,
-    StreamCipher,
-    StreamCipherSeek,
-};
-
 use rand_core::RngCore;
 use subtle::{Choice, ConstantTimeEq};
 
@@ -134,7 +126,7 @@ pub trait Domain {
     type SymmetricKey: AsRef<[u8]>;
     type Note;
     type NotePlaintextBytes: AsMut<[u8]>;
-    type EncNoteCiphertextBytes;
+    type EncNoteCiphertextBytes: From<(Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])>;
     type CompactNotePlaintextBytes: From<Self::NotePlaintextBytes> + AsMut<[u8]>;
     type CompactEncNoteCiphertextBytes;
     type Recipient;
@@ -298,8 +290,6 @@ pub trait Domain {
     /// Returns `None` if `out_plaintext` does not contain a valid byte encoding of an
     /// `EphemeralSecretKey`.
     fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
-
-    fn ciphertext_from_enc_plaintext_and_tag(enc_plaintext: Self::NotePlaintextBytes, tag: &[u8]) -> Self::EncNoteCiphertextBytes;
 
     fn separate_tag_from_ciphertext(enc_ciphertext: Self::EncNoteCiphertextBytes) -> (Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE]);
 
@@ -489,7 +479,7 @@ impl<D: Domain> NoteEncryption<D> {
                 input.as_mut(),
             )
             .unwrap();
-        D::ciphertext_from_enc_plaintext_and_tag(input, &tag)
+        D::EncNoteCiphertextBytes::from((input, tag.into()))
     }
 
     /// Generates `outCiphertext` for this note.
