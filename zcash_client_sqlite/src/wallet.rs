@@ -287,23 +287,43 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         }
     }
 
-    // Get the UFVK for the account.
-    let ufvk_str: String = conn.query_row(
-        "SELECT ufvk FROM accounts WHERE account = :account",
-        [u32::from(account)],
-        |row| row.get(0),
-    )?;
-    let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
-        .map_err(SqliteClientError::CorruptedData)?;
-
-    // Derive the default transparent address (if it wasn't already part of a derived UA).
-    if let Some(tfvk) = ufvk.transparent() {
-        let tivk = tfvk.derive_external_ivk()?;
-        let taddr = tivk.default_address().0;
+    if let Some(taddr) = get_legacy_transparent_address(params, conn, account)? {
         ret.insert(taddr);
     }
 
     Ok(ret)
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
+    params: &P,
+    conn: &Connection,
+    account: AccountId,
+) -> Result<Option<TransparentAddress>, SqliteClientError> {
+    // Get the UFVK for the account.
+    let ufvk_str: Option<String> = conn
+        .query_row(
+            "SELECT ufvk FROM accounts WHERE account = :account",
+            [u32::from(account)],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(ufvk_str) = ufvk_str {
+        let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+            .map_err(SqliteClientError::CorruptedData)?;
+
+        // Derive the default transparent address (if it wasn't already part of a derived UA).
+        ufvk.transparent()
+            .map(|tfvk| {
+                tfvk.derive_external_ivk()
+                    .map(|tivk| tivk.default_address().0)
+                    .map_err(SqliteClientError::HdwalletError)
+            })
+            .transpose()
+    } else {
+        Ok(None)
+    }
 }
 
 /// Returns the [`UnifiedFullViewingKey`]s for the wallet.
@@ -1058,11 +1078,37 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
-    let update_result = stmts.stmt_update_received_transparent_utxo(output)?;
-    match update_result {
-        None => stmts.stmt_insert_received_transparent_utxo(output),
-        Some(id) => Ok(id),
-    }
+    stmts
+        .stmt_update_received_transparent_utxo(output)
+        .transpose()
+        .or_else(|| {
+            stmts
+                .stmt_insert_received_transparent_utxo(output)
+                .transpose()
+        })
+        .unwrap_or_else(|| {
+            // This could occur if the UTXO is received at the legacy transparent
+            // address, in which case the join to the `addresses` table will fail.
+            // In this case, we should look up the legacy address for account 0 and
+            // check whether it matches the address for the received UTXO, and if
+            // so then insert/update it directly.
+            let account = AccountId::from(0u32);
+            get_legacy_transparent_address(&stmts.wallet_db.params, &stmts.wallet_db.conn, account)
+                .and_then(|taddr| {
+                    if taddr.as_ref() == Some(output.recipient_address()) {
+                        stmts
+                            .stmt_update_legacy_transparent_utxo(output, account)
+                            .transpose()
+                            .unwrap_or_else(|| {
+                                stmts.stmt_insert_legacy_transparent_utxo(output, account)
+                            })
+                    } else {
+                        Err(SqliteClientError::AddressNotRecognized(
+                            RecipientAddress::Transparent(*output.recipient_address()),
+                        ))
+                    }
+                })
+        })
 }
 
 /// Records the specified shielded output as having been received.

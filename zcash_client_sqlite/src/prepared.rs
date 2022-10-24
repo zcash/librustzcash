@@ -106,6 +106,10 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_insert_received_transparent_utxo: Statement<'a>,
     #[cfg(feature = "transparent-inputs")]
     stmt_update_received_transparent_utxo: Statement<'a>,
+    #[cfg(feature = "transparent-inputs")]
+    stmt_insert_legacy_transparent_utxo: Statement<'a>,
+    #[cfg(feature = "transparent-inputs")]
+    stmt_update_legacy_transparent_utxo: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,
@@ -186,6 +190,30 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     WHERE prevout_txid = :prevout_txid
                       AND prevout_idx = :prevout_idx
                       AND addresses.cached_transparent_receiver_address = :address
+                    RETURNING id_utxo"
+                )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_insert_legacy_transparent_utxo: wallet_db.conn.prepare(
+                    "INSERT INTO utxos (
+                        received_by_account, address,
+                        prevout_txid, prevout_idx, script,
+                        value_zat, height)
+                    VALUES
+                        (:received_by_account, :address,
+                        :prevout_txid, :prevout_idx, :script,
+                        :value_zat, :height)
+                    RETURNING id_utxo"
+                )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_update_legacy_transparent_utxo: wallet_db.conn.prepare(
+                    "UPDATE utxos
+                    SET received_by_account = :received_by_account,
+                        height = :height,
+                        address = :address,
+                        script = :script,
+                        value_zat = :value_zat
+                    WHERE prevout_txid = :prevout_txid
+                      AND prevout_idx = :prevout_idx
                     RETURNING id_utxo"
                 )?,
                 stmt_insert_received_note: wallet_db.conn.prepare(
@@ -503,13 +531,14 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 
     /// Adds the given received UTXO to the datastore.
     ///
-    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
-    /// exists.
+    /// Returns the database identifier for the newly-inserted UTXO if the address to which the
+    /// UTXO was sent corresponds to a cached transparent receiver in the addresses table, or
+    /// Ok(None) if the address is unknown. Returns an error if the UTXO exists.
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn stmt_insert_received_transparent_utxo(
         &mut self,
         output: &WalletTransparentOutput,
-    ) -> Result<UtxoId, SqliteClientError> {
+    ) -> Result<Option<UtxoId>, SqliteClientError> {
         self.stmt_insert_received_transparent_utxo
             .query_row(
                 named_params![
@@ -525,13 +554,15 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
                     Ok(UtxoId(id))
                 },
             )
+            .optional()
             .map_err(SqliteClientError::from)
     }
 
     /// Adds the given received UTXO to the datastore.
     ///
-    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
-    /// exists.
+    /// Returns the database identifier for the updated UTXO if the address to which the UTXO was
+    /// sent corresponds to a cached transparent receiver in the addresses table, or Ok(None) if
+    /// the address is unknown.
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn stmt_update_received_transparent_utxo(
         &mut self,
@@ -540,6 +571,65 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         self.stmt_update_received_transparent_utxo
             .query_row(
                 named_params![
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .optional()
+            .map_err(SqliteClientError::from)
+    }
+
+    /// Adds the given legacy UTXO to the datastore.
+    ///
+    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
+    /// exists.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn stmt_insert_legacy_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+        received_by_account: AccountId,
+    ) -> Result<UtxoId, SqliteClientError> {
+        self.stmt_insert_legacy_transparent_utxo
+            .query_row(
+                named_params![
+                    ":received_by_account": &u32::from(received_by_account),
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .map_err(SqliteClientError::from)
+    }
+
+    /// Adds the given legacy UTXO to the datastore.
+    ///
+    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
+    /// exists.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn stmt_update_legacy_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+        received_by_account: AccountId,
+    ) -> Result<Option<UtxoId>, SqliteClientError> {
+        self.stmt_update_legacy_transparent_utxo
+            .query_row(
+                named_params![
+                    ":received_by_account": &u32::from(received_by_account),
                     ":prevout_txid": &output.outpoint().hash().to_vec(),
                     ":prevout_idx": &output.outpoint().n(),
                     ":address": &output.recipient_address().encode(&self.wallet_db.params),

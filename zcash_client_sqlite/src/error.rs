@@ -4,6 +4,7 @@ use std::error;
 use std::fmt;
 
 use zcash_client_backend::{
+    address::RecipientAddress,
     data_api,
     encoding::{Bech32DecodeError, TransparentCodecError},
 };
@@ -80,6 +81,10 @@ pub enum SqliteClientError {
 
     /// A caller attempted to construct a new account with an invalid account identifier.
     AccountIdOutOfRange,
+
+    /// The address associated with a record being inserted was not recognized as
+    /// belonging to the wallet
+    AddressNotRecognized(RecipientAddress),
 }
 
 impl error::Error for SqliteClientError {
@@ -122,6 +127,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
+            SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
         }
     }
 }
