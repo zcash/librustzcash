@@ -236,9 +236,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
 
     addr.map(|(addr_str, di_vec)| {
         let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
-            SqliteClientError::CorruptedData(
-                "Diversifier index is not an 11-byte value".to_owned(),
-            )
+            SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
         })?;
         di_be.reverse();
 
