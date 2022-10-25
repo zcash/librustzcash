@@ -25,6 +25,7 @@ and this library adheres to Rust's notion of
   in any release.
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
+  - `AddressMetadata`
 - `zcash_client_backend::data_api`:
   - `PoolType`
   - `Recipient`
@@ -102,9 +103,17 @@ and this library adheres to Rust's notion of
   `store_decrypted_tx`.
 - `data_api::ReceivedTransaction` has been renamed to `DecryptedTransaction`,
   and its `outputs` field has been renamed to `sapling_outputs`.
-- An `Error::MemoForbidden` error has been added to the
-  `data_api::error::Error` enum to report the condition where a memo was
-  specified to be sent to a transparent recipient.
+- `data_api::error::Error` has the following additional cases:
+  - `Error::MemoForbidden` to report the condition where a memo was
+    specified to be sent to a transparent recipient.
+  - `Error::TransparentInputsNotSupported` to represent the condition
+    where a transparent spend has been requested of a wallet compiled without
+    the `transparent-inputs` feature.
+  - `Error::AddressNotRecognized` to indicate that a transparent address from
+    which funds are being requested to be spent does not appear to be associated
+    with this wallet.
+  - `Error::ChildIndexOutOfRange` to indicate that a diversifier index for an
+    address is out of range for valid transparent child indices.
 - `zcash_client_backend::decrypt`:
   - `decrypt_transaction` now takes a `HashMap<_, UnifiedFullViewingKey>`
     instead of `HashMap<_, ExtendedFullViewingKey>`.

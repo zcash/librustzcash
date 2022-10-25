@@ -34,7 +34,7 @@
 
 use rusqlite::Connection;
 use secrecy::{ExposeSecret, SecretVec};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
@@ -50,7 +50,7 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::UnifiedAddress,
+    address::{AddressMetadata, UnifiedAddress},
     data_api::{
         BlockSource, DecryptedTransaction, PoolType, PrunedBlock, Recipient, SentTransaction,
         WalletRead, WalletWrite,
@@ -248,7 +248,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     fn get_transparent_receivers(
         &self,
         _account: AccountId,
-    ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return wallet::get_transparent_receivers(&self.params, &self.conn, _account);
 
@@ -379,7 +379,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     fn get_transparent_receivers(
         &self,
         account: AccountId,
-    ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
         self.wallet_db.get_transparent_receivers(account)
     }
 
@@ -1187,10 +1187,10 @@ mod tests {
         let receivers = db_data.get_transparent_receivers(0.into()).unwrap();
 
         // The receiver for the default UA should be in the set.
-        assert!(receivers.contains(ufvk.default_address().0.transparent().unwrap()));
+        assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
 
         // The default t-addr should be in the set.
-        assert!(receivers.contains(&taddr));
+        assert!(receivers.contains_key(&taddr));
     }
 
     #[cfg(feature = "unstable")]

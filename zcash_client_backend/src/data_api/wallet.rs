@@ -23,7 +23,7 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey};
+use zcash_primitives::{legacy::TransparentAddress, sapling::keys::OutgoingViewingKey};
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
@@ -440,6 +440,7 @@ pub fn shield_transparent_funds<E, N, P, D, R, U>(
     params: &P,
     prover: impl TxProver,
     usk: &UnifiedSpendingKey,
+    from_addr: &TransparentAddress,
     memo: &MemoBytes,
     min_confirmations: u32,
 ) -> Result<D::TxRef, E>
@@ -465,14 +466,8 @@ where
     let account_pubkey = usk.transparent().to_account_pubkey();
     let ovk = OutgoingViewingKey(account_pubkey.internal_ovk().as_bytes());
 
-    // derive the t-address for the extpubkey at the minimum valid child index
-    let (taddr, child_index) = account_pubkey
-        .derive_external_ivk()
-        .unwrap()
-        .default_address();
-
     // get UTXOs from DB
-    let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
+    let utxos = wallet_db.get_unspent_transparent_outputs(from_addr, latest_anchor)?;
     let total_amount = utxos
         .iter()
         .map(|utxo| utxo.txout().value)
@@ -488,10 +483,20 @@ where
 
     let mut builder = Builder::new_with_fee(params.clone(), latest_scanned_height, fee);
 
+    let diversifier_index = *wallet_db
+        .get_transparent_receivers(account)?
+        .get(from_addr)
+        .ok_or(Error::AddressNotRecognized(*from_addr))?
+        .diversifier_index();
+
+    let child_index = u32::try_from(diversifier_index)
+        .map_err(|_| Error::ChildIndexOutOfRange(diversifier_index))?;
+
     let secret_key = usk
         .transparent()
         .derive_external_secret_key(child_index)
         .unwrap();
+
     for utxo in &utxos {
         builder
             .add_transparent_input(secret_key, utxo.outpoint().clone(), utxo.txout().clone())

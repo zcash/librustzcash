@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- Added in `zcash_primitives::zip32`
+  - An implementation of `TryFrom<DiversifierIndex>` for `u32`
+
 ## [0.8.1] - 2022-10-19
 ### Added
 - `zcash_primitives::legacy`:

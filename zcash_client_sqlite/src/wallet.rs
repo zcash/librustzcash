@@ -42,8 +42,9 @@ use crate::{
 use {
     crate::UtxoId,
     rusqlite::{params, Connection},
-    std::collections::HashSet,
-    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
+    zcash_client_backend::{
+        address::AddressMetadata, encoding::AddressCodec, wallet::WalletTransparentOutput,
+    },
     zcash_primitives::{
         legacy::{keys::IncomingViewingKey, Script, TransparentAddress},
         transaction::components::{OutPoint, TxOut},
@@ -236,7 +237,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
     addr.map(|(addr_str, di_vec)| {
         let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
             SqliteClientError::CorruptedData(
-                "Diverisifier index is not an 11-byte value".to_owned(),
+                "Diversifier index is not an 11-byte value".to_owned(),
             )
         })?;
         di_be.reverse();
@@ -262,15 +263,24 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     conn: &Connection,
     account: AccountId,
-) -> Result<HashSet<TransparentAddress>, SqliteClientError> {
-    let mut ret = HashSet::new();
+) -> Result<HashMap<TransparentAddress, AddressMetadata>, SqliteClientError> {
+    let mut ret = HashMap::new();
 
     // Get all UAs derived
-    let mut ua_query = conn.prepare("SELECT address FROM addresses WHERE account = :account")?;
+    let mut ua_query =
+        conn.prepare("SELECT address, diversifier_index_be FROM addresses WHERE account = :account")?;
     let mut rows = ua_query.query(named_params![":account": &u32::from(account)])?;
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
+        let di_vec: Vec<u8> = row.get(1)?;
+        let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
+            SqliteClientError::CorruptedData(
+                "Diverisifier index is not an 11-byte value".to_owned(),
+            )
+        })?;
+        di_be.reverse();
+
         let ua = RecipientAddress::decode(params, &ua_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
@@ -282,13 +292,18 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     ua_str,
                 ))),
             })?;
+
         if let Some(taddr) = ua.transparent() {
-            ret.insert(*taddr);
+            ret.insert(
+                *taddr,
+                AddressMetadata::new(account, DiversifierIndex(di_be)),
+            );
         }
     }
 
-    if let Some(taddr) = get_legacy_transparent_address(params, conn, account)? {
-        ret.insert(taddr);
+    if let Some((taddr, diversifier_index)) = get_legacy_transparent_address(params, conn, account)?
+    {
+        ret.insert(taddr, AddressMetadata::new(account, diversifier_index));
     }
 
     Ok(ret)
@@ -299,7 +314,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     conn: &Connection,
     account: AccountId,
-) -> Result<Option<TransparentAddress>, SqliteClientError> {
+) -> Result<Option<(TransparentAddress, DiversifierIndex)>, SqliteClientError> {
     // Get the UFVK for the account.
     let ufvk_str: Option<String> = conn
         .query_row(
@@ -317,7 +332,10 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
         ufvk.transparent()
             .map(|tfvk| {
                 tfvk.derive_external_ivk()
-                    .map(|tivk| tivk.default_address().0)
+                    .map(|tivk| {
+                        let (taddr, child_index) = tivk.default_address();
+                        (taddr, DiversifierIndex::from(child_index))
+                    })
                     .map_err(SqliteClientError::HdwalletError)
             })
             .transpose()
@@ -1094,8 +1112,11 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
             // so then insert/update it directly.
             let account = AccountId::from(0u32);
             get_legacy_transparent_address(&stmts.wallet_db.params, &stmts.wallet_db.conn, account)
-                .and_then(|taddr| {
-                    if taddr.as_ref() == Some(output.recipient_address()) {
+                .and_then(|legacy_taddr| {
+                    if legacy_taddr
+                        .iter()
+                        .any(|(taddr, _)| taddr == output.recipient_address())
+                    {
                         stmts
                             .stmt_update_legacy_transparent_utxo(output, account)
                             .transpose()
@@ -1104,7 +1125,7 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
                             })
                     } else {
                         Err(SqliteClientError::AddressNotRecognized(
-                            RecipientAddress::Transparent(*output.recipient_address()),
+                            *output.recipient_address(),
                         ))
                     }
                 })
