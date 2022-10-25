@@ -10,6 +10,9 @@ use zcash_primitives::{
     zip32::AccountId,
 };
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};
+
 #[derive(Debug)]
 pub enum ChainInvalid {
     /// The hash of the parent block given by a proposed new chain tip does
@@ -83,6 +86,12 @@ pub enum Error<NoteId> {
     /// support
     #[cfg(not(feature = "transparent-inputs"))]
     TransparentInputsNotSupported,
+
+    #[cfg(feature = "transparent-inputs")]
+    AddressNotRecognized(TransparentAddress),
+
+    #[cfg(feature = "transparent-inputs")]
+    ChildIndexOutOfRange(DiversifierIndex),
 }
 
 impl ChainInvalid {
@@ -142,6 +151,14 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             #[cfg(not(feature = "transparent-inputs"))]
             Error::TransparentInputsNotSupported => {
                 write!(f, "This wallet does not support spending or manipulating transparent UTXOs.")
+            }
+            #[cfg(feature = "transparent-inputs")]
+            Error::AddressNotRecognized(_) => {
+                write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
+            }
+            #[cfg(feature = "transparent-inputs")]
+            Error::ChildIndexOutOfRange(i) => {
+                write!(f, "The diversifier index {:?} is out of range for transparent addresses.", i)
             }
         }
     }

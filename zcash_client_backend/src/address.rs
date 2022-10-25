@@ -6,7 +6,34 @@ use zcash_address::{
     unified::{self, Container, Encoding},
     ConversionError, Network, ToAddress, TryFromRawAddress, ZcashAddress,
 };
-use zcash_primitives::{consensus, legacy::TransparentAddress, sapling::PaymentAddress};
+use zcash_primitives::{
+    consensus,
+    legacy::TransparentAddress,
+    sapling::PaymentAddress,
+    zip32::{AccountId, DiversifierIndex},
+};
+
+pub struct AddressMetadata {
+    account: AccountId,
+    diversifier_index: DiversifierIndex,
+}
+
+impl AddressMetadata {
+    pub fn new(account: AccountId, diversifier_index: DiversifierIndex) -> Self {
+        Self {
+            account,
+            diversifier_index,
+        }
+    }
+
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
+
+    pub fn diversifier_index(&self) -> &DiversifierIndex {
+        &self.diversifier_index
+    }
+}
 
 /// A Unified Address.
 #[derive(Clone, Debug, PartialEq)]

@@ -1,7 +1,7 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
 use std::cmp;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use secrecy::SecretVec;
@@ -17,7 +17,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::UnifiedAddress,
+    address::{AddressMetadata, UnifiedAddress},
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -207,7 +207,7 @@ pub trait WalletRead {
     fn get_transparent_receivers(
         &self,
         account: AccountId,
-    ) -> Result<HashSet<TransparentAddress>, Self::Error>;
+    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error>;
 
     /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
     /// including `max_height`.
@@ -216,6 +216,14 @@ pub trait WalletRead {
         address: &TransparentAddress,
         max_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
+
+    /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
+    /// for each address associated with a nonzero balance.
+    fn get_transparent_balances(
+        &self,
+        account: AccountId,
+        max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error>;
 }
 
 /// The subset of information that is relevant to this wallet that has been
@@ -400,9 +408,6 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use std::collections::HashMap;
 
-    #[cfg(feature = "transparent-inputs")]
-    use std::collections::HashSet;
-
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},
@@ -415,7 +420,7 @@ pub mod testing {
     };
 
     use crate::{
-        address::UnifiedAddress,
+        address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
         proto::compact_formats::CompactBlock,
         wallet::{SpendableNote, WalletTransparentOutput},
@@ -555,8 +560,8 @@ pub mod testing {
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
-        ) -> Result<HashSet<TransparentAddress>, Self::Error> {
-            Ok(HashSet::new())
+        ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
+            Ok(HashMap::new())
         }
 
         fn get_unspent_transparent_outputs(
@@ -565,6 +570,14 @@ pub mod testing {
             _anchor_height: BlockHeight,
         ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
             Ok(Vec::new())
+        }
+
+        fn get_transparent_balances(
+            &self,
+            _account: AccountId,
+            _max_height: BlockHeight,
+        ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+            Ok(HashMap::new())
         }
     }
 

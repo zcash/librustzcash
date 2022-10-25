@@ -11,6 +11,9 @@ use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
 use crate::{NoteId, PRUNING_HEIGHT};
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::legacy::TransparentAddress;
+
 #[cfg(feature = "unstable")]
 use zcash_primitives::transaction::TxId;
 
@@ -43,6 +46,7 @@ pub enum SqliteClientError {
     /// Base58 decoding error
     Base58(bs58::decode::Error),
 
+    ///
     #[cfg(feature = "transparent-inputs")]
     HdwalletError(hdwallet::error::Error),
 
@@ -80,6 +84,11 @@ pub enum SqliteClientError {
 
     /// A caller attempted to construct a new account with an invalid account identifier.
     AccountIdOutOfRange,
+
+    /// The address associated with a record being inserted was not recognized as
+    /// belonging to the wallet
+    #[cfg(feature = "transparent-inputs")]
+    AddressNotRecognized(TransparentAddress),
 }
 
 impl error::Error for SqliteClientError {
@@ -122,6 +131,8 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
+            #[cfg(feature = "transparent-inputs")]
+            SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
         }
     }
 }
@@ -154,6 +165,12 @@ impl From<bs58::decode::Error> for SqliteClientError {
 impl From<hdwallet::error::Error> for SqliteClientError {
     fn from(e: hdwallet::error::Error) -> Self {
         SqliteClientError::HdwalletError(e)
+    }
+}
+
+impl From<TransparentCodecError> for SqliteClientError {
+    fn from(e: TransparentCodecError) -> Self {
+        SqliteClientError::TransparentAddress(e)
     }
 }
 

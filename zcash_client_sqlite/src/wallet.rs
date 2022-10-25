@@ -42,8 +42,9 @@ use crate::{
 use {
     crate::UtxoId,
     rusqlite::{params, Connection},
-    std::collections::HashSet,
-    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
+    zcash_client_backend::{
+        address::AddressMetadata, encoding::AddressCodec, wallet::WalletTransparentOutput,
+    },
     zcash_primitives::{
         legacy::{keys::IncomingViewingKey, Script, TransparentAddress},
         transaction::components::{OutPoint, TxOut},
@@ -235,9 +236,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
 
     addr.map(|(addr_str, di_vec)| {
         let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
-            SqliteClientError::CorruptedData(
-                "Diverisifier index is not an 11-byte value".to_owned(),
-            )
+            SqliteClientError::CorruptedData("Diversifier index is not an 11-byte value".to_owned())
         })?;
         di_be.reverse();
 
@@ -262,15 +261,24 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     params: &P,
     conn: &Connection,
     account: AccountId,
-) -> Result<HashSet<TransparentAddress>, SqliteClientError> {
-    let mut ret = HashSet::new();
+) -> Result<HashMap<TransparentAddress, AddressMetadata>, SqliteClientError> {
+    let mut ret = HashMap::new();
 
     // Get all UAs derived
-    let mut ua_query = conn.prepare("SELECT address FROM addresses WHERE account = :account")?;
+    let mut ua_query = conn
+        .prepare("SELECT address, diversifier_index_be FROM addresses WHERE account = :account")?;
     let mut rows = ua_query.query(named_params![":account": &u32::from(account)])?;
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
+        let di_vec: Vec<u8> = row.get(1)?;
+        let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
+            SqliteClientError::CorruptedData(
+                "Diverisifier index is not an 11-byte value".to_owned(),
+            )
+        })?;
+        di_be.reverse();
+
         let ua = RecipientAddress::decode(params, &ua_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
@@ -282,28 +290,56 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                     ua_str,
                 ))),
             })?;
+
         if let Some(taddr) = ua.transparent() {
-            ret.insert(*taddr);
+            ret.insert(
+                *taddr,
+                AddressMetadata::new(account, DiversifierIndex(di_be)),
+            );
         }
     }
 
-    // Get the UFVK for the account.
-    let ufvk_str: String = conn.query_row(
-        "SELECT ufvk FROM accounts WHERE account = :account",
-        [u32::from(account)],
-        |row| row.get(0),
-    )?;
-    let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
-        .map_err(SqliteClientError::CorruptedData)?;
-
-    // Derive the default transparent address (if it wasn't already part of a derived UA).
-    if let Some(tfvk) = ufvk.transparent() {
-        let tivk = tfvk.derive_external_ivk()?;
-        let taddr = tivk.default_address().0;
-        ret.insert(taddr);
+    if let Some((taddr, diversifier_index)) = get_legacy_transparent_address(params, conn, account)?
+    {
+        ret.insert(taddr, AddressMetadata::new(account, diversifier_index));
     }
 
     Ok(ret)
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
+    params: &P,
+    conn: &Connection,
+    account: AccountId,
+) -> Result<Option<(TransparentAddress, DiversifierIndex)>, SqliteClientError> {
+    // Get the UFVK for the account.
+    let ufvk_str: Option<String> = conn
+        .query_row(
+            "SELECT ufvk FROM accounts WHERE account = :account",
+            [u32::from(account)],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(ufvk_str) = ufvk_str {
+        let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+            .map_err(SqliteClientError::CorruptedData)?;
+
+        // Derive the default transparent address (if it wasn't already part of a derived UA).
+        ufvk.transparent()
+            .map(|tfvk| {
+                tfvk.derive_external_ivk()
+                    .map(|tivk| {
+                        let (taddr, child_index) = tivk.default_address();
+                        (taddr, DiversifierIndex::from(child_index))
+                    })
+                    .map_err(SqliteClientError::HdwalletError)
+            })
+            .transpose()
+    } else {
+        Ok(None)
+    }
 }
 
 /// Returns the [`UnifiedFullViewingKey`]s for the wallet.
@@ -928,7 +964,7 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
          ON tx.id_tx = u.spent_in_tx
          WHERE u.address = ?
          AND u.height <= ?
-         AND block IS NULL",
+         AND tx.block IS NULL",
     )?;
 
     let addr_str = address.encode(&wdb.params);
@@ -964,6 +1000,38 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     }
 
     Ok(utxos)
+}
+
+/// Returns the unspent balance for each transparent address associated with the specified account,
+/// such that the block that included the transaction was mined at a height less than or equal to
+/// the provided `max_height`.
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
+    wdb: &WalletDb<P>,
+    account: AccountId,
+    max_height: BlockHeight,
+) -> Result<HashMap<TransparentAddress, Amount>, SqliteClientError> {
+    let mut stmt_blocks = wdb.conn.prepare(
+        "SELECT u.address, SUM(u.value_zat)
+         FROM utxos u
+         LEFT OUTER JOIN transactions tx
+         ON tx.id_tx = u.spent_in_tx
+         WHERE u.received_by_accountt = ?
+         AND u.height <= ?
+         AND tx.block IS NULL",
+    )?;
+
+    let mut res = HashMap::new();
+    let mut rows = stmt_blocks.query(params![u32::from(account), u32::from(max_height)])?;
+    while let Some(row) = rows.next()? {
+        let taddr_str: String = row.get(0)?;
+        let taddr = TransparentAddress::decode(&wdb.params, &taddr_str)?;
+        let value = Amount::from_i64(row.get(1)?).unwrap();
+
+        res.insert(taddr, value);
+    }
+
+    Ok(res)
 }
 
 /// Inserts information about a scanned block into the database.
@@ -1058,11 +1126,40 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
-    let update_result = stmts.stmt_update_received_transparent_utxo(output)?;
-    match update_result {
-        None => stmts.stmt_insert_received_transparent_utxo(output),
-        Some(id) => Ok(id),
-    }
+    stmts
+        .stmt_update_received_transparent_utxo(output)
+        .transpose()
+        .or_else(|| {
+            stmts
+                .stmt_insert_received_transparent_utxo(output)
+                .transpose()
+        })
+        .unwrap_or_else(|| {
+            // This could occur if the UTXO is received at the legacy transparent
+            // address, in which case the join to the `addresses` table will fail.
+            // In this case, we should look up the legacy address for account 0 and
+            // check whether it matches the address for the received UTXO, and if
+            // so then insert/update it directly.
+            let account = AccountId::from(0u32);
+            get_legacy_transparent_address(&stmts.wallet_db.params, &stmts.wallet_db.conn, account)
+                .and_then(|legacy_taddr| {
+                    if legacy_taddr
+                        .iter()
+                        .any(|(taddr, _)| taddr == output.recipient_address())
+                    {
+                        stmts
+                            .stmt_update_legacy_transparent_utxo(output, account)
+                            .transpose()
+                            .unwrap_or_else(|| {
+                                stmts.stmt_insert_legacy_transparent_utxo(output, account)
+                            })
+                    } else {
+                        Err(SqliteClientError::AddressNotRecognized(
+                            *output.recipient_address(),
+                        ))
+                    }
+                })
+        })
 }
 
 /// Records the specified shielded output as having been received.

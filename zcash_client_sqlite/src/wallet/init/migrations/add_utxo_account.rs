@@ -79,7 +79,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             )),
                         })?;
 
-                for taddr in taddrs {
+                for (taddr, _) in taddrs {
                     stmt_update_utxo_account.execute(named_params![
                         ":account": &account,
                         ":address": &taddr.encode(&self._params),
