@@ -216,6 +216,14 @@ pub trait WalletRead {
         address: &TransparentAddress,
         max_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
+
+    /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
+    /// for each address associated with a nonzero balance.
+    fn get_transparent_balances(
+        &self,
+        account: AccountId,
+        max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error>;
 }
 
 /// The subset of information that is relevant to this wallet that has been
@@ -562,6 +570,14 @@ pub mod testing {
             _anchor_height: BlockHeight,
         ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
             Ok(Vec::new())
+        }
+
+        fn get_transparent_balances(
+            &self,
+            _account: AccountId,
+            _max_height: BlockHeight,
+        ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+            Ok(HashMap::new())
         }
     }
 

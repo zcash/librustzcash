@@ -36,6 +36,7 @@ and this library adheres to Rust's notion of
   - `WalletRead::get_all_nullifiers`
   - `WalletRead::get_transparent_receivers`
   - `WalletRead::get_unspent_transparent_outputs`
+  - `WalletRead::get_transparent_balances`
   - `WalletWrite::create_account`
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
   - `WalletWrite::get_next_available_address`

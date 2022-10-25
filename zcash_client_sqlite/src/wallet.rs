@@ -267,8 +267,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let mut ret = HashMap::new();
 
     // Get all UAs derived
-    let mut ua_query =
-        conn.prepare("SELECT address, diversifier_index_be FROM addresses WHERE account = :account")?;
+    let mut ua_query = conn
+        .prepare("SELECT address, diversifier_index_be FROM addresses WHERE account = :account")?;
     let mut rows = ua_query.query(named_params![":account": &u32::from(account)])?;
 
     while let Some(row) = rows.next()? {
@@ -966,7 +966,7 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
          ON tx.id_tx = u.spent_in_tx
          WHERE u.address = ?
          AND u.height <= ?
-         AND block IS NULL",
+         AND tx.block IS NULL",
     )?;
 
     let addr_str = address.encode(&wdb.params);
@@ -1002,6 +1002,38 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     }
 
     Ok(utxos)
+}
+
+/// Returns the unspent balance for each transparent address associated with the specified account,
+/// such that the block that included the transaction was mined at a height less than or equal to
+/// the provided `max_height`.
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
+    wdb: &WalletDb<P>,
+    account: AccountId,
+    max_height: BlockHeight,
+) -> Result<HashMap<TransparentAddress, Amount>, SqliteClientError> {
+    let mut stmt_blocks = wdb.conn.prepare(
+        "SELECT u.address, SUM(u.value_zat)
+         FROM utxos u
+         LEFT OUTER JOIN transactions tx
+         ON tx.id_tx = u.spent_in_tx
+         WHERE u.received_by_accountt = ?
+         AND u.height <= ?
+         AND tx.block IS NULL",
+    )?;
+
+    let mut res = HashMap::new();
+    let mut rows = stmt_blocks.query(params![u32::from(account), u32::from(max_height)])?;
+    while let Some(row) = rows.next()? {
+        let taddr_str: String = row.get(0)?;
+        let taddr = TransparentAddress::decode(&wdb.params, &taddr_str)?;
+        let value = Amount::from_i64(row.get(1)?).unwrap();
+
+        res.insert(taddr, value);
+    }
+
+    Ok(res)
 }
 
 /// Inserts information about a scanned block into the database.

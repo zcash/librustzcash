@@ -168,6 +168,12 @@ impl From<hdwallet::error::Error> for SqliteClientError {
     }
 }
 
+impl From<TransparentCodecError> for SqliteClientError {
+    fn from(e: TransparentCodecError) -> Self {
+        SqliteClientError::TransparentAddress(e)
+    }
+}
+
 impl From<zcash_primitives::memo::Error> for SqliteClientError {
     fn from(e: zcash_primitives::memo::Error) -> Self {
         SqliteClientError::InvalidMemo(e)

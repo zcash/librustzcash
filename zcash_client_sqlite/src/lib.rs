@@ -271,6 +271,20 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
             Error::TransparentInputsNotSupported,
         ));
     }
+
+    fn get_transparent_balances(
+        &self,
+        _account: AccountId,
+        _max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::get_transparent_balances(self, _account, _max_height);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(SqliteClientError::BackendError(
+            Error::TransparentInputsNotSupported,
+        ));
+    }
 }
 
 impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
@@ -390,6 +404,14 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         self.wallet_db
             .get_unspent_transparent_outputs(address, max_height)
+    }
+
+    fn get_transparent_balances(
+        &self,
+        account: AccountId,
+        max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        self.wallet_db.get_transparent_balances(account, max_height)
     }
 }
 
