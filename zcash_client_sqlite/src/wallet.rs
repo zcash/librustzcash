@@ -1016,7 +1016,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
-         WHERE u.received_by_accountt = ?
+         WHERE u.received_by_account = ?
          AND u.height <= ?
          AND tx.block IS NULL",
     )?;
