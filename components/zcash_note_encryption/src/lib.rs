@@ -283,9 +283,9 @@ pub trait Domain {
     /// `EphemeralSecretKey`.
     fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
 
-    fn separate_tag_from_ciphertext(enc_ciphertext: Self::EncNoteCiphertextBytes) -> (Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE]);
+    fn separate_tag_from_ciphertext(enc_ciphertext: &Self::EncNoteCiphertextBytes) -> (Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE]);
 
-    fn convert_to_compact_plaintext_type(enc_ciphertext: Self::CompactEncNoteCiphertextBytes) -> Self::CompactNotePlaintextBytes;
+    fn convert_to_compact_plaintext_type(enc_ciphertext: &Self::CompactEncNoteCiphertextBytes) -> Self::CompactNotePlaintextBytes;
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -340,11 +340,11 @@ pub trait ShieldedOutput<D: Domain> {
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
 
     /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
-    fn enc_ciphertext(&self) -> Option<D::EncNoteCiphertextBytes>;
+    fn enc_ciphertext(&self) -> Option<&D::EncNoteCiphertextBytes>;
 
     /// Exposes the note ciphertext of the output in the compact note context.
     /// This always returns a value, since a full note ciphertext can be truncated to a compact ciphertext.
-    fn enc_ciphertext_compact(&self) -> D::CompactEncNoteCiphertextBytes;
+    fn enc_ciphertext_compact(&self) -> &D::CompactEncNoteCiphertextBytes;
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -551,7 +551,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
-    let enc_ciphertext: D::EncNoteCiphertextBytes;
+    let enc_ciphertext: &D::EncNoteCiphertextBytes;
     match output.enc_ciphertext() {
         Some(x) => enc_ciphertext = x,
         None                                    => return None,
@@ -723,7 +723,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
-    let enc_ciphertext: D::EncNoteCiphertextBytes;
+    let enc_ciphertext: &D::EncNoteCiphertextBytes;
     match output.enc_ciphertext() {
         Some(x) => enc_ciphertext = x,
         None                                    => return None,
