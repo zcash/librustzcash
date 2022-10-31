@@ -746,6 +746,14 @@ impl DiversifiableFullViewingKey {
         sapling_default_address(&self.fvk, &self.dk)
     }
 
+    /// Returns the payment address corresponding to the specified diversifier, if any.
+    ///
+    /// In general, it is preferable to use `find_address` instead, but this method is
+    /// useful in some cases for matching keys to existing payment addresses.
+    pub fn diversified_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
+        self.fvk.vk.to_payment_address(diversifier)
+    }
+
     /// Returns the internal address corresponding to the smallest valid diversifier index,
     /// along with that index.
     ///
@@ -754,6 +762,17 @@ impl DiversifiableFullViewingKey {
     pub fn change_address(&self) -> (DiversifierIndex, PaymentAddress) {
         let internal_dfvk = self.derive_internal();
         sapling_default_address(&internal_dfvk.fvk, &internal_dfvk.dk)
+    }
+
+    /// Returns the change address corresponding to the specified diversifier, if any.
+    ///
+    /// In general, it is preferable to use `change_address` instead, but this method is
+    /// useful in some cases for matching keys to existing payment addresses.
+    pub fn diversified_change_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
+        self.derive_internal()
+            .fvk
+            .vk
+            .to_payment_address(diversifier)
     }
 
     /// Attempts to decrypt the given address's diversifier with this full viewing key.

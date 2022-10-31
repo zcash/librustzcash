@@ -86,6 +86,11 @@ pub enum Error<NoteId> {
     /// identifier.
     KeyDerivationError(AccountId),
 
+    /// A note being spent does not correspond to either the internal or external
+    /// full viewing key for an account.
+    // TODO: Return the note id for the note that caused the failure
+    NoteMismatch,
+
     /// An error indicating that a call was attempted to a method providing
     /// support
     #[cfg(not(feature = "transparent-inputs"))]
@@ -151,6 +156,7 @@ impl<N: fmt::Display> fmt::Display for Error<N> {
             Error::SaplingNotActive => write!(f, "Could not determine Sapling upgrade activation height."),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
             Error::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
+            Error::NoteMismatch => write!(f, "A note being spent does not correspond to either the internal or external full viewing key for the provided spending key."),
 
             #[cfg(not(feature = "transparent-inputs"))]
             Error::TransparentInputsNotSupported => {

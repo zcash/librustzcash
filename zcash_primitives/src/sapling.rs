@@ -80,6 +80,12 @@ impl Node {
     pub fn new(repr: [u8; 32]) -> Self {
         Node { repr }
     }
+
+    pub fn from_scalar(cmu: bls12_381::Scalar) -> Self {
+        Self {
+            repr: cmu.to_repr(),
+        }
+    }
 }
 
 impl incrementalmerkletree::Hashable for Node {

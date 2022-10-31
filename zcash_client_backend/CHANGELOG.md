@@ -131,6 +131,9 @@ and this library adheres to Rust's notion of
     with this wallet.
   - `Error::ChildIndexOutOfRange` to indicate that a diversifier index for an
     address is out of range for valid transparent child indices.
+  - `Error::NoteMismatch` to indicate that a note being spent is not associated
+    with either the internal or external full viewing keys corresponding to the
+    provided spending key.
 - `zcash_client_backend::decrypt`:
   - `decrypt_transaction` now takes a `HashMap<_, UnifiedFullViewingKey>`
     instead of `HashMap<_, ExtendedFullViewingKey>`.

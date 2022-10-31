@@ -39,6 +39,10 @@ and this library adheres to Rust's notion of
   longer fixes the fee for transactions to 0.00001 ZEC; the builder instead
   computes the fee using a `FeeRule` implementation at build time.
 
+### Deprecated
+- `zcash_primitives::zip32::sapling::to_extended_full_viewing_key` Use
+  `to_diversifiable_full_viewing_key` instead.
+
 ### Removed
 - Removed from `zcash_primitives::transaction::builder::Builder`
   - `Builder::{new_with_fee, new_with_rng_and_fee`} (use `Builder::{new, new_with_rng}` 

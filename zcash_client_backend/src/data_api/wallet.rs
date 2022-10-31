@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    sapling::prover::TxProver,
+    sapling::{prover::TxProver, Node},
     transaction::{
         builder::Builder,
         components::amount::{Amount, BalanceError, DEFAULT_FEE},
@@ -307,17 +307,28 @@ where
     // Create the transaction
     let mut builder = Builder::new(params.clone(), target_height);
     for selected in spendable_notes {
-        let from = dfvk
-            .fvk()
-            .vk
-            .to_payment_address(selected.diversifier)
-            .unwrap(); //DiversifyHash would have to unexpectedly return the zero point for this to be None
-
-        let note = from
-            .create_note(selected.note_value.into(), selected.rseed)
-            .unwrap();
-
         let merkle_path = selected.witness.path().expect("the tree is not empty");
+
+        // Attempt to reconstruct the note being spent using both the internal and external dfvks
+        // corresponding to the unified spending key, checking against the witness we are using
+        // to spend the note that we've used the correct key.
+        let note = {
+            let external_note = dfvk
+                .diversified_address(selected.diversifier)
+                .and_then(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+            let internal_note = dfvk
+                .diversified_change_address(selected.diversifier)
+                .and_then(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+
+            let expected_root = selected.witness.root();
+            external_note
+                .filter(|n| expected_root == merkle_path.root(Node::from_scalar(n.cmu())))
+                .or_else(|| {
+                    internal_note
+                        .filter(|n| expected_root == merkle_path.root(Node::from_scalar(n.cmu())))
+                })
+                .ok_or_else(|| E::from(Error::NoteMismatch))
+        }?;
 
         builder
             .add_sapling_spend(
