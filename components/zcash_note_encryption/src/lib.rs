@@ -106,14 +106,6 @@ enum NoteValidity {
     Invalid,
 }
 
-/// Enum for the note ciphertext.
-/// The variants represent whether the encrypted note is a full note or a compact note.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum NoteCiphertext<D: Domain> {
-    Full(D::EncNoteCiphertextBytes),
-    Compact(D::CompactEncNoteCiphertextBytes),
-}
-
 /// Trait that encapsulates protocol-specific note encryption types and logic.
 ///
 /// This trait enables most of the note encryption logic to be shared between Sapling and
@@ -347,8 +339,12 @@ pub trait ShieldedOutput<D: Domain> {
     /// Exposes the `cmu_bytes` or `cmx_bytes` field of the output.
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
 
-    /// Exposes the note ciphertext of the output.
-    fn enc_ciphertext(&self) -> NoteCiphertext<D>;
+    /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
+    fn enc_ciphertext(&self) -> Option<D::EncNoteCiphertextBytes>;
+
+    /// Exposes the note ciphertext of the output in the compact note context.
+    /// This always returns a value, since a full note ciphertext can be truncated to a compact ciphertext.
+    fn enc_ciphertext_compact(&self) -> D::CompactEncNoteCiphertextBytes;
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -557,8 +553,8 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 
     let enc_ciphertext: D::EncNoteCiphertextBytes;
     match output.enc_ciphertext() {
-        NoteCiphertext::Full(x) => enc_ciphertext = x,
-        NoteCiphertext::Compact(_) => return None,
+        Some(x) => enc_ciphertext = x,
+        None                                    => return None,
     }
 
     let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(enc_ciphertext);
@@ -572,8 +568,6 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
             &tag.into(),
         )
         .ok()?;
-
-    // let plaintext = D::decrypt_with_key(key, enc_ciphertext);
 
     let memo = domain.extract_memo(&plaintext);
 
@@ -670,11 +664,7 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient)> {
 
-    let enc_ciphertext: D::CompactEncNoteCiphertextBytes;
-    match output.enc_ciphertext() {
-        NoteCiphertext::<D>::Compact(x) => enc_ciphertext = x,
-        NoteCiphertext::<D>::Full(_) => return None,
-    }
+    let enc_ciphertext = output.enc_ciphertext_compact();
 
     // Start from block 1 to skip over Poly1305 keying output
     let mut plaintext = D::convert_to_compact_plaintext_type(enc_ciphertext);
@@ -735,8 +725,8 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
 
     let enc_ciphertext: D::EncNoteCiphertextBytes;
     match output.enc_ciphertext() {
-        NoteCiphertext::<D>::Full(x) => enc_ciphertext = x,
-        NoteCiphertext::<D>::Compact(_) => return None,
+        Some(x) => enc_ciphertext = x,
+        None                                    => return None,
     }
 
     let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
