@@ -175,7 +175,7 @@ impl UnifiedSpendingKey {
         UnifiedFullViewingKey {
             #[cfg(feature = "transparent-inputs")]
             transparent: Some(self.transparent.to_account_pubkey()),
-            sapling: Some(sapling::ExtendedFullViewingKey::from(&self.sapling).into()),
+            sapling: Some(self.sapling.to_diversifiable_full_viewing_key()),
             orchard: Some((&self.orchard).into()),
             unknown: vec![],
         }
@@ -584,10 +584,7 @@ mod tests {
     use proptest::prelude::proptest;
 
     use super::{sapling, UnifiedFullViewingKey};
-    use zcash_primitives::{
-        consensus::MAIN_NETWORK,
-        zip32::{AccountId, ExtendedFullViewingKey},
-    };
+    use zcash_primitives::{consensus::MAIN_NETWORK, zip32::AccountId};
 
     #[cfg(feature = "transparent-inputs")]
     use {
@@ -647,7 +644,7 @@ mod tests {
 
         let sapling = {
             let extsk = sapling::spending_key(&[0; 32], 0, account);
-            Some(ExtendedFullViewingKey::from(&extsk).into())
+            Some(extsk.to_diversifiable_full_viewing_key())
         };
 
         #[cfg(feature = "transparent-inputs")]

@@ -175,7 +175,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 ///
 /// use zcash_primitives::{
 ///     consensus::{Network, Parameters},
-///     zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey}
+///     zip32::{AccountId, ExtendedSpendingKey}
 /// };
 ///
 /// use zcash_client_backend::{
@@ -197,7 +197,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
-/// let dfvk = ExtendedFullViewingKey::from(&extsk).into();
+/// let dfvk = extsk.to_diversifiable_full_viewing_key();
 /// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
 /// let ufvks = HashMap::from([(account, ufvk)]);
 /// init_accounts_table(&db_data, &ufvks).unwrap();
@@ -309,7 +309,7 @@ mod tests {
         block::BlockHash,
         consensus::{BlockHeight, BranchId, Parameters},
         transaction::{TransactionData, TxVersion},
-        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+        zip32::sapling::ExtendedFullViewingKey,
     };
 
     use crate::{
@@ -693,7 +693,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::from(0);
         let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
-        let extfvk = ExtendedFullViewingKey::from(&secret_key);
+        let extfvk = secret_key.to_extended_full_viewing_key();
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
@@ -856,7 +856,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::from(0);
         let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
-        let extfvk = ExtendedFullViewingKey::from(&secret_key);
+        let extfvk = secret_key.to_extended_full_viewing_key();
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_autoshielding(&db_data, &extfvk, account).unwrap();
@@ -1025,7 +1025,7 @@ mod tests {
 
         // First call with data should initialise the accounts table
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
 
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(

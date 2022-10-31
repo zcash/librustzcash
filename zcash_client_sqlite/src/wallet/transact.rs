@@ -167,7 +167,7 @@ mod tests {
         legacy::TransparentAddress,
         sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, Transaction},
-        zip32::sapling::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        zip32::sapling::ExtendedSpendingKey,
     };
 
     use zcash_client_backend::{
@@ -525,7 +525,7 @@ mod tests {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
-                &ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])).into(),
+                &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 value,
             );
             insert_into_cache(&db_cache, &cb);
@@ -558,7 +558,7 @@ mod tests {
         let (cb, _) = fake_compact_block(
             sapling_activation_height() + 22,
             cb.hash(),
-            &ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[22])).into(),
+            &ExtendedSpendingKey::master(&[22]).to_diversifiable_full_viewing_key(),
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -674,7 +674,7 @@ mod tests {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
-                &ExtendedFullViewingKey::from(&ExtendedSpendingKey::master(&[i as u8])).into(),
+                &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 value,
             );
             insert_into_cache(&db_cache, &cb);

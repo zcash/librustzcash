@@ -558,7 +558,7 @@ mod tests {
             sapling::builder::{self as build_s},
             transparent::builder::{self as build_t},
         },
-        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+        zip32::ExtendedSpendingKey,
     };
 
     use super::{Builder, Error};
@@ -583,9 +583,9 @@ mod tests {
     #[test]
     fn fails_on_negative_output() {
         let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let ovk = extfvk.fvk.ovk;
-        let to = extfvk.default_address().1;
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let ovk = dfvk.fvk().ovk;
+        let to = dfvk.default_address().1;
 
         let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -665,8 +665,8 @@ mod tests {
     #[test]
     fn binding_sig_present_if_shielded_spend() {
         let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let to = extfvk.default_address().1;
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let to = dfvk.default_address().1;
 
         let mut rng = OsRng;
 
@@ -738,9 +738,9 @@ mod tests {
             );
         }
 
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
-        let ovk = Some(extfvk.fvk.ovk);
-        let to = extfvk.default_address().1;
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let ovk = Some(dfvk.fvk().ovk);
+        let to = dfvk.default_address().1;
 
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.00001 t-ZEC fee

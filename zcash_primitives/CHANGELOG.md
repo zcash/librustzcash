@@ -50,6 +50,8 @@ and this library adheres to Rust's notion of
   - `Error::NoChangeAddress`
 - `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder::get_candidate_change_address`
    has been removed; change outputs must now be added by the caller.
+- The `From<&ExtendedSpendingKey>` instance for `ExtendedFullViewingKey` has been
+  removed. Use `ExtendedSpendingKey::to_diversifiable_full_viewing_key` instead.
 
 ## [0.8.1] - 2022-10-19
 ### Added
