@@ -14,19 +14,32 @@ edition = "2021"
 rust-version = "1.56.1"
 
 [dependencies]
+zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
+zcash_primitives = { version = "0.8", path = "../zcash_primitives" }
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Errors
 bs58 = { version = "0.4", features = ["check"] }
-group = "0.12"
 hdwallet = { version = "0.3.1", optional = true }
-jubjub = "0.9"
+
+# - Protobuf interfaces
 protobuf = "~2.27.1" # MSRV 1.52.1
+
+# - Secret management
+secrecy = "0.8"
+
+# - SQLite databases
+group = "0.12"
+jubjub = "0.9"
 rusqlite = { version = "0.25", features = ["bundled", "time"] }
 schemer = "0.2"
 schemer-rusqlite = "0.2"
-secrecy = "0.8"
 time = "0.2"
 uuid = "1.1"
-zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
-zcash_primitives = { version = "0.8", path = "../zcash_primitives" }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 
 [dev-dependencies]
 proptest = "1.0.0"
