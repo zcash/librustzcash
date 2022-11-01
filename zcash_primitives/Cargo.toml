@@ -24,9 +24,7 @@ bip0039 = { version = "0.9", features = ["std", "all-languages"] }
 blake2b_simd = "1"
 blake2s_simd = "1"
 bls12_381 = "0.7"
-bs58 = { version = "0.4", features = ["check"], optional = true }
 byteorder = "1"
-chacha20poly1305 = "0.10"
 equihash = { version = "0.2", path = "../components/equihash" }
 ff = "0.12"
 fpe = "0.5"
@@ -55,6 +53,7 @@ path = "../components/zcash_note_encryption"
 features = ["pre-zip-212"]
 
 [dev-dependencies]
+chacha20poly1305 = "0.10"
 criterion = "0.3"
 proptest = "1.0.0"
 rand_xorshift = "0.3"
@@ -64,7 +63,7 @@ orchard = { version = "0.3", features = ["test-dependencies"] }
 pprof = { version = "0.9", features = ["criterion", "flamegraph"] } # MSRV 1.56
 
 [features]
-transparent-inputs = ["bs58", "hdwallet", "ripemd", "secp256k1"]
+transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
 test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
 
