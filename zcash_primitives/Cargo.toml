@@ -18,36 +18,66 @@ categories = ["cryptography::cryptocurrencies"]
 all-features = true
 
 [dependencies]
-aes = "0.7"
-bitvec = "1"
-bip0039 = { version = "0.9", features = ["std", "all-languages"] }
-blake2b_simd = "1"
-blake2s_simd = "1"
-bls12_381 = "0.7"
-bs58 = { version = "0.4", features = ["check"], optional = true }
-byteorder = "1"
-chacha20poly1305 = "0.10"
 equihash = { version = "0.2", path = "../components/equihash" }
-ff = "0.12"
-fpe = "0.5"
-group = { version = "0.12.1", features = ["wnaf-memuse"] }
-hdwallet = { version = "0.3.1", optional = true }
-hex = "0.4"
-incrementalmerkletree = "0.3"
-jubjub = "0.9"
-lazy_static = "1"
-memuse = "0.2.1"
-nonempty = "0.7"
-orchard = "0.3"
-proptest = { version = "1.0.0", optional = true }
-rand = "0.8"
-rand_core = "0.6"
-ripemd = { version = "0.1", optional = true }
-secp256k1 = { version = "0.21", optional = true }
-sha2 = "0.9"
-subtle = "2.2.3"
 zcash_address = { version = "0.2", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - CSPRNG
+rand = "0.8"
+rand_core = "0.6"
+
+# - Digests (output types exposed)
+blake2b_simd = "1"
+sha2 = "0.9"
+
+# - Metrics
+memuse = "0.2.1"
+
+# - Secret management
+subtle = "2.2.3"
+
+# - Shielded protocols
+bls12_381 = "0.7"
+ff = "0.12"
+group = { version = "0.12.1", features = ["wnaf-memuse"] }
+incrementalmerkletree = "0.3"
+jubjub = "0.9"
+nonempty = "0.7"
+orchard = "0.3"
+
+# - Static constants
+lazy_static = "1"
+
+# - Test dependencies
+proptest = { version = "1.0.0", optional = true }
+
+# - Transparent inputs
+#   - `Error` type exposed
+hdwallet = { version = "0.3.1", optional = true }
+#   - `SecretKey` and `PublicKey` types exposed
+secp256k1 = { version = "0.21", optional = true }
+
+# - ZIP 339
+bip0039 = { version = "0.9", features = ["std", "all-languages"] }
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Encodings
+byteorder = "1"
+hex = "0.4"
+
+# - Shielded protocols
+bitvec = "1"
+blake2s_simd = "1"
+
+# - Transparent inputs
+ripemd = { version = "0.1", optional = true }
+
+# - ZIP 32
+aes = "0.7"
+fpe = "0.5"
 
 [dependencies.zcash_note_encryption]
 version = "0.2"
@@ -55,6 +85,7 @@ path = "../components/zcash_note_encryption"
 features = ["pre-zip-212"]
 
 [dev-dependencies]
+chacha20poly1305 = "0.10"
 criterion = "0.3"
 proptest = "1.0.0"
 rand_xorshift = "0.3"
@@ -64,7 +95,7 @@ orchard = { version = "0.3", features = ["test-dependencies"] }
 pprof = { version = "0.9", features = ["criterion", "flamegraph"] } # MSRV 1.56
 
 [features]
-transparent-inputs = ["bs58", "hdwallet", "ripemd", "secp256k1"]
+transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
 test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
 
