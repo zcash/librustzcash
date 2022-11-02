@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 
-use group::ff::PrimeField;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
 use zcash_primitives::{
@@ -333,7 +332,7 @@ pub(crate) fn scan_block_with_runner<
                     .collect();
 
                 // Increment tree and witnesses
-                let node = Node::new(output.cmu.to_repr());
+                let node = Node::from_scalar(output.cmu);
                 for witness in &mut *existing_witnesses {
                     witness.append(node).unwrap();
                 }

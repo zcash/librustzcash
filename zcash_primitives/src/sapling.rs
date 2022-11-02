@@ -77,10 +77,12 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(repr: [u8; 32]) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(repr: [u8; 32]) -> Self {
         Node { repr }
     }
 
+    /// Constructs a new note commitment tree node from a [`bls12_381::Scalar`]
     pub fn from_scalar(cmu: bls12_381::Scalar) -> Self {
         Self {
             repr: cmu.to_repr(),
@@ -110,7 +112,7 @@ impl HashSer for Node {
     fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut repr = [0u8; 32];
         reader.read_exact(&mut repr)?;
-        Ok(Node::new(repr))
+        Ok(Node { repr })
     }
 
     fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
@@ -523,6 +525,12 @@ impl Note {
             )),
         }
     }
+
+    pub fn commitment(&self) -> Node {
+        Node {
+            repr: self.cmu().to_repr(),
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
@@ -569,7 +577,9 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_node()(value in prop::array::uniform32(prop::num::u8::ANY)) -> Node {
-            Node::new(value)
+            Node {
+                repr: value
+            }
         }
     }
 

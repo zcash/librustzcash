@@ -177,7 +177,8 @@ and this library adheres to Rust's notion of
   - Setters (use direct field access instead).
 - The hardcoded `data_api::wallet::ANCHOR_OFFSET` constant.
 - `zcash_client_backend::wallet::AccountId` (moved to `zcash_primitives::zip32::AccountId`).
-
+- The implementation of `welding_rig::ScanningKey` for `ExtendedFullViewingKey`
+  has been removed. Use `DiversifiableFullViewingKey` instead.
 
 ## [0.5.0] - 2021-03-26
 ### Added

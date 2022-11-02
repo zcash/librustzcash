@@ -56,6 +56,8 @@ and this library adheres to Rust's notion of
    has been removed; change outputs must now be added by the caller.
 - The `From<&ExtendedSpendingKey>` instance for `ExtendedFullViewingKey` has been
   removed. Use `ExtendedSpendingKey::to_diversifiable_full_viewing_key` instead.
+- `zcash_primitives::sapling::Node::new` has been removed. Use
+  `Node::from_scalar` or (preferably) `Note::commitment` instead.
 
 ## [0.8.1] - 2022-10-19
 ### Added

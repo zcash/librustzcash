@@ -544,7 +544,7 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
-    use ff::{Field, PrimeField};
+    use ff::Field;
     use rand_core::OsRng;
 
     use crate::{
@@ -552,7 +552,7 @@ mod tests {
         legacy::TransparentAddress,
         memo::MemoBytes,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::{Node, Rseed},
+        sapling::Rseed,
         transaction::components::{
             amount::{Amount, DEFAULT_FEE},
             sapling::builder::{self as build_s},
@@ -673,7 +673,7 @@ mod tests {
         let note1 = to
             .create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cmu1 = Node::new(note1.cmu().to_repr());
+        let cmu1 = note1.commitment();
         let mut tree = CommitmentTree::empty();
         tree.append(cmu1).unwrap();
         let witness1 = IncrementalWitness::from_tree(&tree);
@@ -783,7 +783,7 @@ mod tests {
         let note1 = to
             .create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cmu1 = Node::new(note1.cmu().to_repr());
+        let cmu1 = note1.commitment();
         let mut tree = CommitmentTree::empty();
         tree.append(cmu1).unwrap();
         let mut witness1 = IncrementalWitness::from_tree(&tree);
@@ -823,7 +823,7 @@ mod tests {
         let note2 = to
             .create_note(1, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
-        let cmu2 = Node::new(note2.cmu().to_repr());
+        let cmu2 = note2.commitment();
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();
         let witness2 = IncrementalWitness::from_tree(&tree);

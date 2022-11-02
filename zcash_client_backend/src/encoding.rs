@@ -217,7 +217,7 @@ pub fn decode_extended_spending_key(
 /// use zcash_primitives::zip32::ExtendedFullViewingKey;
 ///
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
-/// let extfvk = ExtendedFullViewingKey::from(&extsk);
+/// let extfvk = extsk.to_extended_full_viewing_key();
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey

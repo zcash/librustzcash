@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    sapling::{prover::TxProver, Node},
+    sapling::prover::TxProver,
     transaction::{
         builder::Builder,
         components::amount::{Amount, BalanceError, DEFAULT_FEE},
@@ -322,10 +322,9 @@ where
 
             let expected_root = selected.witness.root();
             external_note
-                .filter(|n| expected_root == merkle_path.root(Node::from_scalar(n.cmu())))
+                .filter(|n| expected_root == merkle_path.root(n.commitment()))
                 .or_else(|| {
-                    internal_note
-                        .filter(|n| expected_root == merkle_path.root(Node::from_scalar(n.cmu())))
+                    internal_note.filter(|n| expected_root == merkle_path.root(n.commitment()))
                 })
                 .ok_or_else(|| E::from(Error::NoteMismatch))
         }?;
