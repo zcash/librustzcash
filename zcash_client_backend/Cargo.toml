@@ -13,6 +13,9 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 rust-version = "1.56.1"
 
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
+
 [package.metadata.cargo-udeps.ignore]
 development = ["zcash_proofs"]
 
@@ -40,7 +43,7 @@ memuse = "0.2"
 tracing = "0.1"
 
 # - Protobuf interfaces
-protobuf = "~2.27.1" # MSRV 1.52.1
+prost = "0.11"
 
 # - Secret management
 secrecy = "0.8"
@@ -68,7 +71,8 @@ crossbeam-channel = "0.5"
 rayon = "1.5"
 
 [build-dependencies]
-protobuf-codegen-pure = "~2.27.1" # MSRV 1.52.1
+prost-build = "0.11"
+which = "4"
 
 [dev-dependencies]
 gumdrop = "0.8"

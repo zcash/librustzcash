@@ -1,6 +1,6 @@
 //! Functions for enforcing chain validity and handling chain reorgs.
-use protobuf::Message;
 
+use prost::Message;
 use rusqlite::params;
 
 use zcash_primitives::consensus::BlockHeight;
@@ -14,7 +14,7 @@ use {
     crate::{BlockHash, FsBlockDb},
     rusqlite::Connection,
     std::fs::File,
-    std::io::BufReader,
+    std::io::Read,
     std::path::{Path, PathBuf},
 };
 
@@ -60,7 +60,7 @@ where
 
     for row_result in rows {
         let cbr = row_result?;
-        let block: CompactBlock = Message::parse_from_bytes(&cbr.data).map_err(Error::from)?;
+        let block = CompactBlock::decode(&cbr.data[..]).map_err(Error::from)?;
 
         if block.height() != cbr.height {
             return Err(SqliteClientError::CorruptedData(format!(
@@ -195,11 +195,11 @@ where
 
     for row_result in rows {
         let cbr = row_result?;
-        let block_file = File::open(cbr.block_file_path(&cache.blocks_dir))?;
-        let mut buf_reader = BufReader::new(block_file);
+        let mut block_file = File::open(cbr.block_file_path(&cache.blocks_dir))?;
+        let mut block_data = vec![];
+        block_file.read_to_end(&mut block_data)?;
 
-        let block: CompactBlock =
-            Message::parse_from_reader(&mut buf_reader).map_err(Error::from)?;
+        let block = CompactBlock::decode(&block_data[..]).map_err(Error::from)?;
 
         if block.height() != cbr.height {
             return Err(SqliteClientError::CorruptedData(format!(

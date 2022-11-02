@@ -459,16 +459,16 @@ mod tests {
             let fake_epk = SPENDING_KEY_GENERATOR * fake_esk;
             fake_epk.to_bytes().to_vec()
         };
-        let mut cspend = CompactSaplingSpend::new();
-        cspend.set_nf(fake_nf);
-        let mut cout = CompactSaplingOutput::new();
-        cout.set_cmu(fake_cmu);
-        cout.set_ephemeralKey(fake_epk);
-        cout.set_ciphertext(vec![0; 52]);
-        let mut ctx = CompactTx::new();
+        let cspend = CompactSaplingSpend { nf: fake_nf };
+        let cout = CompactSaplingOutput {
+            cmu: fake_cmu,
+            ephemeral_key: fake_epk,
+            ciphertext: vec![0; 52],
+        };
+        let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.set_hash(txid);
+        ctx.hash = txid;
         ctx.spends.push(cspend);
         ctx.outputs.push(cout);
         ctx
@@ -503,17 +503,17 @@ mod tests {
             &mut rng,
         );
         let cmu = note.cmu().to_repr().as_ref().to_owned();
-        let epk = encryptor.epk().to_bytes().to_vec();
+        let ephemeral_key = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
-        let mut cb = CompactBlock::new();
-        cb.set_hash({
+        let mut cb = CompactBlock::default();
+        cb.hash = {
             let mut hash = vec![0; 32];
             rng.fill_bytes(&mut hash);
             hash
-        });
-        cb.set_height(height.into());
+        };
+        cb.height = height.into();
 
         // Add a random Sapling tx before ours
         {
@@ -522,16 +522,16 @@ mod tests {
             cb.vtx.push(tx);
         }
 
-        let mut cspend = CompactSaplingSpend::new();
-        cspend.set_nf(nf.0.to_vec());
-        let mut cout = CompactSaplingOutput::new();
-        cout.set_cmu(cmu);
-        cout.set_ephemeralKey(epk);
-        cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
-        let mut ctx = CompactTx::new();
+        let cspend = CompactSaplingSpend { nf: nf.0.to_vec() };
+        let cout = CompactSaplingOutput {
+            cmu,
+            ephemeral_key,
+            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        };
+        let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.set_hash(txid);
+        ctx.hash = txid;
         ctx.spends.push(cspend);
         ctx.outputs.push(cout);
         ctx.index = cb.vtx.len() as u64;
