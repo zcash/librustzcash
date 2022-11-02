@@ -39,8 +39,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             _params: params.clone(),
         }),
         Box::new(sent_notes_to_internal::Migration {}),
-        Box::new(add_transaction_views::Migration {
-            params: params.clone(),
-        }),
+        Box::new(add_transaction_views::Migration),
     ]
 }
