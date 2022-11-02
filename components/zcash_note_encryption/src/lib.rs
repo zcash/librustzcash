@@ -340,11 +340,11 @@ pub trait ShieldedOutput<D: Domain> {
     fn cmstar_bytes(&self) -> D::ExtractedCommitmentBytes;
 
     /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
-    fn enc_ciphertext(&self) -> Option<&D::EncNoteCiphertextBytes>;
+    fn enc_ciphertext(&self) -> Option<D::EncNoteCiphertextBytes>;
 
     /// Exposes the note ciphertext of the output in the compact note context.
     /// This always returns a value, since a full note ciphertext can be truncated to a compact ciphertext.
-    fn enc_ciphertext_compact(&self) -> &D::CompactEncNoteCiphertextBytes;
+    fn enc_ciphertext_compact(&self) -> D::CompactEncNoteCiphertextBytes;
 }
 
 /// A struct containing context required for encrypting Sapling and Orchard notes.
@@ -551,13 +551,13 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
-    let enc_ciphertext: &D::EncNoteCiphertextBytes;
+    let enc_ciphertext: D::EncNoteCiphertextBytes;
     match output.enc_ciphertext() {
         Some(x) => enc_ciphertext = x,
         None                                    => return None,
     }
 
-    let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(enc_ciphertext);
+    let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(&enc_ciphertext);
     let mut plaintext = enc_plaintext;
 
     ChaCha20Poly1305::new(key.as_ref().into())
@@ -667,7 +667,7 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     let enc_ciphertext = output.enc_ciphertext_compact();
 
     // Start from block 1 to skip over Poly1305 keying output
-    let mut plaintext = D::convert_to_compact_plaintext_type(enc_ciphertext);
+    let mut plaintext = D::convert_to_compact_plaintext_type(&enc_ciphertext);
     let mut keystream = ChaCha20::new(key.as_ref().into(), [0u8; 12][..].into());
     keystream.seek(64);
     keystream.apply_keystream(plaintext.as_mut());
@@ -723,7 +723,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
-    let enc_ciphertext: &D::EncNoteCiphertextBytes;
+    let enc_ciphertext: D::EncNoteCiphertextBytes;
     match output.enc_ciphertext() {
         Some(x) => enc_ciphertext = x,
         None                                    => return None,
@@ -751,7 +751,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     // be okay.
     let key = D::kdf(shared_secret, &ephemeral_key);
 
-    let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(enc_ciphertext);
+    let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(&enc_ciphertext);
     let mut plaintext = enc_plaintext;
 
     ChaCha20Poly1305::new(key.as_ref().into())
