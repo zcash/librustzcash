@@ -42,8 +42,9 @@ hdwallet = { version = "0.3.1", optional = true }
 memuse = "0.2"
 tracing = "0.1"
 
-# - Protobuf interfaces
+# - Protobuf interfaces and gRPC bindings
 prost = "0.11"
+tonic = { version = "0.8", optional = true }
 
 # - Secret management
 secrecy = "0.8"
@@ -71,7 +72,7 @@ crossbeam-channel = "0.5"
 rayon = "1.5"
 
 [build-dependencies]
-prost-build = "0.11"
+tonic-build = "0.8"
 which = "4"
 
 [dev-dependencies]
@@ -86,6 +87,7 @@ zcash_proofs = { version = "0.8", path = "../zcash_proofs" }
 zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
+lightwalletd-tonic = ["tonic"]
 transparent-inputs = ["hdwallet", "zcash_primitives/transparent-inputs"]
 test-dependencies = [
     "proptest",

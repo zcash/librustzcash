@@ -47,6 +47,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`
+  - gRPC bindings for the `lightwalletd` server, behind a `lightwalletd-tonic`
+    feature flag.
 - `zcash_client_backend::zip321::TransactionRequest` methods:
   - `TransactionRequest::new` for constructing a request from `Vec<Payment>`.
   - `TransactionRequest::payments` for accessing the `Payments` that make up a

@@ -14,6 +14,10 @@ use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 #[rustfmt::skip]
 pub mod compact_formats;
 
+#[cfg(feature = "lightwalletd-tonic")]
+#[rustfmt::skip]
+pub mod service;
+
 impl compact_formats::CompactBlock {
     /// Returns the [`BlockHash`] for this block.
     ///
