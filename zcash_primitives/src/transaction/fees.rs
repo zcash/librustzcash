@@ -29,7 +29,7 @@ pub trait FeeRule {
         transparent_inputs: &[impl TransparentInput],
         transparent_outputs: &[TxOut],
         sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[SaplingOutput],
+        sapling_outputs: &[impl SaplingOutput],
     ) -> Result<Amount, Self::Error>;
 }
 
@@ -50,7 +50,7 @@ pub trait FutureFeeRule: FeeRule {
         transparent_inputs: &[impl TransparentInput],
         transparent_outputs: &[TxOut],
         sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[SaplingOutput],
+        sapling_outputs: &[impl SaplingOutput],
         tze_inputs: &[impl TzeInput],
         tze_outputs: &[TzeOut],
     ) -> Result<Amount, Self::Error>;
@@ -79,7 +79,7 @@ impl FeeRule for FixedFeeRule {
         _transparent_inputs: &[impl TransparentInput],
         _transparent_outputs: &[TxOut],
         _sapling_inputs: &[impl SaplingInput],
-        _sapling_outputs: &[SaplingOutput],
+        _sapling_outputs: &[impl SaplingOutput],
     ) -> Result<Amount, Self::Error> {
         Ok(self.fixed_fee)
     }
@@ -94,7 +94,7 @@ impl FutureFeeRule for FixedFeeRule {
         _transparent_inputs: &[impl TransparentInput],
         _transparent_outputs: &[TxOut],
         _sapling_inputs: &[impl SaplingInput],
-        _sapling_outputs: &[SaplingOutput],
+        _sapling_outputs: &[impl SaplingOutput],
         _tze_inputs: &[impl TzeInput],
         _tze_outputs: &[TzeOut],
     ) -> Result<Amount, Self::Error> {

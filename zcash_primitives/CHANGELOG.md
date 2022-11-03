@@ -21,15 +21,15 @@ and this library adheres to Rust's notion of
     - `Builder::sapling_inputs()`
     - `Builder::sapling_outputs()`
 - `zcash_primitives::transaction::fees` a new module containing abstractions
-  and types related to fee calculations. 
+  and types related to fee calculations.
   - `FeeRule` a trait that describes how to compute the fee required for a
     transaction given inputs and outputs to the transaction.
 - Added to `zcash_primitives::transaction::components::sapling::builder`
   - `SaplingInput` a trait that provides a minimized view of a Sapling input suitable
-    for use in fee computation.
-  - The `SaplingOutput` type has been made public, so that it can now be used in fee
-    computation.
-  - `SaplingBuilder::inputs` and `SaplingBuilder::outputs`: accessors for Sapling 
+    for use in change and fee computation.
+  - `SaplingOutput` a trait that provides a minimized view of a Sapling output suitable
+    for use in change and fee computation.
+  - `SaplingBuilder::inputs` and `SaplingBuilder::outputs`: accessors for Sapling
     builder state.
 - Added to `zcash_primitives::transaction::components::transparent::builder`
   - `TransparentInput` a trait that provides a minimized view of a transparent input suitable
@@ -74,9 +74,9 @@ and this library adheres to Rust's notion of
   - `ChainCode::as_bytes`
   - `DiversifierIndex::{as_bytes}`
   - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
-- `zcash_primitives::zip32::sapling` has been added and now contains 
+- `zcash_primitives::zip32::sapling` has been added and now contains
   all of the Sapling zip32 key types that were previously located in
-  `zcash_primitives::zip32` directly. The base `zip32` module reexports 
+  `zcash_primitives::zip32` directly. The base `zip32` module reexports
   the moved types for backwards compatibility.
   - `DiversifierKey::{from_bytes, as_bytes}`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`

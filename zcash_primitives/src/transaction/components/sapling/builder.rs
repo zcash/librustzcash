@@ -67,6 +67,13 @@ pub trait SaplingInput {
     fn value(&self) -> Amount;
 }
 
+/// A trait that provides a minimized view of a Sapling output suitable for use in
+/// fee and change calculation.
+pub trait SaplingOutput {
+    /// The value of the output being produced.
+    fn value(&self) -> Amount;
+}
+
 #[derive(Debug, Clone)]
 pub struct SpendDescriptionInfo {
     extsk: ExtendedSpendingKey,
@@ -87,7 +94,7 @@ impl SaplingInput for SpendDescriptionInfo {
 /// A struct containing the information required in order to construct a
 /// Sapling output to a transaction.
 #[derive(Clone)]
-pub struct SaplingOutput {
+struct SaplingOutputInfo {
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
     to: PaymentAddress,
@@ -95,7 +102,7 @@ pub struct SaplingOutput {
     memo: MemoBytes,
 }
 
-impl SaplingOutput {
+impl SaplingOutputInfo {
     fn new_internal<P: consensus::Parameters, R: RngCore>(
         params: &P,
         rng: &mut R,
@@ -119,18 +126,12 @@ impl SaplingOutput {
             rseed,
         };
 
-        Ok(SaplingOutput {
+        Ok(SaplingOutputInfo {
             ovk,
             to,
             note,
             memo,
         })
-    }
-
-    pub fn value(&self) -> Amount {
-        // this unwrap is safe because the note's value was initially
-        // constructed from an `Amount`.
-        Amount::from_u64(self.note.value).unwrap()
     }
 
     fn build<P: consensus::Parameters, Pr: TxProver, R: RngCore>(
@@ -170,6 +171,12 @@ impl SaplingOutput {
             out_ciphertext,
             zkproof,
         }
+    }
+}
+
+impl SaplingOutput for SaplingOutputInfo {
+    fn value(&self) -> Amount {
+        Amount::from_u64(self.note.value).expect("Note values should be checked at construction.")
     }
 }
 
@@ -217,7 +224,7 @@ pub struct SaplingBuilder<P> {
     target_height: BlockHeight,
     value_balance: Amount,
     spends: Vec<SpendDescriptionInfo>,
-    outputs: Vec<SaplingOutput>,
+    outputs: Vec<SaplingOutputInfo>,
 }
 
 #[derive(Clone)]
@@ -255,7 +262,7 @@ impl<P> SaplingBuilder<P> {
     }
 
     /// Returns the Sapling outputs that will be produced by the transaction being constructed
-    pub fn outputs(&self) -> &[SaplingOutput] {
+    pub fn outputs(&self) -> &[impl SaplingOutput] {
         &self.outputs
     }
 
@@ -314,7 +321,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         value: Amount,
         memo: MemoBytes,
     ) -> Result<(), Error> {
-        let output = SaplingOutput::new_internal(
+        let output = SaplingOutputInfo::new_internal(
             &self.params,
             &mut rng,
             self.target_height,

@@ -177,7 +177,7 @@ impl<'a, P, R> Builder<'a, P, R> {
 
     /// Returns the set of Sapling outputs currently set to be produced by
     /// the transaction.
-    pub fn sapling_outputs(&self) -> &[SaplingOutput] {
+    pub fn sapling_outputs(&self) -> &[impl SaplingOutput] {
         self.sapling_builder.outputs()
     }
 }

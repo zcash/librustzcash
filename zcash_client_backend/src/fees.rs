@@ -82,7 +82,7 @@ pub trait ChangeStrategy {
         transparent_inputs: &[impl TransparentInput],
         transparent_outputs: &[TxOut],
         sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[SaplingOutput],
+        sapling_outputs: &[impl SaplingOutput],
     ) -> Result<TransactionBalance, ChangeError<Self::Error>>;
 }
 
@@ -115,7 +115,7 @@ impl ChangeStrategy for BasicFixedFeeChangeStrategy {
         transparent_inputs: &[impl TransparentInput],
         transparent_outputs: &[TxOut],
         sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[SaplingOutput],
+        sapling_outputs: &[impl SaplingOutput],
     ) -> Result<TransactionBalance, ChangeError<Self::Error>> {
         let overflow = || ChangeError::StrategyError(BalanceError::Overflow);
         let underflow = || ChangeError::StrategyError(BalanceError::Underflow);
