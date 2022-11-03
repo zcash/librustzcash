@@ -1059,10 +1059,15 @@ mod tests {
         rng.fill_bytes(&mut txid);
         ctx.hash = txid;
         ctx.outputs.push(cout);
-        let mut cb = CompactBlock::default();
-        cb.height = u64::from(height);
-        cb.hash.resize(32, 0);
-        rng.fill_bytes(&mut cb.hash);
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
         (cb, note.nf(&dfvk.fvk().vk.nk, 0))
@@ -1082,8 +1087,7 @@ mod tests {
         let rseed = generate_random_rseed(&network(), height, &mut rng);
 
         // Create a fake CompactBlock containing the note
-        let mut cspend = CompactSaplingSpend::default();
-        cspend.nf = nf.to_vec();
+        let cspend = CompactSaplingSpend { nf: nf.to_vec() };
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
@@ -1144,10 +1148,15 @@ mod tests {
             }
         });
 
-        let mut cb = CompactBlock::default();
-        cb.height = u64::from(height);
-        cb.hash.resize(32, 0);
-        rng.fill_bytes(&mut cb.hash);
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
         cb

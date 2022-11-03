@@ -507,13 +507,15 @@ mod tests {
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
-        let mut cb = CompactBlock::default();
-        cb.hash = {
-            let mut hash = vec![0; 32];
-            rng.fill_bytes(&mut hash);
-            hash
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
         };
-        cb.height = height.into();
 
         // Add a random Sapling tx before ours
         {
