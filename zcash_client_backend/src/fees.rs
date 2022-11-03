@@ -3,8 +3,8 @@ use zcash_primitives::{
     transaction::{
         components::{
             amount::{Amount, BalanceError},
-            sapling::builder::{SaplingInput, SaplingOutput},
-            transparent::{builder::TransparentInput, TxOut},
+            sapling::fees as sapling,
+            transparent::fees as transparent,
         },
         fees::{FeeRule, FixedFeeRule},
     },
@@ -79,10 +79,10 @@ pub trait ChangeStrategy {
         &self,
         params: &P,
         target_height: BlockHeight,
-        transparent_inputs: &[impl TransparentInput],
-        transparent_outputs: &[TxOut],
-        sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[impl SaplingOutput],
+        transparent_inputs: &[impl transparent::InputView],
+        transparent_outputs: &[impl transparent::OutputView],
+        sapling_inputs: &[impl sapling::InputView],
+        sapling_outputs: &[impl sapling::OutputView],
     ) -> Result<TransactionBalance, ChangeError<Self::Error>>;
 }
 
@@ -112,10 +112,10 @@ impl ChangeStrategy for BasicFixedFeeChangeStrategy {
         &self,
         _params: &P,
         _target_height: BlockHeight,
-        transparent_inputs: &[impl TransparentInput],
-        transparent_outputs: &[TxOut],
-        sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[impl SaplingOutput],
+        transparent_inputs: &[impl transparent::InputView],
+        transparent_outputs: &[impl transparent::OutputView],
+        sapling_inputs: &[impl sapling::InputView],
+        sapling_outputs: &[impl sapling::OutputView],
     ) -> Result<TransactionBalance, ChangeError<Self::Error>> {
         let overflow = || ChangeError::StrategyError(BalanceError::Overflow);
         let underflow = || ChangeError::StrategyError(BalanceError::Underflow);
@@ -127,7 +127,7 @@ impl ChangeStrategy for BasicFixedFeeChangeStrategy {
             .ok_or_else(overflow)?;
         let t_out = transparent_outputs
             .iter()
-            .map(|t_out| t_out.value)
+            .map(|t_out| t_out.value())
             .sum::<Option<_>>()
             .ok_or_else(overflow)?;
         let sapling_in = sapling_inputs

@@ -25,7 +25,7 @@ use crate::{
         components::{
             amount::Amount,
             sapling::{
-                Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
+                fees, Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
                 SpendDescription,
             },
         },
@@ -60,20 +60,6 @@ impl fmt::Display for Error {
     }
 }
 
-/// A trait that provides a minimized view of a Sapling input suitable for use in
-/// fee and change calculation.
-pub trait SaplingInput {
-    /// The value of the input being spent.
-    fn value(&self) -> Amount;
-}
-
-/// A trait that provides a minimized view of a Sapling output suitable for use in
-/// fee and change calculation.
-pub trait SaplingOutput {
-    /// The value of the output being produced.
-    fn value(&self) -> Amount;
-}
-
 #[derive(Debug, Clone)]
 pub struct SpendDescriptionInfo {
     extsk: ExtendedSpendingKey,
@@ -83,7 +69,7 @@ pub struct SpendDescriptionInfo {
     merkle_path: MerklePath<Node>,
 }
 
-impl SaplingInput for SpendDescriptionInfo {
+impl fees::InputView for SpendDescriptionInfo {
     fn value(&self) -> Amount {
         // An existing note to be spent must have a valid
         // amount value.
@@ -174,7 +160,7 @@ impl SaplingOutputInfo {
     }
 }
 
-impl SaplingOutput for SaplingOutputInfo {
+impl fees::OutputView for SaplingOutputInfo {
     fn value(&self) -> Amount {
         Amount::from_u64(self.note.value).expect("Note values should be checked at construction.")
     }
@@ -257,12 +243,12 @@ impl<P> SaplingBuilder<P> {
 
     /// Returns the list of Sapling inputs that will be consumed by the transaction being
     /// constructed.
-    pub fn inputs(&self) -> &[impl SaplingInput] {
+    pub fn inputs(&self) -> &[impl fees::InputView] {
         &self.spends
     }
 
     /// Returns the Sapling outputs that will be produced by the transaction being constructed
-    pub fn outputs(&self) -> &[impl SaplingOutput] {
+    pub fn outputs(&self) -> &[impl fees::OutputView] {
         &self.outputs
     }
 

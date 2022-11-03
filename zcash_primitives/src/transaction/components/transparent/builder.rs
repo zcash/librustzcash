@@ -7,7 +7,7 @@ use crate::{
     transaction::{
         components::{
             amount::Amount,
-            transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
+            transparent::{self, fees, Authorization, Authorized, Bundle, TxIn, TxOut},
         },
         sighash::TransparentAuthorizingContext,
         OutPoint,
@@ -40,22 +40,13 @@ impl fmt::Display for Error {
     }
 }
 
-/// This trait provides a minimized view of a transparent input suitable for use in
-/// fee computation.
-pub trait TransparentInput {
-    /// The outpoint to which the input refers.
-    fn outpoint(&self) -> &OutPoint;
-    /// The previous output being spent.
-    fn coin(&self) -> &TxOut;
-}
-
 /// An uninhabited type that allows the type of [`TransparentBuilder::inputs`]
 /// to resolve when the transparent-inputs feature is not turned on.
 #[cfg(not(feature = "transparent-inputs"))]
 enum InvalidTransparentInput {}
 
 #[cfg(not(feature = "transparent-inputs"))]
-impl TransparentInput for InvalidTransparentInput {
+impl fees::InputView for InvalidTransparentInput {
     fn outpoint(&self) -> &OutPoint {
         panic!("transparent-inputs feature flag is not enabled.");
     }
@@ -74,7 +65,7 @@ struct TransparentInputInfo {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl TransparentInput for TransparentInputInfo {
+impl fees::InputView for TransparentInputInfo {
     fn outpoint(&self) -> &OutPoint {
         &self.utxo
     }
@@ -118,7 +109,7 @@ impl TransparentBuilder {
 
     /// Returns the list of transparent inputs that will be consumed by the transaction being
     /// constructed.
-    pub fn inputs(&self) -> &[impl TransparentInput] {
+    pub fn inputs(&self) -> &[impl fees::InputView] {
         #[cfg(feature = "transparent-inputs")]
         return &self.inputs;
 
@@ -130,7 +121,7 @@ impl TransparentBuilder {
     }
 
     /// Returns the transparent outputs that will be produced by the transaction being constructed.
-    pub fn outputs(&self) -> &[TxOut] {
+    pub fn outputs(&self) -> &[impl fees::OutputView] {
         &self.vout
     }
 

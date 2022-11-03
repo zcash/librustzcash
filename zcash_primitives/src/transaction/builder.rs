@@ -23,20 +23,20 @@ use crate::{
             amount::Amount,
             sapling::{
                 self,
-                builder::{SaplingBuilder, SaplingInput, SaplingMetadata, SaplingOutput},
+                builder::{SaplingBuilder, SaplingMetadata},
             },
-            transparent::{
-                self,
-                builder::{TransparentBuilder, TransparentInput},
-            },
+            transparent::{self, builder::TransparentBuilder},
         },
         fees::FeeRule,
         sighash::{signature_hash, SignableInput},
         txid::TxIdDigester,
-        Transaction, TransactionData, TxOut, TxVersion, Unauthorized,
+        Transaction, TransactionData, TxVersion, Unauthorized,
     },
     zip32::ExtendedSpendingKey,
 };
+
+#[cfg(feature = "transparent-inputs")]
+use crate::transaction::components::transparent::TxOut;
 
 #[cfg(feature = "zfuture")]
 use crate::{
@@ -159,25 +159,25 @@ impl<'a, P, R> Builder<'a, P, R> {
 
     /// Returns the set of transparent inputs currently committed to be consumed
     /// by the transaction.
-    pub fn transparent_inputs(&self) -> &[impl TransparentInput] {
+    pub fn transparent_inputs(&self) -> &[impl transparent::fees::InputView] {
         self.transparent_builder.inputs()
     }
 
     /// Returns the set of transparent outputs currently set to be produced by
     /// the transaction.
-    pub fn transparent_outputs(&self) -> &[TxOut] {
+    pub fn transparent_outputs(&self) -> &[impl transparent::fees::OutputView] {
         self.transparent_builder.outputs()
     }
 
     /// Returns the set of Sapling inputs currently committed to be consumed
     /// by the transaction.
-    pub fn sapling_inputs(&self) -> &[impl SaplingInput] {
+    pub fn sapling_inputs(&self) -> &[impl sapling::fees::InputView] {
         self.sapling_builder.inputs()
     }
 
     /// Returns the set of Sapling outputs currently set to be produced by
     /// the transaction.
-    pub fn sapling_outputs(&self) -> &[impl SaplingOutput] {
+    pub fn sapling_outputs(&self) -> &[impl sapling::fees::OutputView] {
         self.sapling_builder.outputs()
     }
 }

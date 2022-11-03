@@ -9,7 +9,7 @@ use crate::{
         self as tx,
         components::{
             amount::Amount,
-            tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
+            tze::{fees, Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
         },
     },
 };
@@ -35,20 +35,13 @@ pub struct TzeSigner<'a, BuildCtx> {
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
 }
 
-/// This trait provides a minimized view of a TZE input suitable for use in
-/// fee computation.
-pub trait TzeInput {
-    fn outpoint(&self) -> &OutPoint;
-    fn coin(&self) -> &TzeOut;
-}
-
 #[derive(Clone)]
 struct TzeBuildInput {
     tzein: TzeIn<()>,
     coin: TzeOut,
 }
 
-impl TzeInput for TzeBuildInput {
+impl fees::InputView for TzeBuildInput {
     fn outpoint(&self) -> &OutPoint {
         &self.tzein.prevout
     }
@@ -79,11 +72,11 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         }
     }
 
-    pub fn inputs(&self) -> &[impl TzeInput] {
+    pub fn inputs(&self) -> &[impl fees::InputView] {
         &self.vin
     }
 
-    pub fn outputs(&self) -> &[TzeOut] {
+    pub fn outputs(&self) -> &[impl fees::OutputView] {
         &self.vout
     }
 

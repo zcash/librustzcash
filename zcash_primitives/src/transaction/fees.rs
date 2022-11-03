@@ -3,14 +3,12 @@
 use crate::{
     consensus::{self, BlockHeight},
     transaction::components::{
-        amount::Amount,
-        sapling::builder::{SaplingInput, SaplingOutput},
-        transparent::{builder::TransparentInput, TxOut},
+        amount::Amount, sapling::fees as sapling, transparent::fees as transparent,
     },
 };
 
 #[cfg(feature = "zfuture")]
-use crate::transaction::components::tze::{builder::TzeInput, TzeOut};
+use crate::transaction::components::tze::fees as tze;
 
 /// A trait that represents the ability to compute the fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
@@ -26,10 +24,10 @@ pub trait FeeRule {
         &self,
         params: &P,
         target_height: BlockHeight,
-        transparent_inputs: &[impl TransparentInput],
-        transparent_outputs: &[TxOut],
-        sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[impl SaplingOutput],
+        transparent_inputs: &[impl transparent::InputView],
+        transparent_outputs: &[impl transparent::OutputView],
+        sapling_inputs: &[impl sapling::InputView],
+        sapling_outputs: &[impl sapling::OutputView],
     ) -> Result<Amount, Self::Error>;
 }
 
@@ -47,12 +45,12 @@ pub trait FutureFeeRule: FeeRule {
         &self,
         params: &P,
         target_height: BlockHeight,
-        transparent_inputs: &[impl TransparentInput],
-        transparent_outputs: &[TxOut],
-        sapling_inputs: &[impl SaplingInput],
-        sapling_outputs: &[impl SaplingOutput],
-        tze_inputs: &[impl TzeInput],
-        tze_outputs: &[TzeOut],
+        transparent_inputs: &[impl transparent::InputView],
+        transparent_outputs: &[impl transparent::OutputView],
+        sapling_inputs: &[impl sapling::InputView],
+        sapling_outputs: &[impl sapling::OutputView],
+        tze_inputs: &[impl tze::InputView],
+        tze_outputs: &[impl tze::OutputView],
     ) -> Result<Amount, Self::Error>;
 }
 
@@ -76,10 +74,10 @@ impl FeeRule for FixedFeeRule {
         &self,
         _params: &P,
         _target_height: BlockHeight,
-        _transparent_inputs: &[impl TransparentInput],
-        _transparent_outputs: &[TxOut],
-        _sapling_inputs: &[impl SaplingInput],
-        _sapling_outputs: &[impl SaplingOutput],
+        _transparent_inputs: &[impl transparent::InputView],
+        _transparent_outputs: &[impl transparent::OutputView],
+        _sapling_inputs: &[impl sapling::InputView],
+        _sapling_outputs: &[impl sapling::OutputView],
     ) -> Result<Amount, Self::Error> {
         Ok(self.fixed_fee)
     }
@@ -91,12 +89,12 @@ impl FutureFeeRule for FixedFeeRule {
         &self,
         _params: &P,
         _target_height: BlockHeight,
-        _transparent_inputs: &[impl TransparentInput],
-        _transparent_outputs: &[TxOut],
-        _sapling_inputs: &[impl SaplingInput],
-        _sapling_outputs: &[impl SaplingOutput],
-        _tze_inputs: &[impl TzeInput],
-        _tze_outputs: &[TzeOut],
+        _transparent_inputs: &[impl transparent::InputView],
+        _transparent_outputs: &[impl transparent::OutputView],
+        _sapling_inputs: &[impl sapling::InputView],
+        _sapling_outputs: &[impl sapling::OutputView],
+        _tze_inputs: &[impl tze::InputView],
+        _tze_outputs: &[impl tze::OutputView],
     ) -> Result<Amount, Self::Error> {
         Ok(self.fixed_fee)
     }
