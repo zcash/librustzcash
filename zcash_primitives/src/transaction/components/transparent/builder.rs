@@ -57,10 +57,10 @@ enum InvalidTransparentInput {}
 #[cfg(not(feature = "transparent-inputs"))]
 impl TransparentInput for InvalidTransparentInput {
     fn outpoint(&self) -> &OutPoint {
-        panic!("InvalidTransparentInput is uninhabited.");
+        panic!("transparent-inputs feature flag is not enabled.");
     }
     fn coin(&self) -> &TxOut {
-        panic!("InvalidTransparentInput is uninhabited.");
+        panic!("transparent-inputs feature flag is not enabled.");
     }
 }
 
@@ -129,7 +129,7 @@ impl TransparentBuilder {
         }
     }
 
-    /// Returns the transparent outputs that will be produced by the transaction being constructed
+    /// Returns the transparent outputs that will be produced by the transaction being constructed.
     pub fn outputs(&self) -> &[TxOut] {
         &self.vout
     }

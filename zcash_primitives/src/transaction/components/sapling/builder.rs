@@ -61,7 +61,7 @@ impl fmt::Display for Error {
 }
 
 /// A trait that provides a minimized view of a Sapling input suitable for use in
-/// fee calculation.
+/// fee and change calculation.
 pub trait SaplingInput {
     /// The value of the input being spent.
     fn value(&self) -> Amount;

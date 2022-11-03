@@ -1,3 +1,5 @@
+//! Abstractions and types related to fee calculations.
+
 use crate::{
     consensus::{self, BlockHeight},
     transaction::components::{
@@ -15,13 +17,11 @@ use crate::transaction::components::tze::{TzeInput, TzeOut};
 pub trait FeeRule {
     type Error;
 
-    /// Computes the totals of inputs, required change amount, and fees given the
-    /// provided inputs and outputs being used to construct a transaction.
+    /// Computes the total fee required for a transaction given the provided inputs and outputs.
     ///
-    /// Implementations of this method should compute the fee amount given exactly
-    /// the inputs and outputs specified, and should NOT compute speculative fees
-    /// given any additional change outputs that may need to be created in order for
-    /// inputs and outputs to balance.
+    /// Implementations of this method should compute the fee amount given exactly the inputs and
+    /// outputs specified, and should NOT compute speculative fees given any additional change
+    /// outputs that may need to be created in order for inputs and outputs to balance.
     fn fee_required<P: consensus::Parameters>(
         &self,
         params: &P,
@@ -33,23 +33,15 @@ pub trait FeeRule {
     ) -> Result<Amount, Self::Error>;
 }
 
-/// A trait that represents the ability to compute the fees that must be paid
-/// by a transaction having a specified set of inputs and outputs, for use
-/// when experimenting with the TZE feature.
-///
-/// Implementations of this method should compute the fee amount given exactly
-/// the inputs and outputs specified, and should NOT compute speculative fees
-/// given any additional change outputs that may need to be created in order for
-/// inputs and outputs to balance.
+/// A trait that represents the ability to compute the fees that must be paid by a transaction
+/// having a specified set of inputs and outputs, for use when experimenting with the TZE feature.
 #[cfg(feature = "zfuture")]
 pub trait FutureFeeRule: FeeRule {
-    /// Computes the totals of inputs, required change amount, and fees given the
-    /// provided inputs and outputs being used to construct a transaction.
+    /// Computes the total fee required for a transaction given the provided inputs and outputs.
     ///
-    /// Implementations of this method should compute the fee amount given exactly
-    /// the inputs and outputs specified, and should NOT compute speculative fees
-    /// given any additional change outputs that may need to be created in order for
-    /// inputs and outputs to balance.
+    /// Implementations of this method should compute the fee amount given exactly the inputs and
+    /// outputs specified, and should NOT compute speculative fees given any additional change
+    /// outputs that may need to be created in order for inputs and outputs to balance.
     #[allow(clippy::too_many_arguments)]
     fn fee_required_zfuture<P: consensus::Parameters>(
         &self,
@@ -63,10 +55,6 @@ pub trait FutureFeeRule: FeeRule {
         tze_outputs: &[TzeOut],
     ) -> Result<Amount, Self::Error>;
 }
-
-/// An uninhabited error type used to indicate when an operation
-/// that returns a `Result` cannot fail.
-pub enum Infallible {}
 
 /// A fee rule that always returns a fixed fee, irrespective of the structure of
 /// the transaction being constructed.
@@ -82,7 +70,7 @@ impl FixedFeeRule {
 }
 
 impl FeeRule for FixedFeeRule {
-    type Error = Infallible;
+    type Error = std::convert::Infallible;
 
     fn fee_required<P: consensus::Parameters>(
         &self,

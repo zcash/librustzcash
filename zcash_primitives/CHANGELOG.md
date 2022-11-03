@@ -21,14 +21,9 @@ and this library adheres to Rust's notion of
     - `Builder::sapling_inputs()`
     - `Builder::sapling_outputs()`
 - `zcash_primitives::transaction::fees` a new module containing abstractions
-  and types related to fee calculations.
-  - `TransactionBalance` A type representing the unspent balance of transaction inputs,
-    allocated separately to change and fee portions.
-  - `FeeRule` a function that computes the fee required for a transaction given
-    inputs and outputs to the transaction.
-  - `Infalliable` an uninhabited error type for conditions where no error can occur.
-  - `FixedFeeRule` A `FeeRule` implementation that always computes the same fixed
-    fee irrespective of the inputs and outputs to the transaction being constructed.
+  and types related to fee calculations. 
+  - `FeeRule` a trait that describes how to compute the fee required for a
+    transaction given inputs and outputs to the transaction.
 - Added to `zcash_primitives::transaction::components::sapling::builder`
   - `SaplingInput` a trait that provides a minimized view of a Sapling input suitable
     for use in fee computation.
@@ -39,26 +34,27 @@ and this library adheres to Rust's notion of
 - Added to `zcash_primitives::transaction::components::transparent::builder`
   - `TransparentInput` a trait that provides a minimized view of a transparent input suitable
     for use in fee computation.
-  - `TransparentBuilder::inputs` and `TransparentBuilder::outputs`: accessors for Sapling 
-    builder state.
+  - `TransparentBuilder::{inputs, outputs}`: accessors for transparent builder state.
 
 ### Changed
 - `zcash_primitives::transaction::builder::Builder::build` now takes a `FeeRule`
   argument which is used to compute the fee for the transaction as part of the
   build process.
+- `zcash_primitives::transaction::builder::Builder::{new, new_with_rng}` no
+  longer fixes the fee for transactions to 0.00001 ZEC; the builder instead
+  computes the fee using a `FeeRule` implementation at build time.
 
 ### Removed
 - Removed from `zcash_primitives::transaction::builder::Builder`
-  - `Builder::new_with_fee` and `Builder::new_with_rng_and_fee` have been removed;
-    The transaction builder no longer fixes the fee for transactions to 0.00001 ZEC,
-    but instead computes the fee using a `FeeRule` implementation at build time.
+  - `Builder::{new_with_fee, new_with_rng_and_fee`} (use `Builder::{new, new_with_rng}` 
+    instead along with a `FeeRule` implementation passed to `Builder::build`.
   - `Builder::send_change_to` has been removed. Change outputs must be added to the
     builder by the caller, just like any other output.
 - Removed from `zcash_primitives::transaction::builder::Error`
   - `Error::ChangeIsNegative`
   - `Error::NoChangeAddress`
-- Removed from `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder`
-  - `get_candidate_change_address` change outputs must now be added by the caller.
+- `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder::get_candidate_change_address`
+   has been removed; change outputs must now be added by the caller.
 
 ## [0.8.1] - 2022-10-19
 ### Added

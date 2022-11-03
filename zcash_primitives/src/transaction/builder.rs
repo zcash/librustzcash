@@ -1,6 +1,7 @@
 //! Structs for building transactions.
 
 use std::cmp::Ordering;
+use std::convert::Infallible;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
@@ -29,7 +30,7 @@ use crate::{
                 builder::{TransparentBuilder, TransparentInput},
             },
         },
-        fees::{FeeRule, Infallible},
+        fees::FeeRule,
         sighash::{signature_hash, SignableInput},
         txid::TxIdDigester,
         Transaction, TransactionData, TxOut, TxVersion, Unauthorized,

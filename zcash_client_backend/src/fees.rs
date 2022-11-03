@@ -52,7 +52,7 @@ impl TransactionBalance {
     }
 }
 
-/// Errors that can occur in balance
+/// Errors that can occur in computing suggested change and/or fees.
 pub enum ChangeError<E> {
     InsufficientFunds { available: Amount, required: Amount },
     StrategyError(E),
