@@ -193,17 +193,23 @@ mod tests {
         consensus::{BlockHeight, BranchId},
         legacy::TransparentAddress,
         sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
-        transaction::{components::Amount, Transaction},
+        transaction::{components::Amount, fees::zip317::FeeRule as Zip317FeeRule, Transaction},
         zip32::sapling::ExtendedSpendingKey,
     };
 
     use zcash_client_backend::{
+        address::RecipientAddress,
         data_api::{
-            self, chain::scan_cached_blocks, wallet::create_spend_to_address, WalletRead,
-            WalletWrite,
+            self,
+            chain::scan_cached_blocks,
+            error::Error,
+            wallet::{create_spend_to_address, input_selection::GreedyInputSelector, spend},
+            WalletRead, WalletWrite,
         },
+        fees::{zip317, DustOutputPolicy},
         keys::UnifiedSpendingKey,
         wallet::OvkPolicy,
+        zip321::{Payment, TransactionRequest},
     };
 
     use crate::{
@@ -828,6 +834,115 @@ mod tests {
                 None,
                 OvkPolicy::Sender,
                 10,
+            ),
+            Ok(_)
+        );
+    }
+
+    #[test]
+    fn zip317_spend() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        // Add an account to the wallet
+        let mut ops = db_data.get_update_ops().unwrap();
+        let seed = Secret::new([0u8; 32].to_vec());
+        let (_, usk) = ops.create_account(&seed).unwrap();
+        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+
+        // Add funds to the wallet
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            &dfvk,
+            AddressType::Internal,
+            Amount::from_u64(50000).unwrap(),
+        );
+        insert_into_cache(&db_cache, &cb);
+
+        // Add 10 dust notes to the wallet
+        for i in 1..=10 {
+            let (cb, _) = fake_compact_block(
+                sapling_activation_height() + i,
+                cb.hash(),
+                &dfvk,
+                AddressType::DefaultExternal,
+                Amount::from_u64(1000).unwrap(),
+            );
+            insert_into_cache(&db_cache, &cb);
+        }
+
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Verified balance matches total balance
+        let total = Amount::from_u64(60000).unwrap();
+        let (_, anchor_height) = db_data.get_target_and_anchor_heights(1).unwrap().unwrap();
+        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), total);
+        assert_eq!(
+            get_balance_at(&db_data, AccountId::from(0), anchor_height).unwrap(),
+            total
+        );
+
+        let input_selector = GreedyInputSelector::new(
+            zip317::SingleOutputChangeStrategy::new(Zip317FeeRule::standard()),
+            DustOutputPolicy::default(),
+        );
+
+        // This first request will fail due to insufficient non-dust funds
+        let req = TransactionRequest::new(vec![Payment {
+            recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
+            amount: Amount::from_u64(50000).unwrap(),
+            memo: None,
+            label: None,
+            message: None,
+            other_params: vec![],
+        }])
+        .unwrap();
+
+        assert_matches!(
+            spend(
+                &mut db_write,
+                &tests::network(),
+                test_prover(),
+                &input_selector,
+                &usk,
+                req,
+                OvkPolicy::Sender,
+                1,
+            ),
+            Err(Error::InsufficientFunds { available, required })
+                if available == Amount::from_u64(51000).unwrap()
+                && required == Amount::from_u64(60000).unwrap()
+        );
+
+        // This request will succeed, spending a single dust input to pay the 10000
+        // ZAT fee in addition to the 41000 ZAT output to the recipient
+        let req = TransactionRequest::new(vec![Payment {
+            recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
+            amount: Amount::from_u64(41000).unwrap(),
+            memo: None,
+            label: None,
+            message: None,
+            other_params: vec![],
+        }])
+        .unwrap();
+
+        assert_matches!(
+            spend(
+                &mut db_write,
+                &tests::network(),
+                test_prover(),
+                &input_selector,
+                &usk,
+                req,
+                OvkPolicy::Sender,
+                1,
             ),
             Ok(_)
         );

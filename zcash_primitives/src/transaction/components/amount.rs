@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
 use memuse::DynamicUsage;
 use orchard::value as orchard;
@@ -202,6 +202,17 @@ impl Neg for Amount {
 
     fn neg(self) -> Self {
         Amount(-self.0)
+    }
+}
+
+impl Mul<usize> for Amount {
+    type Output = Option<Amount>;
+
+    fn mul(self, rhs: usize) -> Option<Amount> {
+        let rhs: i64 = rhs.try_into().ok()?;
+        self.0
+            .checked_mul(rhs)
+            .and_then(|i| Amount::try_from(i).ok())
     }
 }
 

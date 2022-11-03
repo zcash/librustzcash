@@ -27,8 +27,10 @@ and this library adheres to Rust's notion of
   and types related to fee calculations.
   - `FeeRule` a trait that describes how to compute the fee required for a
     transaction given inputs and outputs to the transaction.
-  - `zcash_primitives::transaction::fees::fixed` a new module containing an implementation
-    of the existing fixed fee rule.
+  - `fixed`, a new module containing an implementation of the existing fixed
+    fee rule.
+  - `zip317`, a new module containing an implementation of the ZIP 317 fee
+    rules.
 - Added to `zcash_primitives::transaction::components::sapling::builder`
   - `SaplingBuilder::{inputs, outputs}`: accessors for Sapling builder state.
 - `zcash_primitives::transaction::components::sapling::fees`

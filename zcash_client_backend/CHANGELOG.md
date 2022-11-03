@@ -71,8 +71,10 @@ and this library adheres to Rust's notion of
   - `TransactionBalance`
   - `BasicFixedFeeChangeStrategy` - a `ChangeStrategy` implementation that
     reproduces current wallet change behavior
-  - `fixed` a new module containing of change selection strategies for the
+  - `fixed`, a new module containing of change selection strategies for the
     existing fixed fee rule.
+  - `zip317`, a new module containing change selection strategies for the ZIP
+    317 fee rule.
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:

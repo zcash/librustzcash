@@ -9,6 +9,7 @@ use crate::{
 use crate::transaction::components::tze::fees as tze;
 
 pub mod fixed;
+pub mod zip317;
 
 /// A trait that represents the ability to compute the fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.

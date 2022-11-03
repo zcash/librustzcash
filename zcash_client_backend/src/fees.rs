@@ -12,6 +12,7 @@ use zcash_primitives::{
 };
 
 pub mod fixed;
+pub mod zip317;
 
 /// A proposed change amount and output pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
