@@ -9,7 +9,7 @@ use crate::{
         self as tx,
         components::{
             amount::Amount,
-            tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeInput, TzeOut},
+            tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
         },
     },
 };
@@ -33,6 +33,13 @@ impl fmt::Display for Error {
 #[allow(clippy::type_complexity)]
 pub struct TzeSigner<'a, BuildCtx> {
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
+}
+
+/// This trait provides a minimized view of a TZE input suitable for use in
+/// fee computation.
+pub trait TzeInput {
+    fn outpoint(&self) -> &OutPoint;
+    fn coin(&self) -> &TzeOut;
 }
 
 #[derive(Clone)]

@@ -212,13 +212,6 @@ impl TzeOut {
     }
 }
 
-/// This trait provides a minimized view of a TZE input suitable for use in
-/// fee computation.
-pub trait TzeInput {
-    fn outpoint(&self) -> &OutPoint;
-    fn coin(&self) -> &TzeOut;
-}
-
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;

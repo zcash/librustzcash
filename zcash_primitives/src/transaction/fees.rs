@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "zfuture")]
-use crate::transaction::components::tze::{TzeInput, TzeOut};
+use crate::transaction::components::tze::{builder::TzeInput, TzeOut};
 
 /// A trait that represents the ability to compute the fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
