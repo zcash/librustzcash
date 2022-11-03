@@ -11,6 +11,7 @@ use zcash_primitives::{
 
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
+#[rustfmt::skip]
 pub mod compact_formats;
 
 impl compact_formats::CompactBlock {
@@ -44,7 +45,7 @@ impl compact_formats::CompactBlock {
         if let Some(header) = self.header() {
             header.prev_block
         } else {
-            BlockHash::from_slice(&self.prevHash)
+            BlockHash::from_slice(&self.prev_hash)
         }
     }
 
@@ -99,7 +100,7 @@ impl compact_formats::CompactSaplingOutput {
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
     pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
-        self.ephemeralKey[..]
+        self.ephemeral_key[..]
             .try_into()
             .map(EphemeralKeyBytes)
             .map_err(|_| ())
@@ -110,11 +111,11 @@ impl<A: sapling::Authorization> From<sapling::OutputDescription<A>>
     for compact_formats::CompactSaplingOutput
 {
     fn from(out: sapling::OutputDescription<A>) -> compact_formats::CompactSaplingOutput {
-        let mut result = compact_formats::CompactSaplingOutput::new();
-        result.set_cmu(out.cmu.to_repr().to_vec());
-        result.set_ephemeralKey(out.ephemeral_key.as_ref().to_vec());
-        result.set_ciphertext(out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec());
-        result
+        compact_formats::CompactSaplingOutput {
+            cmu: out.cmu.to_repr().to_vec(),
+            ephemeral_key: out.ephemeral_key.as_ref().to_vec(),
+            ciphertext: out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+        }
     }
 }
 

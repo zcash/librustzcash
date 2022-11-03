@@ -915,7 +915,7 @@ impl BlockSource for FsBlockDb {
 #[allow(deprecated)]
 mod tests {
     use group::{ff::PrimeField, GroupEncoding};
-    use protobuf::Message;
+    use prost::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
     use std::collections::HashMap;
@@ -1045,24 +1045,30 @@ mod tests {
             &mut rng,
         );
         let cmu = note.cmu().to_repr().as_ref().to_vec();
-        let epk = encryptor.epk().to_bytes().to_vec();
+        let ephemeral_key = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
-        let mut cout = CompactSaplingOutput::new();
-        cout.set_cmu(cmu);
-        cout.set_ephemeralKey(epk);
-        cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
-        let mut ctx = CompactTx::new();
+        let cout = CompactSaplingOutput {
+            cmu,
+            ephemeral_key,
+            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        };
+        let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.set_hash(txid);
+        ctx.hash = txid;
         ctx.outputs.push(cout);
-        let mut cb = CompactBlock::new();
-        cb.set_height(u64::from(height));
-        cb.hash.resize(32, 0);
-        rng.fill_bytes(&mut cb.hash);
-        cb.prevHash.extend_from_slice(&prev_hash.0);
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
         (cb, note.nf(&dfvk.fvk().vk.nk, 0))
     }
@@ -1081,12 +1087,11 @@ mod tests {
         let rseed = generate_random_rseed(&network(), height, &mut rng);
 
         // Create a fake CompactBlock containing the note
-        let mut cspend = CompactSaplingSpend::new();
-        cspend.set_nf(nf.to_vec());
-        let mut ctx = CompactTx::new();
+        let cspend = CompactSaplingSpend { nf: nf.to_vec() };
+        let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.set_hash(txid);
+        ctx.hash = txid;
         ctx.spends.push(cspend);
 
         // Create a fake Note for the payment
@@ -1105,14 +1110,14 @@ mod tests {
                 &mut rng,
             );
             let cmu = note.cmu().to_repr().as_ref().to_vec();
-            let epk = encryptor.epk().to_bytes().to_vec();
+            let ephemeral_key = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-            let mut cout = CompactSaplingOutput::new();
-            cout.set_cmu(cmu);
-            cout.set_ephemeralKey(epk);
-            cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
-            cout
+            CompactSaplingOutput {
+                cmu,
+                ephemeral_key,
+                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            }
         });
 
         // Create a fake Note for the change
@@ -1133,28 +1138,33 @@ mod tests {
                 &mut rng,
             );
             let cmu = note.cmu().to_repr().as_ref().to_vec();
-            let epk = encryptor.epk().to_bytes().to_vec();
+            let ephemeral_key = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-            let mut cout = CompactSaplingOutput::new();
-            cout.set_cmu(cmu);
-            cout.set_ephemeralKey(epk);
-            cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
-            cout
+            CompactSaplingOutput {
+                cmu,
+                ephemeral_key,
+                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            }
         });
 
-        let mut cb = CompactBlock::new();
-        cb.set_height(u64::from(height));
-        cb.hash.resize(32, 0);
-        rng.fill_bytes(&mut cb.hash);
-        cb.prevHash.extend_from_slice(&prev_hash.0);
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
         cb
     }
 
     /// Insert a fake CompactBlock into the cache DB.
     pub(crate) fn insert_into_cache(db_cache: &BlockDb, cb: &CompactBlock) {
-        let cb_bytes = cb.write_to_bytes().unwrap();
+        let cb_bytes = cb.encode_to_vec();
         db_cache
             .0
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")

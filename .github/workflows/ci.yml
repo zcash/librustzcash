@@ -43,6 +43,9 @@ jobs:
           command: test
           args: --all-features --verbose --release --all -- --ignored
 
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
   build:
     name: Build target ${{ matrix.target }}
     runs-on: ubuntu-latest
@@ -199,14 +202,6 @@ jobs:
         with:
           toolchain: 1.56.1
           override: true
-
-      # cargo fmt does not build the code, and running it in a fresh clone of
-      # the codebase will fail because the protobuf code has not been generated.
-      - name: cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all
 
       # Ensure all code has been formatted with rustfmt
       - run: rustup component add rustfmt

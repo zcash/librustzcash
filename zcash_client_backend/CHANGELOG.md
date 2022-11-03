@@ -41,6 +41,7 @@ and this library adheres to Rust's notion of
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
   - `WalletWrite::get_next_available_address`
   - `WalletWrite::put_received_transparent_utxo`
+  - `impl From<prost::DecodeError> for error::Error`
 - `zcash_client_backend::decrypt`:
   - `TransferType`
 - `zcash_client_backend::proto`:
@@ -68,6 +69,8 @@ and this library adheres to Rust's notion of
 - Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`, `jubjub 0.9`,
   `zcash_primitives 0.8`, `orchard 0.3`.
 - `zcash_client_backend::proto`:
+  - The Protocol Buffers bindings are now generated for `prost 0.11` instead of
+    `protobuf 2`.
   - `compact_formats::CompactSpend` has been renamed to `CompactSaplingSpend`,
     and its `epk` field (and associated `set_epk` method) has been renamed to
     `ephemeralKey` (and `set_ephemeralKey`).
@@ -104,6 +107,8 @@ and this library adheres to Rust's notion of
   `store_decrypted_tx`.
 - `data_api::ReceivedTransaction` has been renamed to `DecryptedTransaction`,
   and its `outputs` field has been renamed to `sapling_outputs`.
+- `data_api::error::Error::Protobuf` now wraps `prost::DecodeError` instead of
+  `protobuf::ProtobufError`.
 - `data_api::error::Error` has the following additional cases:
   - `Error::MemoForbidden` to report the condition where a memo was
     specified to be sent to a transparent recipient.
@@ -150,6 +155,12 @@ and this library adheres to Rust's notion of
     `WalletRead::get_unified_full_viewing_keys` instead).
   - `WalletRead::get_address` (use `WalletRead::get_current_address` or
     `WalletWrite::get_next_available_address` instead.)
+  - `impl From<protobuf::ProtobufError> for error::Error`
+- `zcash_client_backend::proto::compact_formats`:
+  - `Compact*::new` methods (use `Default::default` or struct instantiation
+    instead).
+  - Getters (use dedicated typed methods or direct field access instead).
+  - Setters (use direct field access instead).
 - The hardcoded `data_api::wallet::ANCHOR_OFFSET` constant.
 - `zcash_client_backend::wallet::AccountId` (moved to `zcash_primitives::zip32::AccountId`).
 

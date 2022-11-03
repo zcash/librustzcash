@@ -69,7 +69,7 @@ pub enum Error<NoteId> {
     Builder(builder::Error),
 
     /// An error occurred decoding a protobuf message.
-    Protobuf(protobuf::ProtobufError),
+    Protobuf(prost::DecodeError),
 
     /// The wallet attempted a sapling-only operation at a block
     /// height when Sapling was not yet active.
@@ -180,8 +180,8 @@ impl<N> From<builder::Error> for Error<N> {
     }
 }
 
-impl<N> From<protobuf::ProtobufError> for Error<N> {
-    fn from(e: protobuf::ProtobufError) -> Self {
+impl<N> From<prost::DecodeError> for Error<N> {
+    fn from(e: prost::DecodeError) -> Self {
         Error::Protobuf(e)
     }
 }
