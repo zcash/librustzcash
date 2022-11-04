@@ -24,6 +24,7 @@ use super::{amount::Amount, GROTH_PROOF_SIZE};
 pub type GrothProofBytes = [u8; GROTH_PROOF_SIZE];
 
 pub mod builder;
+pub mod fees;
 
 pub trait Authorization: Debug {
     type Proof: Clone + Debug;

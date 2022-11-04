@@ -495,6 +495,7 @@ mod tests {
                 amount::{Amount, DEFAULT_FEE},
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
+            fees::FixedFeeRule,
             Transaction, TransactionData, TxVersion,
         },
         zip32::ExtendedSpendingKey,
@@ -808,12 +809,13 @@ mod tests {
         //
 
         let mut rng = OsRng;
+        let fee_rule = FixedFeeRule::new(DEFAULT_FEE);
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
         let to = extsk.default_address().1;
         let note1 = to
-            .create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
+            .create_note(101000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
             .unwrap();
         let cm1 = Node::new(note1.cmu().to_repr());
         let mut tree = CommitmentTree::empty();
@@ -835,7 +837,7 @@ mod tests {
             .unwrap();
         let (tx_a, _) = builder_a
             .txn_builder
-            .build(&prover)
+            .build_zfuture(&prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_a = tx_a.tze_bundle().unwrap();
@@ -853,7 +855,7 @@ mod tests {
             .unwrap();
         let (tx_b, _) = builder_b
             .txn_builder
-            .build(&prover)
+            .build_zfuture(&prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_b = tx_b.tze_bundle().unwrap();
@@ -878,7 +880,7 @@ mod tests {
 
         let (tx_c, _) = builder_c
             .txn_builder
-            .build(&prover)
+            .build_zfuture(&prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_c = tx_c.tze_bundle().unwrap();

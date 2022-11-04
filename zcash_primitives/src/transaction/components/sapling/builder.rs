@@ -25,7 +25,7 @@ use crate::{
         components::{
             amount::Amount,
             sapling::{
-                Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
+                fees, Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
                 SpendDescription,
             },
         },
@@ -69,8 +69,18 @@ pub struct SpendDescriptionInfo {
     merkle_path: MerklePath<Node>,
 }
 
+impl fees::InputView for SpendDescriptionInfo {
+    fn value(&self) -> Amount {
+        // An existing note to be spent must have a valid
+        // amount value.
+        Amount::from_u64(self.note.value).unwrap()
+    }
+}
+
+/// A struct containing the information required in order to construct a
+/// Sapling output to a transaction.
 #[derive(Clone)]
-struct SaplingOutput {
+struct SaplingOutputInfo {
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
     to: PaymentAddress,
@@ -78,7 +88,7 @@ struct SaplingOutput {
     memo: MemoBytes,
 }
 
-impl SaplingOutput {
+impl SaplingOutputInfo {
     fn new_internal<P: consensus::Parameters, R: RngCore>(
         params: &P,
         rng: &mut R,
@@ -102,7 +112,7 @@ impl SaplingOutput {
             rseed,
         };
 
-        Ok(SaplingOutput {
+        Ok(SaplingOutputInfo {
             ovk,
             to,
             note,
@@ -150,6 +160,12 @@ impl SaplingOutput {
     }
 }
 
+impl fees::OutputView for SaplingOutputInfo {
+    fn value(&self) -> Amount {
+        Amount::from_u64(self.note.value).expect("Note values should be checked at construction.")
+    }
+}
+
 /// Metadata about a transaction created by a [`SaplingBuilder`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaplingMetadata {
@@ -194,7 +210,7 @@ pub struct SaplingBuilder<P> {
     target_height: BlockHeight,
     value_balance: Amount,
     spends: Vec<SpendDescriptionInfo>,
-    outputs: Vec<SaplingOutput>,
+    outputs: Vec<SaplingOutputInfo>,
 }
 
 #[derive(Clone)]
@@ -213,7 +229,7 @@ impl Authorization for Unauthorized {
     type AuthSig = SpendDescriptionInfo;
 }
 
-impl<P: consensus::Parameters> SaplingBuilder<P> {
+impl<P> SaplingBuilder<P> {
     pub fn new(params: P, target_height: BlockHeight) -> Self {
         SaplingBuilder {
             params,
@@ -225,11 +241,24 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         }
     }
 
+    /// Returns the list of Sapling inputs that will be consumed by the transaction being
+    /// constructed.
+    pub fn inputs(&self) -> &[impl fees::InputView] {
+        &self.spends
+    }
+
+    /// Returns the Sapling outputs that will be produced by the transaction being constructed
+    pub fn outputs(&self) -> &[impl fees::OutputView] {
+        &self.outputs
+    }
+
     /// Returns the net value represented by the spends and outputs added to this builder.
     pub fn value_balance(&self) -> Amount {
         self.value_balance
     }
+}
 
+impl<P: consensus::Parameters> SaplingBuilder<P> {
     /// Adds a Sapling note to be spent in this transaction.
     ///
     /// Returns an error if the given Merkle path does not have the same anchor as the
@@ -278,7 +307,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         value: Amount,
         memo: MemoBytes,
     ) -> Result<(), Error> {
-        let output = SaplingOutput::new_internal(
+        let output = SaplingOutputInfo::new_internal(
             &self.params,
             &mut rng,
             self.target_height,
@@ -293,15 +322,6 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         self.outputs.push(output);
 
         Ok(())
-    }
-
-    /// Send change to the specified change address. If no change address
-    /// was set, send change to the first Sapling address given as input.
-    pub fn get_candidate_change_address(&self) -> Option<(OutgoingViewingKey, PaymentAddress)> {
-        self.spends.first().and_then(|spend| {
-            PaymentAddress::from_parts(spend.diversifier, spend.note.pk_d)
-                .map(|addr| (spend.extsk.expsk.ovk, addr))
-        })
     }
 
     pub fn build<Pr: TxProver, R: RngCore>(

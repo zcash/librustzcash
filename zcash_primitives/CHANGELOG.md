@@ -10,6 +10,46 @@ and this library adheres to Rust's notion of
 ### Added
 - Added in `zcash_primitives::zip32`
   - An implementation of `TryFrom<DiversifierIndex>` for `u32`
+- Added to `zcash_primitives::transaction::builder`
+  - `Error::InsufficientFunds`
+  - `Error::ChangeRequired`
+  - `Builder` state accessor methods:
+    - `Builder::params()`
+    - `Builder::target_height()`
+    - `Builder::transparent_inputs()`
+    - `Builder::transparent_outputs()`
+    - `Builder::sapling_inputs()`
+    - `Builder::sapling_outputs()`
+- `zcash_primitives::transaction::fees` a new module containing abstractions
+  and types related to fee calculations.
+  - `FeeRule` a trait that describes how to compute the fee required for a
+    transaction given inputs and outputs to the transaction.
+- Added to `zcash_primitives::transaction::components::sapling::builder`
+  - `SaplingBuilder::{inputs, outputs}`: accessors for Sapling builder state.
+- `zcash_primitives::transaction::components::sapling::fees`
+- Added to `zcash_primitives::transaction::components::transparent::builder`
+  - `TransparentBuilder::{inputs, outputs}`: accessors for transparent builder state.
+- `zcash_primitives::transaction::components::transparent::fees`
+
+### Changed
+- `zcash_primitives::transaction::builder::Builder::build` now takes a `FeeRule`
+  argument which is used to compute the fee for the transaction as part of the
+  build process.
+- `zcash_primitives::transaction::builder::Builder::{new, new_with_rng}` no
+  longer fixes the fee for transactions to 0.00001 ZEC; the builder instead
+  computes the fee using a `FeeRule` implementation at build time.
+
+### Removed
+- Removed from `zcash_primitives::transaction::builder::Builder`
+  - `Builder::{new_with_fee, new_with_rng_and_fee`} (use `Builder::{new, new_with_rng}` 
+    instead along with a `FeeRule` implementation passed to `Builder::build`.)
+  - `Builder::send_change_to` has been removed. Change outputs must be added to the
+    builder by the caller, just like any other output.
+- Removed from `zcash_primitives::transaction::builder::Error`
+  - `Error::ChangeIsNegative`
+  - `Error::NoChangeAddress`
+- `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder::get_candidate_change_address`
+   has been removed; change outputs must now be added by the caller.
 
 ## [0.8.1] - 2022-10-19
 ### Added
@@ -29,9 +69,9 @@ and this library adheres to Rust's notion of
   - `ChainCode::as_bytes`
   - `DiversifierIndex::{as_bytes}`
   - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
-- `zcash_primitives::zip32::sapling` has been added and now contains 
+- `zcash_primitives::zip32::sapling` has been added and now contains
   all of the Sapling zip32 key types that were previously located in
-  `zcash_primitives::zip32` directly. The base `zip32` module reexports 
+  `zcash_primitives::zip32` directly. The base `zip32` module reexports
   the moved types for backwards compatibility.
   - `DiversifierKey::{from_bytes, as_bytes}`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`

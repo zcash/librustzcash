@@ -12,6 +12,7 @@ pub mod address;
 pub mod data_api;
 mod decrypt;
 pub mod encoding;
+pub mod fees;
 pub mod keys;
 pub mod proto;
 pub mod scan;

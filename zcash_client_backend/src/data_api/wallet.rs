@@ -5,9 +5,10 @@ use zcash_primitives::{
     sapling::prover::TxProver,
     transaction::{
         builder::Builder,
-        components::{amount::DEFAULT_FEE, Amount},
+        components::amount::{Amount, BalanceError, DEFAULT_FEE},
         Transaction,
     },
+    zip32::Scope,
 };
 
 use crate::{
@@ -17,6 +18,7 @@ use crate::{
         SentTransactionOutput, WalletWrite,
     },
     decrypt_transaction,
+    fees::{BasicFixedFeeChangeStrategy, ChangeError, ChangeStrategy, ChangeValue},
     keys::UnifiedSpendingKey,
     wallet::OvkPolicy,
     zip321::{Payment, TransactionRequest},
@@ -92,19 +94,18 @@ where
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
 /// * `prover`: The TxProver to use in constructing the shielded transaction.
-/// * `account`: The ZIP32 account identifier associated with the extended spending
-///   key that controls the funds to be used in creating this transaction.  This
-///   procedure will return an error if this does not correctly correspond to `extsk`.
-/// * `extsk`: The extended spending key that controls the funds that will be spent
-///   in the resulting transaction.
-/// * `amount`: The amount to send.
+/// * `usk`: The unified spending key that controls the funds that will be spent
+///   in the resulting transaction. This procedure will return an error if the
+///   USK does not correspond to an account known to the wallet.
 /// * `to`: The address to which `amount` will be paid.
+/// * `amount`: The amount to send.
 /// * `memo`: A memo to be included in the output to the recipient.
 /// * `ovk_policy`: The policy to use for constructing outgoing viewing keys that
 ///   can allow the sender to view the resulting notes on the blockchain.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
 ///   spent. A value of 10 confirmations is recommended.
+///
 /// # Examples
 ///
 /// ```
@@ -236,10 +237,8 @@ where
 /// * `params`: Consensus parameters
 /// * `prover`: The TxProver to use in constructing the shielded transaction.
 /// * `usk`: The unified spending key that controls the funds that will be spent
-///   in the resulting transaction.
-/// * `account`: The ZIP32 account identifier associated with the extended spending
-///   key that controls the funds to be used in creating this transaction.  This
-///   procedure will return an error if this does not correctly correspond to `extsk`.
+///   in the resulting transaction. This procedure will return an error if the
+///   USK does not correspond to an account known to the wallet.
 /// * `request`: The ZIP-321 payment request specifying the recipients and amounts
 ///   for the transaction.
 /// * `ovk_policy`: The policy to use for constructing outgoing viewing keys that
@@ -267,17 +266,17 @@ where
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())?
         .ok_or(Error::KeyNotRecognized)?;
 
-    let extfvk = usk.sapling().to_extended_full_viewing_key();
+    let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
     // Apply the outgoing viewing key policy.
     let ovk = match ovk_policy {
-        OvkPolicy::Sender => Some(extfvk.fvk.ovk),
+        OvkPolicy::Sender => Some(dfvk.fvk().ovk),
         OvkPolicy::Custom(ovk) => Some(ovk),
         OvkPolicy::Discard => None,
     };
 
     // Target the next block, assuming we are up-to-date.
-    let (height, anchor_height) = wallet_db
+    let (target_height, anchor_height) = wallet_db
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
@@ -286,8 +285,9 @@ where
         .iter()
         .map(|p| p.amount)
         .sum::<Option<Amount>>()
-        .ok_or_else(|| E::from(Error::InvalidAmount))?;
-    let target_value = (value + DEFAULT_FEE).ok_or_else(|| E::from(Error::InvalidAmount))?;
+        .ok_or_else(|| E::from(Error::BalanceError(BalanceError::Overflow)))?;
+    let target_value = (value + DEFAULT_FEE)
+        .ok_or_else(|| E::from(Error::BalanceError(BalanceError::Overflow)))?;
     let spendable_notes =
         wallet_db.select_spendable_sapling_notes(account, target_value, anchor_height)?;
 
@@ -296,7 +296,7 @@ where
         .iter()
         .map(|n| n.note_value)
         .sum::<Option<_>>()
-        .ok_or_else(|| E::from(Error::InvalidAmount))?;
+        .ok_or_else(|| E::from(Error::BalanceError(BalanceError::Overflow)))?;
     if selected_value < target_value {
         return Err(E::from(Error::InsufficientBalance(
             selected_value,
@@ -305,10 +305,10 @@ where
     }
 
     // Create the transaction
-    let mut builder = Builder::new_with_fee(params.clone(), height, DEFAULT_FEE);
+    let mut builder = Builder::new(params.clone(), target_height);
     for selected in spendable_notes {
-        let from = extfvk
-            .fvk
+        let from = dfvk
+            .fvk()
             .vk
             .to_payment_address(selected.diversifier)
             .unwrap(); //DiversifyHash would have to unexpectedly return the zero point for this to be None
@@ -361,7 +361,42 @@ where
         }?
     }
 
-    let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
+    let fee_strategy = BasicFixedFeeChangeStrategy::new(DEFAULT_FEE);
+    let balance = fee_strategy
+        .compute_balance(
+            params,
+            target_height,
+            builder.transparent_inputs(),
+            builder.transparent_outputs(),
+            builder.sapling_inputs(),
+            builder.sapling_outputs(),
+        )
+        .map_err(|e| match e {
+            ChangeError::InsufficientFunds {
+                available,
+                required,
+            } => Error::InsufficientBalance(available, required),
+            ChangeError::StrategyError(e) => Error::BalanceError(e),
+        })?;
+
+    for change_value in balance.proposed_change() {
+        match change_value {
+            ChangeValue::Sapling(amount) => {
+                builder
+                    .add_sapling_output(
+                        Some(dfvk.to_ovk(Scope::Internal)),
+                        dfvk.change_address().1,
+                        *amount,
+                        MemoBytes::empty(),
+                    )
+                    .map_err(Error::Builder)?;
+            }
+        }
+    }
+
+    let (tx, tx_metadata) = builder
+        .build(&prover, &fee_strategy.fee_rule())
+        .map_err(Error::Builder)?;
 
     let sent_outputs = request.payments().iter().enumerate().map(|(i, payment)| {
         let (output_index, recipient) = match &payment.recipient_address {
@@ -405,7 +440,7 @@ where
         created: time::OffsetDateTime::now_utc(),
         account,
         outputs: sent_outputs,
-        fee_amount: DEFAULT_FEE,
+        fee_amount: balance.fee_required(),
         #[cfg(feature = "transparent-inputs")]
         utxos_spent: vec![],
     })
@@ -423,12 +458,12 @@ where
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
 /// * `prover`: The TxProver to use in constructing the shielded transaction.
-/// * `sk`: The secp256k1 secret key that will be used to detect and spend transparent
-///   UTXOs.
-/// * `account`: The ZIP32 account identifier for the account to which funds will
-///   be shielded. Funds will be shielded to the internal (change) address associated with the
-///   most preferred shielded receiver corresponding to this account, or if no shielded
-///   receiver can be used for this account, this function will return an error.
+/// * `usk`: The unified spending key that will be used to detect and spend transparent UTXOs,
+///   and that will provide the shielded address to which funds will be sent. Funds will be
+///   shielded to the internal (change) address associated with the most preferred shielded
+///   receiver corresponding to this account, or if no shielded receiver can be used for this
+///   account, this function will return an error. This procedure will return an error if the
+///   USK does not correspond to an account known to the wallet.
 /// * `memo`: A memo to be included in the output to the (internal) recipient.
 ///   This can be used to take notes about auto-shielding operations internal
 ///   to the wallet that the wallet can use to improve how it represents those
@@ -462,7 +497,7 @@ where
         .to_diversifiable_full_viewing_key()
         .change_address()
         .1;
-    let (latest_scanned_height, latest_anchor) = wallet_db
+    let (target_height, latest_anchor) = wallet_db
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
@@ -476,21 +511,15 @@ where
         utxos.append(&mut outputs);
     }
 
-    let total_amount = utxos
+    let _total_amount = utxos
         .iter()
         .map(|utxo| utxo.txout().value)
         .sum::<Option<Amount>>()
-        .ok_or_else(|| E::from(Error::InvalidAmount))?;
-
-    let fee = DEFAULT_FEE;
-    if fee >= total_amount {
-        return Err(E::from(Error::InsufficientBalance(total_amount, fee)));
-    }
-
-    let amount_to_shield = (total_amount - fee).ok_or_else(|| E::from(Error::InvalidAmount))?;
+        .ok_or_else(|| E::from(Error::BalanceError(BalanceError::Overflow)))?;
 
     let addr_metadata = wallet_db.get_transparent_receivers(account)?;
-    let mut builder = Builder::new_with_fee(params.clone(), latest_scanned_height, fee);
+    let mut builder = Builder::new(params.clone(), target_height);
+
     for utxo in &utxos {
         let diversifier_index = addr_metadata
             .get(utxo.recipient_address())
@@ -510,15 +539,44 @@ where
             .map_err(Error::Builder)?;
     }
 
-    // there are no sapling notes so we set the change manually
-    builder.send_change_to(ovk, shielding_address.clone());
+    // Compute the balance of the transaction. We have only added inputs, so the total change
+    // amount required will be the total of the UTXOs minus fees.
+    let fee_strategy = BasicFixedFeeChangeStrategy::new(DEFAULT_FEE);
+    let balance = fee_strategy
+        .compute_balance(
+            params,
+            target_height,
+            builder.transparent_inputs(),
+            builder.transparent_outputs(),
+            builder.sapling_inputs(),
+            builder.sapling_outputs(),
+        )
+        .map_err(|e| match e {
+            ChangeError::InsufficientFunds {
+                available,
+                required,
+            } => Error::InsufficientBalance(available, required),
+            ChangeError::StrategyError(e) => Error::BalanceError(e),
+        })?;
 
-    // add the sapling output to shield the funds
-    builder
-        .add_sapling_output(Some(ovk), shielding_address, amount_to_shield, memo.clone())
+    let fee = balance.fee_required();
+    let mut total_out = Amount::zero();
+    for change_value in balance.proposed_change() {
+        total_out = (total_out + change_value.value())
+            .ok_or(Error::BalanceError(BalanceError::Overflow))?;
+        match change_value {
+            ChangeValue::Sapling(amount) => {
+                builder
+                    .add_sapling_output(Some(ovk), shielding_address.clone(), *amount, memo.clone())
+                    .map_err(Error::Builder)?;
+            }
+        }
+    }
+
+    // The transaction build process will check that the inputs and outputs balance
+    let (tx, tx_metadata) = builder
+        .build(&prover, &fee_strategy.fee_rule())
         .map_err(Error::Builder)?;
-
-    let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
     let output_index = tx_metadata.output_index(0).expect(
         "No sapling note was created in autoshielding transaction. This is a programming error.",
     );
@@ -529,8 +587,8 @@ where
         account,
         outputs: vec![SentTransactionOutput {
             output_index,
-            value: amount_to_shield,
             recipient: Recipient::InternalAccount(account, PoolType::Sapling),
+            value: total_out,
             memo: Some(memo.clone()),
         }],
         fee_amount: fee,
