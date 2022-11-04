@@ -181,7 +181,10 @@ mod tests {
 
     use crate::{
         chain::init::init_cache_database,
-        tests::{self, fake_compact_block, insert_into_cache, network, sapling_activation_height},
+        tests::{
+            self, fake_compact_block, insert_into_cache, network, sapling_activation_height,
+            AddressType,
+        },
         wallet::{
             get_balance, get_balance_at,
             init::{init_blocks_table, init_wallet_db},
@@ -341,6 +344,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -356,7 +360,13 @@ mod tests {
         );
 
         // Add more funds to the wallet in a second note
-        let (cb, _) = fake_compact_block(sapling_activation_height() + 1, cb.hash(), &dfvk, value);
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height() + 1,
+            cb.hash(),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value,
+        );
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
@@ -399,8 +409,13 @@ mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
         for i in 2..10 {
-            let (cb, _) =
-                fake_compact_block(sapling_activation_height() + i, cb.hash(), &dfvk, value);
+            let (cb, _) = fake_compact_block(
+                sapling_activation_height() + i,
+                cb.hash(),
+                &dfvk,
+                AddressType::DefaultExternal,
+                value,
+            );
             insert_into_cache(&db_cache, &cb);
         }
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
@@ -429,7 +444,13 @@ mod tests {
         ));
 
         // Mine block 11 so that the second note becomes verified
-        let (cb, _) = fake_compact_block(sapling_activation_height() + 10, cb.hash(), &dfvk, value);
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height() + 10,
+            cb.hash(),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value,
+        );
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
@@ -472,6 +493,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -526,6 +548,7 @@ mod tests {
                 sapling_activation_height() + i,
                 cb.hash(),
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
+                AddressType::DefaultExternal,
                 value,
             );
             insert_into_cache(&db_cache, &cb);
@@ -559,6 +582,7 @@ mod tests {
             sapling_activation_height() + 22,
             cb.hash(),
             &ExtendedSpendingKey::master(&[22]).to_diversifiable_full_viewing_key(),
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -602,6 +626,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -675,6 +700,7 @@ mod tests {
                 sapling_activation_height() + i,
                 cb.hash(),
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
+                AddressType::DefaultExternal,
                 value,
             );
             insert_into_cache(&db_cache, &cb);
@@ -708,6 +734,61 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
+            value,
+        );
+        insert_into_cache(&db_cache, &cb);
+        let mut db_write = db_data.get_update_ops().unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+
+        // Verified balance matches total balance
+        let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
+        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+        assert_eq!(
+            get_balance_at(&db_data, AccountId::from(0), anchor_height).unwrap(),
+            value
+        );
+
+        let to = TransparentAddress::PublicKey([7; 20]).into();
+        assert!(matches!(
+            create_spend_to_address(
+                &mut db_write,
+                &tests::network(),
+                test_prover(),
+                &usk,
+                &to,
+                Amount::from_u64(50000).unwrap(),
+                None,
+                OvkPolicy::Sender,
+                10,
+            ),
+            Ok(_)
+        ));
+    }
+
+    #[test]
+    fn create_to_address_spends_a_change_note() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        // Add an account to the wallet
+        let mut ops = db_data.get_update_ops().unwrap();
+        let seed = Secret::new([0u8; 32].to_vec());
+        let (_, usk) = ops.create_account(&seed).unwrap();
+        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+
+        // Add funds to the wallet in a single note
+        let value = Amount::from_u64(51000).unwrap();
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            &dfvk,
+            AddressType::Internal,
             value,
         );
         insert_into_cache(&db_cache, &cb);
