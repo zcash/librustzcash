@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 
-use group::ff::PrimeField;
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
 use zcash_primitives::{
@@ -15,10 +14,7 @@ use zcash_primitives::{
         Node, Note, Nullifier, NullifierDerivingKey, SaplingIvk,
     },
     transaction::components::sapling::CompactOutputDescription,
-    zip32::{
-        sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
-        AccountId, Scope,
-    },
+    zip32::{sapling::DiversifiableFullViewingKey, AccountId, Scope},
 };
 
 use crate::{
@@ -87,29 +83,6 @@ impl ScanningKey for DiversifiableFullViewingKey {
                 self.to_nk(Scope::Internal),
             ),
         ]
-    }
-
-    fn sapling_nf(
-        key: &Self::SaplingNk,
-        note: &Note,
-        witness: &IncrementalWitness<Node>,
-    ) -> Self::Nf {
-        note.nf(key, witness.position() as u64)
-    }
-}
-
-/// The [`ScanningKey`] implementation for [`ExtendedFullViewingKey`]s.
-/// Nullifiers may be derived when scanning with these keys.
-///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-impl ScanningKey for ExtendedFullViewingKey {
-    type Scope = Scope;
-    type SaplingNk = NullifierDerivingKey;
-    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 1];
-    type Nf = sapling::Nullifier;
-
-    fn to_sapling_keys(&self) -> Self::SaplingKeys {
-        [(Scope::External, self.fvk.vk.ivk(), self.fvk.vk.nk)]
     }
 
     fn sapling_nf(
@@ -359,7 +332,7 @@ pub(crate) fn scan_block_with_runner<
                     .collect();
 
                 // Increment tree and witnesses
-                let node = Node::new(output.cmu.to_repr());
+                let node = Node::from_scalar(output.cmu);
                 for witness in &mut *existing_witnesses {
                     witness.append(node).unwrap();
                 }
@@ -430,7 +403,7 @@ mod tests {
             Note, Nullifier, SaplingIvk,
         },
         transaction::components::Amount,
-        zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey},
+        zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},
     };
 
     use crate::{
@@ -480,11 +453,11 @@ mod tests {
     fn fake_compact_block(
         height: BlockHeight,
         nf: Nullifier,
-        extfvk: ExtendedFullViewingKey,
+        dfvk: &DiversifiableFullViewingKey,
         value: Amount,
         tx_after: bool,
     ) -> CompactBlock {
-        let to = extfvk.default_address().1;
+        let to = dfvk.default_address().1;
 
         // Create a fake Note for the account
         let mut rng = OsRng;
@@ -496,7 +469,7 @@ mod tests {
             rseed,
         };
         let encryptor = sapling_note_encryption::<_, Network>(
-            Some(extfvk.fvk.ovk),
+            Some(dfvk.fvk().ovk),
             note.clone(),
             to,
             MemoBytes::empty(),
@@ -554,12 +527,12 @@ mod tests {
         fn go(scan_multithreaded: bool) {
             let account = AccountId::from(0);
             let extsk = ExtendedSpendingKey::master(&[]);
-            let extfvk = ExtendedFullViewingKey::from(&extsk);
+            let dfvk = extsk.to_diversifiable_full_viewing_key();
 
             let cb = fake_compact_block(
                 1u32.into(),
                 Nullifier([0; 32]),
-                extfvk.clone(),
+                &dfvk,
                 Amount::from_u64(5).unwrap(),
                 false,
             );
@@ -569,8 +542,7 @@ mod tests {
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, ()>::new(
                     10,
-                    extfvk
-                        .to_sapling_keys()
+                    dfvk.to_sapling_keys()
                         .iter()
                         .map(|(scope, ivk, _)| ((account, *scope), ivk))
                         .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
@@ -587,7 +559,7 @@ mod tests {
             let txs = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
-                &[(&account, &extfvk)],
+                &[(&account, &dfvk)],
                 &[],
                 &mut tree,
                 &mut [],
@@ -618,12 +590,12 @@ mod tests {
         fn go(scan_multithreaded: bool) {
             let account = AccountId::from(0);
             let extsk = ExtendedSpendingKey::master(&[]);
-            let extfvk = ExtendedFullViewingKey::from(&extsk);
+            let dfvk = extsk.to_diversifiable_full_viewing_key();
 
             let cb = fake_compact_block(
                 1u32.into(),
                 Nullifier([0; 32]),
-                extfvk.clone(),
+                &dfvk,
                 Amount::from_u64(5).unwrap(),
                 true,
             );
@@ -633,8 +605,7 @@ mod tests {
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, ()>::new(
                     10,
-                    extfvk
-                        .to_sapling_keys()
+                    dfvk.to_sapling_keys()
                         .iter()
                         .map(|(scope, ivk, _)| ((account, *scope), ivk))
                         .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
@@ -651,7 +622,7 @@ mod tests {
             let txs = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
-                &[(&AccountId::from(0), &extfvk)],
+                &[(&AccountId::from(0), &dfvk)],
                 &[],
                 &mut tree,
                 &mut [],
@@ -680,11 +651,11 @@ mod tests {
     #[test]
     fn scan_block_with_my_spend() {
         let extsk = ExtendedSpendingKey::master(&[]);
-        let extfvk = ExtendedFullViewingKey::from(&extsk);
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
         let nf = Nullifier([7; 32]);
         let account = AccountId::from(12);
 
-        let cb = fake_compact_block(1u32.into(), nf, extfvk, Amount::from_u64(5).unwrap(), false);
+        let cb = fake_compact_block(1u32.into(), nf, &dfvk, Amount::from_u64(5).unwrap(), false);
         assert_eq!(cb.vtx.len(), 2);
         let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
 

@@ -30,6 +30,9 @@ and this library adheres to Rust's notion of
 - Added to `zcash_primitives::transaction::components::transparent::builder`
   - `TransparentBuilder::{inputs, outputs}`: accessors for transparent builder state.
 - `zcash_primitives::transaction::components::transparent::fees`
+- `zcash_primitives::sapling::Note::commitment`
+- Added to `zcash_primitives::zip32::sapling::DiversifiableFullViewingKey`
+  - `DiversifiableFullViewingKey::{diversified_address, diversified_change_address}`
 
 ### Changed
 - `zcash_primitives::transaction::builder::Builder::build` now takes a `FeeRule`
@@ -38,6 +41,10 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::builder::Builder::{new, new_with_rng}` no
   longer fixes the fee for transactions to 0.00001 ZEC; the builder instead
   computes the fee using a `FeeRule` implementation at build time.
+
+### Deprecated
+- `zcash_primitives::zip32::sapling::to_extended_full_viewing_key` Use
+  `to_diversifiable_full_viewing_key` instead.
 
 ### Removed
 - Removed from `zcash_primitives::transaction::builder::Builder`
@@ -50,6 +57,10 @@ and this library adheres to Rust's notion of
   - `Error::NoChangeAddress`
 - `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder::get_candidate_change_address`
    has been removed; change outputs must now be added by the caller.
+- The `From<&ExtendedSpendingKey>` instance for `ExtendedFullViewingKey` has been
+  removed. Use `ExtendedSpendingKey::to_diversifiable_full_viewing_key` instead.
+- `zcash_primitives::sapling::Node::new` has been removed. Use
+  `Node::from_scalar` or (preferably) `Note::commitment` instead.
 
 ## [0.8.1] - 2022-10-19
 ### Added

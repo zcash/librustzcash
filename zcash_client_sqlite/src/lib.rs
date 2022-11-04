@@ -933,7 +933,7 @@ mod tests {
             PaymentAddress,
         },
         transaction::components::Amount,
-        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+        zip32::sapling::DiversifiableFullViewingKey,
     };
 
     use zcash_client_backend::{
@@ -990,7 +990,7 @@ mod tests {
         let seed = [0u8; 32];
         let account = AccountId::from(0);
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
 
         #[cfg(feature = "transparent-inputs")]
         let (tkey, taddr) = {

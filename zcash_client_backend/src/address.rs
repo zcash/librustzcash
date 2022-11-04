@@ -253,7 +253,7 @@ impl RecipientAddress {
 #[cfg(test)]
 mod tests {
     use zcash_address::test_vectors;
-    use zcash_primitives::{consensus::MAIN_NETWORK, zip32::ExtendedFullViewingKey};
+    use zcash_primitives::consensus::MAIN_NETWORK;
 
     use super::{RecipientAddress, UnifiedAddress};
     use crate::keys::sapling;
@@ -268,8 +268,8 @@ mod tests {
 
         let sapling = {
             let extsk = sapling::spending_key(&[0; 32], 0, 0.into());
-            let extfvk = ExtendedFullViewingKey::from(&extsk);
-            Some(extfvk.default_address().1)
+            let dfvk = extsk.to_diversifiable_full_viewing_key();
+            Some(dfvk.default_address().1)
         };
 
         let transparent = { None };
