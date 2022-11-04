@@ -25,16 +25,11 @@ and this library adheres to Rust's notion of
   - `FeeRule` a trait that describes how to compute the fee required for a
     transaction given inputs and outputs to the transaction.
 - Added to `zcash_primitives::transaction::components::sapling::builder`
-  - `SaplingInput` a trait that provides a minimized view of a Sapling input suitable
-    for use in change and fee computation.
-  - `SaplingOutput` a trait that provides a minimized view of a Sapling output suitable
-    for use in change and fee computation.
-  - `SaplingBuilder::inputs` and `SaplingBuilder::outputs`: accessors for Sapling
-    builder state.
+  - `SaplingBuilder::{inputs, outputs}`: accessors for Sapling builder state.
+- `zcash_primitives::transaction::components::sapling::fees`
 - Added to `zcash_primitives::transaction::components::transparent::builder`
-  - `TransparentInput` a trait that provides a minimized view of a transparent input suitable
-    for use in fee computation.
   - `TransparentBuilder::{inputs, outputs}`: accessors for transparent builder state.
+- `zcash_primitives::transaction::components::transparent::fees`
 
 ### Changed
 - `zcash_primitives::transaction::builder::Builder::build` now takes a `FeeRule`
@@ -47,7 +42,7 @@ and this library adheres to Rust's notion of
 ### Removed
 - Removed from `zcash_primitives::transaction::builder::Builder`
   - `Builder::{new_with_fee, new_with_rng_and_fee`} (use `Builder::{new, new_with_rng}` 
-    instead along with a `FeeRule` implementation passed to `Builder::build`.
+    instead along with a `FeeRule` implementation passed to `Builder::build`.)
   - `Builder::send_change_to` has been removed. Change outputs must be added to the
     builder by the caller, just like any other output.
 - Removed from `zcash_primitives::transaction::builder::Error`
