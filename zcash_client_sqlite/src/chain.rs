@@ -236,7 +236,7 @@ mod tests {
         error::SqliteClientError,
         tests::{
             self, fake_compact_block, fake_compact_block_spending, init_test_accounts_table,
-            insert_into_cache, sapling_activation_height,
+            insert_into_cache, sapling_activation_height, AddressType,
         },
         wallet::{get_balance, init::init_wallet_db, rewind_to_height},
         AccountId, BlockDb, NoteId, WalletDb,
@@ -268,6 +268,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
         insert_into_cache(&db_cache, &cb);
@@ -297,6 +298,7 @@ mod tests {
             sapling_activation_height() + 1,
             cb.hash(),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
         );
         insert_into_cache(&db_cache, &cb2);
@@ -339,12 +341,14 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
             cb.hash(),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
         );
         insert_into_cache(&db_cache, &cb);
@@ -367,12 +371,14 @@ mod tests {
             sapling_activation_height() + 2,
             BlockHash([1; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(8).unwrap(),
         );
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
             cb3.hash(),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(3).unwrap(),
         );
         insert_into_cache(&db_cache, &cb3);
@@ -409,12 +415,14 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
             cb.hash(),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
         );
         insert_into_cache(&db_cache, &cb);
@@ -437,12 +445,14 @@ mod tests {
             sapling_activation_height() + 2,
             cb2.hash(),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(8).unwrap(),
         );
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
             BlockHash([1; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             Amount::from_u64(3).unwrap(),
         );
         insert_into_cache(&db_cache, &cb3);
@@ -487,11 +497,17 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
 
-        let (cb2, _) =
-            fake_compact_block(sapling_activation_height() + 1, cb.hash(), &dfvk, value2);
+        let (cb2, _) = fake_compact_block(
+            sapling_activation_height() + 1,
+            cb.hash(),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value2,
+        );
         insert_into_cache(&db_cache, &cb);
         insert_into_cache(&db_cache, &cb2);
 
@@ -549,6 +565,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb1);
@@ -557,10 +574,20 @@ mod tests {
         assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
-        let (cb2, _) =
-            fake_compact_block(sapling_activation_height() + 1, cb1.hash(), &dfvk, value);
-        let (cb3, _) =
-            fake_compact_block(sapling_activation_height() + 2, cb2.hash(), &dfvk, value);
+        let (cb2, _) = fake_compact_block(
+            sapling_activation_height() + 1,
+            cb1.hash(),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value,
+        );
+        let (cb3, _) = fake_compact_block(
+            sapling_activation_height() + 2,
+            cb2.hash(),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value,
+        );
         insert_into_cache(&db_cache, &cb3);
         match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
             Err(SqliteClientError::BackendError(e)) => {
@@ -610,6 +637,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb);
@@ -623,8 +651,13 @@ mod tests {
 
         // Create a second fake CompactBlock sending more value to the address
         let value2 = Amount::from_u64(7).unwrap();
-        let (cb2, _) =
-            fake_compact_block(sapling_activation_height() + 1, cb.hash(), &dfvk, value2);
+        let (cb2, _) = fake_compact_block(
+            sapling_activation_height() + 1,
+            cb.hash(),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value2,
+        );
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
@@ -662,6 +695,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb);

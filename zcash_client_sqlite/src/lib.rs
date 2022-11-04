@@ -933,7 +933,7 @@ mod tests {
             PaymentAddress,
         },
         transaction::components::Amount,
-        zip32::sapling::DiversifiableFullViewingKey,
+        zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
     };
 
     use zcash_client_backend::{
@@ -1018,15 +1018,27 @@ mod tests {
         (ufvk, taddr)
     }
 
+    #[allow(dead_code)]
+    pub(crate) enum AddressType {
+        DefaultExternal,
+        DiversifiedExternal(DiversifierIndex),
+        Internal,
+    }
+
     /// Create a fake CompactBlock at the given height, containing a single output paying
-    /// the given address. Returns the CompactBlock and the nullifier for the new note.
+    /// an address. Returns the CompactBlock and the nullifier for the new note.
     pub(crate) fn fake_compact_block(
         height: BlockHeight,
         prev_hash: BlockHash,
         dfvk: &DiversifiableFullViewingKey,
+        req: AddressType,
         value: Amount,
     ) -> (CompactBlock, Nullifier) {
-        let to = dfvk.default_address().1;
+        let to = match req {
+            AddressType::DefaultExternal => dfvk.default_address().1,
+            AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
+            AddressType::Internal => dfvk.change_address().1,
+        };
 
         // Create a fake Note for the account
         let mut rng = OsRng;
@@ -1262,6 +1274,7 @@ mod tests {
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
+            AddressType::DefaultExternal,
             value,
         );
         insert_into_cache(&db_cache, &cb);
