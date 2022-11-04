@@ -30,6 +30,9 @@ and this library adheres to Rust's notion of
 - Added to `zcash_primitives::transaction::components::transparent::builder`
   - `TransparentBuilder::{inputs, outputs}`: accessors for transparent builder state.
 - `zcash_primitives::transaction::components::transparent::fees`
+- `zcash_primitives::sapling::Note::commitment`
+- Added to `zcash_primitives::zip32::sapling::DiversifiableFullViewingKey`
+  - `DiversifiableFullViewingKey::{diversified_address, diversified_change_address}`
 
 ### Changed
 - `zcash_primitives::transaction::builder::Builder::build` now takes a `FeeRule`
