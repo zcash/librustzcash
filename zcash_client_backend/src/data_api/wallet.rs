@@ -312,7 +312,7 @@ where
         // Attempt to reconstruct the note being spent using both the internal and external dfvks
         // corresponding to the unified spending key, checking against the witness we are using
         // to spend the note that we've used the correct key.
-        let note = {
+        let (note, key) = {
             let external_note = dfvk
                 .diversified_address(selected.diversifier)
                 .and_then(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
@@ -323,19 +323,17 @@ where
             let expected_root = selected.witness.root();
             external_note
                 .filter(|n| expected_root == merkle_path.root(n.commitment()))
+                .map(|n| (n, usk.sapling().clone()))
                 .or_else(|| {
-                    internal_note.filter(|n| expected_root == merkle_path.root(n.commitment()))
+                    internal_note
+                        .filter(|n| expected_root == merkle_path.root(n.commitment()))
+                        .map(|n| (n, usk.sapling().derive_internal()))
                 })
                 .ok_or_else(|| E::from(Error::NoteMismatch))
         }?;
 
         builder
-            .add_sapling_spend(
-                usk.sapling().clone(),
-                selected.diversifier,
-                note,
-                merkle_path,
-            )
+            .add_sapling_spend(key, selected.diversifier, note, merkle_path)
             .map_err(Error::Builder)?;
     }
 
