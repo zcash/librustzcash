@@ -12,10 +12,14 @@ use zcash_primitives::{
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
 #[rustfmt::skip]
+#[allow(unknown_lints)]
+#[allow(clippy::derive_partial_eq_without_eq)]
 pub mod compact_formats;
 
 #[cfg(feature = "lightwalletd-tonic")]
 #[rustfmt::skip]
+#[allow(unknown_lints)]
+#[allow(clippy::derive_partial_eq_without_eq)]
 pub mod service;
 
 impl compact_formats::CompactBlock {
