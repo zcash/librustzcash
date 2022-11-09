@@ -79,6 +79,9 @@ and this library adheres to Rust's notion of
   - `zcash_client_sqlite::wallet`:
     - `get_spendable_notes` to `get_spendable_sapling_notes`.
     - `select_spendable_notes` to `select_spendable_sapling_notes`.
+- `zcash_client_sqlite::wallet::{get_spendable_sapling_notes, select_spendable_sapling_notes}`
+  have also been changed to take a parameter that permits the caller to
+  specify a set of notes to exclude from consideration.
 - `zcash_client_sqlite::wallet::init_wallet_db` has been modified to
   take the wallet seed as an argument so that it can correctly perform
   migrations that require re-deriving key material. In particular for

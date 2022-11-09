@@ -45,7 +45,10 @@ use zcash_primitives::{
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier},
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{
+        components::{amount::Amount, OutPoint},
+        Transaction, TxId,
+    },
     zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
 };
 
@@ -113,7 +116,10 @@ pub struct WalletDb<P> {
 impl<P: consensus::Parameters> WalletDb<P> {
     /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(move |conn| WalletDb { conn, params })
+        Connection::open(path).and_then(move |conn| {
+            rusqlite::vtab::array::load_module(&conn)?;
+            Ok(WalletDb { conn, params })
+        })
     }
 
     /// Given a wallet database connection, obtain a handle for the write operations
@@ -227,9 +233,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         #[allow(deprecated)]
-        wallet::transact::get_spendable_sapling_notes(self, account, anchor_height)
+        wallet::transact::get_spendable_sapling_notes(self, account, anchor_height, exclude)
     }
 
     fn select_spendable_sapling_notes(
@@ -237,9 +244,16 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         #[allow(deprecated)]
-        wallet::transact::select_spendable_sapling_notes(self, account, target_value, anchor_height)
+        wallet::transact::select_spendable_sapling_notes(
+            self,
+            account,
+            target_value,
+            anchor_height,
+            exclude,
+        )
     }
 
     fn get_transparent_receivers(
@@ -259,9 +273,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         _address: &TransparentAddress,
         _max_height: BlockHeight,
+        _exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::get_unspent_transparent_outputs(self, _address, _max_height);
+        return wallet::get_unspent_transparent_outputs(self, _address, _max_height, _exclude);
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -372,9 +387,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         self.wallet_db
-            .get_spendable_sapling_notes(account, anchor_height)
+            .get_spendable_sapling_notes(account, anchor_height, exclude)
     }
 
     fn select_spendable_sapling_notes(
@@ -382,9 +398,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         self.wallet_db
-            .select_spendable_sapling_notes(account, target_value, anchor_height)
+            .select_spendable_sapling_notes(account, target_value, anchor_height, exclude)
     }
 
     fn get_transparent_receivers(
@@ -398,9 +415,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         &self,
         address: &TransparentAddress,
         max_height: BlockHeight,
+        exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         self.wallet_db
-            .get_unspent_transparent_outputs(address, max_height)
+            .get_unspent_transparent_outputs(address, max_height, exclude)
     }
 
     fn get_transparent_balances(

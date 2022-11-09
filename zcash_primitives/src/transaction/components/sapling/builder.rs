@@ -69,10 +69,14 @@ pub struct SpendDescriptionInfo {
     merkle_path: MerklePath<Node>,
 }
 
-impl fees::InputView for SpendDescriptionInfo {
+impl fees::InputView<()> for SpendDescriptionInfo {
+    fn note_id(&self) -> &() {
+        // The builder does not make use of note identifiers, so we can just return the unit value.
+        &()
+    }
+
     fn value(&self) -> Amount {
-        // An existing note to be spent must have a valid
-        // amount value.
+        // An existing note to be spent must have a valid amount value.
         Amount::from_u64(self.note.value).unwrap()
     }
 }
@@ -243,7 +247,7 @@ impl<P> SaplingBuilder<P> {
 
     /// Returns the list of Sapling inputs that will be consumed by the transaction being
     /// constructed.
-    pub fn inputs(&self) -> &[impl fees::InputView] {
+    pub fn inputs(&self) -> &[impl fees::InputView<()>] {
         &self.spends
     }
 

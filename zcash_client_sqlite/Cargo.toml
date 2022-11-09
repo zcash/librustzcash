@@ -32,7 +32,7 @@ secrecy = "0.8"
 # - SQLite databases
 group = "0.12"
 jubjub = "0.9"
-rusqlite = { version = "0.25", features = ["bundled", "time"] }
+rusqlite = { version = "0.25", features = ["bundled", "time", "array"] }
 schemer = "0.2"
 schemer-rusqlite = "0.2"
 time = "0.2"

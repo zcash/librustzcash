@@ -71,6 +71,8 @@ and this library adheres to Rust's notion of
   - `TransactionBalance`
   - `BasicFixedFeeChangeStrategy` - a `ChangeStrategy` implementation that
     reproduces current wallet change behavior
+  - `fixed` a new module containing of change selection strategies for the
+    existing fixed fee rule.
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:
@@ -107,9 +109,11 @@ and this library adheres to Rust's notion of
     the anchor height being returned; this had previously been hardcoded to
     `data_api::wallet::ANCHOR_OFFSET`.
   - `WalletRead::get_spendable_notes` has been renamed to
-    `get_spendable_sapling_notes`
+    `get_spendable_sapling_notes` and now takes as an argument a vector of
+    note IDs to be excluded from consideration.
   - `WalletRead::select_spendable_notes` has been renamed to
-    `select_spendable_sapling_notes`
+    `select_spendable_sapling_notes` and now takes as an argument a vector of
+    note IDs to be excluded from consideration.
   - The `WalletRead::NoteRef` and `WalletRead::TxRef` associated types are now
     required to implement `Eq` and `Ord`
 - The `zcash_client_backend::data_api::SentTransaction` type has been

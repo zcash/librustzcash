@@ -119,7 +119,11 @@ pub struct SpendableNote<NoteRef> {
     pub witness: IncrementalWitness<Node>,
 }
 
-impl<NoteRef> sapling::fees::InputView for SpendableNote<NoteRef> {
+impl<NoteRef> sapling::fees::InputView<NoteRef> for SpendableNote<NoteRef> {
+    fn note_id(&self) -> &NoteRef {
+        &self.note_id
+    }
+
     fn value(&self) -> Amount {
         self.note_value
     }

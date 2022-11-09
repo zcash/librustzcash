@@ -90,7 +90,7 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
     hash: [u8; 32],
     n: u32,

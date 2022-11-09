@@ -12,7 +12,10 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier, PaymentAddress},
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{
+        components::{amount::Amount, OutPoint},
+        Transaction, TxId,
+    },
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
@@ -22,9 +25,6 @@ use crate::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     wallet::{SpendableNote, WalletTransparentOutput, WalletTx},
 };
-
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::components::transparent::OutPoint;
 
 pub mod chain;
 pub mod error;
@@ -187,6 +187,7 @@ pub trait WalletRead {
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error>;
 
     /// Returns a list of spendable Sapling notes sufficient to cover the specified
@@ -196,6 +197,7 @@ pub trait WalletRead {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error>;
 
     /// Returns the set of all transparent receivers associated with the given account.
@@ -214,6 +216,7 @@ pub trait WalletRead {
         &self,
         address: &TransparentAddress,
         max_height: BlockHeight,
+        exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
@@ -400,7 +403,10 @@ pub mod testing {
         memo::Memo,
         merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Nullifier},
-        transaction::{components::Amount, Transaction, TxId},
+        transaction::{
+            components::{Amount, OutPoint},
+            Transaction, TxId,
+        },
         zip32::{AccountId, ExtendedFullViewingKey},
     };
 
@@ -507,6 +513,7 @@ pub mod testing {
             &self,
             _account: AccountId,
             _anchor_height: BlockHeight,
+            _exclude: &[Self::NoteRef],
         ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
@@ -516,6 +523,7 @@ pub mod testing {
             _account: AccountId,
             _target_value: Amount,
             _anchor_height: BlockHeight,
+            _exclude: &[Self::NoteRef],
         ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
@@ -531,6 +539,7 @@ pub mod testing {
             &self,
             _address: &TransparentAddress,
             _anchor_height: BlockHeight,
+            _exclude: &[OutPoint],
         ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
             Ok(Vec::new())
         }

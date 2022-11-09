@@ -173,7 +173,7 @@ impl<'a, P, R> Builder<'a, P, R> {
 
     /// Returns the set of Sapling inputs currently committed to be consumed
     /// by the transaction.
-    pub fn sapling_inputs(&self) -> &[impl sapling::fees::InputView] {
+    pub fn sapling_inputs(&self) -> &[impl sapling::fees::InputView<()>] {
         self.sapling_builder.inputs()
     }
 
@@ -511,7 +511,7 @@ mod testing {
     use crate::{
         consensus::{self, BlockHeight},
         sapling::prover::mock::MockTxProver,
-        transaction::{components::amount::DEFAULT_FEE, fees::FixedFeeRule, Transaction},
+        transaction::{fees::fixed, Transaction},
     };
 
     impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
@@ -529,7 +529,7 @@ mod testing {
         }
 
         pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
-            self.build(&MockTxProver, &FixedFeeRule::new(DEFAULT_FEE))
+            self.build(&MockTxProver, &fixed::FeeRule::standard())
         }
     }
 }

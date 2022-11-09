@@ -7,8 +7,8 @@ use zcash_primitives::{
     sapling::{self, prover::TxProver as SaplingProver},
     transaction::{
         builder::Builder,
-        components::amount::{Amount, BalanceError, DEFAULT_FEE},
-        fees::{FeeRule, FixedFeeRule},
+        components::amount::{Amount, BalanceError},
+        fees::{fixed, FeeRule},
         Transaction,
     },
     zip32::{sapling::DiversifiableFullViewingKey, sapling::ExtendedSpendingKey, Scope},
@@ -21,7 +21,7 @@ use crate::{
         SentTransactionOutput, WalletWrite,
     },
     decrypt_transaction,
-    fees::{ChangeValue, SingleOutputFixedFeeChangeStrategy},
+    fees::{self, ChangeValue, DustOutputPolicy},
     keys::UnifiedSpendingKey,
     wallet::{OvkPolicy, SpendableNote},
     zip321::{self, Payment},
@@ -191,7 +191,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     DbT::TxRef,
     Error<
         DbT::Error,
-        GreedyInputSelectorError<BalanceError>,
+        GreedyInputSelectorError<BalanceError, DbT::NoteRef>,
         core::convert::Infallible,
         DbT::NoteRef,
     >,
@@ -213,12 +213,12 @@ where
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
 
-    let change_strategy = SingleOutputFixedFeeChangeStrategy::new(FixedFeeRule::new(DEFAULT_FEE));
+    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fixed::FeeRule::standard());
     spend(
         wallet_db,
         params,
         prover,
-        &GreedyInputSelector::<DbT, _>::new(change_strategy),
+        &GreedyInputSelector::<DbT, _>::new(change_strategy, DustOutputPolicy::default()),
         usk,
         req,
         ovk_policy,

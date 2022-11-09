@@ -1,6 +1,7 @@
 //! Functions for creating transactions.
 //!
-use rusqlite::{named_params, Row};
+use rusqlite::{named_params, types::Value, Row};
+use std::rc::Rc;
 
 use group::ff::PrimeField;
 
@@ -68,6 +69,7 @@ pub fn get_spendable_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
     anchor_height: BlockHeight,
+    exclude: &[NoteId],
 ) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
     let mut stmt_select_notes = wdb.conn.prepare(
         "SELECT id_note, diversifier, value, rcm, witness
@@ -77,14 +79,24 @@ pub fn get_spendable_sapling_notes<P>(
             WHERE account = :account
             AND spent IS NULL
             AND transactions.block <= :anchor_height
-            AND sapling_witnesses.block = :anchor_height",
+            AND sapling_witnesses.block = :anchor_height
+            AND id_note NOT IN rarray(:exclude)",
     )?;
 
-    // Select notes
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|n| match n {
+            NoteId::ReceivedNoteId(i) => Some(Value::from(*i)),
+            NoteId::SentNoteId(_) => None,
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
     let notes = stmt_select_notes.query_and_then(
         named_params![
             ":account": &u32::from(account),
             ":anchor_height": &u32::from(anchor_height),
+            ":exclude": &excluded_ptr,
         ],
         to_spendable_note,
     )?;
@@ -100,6 +112,7 @@ pub fn select_spendable_sapling_notes<P>(
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
+    exclude: &[NoteId],
 ) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the
@@ -127,7 +140,10 @@ pub fn select_spendable_sapling_notes<P>(
                         (PARTITION BY account, spent ORDER BY id_note) AS so_far
                 FROM received_notes
                 INNER JOIN transactions ON transactions.id_tx = received_notes.tx
-                WHERE account = :account AND spent IS NULL AND transactions.block <= :anchor_height
+                WHERE account = :account 
+                AND spent IS NULL 
+                AND transactions.block <= :anchor_height
+                AND id_note NOT IN rarray(:exclude)
             )
             SELECT * FROM eligible WHERE so_far < :target_value
             UNION
@@ -141,12 +157,21 @@ pub fn select_spendable_sapling_notes<P>(
         INNER JOIN witnesses ON selected.id_note = witnesses.note",
     )?;
 
-    // Select notes
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|n| match n {
+            NoteId::ReceivedNoteId(i) => Some(Value::from(*i)),
+            NoteId::SentNoteId(_) => None,
+        })
+        .collect();
+    let excluded_ptr = Rc::new(excluded);
+
     let notes = stmt_select_notes.query_and_then(
         named_params![
             ":account": &u32::from(account),
             ":anchor_height": &u32::from(anchor_height),
             ":target_value": &i64::from(target_value),
+            ":exclude": &excluded_ptr
         ],
         to_spendable_note,
     )?;

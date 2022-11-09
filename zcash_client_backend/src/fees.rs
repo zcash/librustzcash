@@ -5,12 +5,16 @@ use zcash_primitives::{
             amount::{Amount, BalanceError},
             sapling::fees as sapling,
             transparent::fees as transparent,
+            OutPoint,
         },
-        fees::{FeeRule, FixedFeeRule},
+        fees::FeeRule,
     },
 };
 
+pub mod fixed;
+
 /// A proposed change amount and output pool.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChangeValue {
     Sapling(Amount),
 }
@@ -26,6 +30,7 @@ impl ChangeValue {
 /// The amount of change and fees required to make a transaction's inputs and
 /// outputs balance under a specific fee rule, as computed by a particular
 /// [`ChangeStrategy`] that is aware of that rule.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionBalance {
     proposed_change: Vec<ChangeValue>,
     fee_required: Amount,
@@ -66,7 +71,7 @@ impl TransactionBalance {
 
 /// Errors that can occur in computing suggested change and/or fees.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChangeError<E> {
+pub enum ChangeError<E, NoteRefT> {
     /// Insufficient inputs were provided to change selection to fund the
     /// required outputs and fees.
     InsufficientFunds {
@@ -76,8 +81,74 @@ pub enum ChangeError<E> {
         /// including the required fees.
         required: Amount,
     },
+    /// Some of the inputs provided to the transaction were determined to currently have no
+    /// economic value (i.e. their inclusion in a transaction causes fees to rise in an amount
+    /// greater than their value.)
+    DustInputs {
+        /// The outpoints corresponding to transparent inputs having no current economic value.
+        transparent: Vec<OutPoint>,
+        /// The identifiers for Sapling inputs having not current economic value
+        sapling: Vec<NoteRefT>,
+    },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
+}
+
+impl<NoteRefT> From<BalanceError> for ChangeError<BalanceError, NoteRefT> {
+    fn from(err: BalanceError) -> ChangeError<BalanceError, NoteRefT> {
+        ChangeError::StrategyError(err)
+    }
+}
+
+/// An enumeration of actions to tak when a transaction would potentially create dust
+/// outputs (outputs that are likely to be without economic value due to fee rules.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DustAction {
+    /// Do not allow creation of dust outputs; instead, require that additional inputs be provided.
+    Reject,
+    /// Explicitly allow the creation of dust change amounts greater than the specified value.
+    AllowDustChange,
+    /// Allow dust amounts to be added to the transaction fee
+    AddDustToFee,
+}
+
+/// A policy describing how a [`ChangeStrategy`] should treat potentially dust-valued change
+/// outputs (outputs that are likely to be without economic value due to fee rules.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DustOutputPolicy {
+    action: DustAction,
+    dust_threshold: Option<Amount>,
+}
+
+impl DustOutputPolicy {
+    /// Constructs a new dust output policy.
+    ///
+    /// A dust policy created with `None` as the dust threshold will delegate determination
+    /// of the dust threshold to the change strategy that is evaluating the strategy; this
+    /// recommended, but an explicit value (including zero) may be provided to explicitly
+    /// override the determination of the change strategy.
+    pub fn new(action: DustAction, dust_threshold: Option<Amount>) -> Self {
+        Self {
+            action,
+            dust_threshold,
+        }
+    }
+
+    /// Returns the action to take in the event that a dust change amount would be produced
+    pub fn action(&self) -> DustAction {
+        self.action
+    }
+    /// Returns a value that will be used to override the dust determination logic of the
+    /// change policy, if any.
+    pub fn dust_threshold(&self) -> Option<Amount> {
+        self.dust_threshold
+    }
+}
+
+impl Default for DustOutputPolicy {
+    fn default() -> Self {
+        DustOutputPolicy::new(DustAction::Reject, None)
+    }
 }
 
 /// A trait that represents the ability to compute the suggested change and fees that must be paid
@@ -97,101 +168,52 @@ pub trait ChangeStrategy {
     /// change outputs recommended by this operation. If insufficient funds are available to
     /// supply the requested outputs and required fees, implementations should return
     /// [`ChangeError::InsufficientFunds`].
-    fn compute_balance<P: consensus::Parameters>(
+    #[allow(clippy::too_many_arguments)]
+    fn compute_balance<P: consensus::Parameters, NoteRefT: Clone>(
         &self,
         params: &P,
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView],
+        sapling_inputs: &[impl sapling::InputView<NoteRefT>],
         sapling_outputs: &[impl sapling::OutputView],
-    ) -> Result<TransactionBalance, ChangeError<Self::Error>>;
+        dust_output_policy: &DustOutputPolicy,
+    ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }
 
-/// A change strategy that and proposes change as a single output to the most current supported
-/// shielded pool and delegates fee calculation to the provided fee rule.
-pub struct SingleOutputFixedFeeChangeStrategy {
-    fee_rule: FixedFeeRule,
-}
+#[cfg(test)]
+pub(crate) mod tests {
+    use zcash_primitives::transaction::components::{
+        amount::Amount,
+        sapling::fees as sapling,
+        transparent::{fees as transparent, OutPoint, TxOut},
+    };
 
-impl SingleOutputFixedFeeChangeStrategy {
-    /// Constructs a new [`SingleOutputFixedFeeChangeStrategy`] with the specified fee rule.
-    pub fn new(fee_rule: FixedFeeRule) -> Self {
-        Self { fee_rule }
-    }
-}
-
-impl From<BalanceError> for ChangeError<BalanceError> {
-    fn from(err: BalanceError) -> ChangeError<BalanceError> {
-        ChangeError::StrategyError(err)
-    }
-}
-
-impl ChangeStrategy for SingleOutputFixedFeeChangeStrategy {
-    type FeeRule = FixedFeeRule;
-    type Error = BalanceError;
-
-    fn fee_rule(&self) -> &Self::FeeRule {
-        &self.fee_rule
+    pub(crate) struct TestTransparentInput {
+        pub outpoint: OutPoint,
+        pub coin: TxOut,
     }
 
-    fn compute_balance<P: consensus::Parameters>(
-        &self,
-        params: &P,
-        target_height: BlockHeight,
-        transparent_inputs: &[impl transparent::InputView],
-        transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView],
-        sapling_outputs: &[impl sapling::OutputView],
-    ) -> Result<TransactionBalance, ChangeError<Self::Error>> {
-        let t_in = transparent_inputs
-            .iter()
-            .map(|t_in| t_in.coin().value)
-            .sum::<Option<_>>()
-            .ok_or(BalanceError::Overflow)?;
-        let t_out = transparent_outputs
-            .iter()
-            .map(|t_out| t_out.value())
-            .sum::<Option<_>>()
-            .ok_or(BalanceError::Overflow)?;
-        let sapling_in = sapling_inputs
-            .iter()
-            .map(|s_in| s_in.value())
-            .sum::<Option<_>>()
-            .ok_or(BalanceError::Overflow)?;
-        let sapling_out = sapling_outputs
-            .iter()
-            .map(|s_out| s_out.value())
-            .sum::<Option<_>>()
-            .ok_or(BalanceError::Overflow)?;
+    impl transparent::InputView for TestTransparentInput {
+        fn outpoint(&self) -> &OutPoint {
+            &self.outpoint
+        }
+        fn coin(&self) -> &TxOut {
+            &self.coin
+        }
+    }
 
-        let fee_amount = self
-            .fee_rule
-            .fee_required(
-                params,
-                target_height,
-                transparent_inputs,
-                transparent_outputs,
-                sapling_inputs.len(),
-                sapling_outputs.len() + 1,
-            )
-            .unwrap(); // FixedFeeRule::fee_required is infallible.
+    pub(crate) struct TestSaplingInput {
+        pub note_id: u32,
+        pub value: Amount,
+    }
 
-        let total_in = (t_in + sapling_in).ok_or(BalanceError::Overflow)?;
-        let total_out = [t_out, sapling_out, fee_amount]
-            .iter()
-            .sum::<Option<Amount>>()
-            .ok_or(BalanceError::Overflow)?;
-
-        let proposed_change = (total_in - total_out).ok_or(BalanceError::Underflow)?;
-        if proposed_change < Amount::zero() {
-            Err(ChangeError::InsufficientFunds {
-                available: total_in,
-                required: total_out,
-            })
-        } else {
-            TransactionBalance::new(vec![ChangeValue::Sapling(proposed_change)], fee_amount)
-                .ok_or_else(|| BalanceError::Overflow.into())
+    impl sapling::InputView<u32> for TestSaplingInput {
+        fn note_id(&self) -> &u32 {
+            &self.note_id
+        }
+        fn value(&self) -> Amount {
+            self.value
         }
     }
 }

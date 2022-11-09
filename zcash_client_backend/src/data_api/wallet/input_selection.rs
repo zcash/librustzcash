@@ -1,6 +1,7 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
 
 use core::marker::PhantomData;
+use std::collections::BTreeSet;
 use std::fmt;
 
 use zcash_primitives::{
@@ -10,7 +11,7 @@ use zcash_primitives::{
         components::{
             amount::{Amount, BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
-            TxOut,
+            OutPoint, TxOut,
         },
         fees::FeeRule,
     },
@@ -20,7 +21,7 @@ use zcash_primitives::{
 use crate::{
     address::{RecipientAddress, UnifiedAddress},
     data_api::WalletRead,
-    fees::{ChangeError, ChangeStrategy, TransactionBalance},
+    fees::{ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
     wallet::{SpendableNote, WalletTransparentOutput},
     zip321::TransactionRequest,
 };
@@ -179,40 +180,49 @@ pub trait InputSelector {
 
 /// Errors that can occur as a consequence of greedy input selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GreedyInputSelectorError<ChangeErrT> {
+pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     /// An intermediate value overflowed or underflowed the valid monetary range.
     Balance(BalanceError),
     /// A unified address did not contain a supported receiver.
     UnsupportedAddress(Box<UnifiedAddress>),
     /// An error was encountered in change selection.
-    Change(ChangeError<ChangeErrT>),
+    Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
 
-impl<DbErrT, ChangeErrT> From<GreedyInputSelectorError<ChangeErrT>>
-    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeErrT>>
+impl<DbErrT, ChangeStrategyErrT, NoteRefT>
+    From<GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
+    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
 {
-    fn from(err: GreedyInputSelectorError<ChangeErrT>) -> Self {
+    fn from(err: GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>) -> Self {
         InputSelectorError::Selection(err)
     }
 }
 
-impl<DbErrT, ChangeErrT> From<ChangeError<ChangeErrT>>
-    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeErrT>>
+impl<DbErrT, ChangeStrategyErrT, NoteRefT> From<ChangeError<ChangeStrategyErrT, NoteRefT>>
+    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
 {
-    fn from(err: ChangeError<ChangeErrT>) -> Self {
+    fn from(err: ChangeError<ChangeStrategyErrT, NoteRefT>) -> Self {
         InputSelectorError::Selection(GreedyInputSelectorError::Change(err))
     }
 }
 
-impl<DbErrT, ChangeErrT> From<BalanceError>
-    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeErrT>>
+impl<DbErrT, ChangeStrategyErrT, NoteRefT> From<BalanceError>
+    for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
 {
     fn from(err: BalanceError) -> Self {
         InputSelectorError::Selection(GreedyInputSelectorError::Balance(err))
     }
 }
 
-struct SaplingPayment(Amount);
+pub(crate) struct SaplingPayment(Amount);
+
+#[cfg(test)]
+impl SaplingPayment {
+    pub(crate) fn new(amount: Amount) -> Self {
+        SaplingPayment(amount)
+    }
+}
+
 impl sapling::OutputView for SaplingPayment {
     fn value(&self) -> Amount {
         self.0
@@ -226,15 +236,17 @@ impl sapling::OutputView for SaplingPayment {
 /// interface.
 pub struct GreedyInputSelector<DbT, ChangeT> {
     change_strategy: ChangeT,
+    dust_output_policy: DustOutputPolicy,
     _ds_type: PhantomData<DbT>,
 }
 
 impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
     /// Constructs a new greedy input selector that uses the provided change strategy to determine
     /// change values and fee amounts.
-    pub fn new(change_strategy: ChangeT) -> Self {
+    pub fn new(change_strategy: ChangeT, dust_output_policy: DustOutputPolicy) -> Self {
         GreedyInputSelector {
             change_strategy,
+            dust_output_policy,
             _ds_type: PhantomData,
         }
     }
@@ -246,7 +258,7 @@ where
     ChangeT: ChangeStrategy,
     ChangeT::FeeRule: Clone,
 {
-    type Error = GreedyInputSelectorError<<ChangeT as ChangeStrategy>::Error>;
+    type Error = GreedyInputSelectorError<ChangeT::Error, DbT::NoteRef>;
     type DataSource = DbT;
     type FeeRule = ChangeT::FeeRule;
 
@@ -304,7 +316,9 @@ where
         }
 
         let mut sapling_inputs: Vec<SpendableNote<DbT::NoteRef>> = vec![];
-        let mut prior_amount = Amount::zero();
+        let mut prior_available = Amount::zero();
+        let mut amount_required = Amount::zero();
+        let mut exclude: Vec<DbT::NoteRef> = vec![];
         // This loop is guaranteed to terminate because on each iteration we check that the amount
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
@@ -316,6 +330,7 @@ where
                 &transparent_outputs,
                 &sapling_inputs,
                 &sapling_outputs,
+                &self.dust_output_policy,
             );
 
             match balance {
@@ -328,29 +343,34 @@ where
                         fee_rule: (*self.change_strategy.fee_rule()).clone(),
                     });
                 }
+                Err(ChangeError::DustInputs { mut sapling, .. }) => {
+                    exclude.append(&mut sapling);
+                }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
-                    sapling_inputs = wallet_db
-                        .select_spendable_sapling_notes(account, required, anchor_height)
-                        .map_err(InputSelectorError::DataSource)?;
-
-                    let new_amount = sapling_inputs
-                        .iter()
-                        .map(|n| n.note_value)
-                        .sum::<Option<Amount>>()
-                        .ok_or(BalanceError::Overflow)?;
-
-                    if new_amount <= prior_amount {
-                        return Err(InputSelectorError::InsufficientFunds {
-                            required,
-                            available: new_amount,
-                        });
-                    } else {
-                        // If the set of selected inputs has changed after selection, we will loop again
-                        // and see whether we now have enough funds.
-                        prior_amount = new_amount;
-                    }
+                    amount_required = required;
                 }
                 Err(other) => return Err(other.into()),
+            }
+
+            sapling_inputs = wallet_db
+                .select_spendable_sapling_notes(account, amount_required, anchor_height, &exclude)
+                .map_err(InputSelectorError::DataSource)?;
+
+            let new_available = sapling_inputs
+                .iter()
+                .map(|n| n.note_value)
+                .sum::<Option<Amount>>()
+                .ok_or(BalanceError::Overflow)?;
+
+            if new_available <= prior_available {
+                return Err(InputSelectorError::InsufficientFunds {
+                    required: amount_required,
+                    available: new_available,
+                });
+            } else {
+                // If the set of selected inputs has changed after selection, we will loop again
+                // and see whether we now have enough funds.
+                prior_available = new_available;
             }
         }
     }
@@ -371,23 +391,48 @@ where
     where
         ParamsT: consensus::Parameters,
     {
-        let transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
+        let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
-            .map(|taddr| wallet_db.get_unspent_transparent_outputs(taddr, confirmed_height))
+            .map(|taddr| wallet_db.get_unspent_transparent_outputs(taddr, confirmed_height, &[]))
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?
             .into_iter()
             .flat_map(|v| v.into_iter())
             .collect();
 
-        let balance = self.change_strategy.compute_balance(
+        let trial_balance = self.change_strategy.compute_balance(
             params,
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
             &Vec::<SpendableNote<DbT::NoteRef>>::new(),
             &Vec::<SaplingPayment>::new(),
-        )?;
+            &self.dust_output_policy,
+        );
+
+        let balance = match trial_balance {
+            Ok(balance) => balance,
+            Err(ChangeError::DustInputs { transparent, .. }) => {
+                let exclusions: BTreeSet<OutPoint> = transparent.into_iter().collect();
+                transparent_inputs = transparent_inputs
+                    .into_iter()
+                    .filter(|i| !exclusions.contains(i.outpoint()))
+                    .collect();
+
+                self.change_strategy.compute_balance(
+                    params,
+                    target_height,
+                    &transparent_inputs,
+                    &Vec::<TxOut>::new(),
+                    &Vec::<SpendableNote<DbT::NoteRef>>::new(),
+                    &Vec::<SaplingPayment>::new(),
+                    &self.dust_output_policy,
+                )?
+            }
+            Err(other) => {
+                return Err(other.into());
+            }
+        };
 
         if balance.total() >= shielding_threshold.into() {
             Ok(Proposal {

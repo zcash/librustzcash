@@ -42,6 +42,7 @@ use crate::{
 use {
     crate::UtxoId,
     rusqlite::{params, Connection},
+    std::collections::BTreeSet,
     zcash_client_backend::{
         address::AddressMetadata, encoding::AddressCodec, wallet::WalletTransparentOutput,
     },
@@ -955,6 +956,7 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     address: &TransparentAddress,
     max_height: BlockHeight,
+    exclude: &[OutPoint],
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = wdb.conn.prepare(
         "SELECT u.prevout_txid, u.prevout_idx, u.script,
@@ -971,6 +973,7 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
 
     let mut utxos = Vec::<WalletTransparentOutput>::new();
     let mut rows = stmt_blocks.query(params![addr_str, u32::from(max_height)])?;
+    let excluded: BTreeSet<OutPoint> = exclude.iter().cloned().collect();
     while let Some(row) = rows.next()? {
         let txid: Vec<u8> = row.get(0)?;
         let mut txid_bytes = [0u8; 32];
@@ -981,8 +984,13 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
         let value = Amount::from_i64(row.get(3)?).unwrap();
         let height: u32 = row.get(4)?;
 
+        let outpoint = OutPoint::new(txid_bytes, index);
+        if excluded.contains(&outpoint) {
+            continue;
+        }
+
         let output = WalletTransparentOutput::from_parts(
-            OutPoint::new(txid_bytes, index),
+            outpoint,
             TxOut {
                 value,
                 script_pubkey,
@@ -1394,7 +1402,8 @@ mod tests {
             super::get_unspent_transparent_outputs(
                 &db_data,
                 taddr,
-                BlockHeight::from_u32(12345)
+                BlockHeight::from_u32(12345),
+                &[]
             ),
             Ok(utxos) if utxos.is_empty()
         ));
@@ -1403,7 +1412,8 @@ mod tests {
             super::get_unspent_transparent_outputs(
                 &db_data,
                 taddr,
-                BlockHeight::from_u32(34567)
+                BlockHeight::from_u32(34567),
+                &[]
             ),
             Ok(utxos) if {
                 utxos.len() == 1 &&
