@@ -31,8 +31,13 @@ and this library adheres to Rust's notion of
     fee rule.
   - `zip317`, a new module containing an implementation of the ZIP 317 fee
     rules.
-- Added to `zcash_primitives::transaction::components::sapling::builder`
-  - `SaplingBuilder::{inputs, outputs}`: accessors for Sapling builder state.
+- Added to `zcash_primitives::transaction::components::orchard`:
+  - `impl MapAuth<orchard::bundle::Authorized, orchard::bundle::Authorized> for ()`
+    (the identity map).
+- Added to `zcash_primitives::transaction::components::sapling`:
+  - `impl MapAuth<Authorized, Authorized> for ()` (the identity map).
+  - `builder::SaplingBuilder::{inputs, outputs}`: accessors for Sapling builder
+    state.
 - `zcash_primitives::transaction::components::sapling::fees`
 - Added to `zcash_primitives::transaction::components::transparent::builder`
   - `TransparentBuilder::{inputs, outputs}`: accessors for transparent builder state.
