@@ -21,5 +21,3 @@ codegen-units = 1
 [patch.crates-io]
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
-schemer = { git = "https://github.com/aschampion/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }
-schemer-rusqlite = { git = "https://github.com/aschampion/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }
