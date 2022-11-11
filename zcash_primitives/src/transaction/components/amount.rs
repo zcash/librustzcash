@@ -261,6 +261,23 @@ pub enum BalanceError {
     Underflow,
 }
 
+impl std::fmt::Display for BalanceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            BalanceError::Overflow => {
+                write!(
+                    f,
+                    "Amount addition resulted in a value outside the valid range."
+                )
+            }
+            BalanceError::Underflow => write!(
+                f,
+                "Amount subtraction resulted in a value outside the valid range."
+            ),
+        }
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::prop_compose;

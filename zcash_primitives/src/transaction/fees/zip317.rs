@@ -98,6 +98,19 @@ impl From<BalanceError> for FeeError {
     }
 }
 
+impl std::fmt::Display for FeeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            FeeError::Balance(e) => write!(
+                f,
+                "A balance calculation violated amount validity bounds: {}.",
+                e
+            ),
+            FeeError::NonP2pkhInputs(_) => write!(f, "Only P2PKH inputs are supported."),
+        }
+    }
+}
+
 impl super::FeeRule for FeeRule {
     type Error = FeeError;
 
