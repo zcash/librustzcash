@@ -5,13 +5,13 @@ use rusqlite::params;
 
 use zcash_primitives::consensus::BlockHeight;
 
-use zcash_client_backend::{data_api::error::Error, proto::compact_formats::CompactBlock};
+use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
 
 use crate::{error::SqliteClientError, BlockDb};
 
 #[cfg(feature = "unstable")]
 use {
-    crate::{BlockHash, FsBlockDb},
+    crate::{BlockHash, FsBlockDb, FsBlockDbError},
     rusqlite::Connection,
     std::fs::File,
     std::io::Read,
@@ -21,53 +21,51 @@ use {
 pub mod init;
 pub mod migrations;
 
-struct CompactBlockRow {
-    height: BlockHeight,
-    data: Vec<u8>,
-}
-
 /// Implements a traversal of `limit` blocks of the block cache database.
 ///
 /// Starting at the next block above `last_scanned_height`, the `with_row` callback is invoked with
 /// each block retrieved from the backing store. If the `limit` value provided is `None`, all
 /// blocks are traversed up to the maximum height.
-pub(crate) fn blockdb_with_blocks<F>(
-    cache: &BlockDb,
+pub(crate) fn blockdb_with_blocks<F, DbErrT, NoteRef>(
+    block_source: &BlockDb,
     last_scanned_height: BlockHeight,
     limit: Option<u32>,
     mut with_row: F,
-) -> Result<(), SqliteClientError>
+) -> Result<(), Error<DbErrT, SqliteClientError, NoteRef>>
 where
-    F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
+    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, SqliteClientError, NoteRef>>,
 {
-    // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache.0.prepare(
-        "SELECT height, data FROM compactblocks WHERE height > ? ORDER BY height ASC LIMIT ?",
-    )?;
+    fn to_chain_error<D, E: Into<SqliteClientError>, N>(err: E) -> Error<D, SqliteClientError, N> {
+        Error::BlockSource(err.into())
+    }
 
-    let rows = stmt_blocks.query_map(
-        params![
+    // Fetch the CompactBlocks we need to scan
+    let mut stmt_blocks = block_source
+        .0
+        .prepare(
+            "SELECT height, data FROM compactblocks 
+            WHERE height > ? 
+            ORDER BY height ASC LIMIT ?",
+        )
+        .map_err(to_chain_error)?;
+
+    let mut rows = stmt_blocks
+        .query(params![
             u32::from(last_scanned_height),
             limit.unwrap_or(u32::max_value()),
-        ],
-        |row| {
-            Ok(CompactBlockRow {
-                height: BlockHeight::from_u32(row.get(0)?),
-                data: row.get(1)?,
-            })
-        },
-    )?;
+        ])
+        .map_err(to_chain_error)?;
 
-    for row_result in rows {
-        let cbr = row_result?;
-        let block = CompactBlock::decode(&cbr.data[..]).map_err(Error::from)?;
-
-        if block.height() != cbr.height {
-            return Err(SqliteClientError::CorruptedData(format!(
+    while let Some(row) = rows.next().map_err(to_chain_error)? {
+        let height = BlockHeight::from_u32(row.get(0).map_err(to_chain_error)?);
+        let data: Vec<u8> = row.get(1).map_err(to_chain_error)?;
+        let block = CompactBlock::decode(&data[..]).map_err(to_chain_error)?;
+        if block.height() != height {
+            return Err(to_chain_error(SqliteClientError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
                 block.height(),
-                cbr.height
-            )));
+                height
+            ))));
         }
 
         with_row(block)?;
@@ -160,53 +158,65 @@ pub(crate) fn blockmetadb_get_max_cached_height(
 /// invoked with each block retrieved from the backing store. If the `limit` value provided is
 /// `None`, all blocks are traversed up to the maximum height for which metadata is available.
 #[cfg(feature = "unstable")]
-pub(crate) fn fsblockdb_with_blocks<F>(
+pub(crate) fn fsblockdb_with_blocks<F, DbErrT, NoteRef>(
     cache: &FsBlockDb,
     last_scanned_height: BlockHeight,
     limit: Option<u32>,
     mut with_block: F,
-) -> Result<(), SqliteClientError>
+) -> Result<(), Error<DbErrT, FsBlockDbError, NoteRef>>
 where
-    F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
+    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, FsBlockDbError, NoteRef>>,
 {
+    fn to_chain_error<D, E: Into<FsBlockDbError>, N>(err: E) -> Error<D, FsBlockDbError, N> {
+        Error::BlockSource(err.into())
+    }
+
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache.conn.prepare(
-        "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
+    let mut stmt_blocks = cache
+        .conn
+        .prepare(
+            "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
          FROM compactblocks_meta
          WHERE height > ?
          ORDER BY height ASC LIMIT ?",
-    )?;
+        )
+        .map_err(to_chain_error)?;
 
-    let rows = stmt_blocks.query_map(
-        params![
-            u32::from(last_scanned_height),
-            limit.unwrap_or(u32::max_value()),
-        ],
-        |row| {
-            Ok(BlockMeta {
-                height: BlockHeight::from_u32(row.get(0)?),
-                block_hash: BlockHash::from_slice(&row.get::<_, Vec<_>>(1)?),
-                block_time: row.get(2)?,
-                sapling_outputs_count: row.get(3)?,
-                orchard_actions_count: row.get(4)?,
-            })
-        },
-    )?;
+    let rows = stmt_blocks
+        .query_map(
+            params![
+                u32::from(last_scanned_height),
+                limit.unwrap_or(u32::max_value()),
+            ],
+            |row| {
+                Ok(BlockMeta {
+                    height: BlockHeight::from_u32(row.get(0)?),
+                    block_hash: BlockHash::from_slice(&row.get::<_, Vec<_>>(1)?),
+                    block_time: row.get(2)?,
+                    sapling_outputs_count: row.get(3)?,
+                    orchard_actions_count: row.get(4)?,
+                })
+            },
+        )
+        .map_err(to_chain_error)?;
 
     for row_result in rows {
-        let cbr = row_result?;
-        let mut block_file = File::open(cbr.block_file_path(&cache.blocks_dir))?;
+        let cbr = row_result.map_err(to_chain_error)?;
+        let mut block_file =
+            File::open(cbr.block_file_path(&cache.blocks_dir)).map_err(to_chain_error)?;
         let mut block_data = vec![];
-        block_file.read_to_end(&mut block_data)?;
+        block_file
+            .read_to_end(&mut block_data)
+            .map_err(to_chain_error)?;
 
-        let block = CompactBlock::decode(&block_data[..]).map_err(Error::from)?;
+        let block = CompactBlock::decode(&block_data[..]).map_err(to_chain_error)?;
 
         if block.height() != cbr.height {
-            return Err(SqliteClientError::CorruptedData(format!(
+            return Err(to_chain_error(FsBlockDbError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
                 block.height(),
                 cbr.height
-            )));
+            ))));
         }
 
         with_block(block)?;
@@ -225,21 +235,20 @@ mod tests {
         block::BlockHash, transaction::components::Amount, zip32::ExtendedSpendingKey,
     };
 
-    use zcash_client_backend::data_api::WalletRead;
-    use zcash_client_backend::data_api::{
-        chain::{scan_cached_blocks, validate_chain},
-        error::{ChainInvalid, Error},
+    use zcash_client_backend::data_api::chain::{
+        error::{Cause, Error},
+        scan_cached_blocks, validate_chain,
     };
+    use zcash_client_backend::data_api::WalletRead;
 
     use crate::{
         chain::init::init_cache_database,
-        error::SqliteClientError,
         tests::{
             self, fake_compact_block, fake_compact_block_spending, init_test_accounts_table,
             insert_into_cache, sapling_activation_height, AddressType,
         },
         wallet::{get_balance, init::init_wallet_db, rewind_to_height},
-        AccountId, BlockDb, NoteId, WalletDb,
+        AccountId, BlockDb, WalletDb,
     };
 
     #[test]
@@ -385,16 +394,13 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid at the data/cache boundary
-        match validate_chain(
+        let val_result = validate_chain(
             &tests::network(),
             &db_cache,
             db_data.get_max_height_hash().unwrap(),
-        ) {
-            Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
-                assert_eq!(lower_bound, sapling_activation_height() + 2)
-            }
-            _ => panic!(),
-        }
+        );
+
+        assert_matches!(val_result, Err(Error::Chain(e)) if e.at_height() == sapling_activation_height() + 2);
     }
 
     #[test]
@@ -459,16 +465,13 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid inside the cache
-        match validate_chain(
+        let val_result = validate_chain(
             &tests::network(),
             &db_cache,
             db_data.get_max_height_hash().unwrap(),
-        ) {
-            Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
-                assert_eq!(lower_bound, sapling_activation_height() + 3)
-            }
-            _ => panic!(),
-        }
+        );
+
+        assert_matches!(val_result, Err(Error::Chain(e)) if e.at_height() == sapling_activation_height() + 3);
     }
 
     #[test]
@@ -590,14 +593,11 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb3);
         match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
-            Err(SqliteClientError::BackendError(e)) => {
-                assert_eq!(
-                    e.to_string(),
-                    ChainInvalid::block_height_discontinuity::<NoteId>(
-                        sapling_activation_height() + 1,
-                        sapling_activation_height() + 2
-                    )
-                    .to_string()
+            Err(Error::Chain(e)) => {
+                assert_matches!(
+                    e.cause(),
+                    Cause::BlockHeightDiscontinuity(h) if *h
+                        == sapling_activation_height() + 2
                 );
             }
             Ok(_) | Err(_) => panic!("Should have failed"),

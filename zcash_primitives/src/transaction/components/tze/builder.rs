@@ -8,7 +8,7 @@ use crate::{
     transaction::{
         self as tx,
         components::{
-            amount::Amount,
+            amount::{Amount, BalanceError},
             tze::{fees, Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
         },
     },
@@ -121,16 +121,22 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         Ok(())
     }
 
-    pub fn value_balance(&self) -> Option<Amount> {
-        self.vin
+    pub fn value_balance(&self) -> Result<Amount, BalanceError> {
+        let total_in = self
+            .vin
             .iter()
             .map(|tzi| tzi.coin.value)
-            .sum::<Option<Amount>>()?
-            - self
-                .vout
-                .iter()
-                .map(|tzo| tzo.value)
-                .sum::<Option<Amount>>()?
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
+
+        let total_out = self
+            .vout
+            .iter()
+            .map(|tzo| tzo.value)
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
+
+        (total_in - total_out).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> (Option<Bundle<Unauthorized>>, Vec<TzeSigner<'a, BuildCtx>>) {

@@ -32,7 +32,7 @@ secrecy = "0.8"
 # - SQLite databases
 group = "0.12"
 jubjub = "0.9"
-rusqlite = { version = "0.25", features = ["bundled", "time"] }
+rusqlite = { version = "0.25", features = ["bundled", "time", "array"] }
 schemer = "0.2"
 schemer-rusqlite = "0.2"
 time = "0.2"
@@ -42,6 +42,7 @@ uuid = "1.1"
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 
 [dev-dependencies]
+assert_matches = "1.5"
 proptest = "1.0.0"
 rand_core = "0.6"
 regex = "1.4"

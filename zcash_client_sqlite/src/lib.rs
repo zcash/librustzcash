@@ -25,7 +25,7 @@
 //!
 //! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
-//! [`BlockSource`]: zcash_client_backend::data_api::BlockSource
+//! [`BlockSource`]: zcash_client_backend::data_api::chain::BlockSource
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::chain::init::init_cache_database
 
@@ -45,15 +45,18 @@ use zcash_primitives::{
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier},
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{
+        components::{amount::Amount, OutPoint},
+        Transaction, TxId,
+    },
     zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
     address::{AddressMetadata, UnifiedAddress},
     data_api::{
-        BlockSource, DecryptedTransaction, PoolType, PrunedBlock, Recipient, SentTransaction,
-        WalletRead, WalletWrite,
+        self, chain::BlockSource, DecryptedTransaction, PoolType, PrunedBlock, Recipient,
+        SentTransaction, WalletRead, WalletWrite,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -62,9 +65,6 @@ use zcash_client_backend::{
 };
 
 use crate::error::SqliteClientError;
-
-#[cfg(not(feature = "transparent-inputs"))]
-use zcash_client_backend::data_api::error::Error;
 
 #[cfg(feature = "unstable")]
 use {
@@ -87,7 +87,7 @@ pub(crate) const PRUNING_HEIGHT: u32 = 100;
 
 /// A newtype wrapper for sqlite primary key values for the notes
 /// table.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NoteId {
     SentNoteId(i64),
     ReceivedNoteId(i64),
@@ -116,7 +116,10 @@ pub struct WalletDb<P> {
 impl<P: consensus::Parameters> WalletDb<P> {
     /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(move |conn| WalletDb { conn, params })
+        Connection::open(path).and_then(move |conn| {
+            rusqlite::vtab::array::load_module(&conn)?;
+            Ok(WalletDb { conn, params })
+        })
     }
 
     /// Given a wallet database connection, obtain a handle for the write operations
@@ -230,9 +233,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         #[allow(deprecated)]
-        wallet::transact::get_spendable_sapling_notes(self, account, anchor_height)
+        wallet::transact::get_spendable_sapling_notes(self, account, anchor_height, exclude)
     }
 
     fn select_spendable_sapling_notes(
@@ -240,9 +244,16 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         #[allow(deprecated)]
-        wallet::transact::select_spendable_sapling_notes(self, account, target_value, anchor_height)
+        wallet::transact::select_spendable_sapling_notes(
+            self,
+            account,
+            target_value,
+            anchor_height,
+            exclude,
+        )
     }
 
     fn get_transparent_receivers(
@@ -253,23 +264,24 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         return wallet::get_transparent_receivers(&self.params, &self.conn, _account);
 
         #[cfg(not(feature = "transparent-inputs"))]
-        return Err(SqliteClientError::BackendError(
-            Error::TransparentInputsNotSupported,
-        ));
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 
     fn get_unspent_transparent_outputs(
         &self,
         _address: &TransparentAddress,
         _max_height: BlockHeight,
+        _exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::get_unspent_transparent_outputs(self, _address, _max_height);
+        return wallet::get_unspent_transparent_outputs(self, _address, _max_height, _exclude);
 
         #[cfg(not(feature = "transparent-inputs"))]
-        return Err(SqliteClientError::BackendError(
-            Error::TransparentInputsNotSupported,
-        ));
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 
     fn get_transparent_balances(
@@ -281,9 +293,9 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         return wallet::get_transparent_balances(self, _account, _max_height);
 
         #[cfg(not(feature = "transparent-inputs"))]
-        return Err(SqliteClientError::BackendError(
-            Error::TransparentInputsNotSupported,
-        ));
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 }
 
@@ -375,9 +387,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         self.wallet_db
-            .get_spendable_sapling_notes(account, anchor_height)
+            .get_spendable_sapling_notes(account, anchor_height, exclude)
     }
 
     fn select_spendable_sapling_notes(
@@ -385,9 +398,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
         self.wallet_db
-            .select_spendable_sapling_notes(account, target_value, anchor_height)
+            .select_spendable_sapling_notes(account, target_value, anchor_height, exclude)
     }
 
     fn get_transparent_receivers(
@@ -401,9 +415,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         &self,
         address: &TransparentAddress,
         max_height: BlockHeight,
+        exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         self.wallet_db
-            .get_unspent_transparent_outputs(address, max_height)
+            .get_unspent_transparent_outputs(address, max_height, exclude)
     }
 
     fn get_transparent_balances(
@@ -745,9 +760,9 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         return wallet::put_received_transparent_utxo(self, _output);
 
         #[cfg(not(feature = "transparent-inputs"))]
-        return Err(SqliteClientError::BackendError(
-            Error::TransparentInputsNotSupported,
-        ));
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 }
 
@@ -764,14 +779,17 @@ impl BlockDb {
 impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
-    fn with_blocks<F>(
+    fn with_blocks<F, DbErrT, NoteRef>(
         &self,
         from_height: BlockHeight,
         limit: Option<u32>,
         with_row: F,
-    ) -> Result<(), Self::Error>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
     where
-        F: FnMut(CompactBlock) -> Result<(), Self::Error>,
+        F: FnMut(
+            CompactBlock,
+        )
+            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
     {
         chain::blockdb_with_blocks(self, from_height, limit, with_row)
     }
@@ -788,7 +806,7 @@ impl BlockSource for BlockDb {
 ///
 /// where `<block_height>` is the decimal value of the height at which the block was mined, and
 /// `<block_hash>` is the hexadecimal representation of the block hash, as produced by the
-/// [`Display`] implementation for [`zcash_primitives::block::BlockHash`].
+/// [`fmt::Display`] implementation for [`zcash_primitives::block::BlockHash`].
 ///
 /// This block source is intended to be used with the following data flow:
 /// * When the cache is being filled:
@@ -828,6 +846,7 @@ pub struct FsBlockDb {
 pub enum FsBlockDbError {
     FsError(io::Error),
     DbError(rusqlite::Error),
+    Protobuf(prost::DecodeError),
     InvalidBlockstoreRoot(PathBuf),
     InvalidBlockPath(PathBuf),
     CorruptedData(String),
@@ -844,6 +863,13 @@ impl From<io::Error> for FsBlockDbError {
 impl From<rusqlite::Error> for FsBlockDbError {
     fn from(err: rusqlite::Error) -> Self {
         FsBlockDbError::DbError(err)
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl From<prost::DecodeError> for FsBlockDbError {
+    fn from(e: prost::DecodeError) -> Self {
+        FsBlockDbError::Protobuf(e)
     }
 }
 
@@ -896,20 +922,27 @@ impl FsBlockDb {
 
 #[cfg(feature = "unstable")]
 impl BlockSource for FsBlockDb {
-    type Error = SqliteClientError;
+    type Error = FsBlockDbError;
 
-    fn with_blocks<F>(
+    fn with_blocks<F, DbErrT, NoteRef>(
         &self,
         from_height: BlockHeight,
         limit: Option<u32>,
         with_row: F,
-    ) -> Result<(), Self::Error>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
     where
-        F: FnMut(CompactBlock) -> Result<(), Self::Error>,
+        F: FnMut(
+            CompactBlock,
+        )
+            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
     {
         fsblockdb_with_blocks(self, from_height, limit, with_row)
     }
 }
+
+#[cfg(test)]
+#[macro_use]
+extern crate assert_matches;
 
 #[cfg(test)]
 #[allow(deprecated)]

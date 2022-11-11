@@ -6,7 +6,7 @@ use crate::{
     legacy::{Script, TransparentAddress},
     transaction::{
         components::{
-            amount::Amount,
+            amount::{Amount, BalanceError},
             transparent::{self, fees, Authorization, Authorized, Bundle, TxIn, TxOut},
         },
         sighash::TransparentAuthorizingContext,
@@ -176,23 +176,26 @@ impl TransparentBuilder {
         Ok(())
     }
 
-    pub fn value_balance(&self) -> Option<Amount> {
+    pub fn value_balance(&self) -> Result<Amount, BalanceError> {
         #[cfg(feature = "transparent-inputs")]
         let input_sum = self
             .inputs
             .iter()
             .map(|input| input.coin.value)
-            .sum::<Option<Amount>>()?;
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
 
         #[cfg(not(feature = "transparent-inputs"))]
         let input_sum = Amount::zero();
 
-        input_sum
-            - self
-                .vout
-                .iter()
-                .map(|vo| vo.value)
-                .sum::<Option<Amount>>()?
+        let output_sum = self
+            .vout
+            .iter()
+            .map(|vo| vo.value)
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
+
+        (input_sum - output_sum).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> Option<transparent::Bundle<Unauthorized>> {

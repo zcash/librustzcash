@@ -21,3 +21,7 @@ pub mod welding_rig;
 pub mod zip321;
 
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
+
+#[cfg(test)]
+#[macro_use]
+extern crate assert_matches;

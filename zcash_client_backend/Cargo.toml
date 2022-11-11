@@ -76,6 +76,7 @@ tonic-build = "0.8"
 which = "4"
 
 [dev-dependencies]
+assert_matches = "1.5"
 gumdrop = "0.8"
 hex = "0.4"
 jubjub = "0.9"

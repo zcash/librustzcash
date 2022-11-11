@@ -2,13 +2,14 @@
 
 use crate::{
     consensus::{self, BlockHeight},
-    transaction::components::{
-        amount::Amount, sapling::fees as sapling, transparent::fees as transparent,
-    },
+    transaction::components::{amount::Amount, transparent::fees as transparent},
 };
 
 #[cfg(feature = "zfuture")]
 use crate::transaction::components::tze::fees as tze;
+
+pub mod fixed;
+pub mod zip317;
 
 /// A trait that represents the ability to compute the fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
@@ -26,8 +27,8 @@ pub trait FeeRule {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling_input_count: usize,
+        sapling_output_count: usize,
     ) -> Result<Amount, Self::Error>;
 }
 
@@ -47,55 +48,9 @@ pub trait FutureFeeRule: FeeRule {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling_input_count: usize,
+        sapling_output_count: usize,
         tze_inputs: &[impl tze::InputView],
         tze_outputs: &[impl tze::OutputView],
     ) -> Result<Amount, Self::Error>;
-}
-
-/// A fee rule that always returns a fixed fee, irrespective of the structure of
-/// the transaction being constructed.
-pub struct FixedFeeRule {
-    fixed_fee: Amount,
-}
-
-impl FixedFeeRule {
-    /// Creates a new fixed fee rule with the specified fixed fee.
-    pub fn new(fixed_fee: Amount) -> Self {
-        Self { fixed_fee }
-    }
-}
-
-impl FeeRule for FixedFeeRule {
-    type Error = std::convert::Infallible;
-
-    fn fee_required<P: consensus::Parameters>(
-        &self,
-        _params: &P,
-        _target_height: BlockHeight,
-        _transparent_inputs: &[impl transparent::InputView],
-        _transparent_outputs: &[impl transparent::OutputView],
-        _sapling_inputs: &[impl sapling::InputView],
-        _sapling_outputs: &[impl sapling::OutputView],
-    ) -> Result<Amount, Self::Error> {
-        Ok(self.fixed_fee)
-    }
-}
-
-#[cfg(feature = "zfuture")]
-impl FutureFeeRule for FixedFeeRule {
-    fn fee_required_zfuture<P: consensus::Parameters>(
-        &self,
-        _params: &P,
-        _target_height: BlockHeight,
-        _transparent_inputs: &[impl transparent::InputView],
-        _transparent_outputs: &[impl transparent::OutputView],
-        _sapling_inputs: &[impl sapling::InputView],
-        _sapling_outputs: &[impl sapling::OutputView],
-        _tze_inputs: &[impl tze::InputView],
-        _tze_outputs: &[impl tze::OutputView],
-    ) -> Result<Amount, Self::Error> {
-        Ok(self.fixed_fee)
-    }
 }

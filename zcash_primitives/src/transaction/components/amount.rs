@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
 use memuse::DynamicUsage;
 use orchard::value as orchard;
@@ -205,11 +205,51 @@ impl Neg for Amount {
     }
 }
 
+impl Mul<usize> for Amount {
+    type Output = Option<Amount>;
+
+    fn mul(self, rhs: usize) -> Option<Amount> {
+        let rhs: i64 = rhs.try_into().ok()?;
+        self.0
+            .checked_mul(rhs)
+            .and_then(|i| Amount::try_from(i).ok())
+    }
+}
+
 impl TryFrom<orchard::ValueSum> for Amount {
     type Error = ();
 
     fn try_from(v: orchard::ValueSum) -> Result<Amount, Self::Error> {
         i64::try_from(v).map_err(|_| ()).and_then(Amount::try_from)
+    }
+}
+
+/// A type-safe representation of some nonnegative amount of Zcash.
+///
+/// A NonNegativeAmount can only be constructed from an integer that is within the valid monetary
+/// range of `{0..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
+pub struct NonNegativeAmount(Amount);
+
+impl NonNegativeAmount {
+    /// Creates a NonNegativeAmount from a u64.
+    ///
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    pub fn from_u64(amount: u64) -> Result<Self, ()> {
+        Amount::from_u64(amount).map(NonNegativeAmount)
+    }
+
+    /// Creates a NonNegativeAmount from an i64.
+    ///
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
+        Amount::from_nonnegative_i64(amount).map(NonNegativeAmount)
+    }
+}
+
+impl From<NonNegativeAmount> for Amount {
+    fn from(n: NonNegativeAmount) -> Self {
+        n.0
     }
 }
 

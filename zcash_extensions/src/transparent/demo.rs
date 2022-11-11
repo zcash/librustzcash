@@ -492,10 +492,10 @@ mod tests {
         transaction::{
             builder::Builder,
             components::{
-                amount::{Amount, DEFAULT_FEE},
+                amount::Amount,
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
-            fees::FixedFeeRule,
+            fees::fixed,
             Transaction, TransactionData, TxVersion,
         },
         zip32::ExtendedSpendingKey,
@@ -809,7 +809,7 @@ mod tests {
         //
 
         let mut rng = OsRng;
-        let fee_rule = FixedFeeRule::new(DEFAULT_FEE);
+        let fee_rule = fixed::FeeRule::standard();
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
@@ -848,7 +848,7 @@ mod tests {
 
         let mut builder_b = demo_builder(tx_height + 1);
         let prevout_a = (OutPoint::new(tx_a.txid(), 0), tze_a.vout[0].clone());
-        let value_xfr = (value - DEFAULT_FEE).unwrap();
+        let value_xfr = (value - fee_rule.fixed_fee()).unwrap();
         builder_b
             .demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
@@ -874,7 +874,7 @@ mod tests {
         builder_c
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                (value_xfr - DEFAULT_FEE).unwrap(),
+                (value_xfr - fee_rule.fixed_fee()).unwrap(),
             )
             .unwrap();
 
