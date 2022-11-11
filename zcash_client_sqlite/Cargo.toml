@@ -34,7 +34,7 @@ group = "0.12"
 jubjub = "0.9"
 rusqlite = { version = "0.25", features = ["bundled", "time", "array"] }
 schemer = "0.2"
-schemer-rusqlite = "0.2"
+schemer-rusqlite = "0.2.1"
 time = "0.2"
 uuid = "1.1"
 
