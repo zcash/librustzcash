@@ -118,6 +118,10 @@ and this library adheres to Rust's notion of
     - The `WalletRead::NoteRef` and `WalletRead::TxRef` associated types are now
       required to implement `Eq` and `Ord`
   - `WalletWrite::store_received_tx` has been renamed to `store_decrypted_tx`.
+  - `wallet::decrypt_and_store_transaction` now always stores the transaction by
+    calling `WalletWrite::store_decrypted_tx`, even if no outputs could be
+    decrypted. The error type produced by the provided `WalletWrite` instance is
+    also now returned directly.
   - The `SentTransaction` type has been substantially modified to accommodate
     handling of transparent inputs. Per-output data has been split out into a
     new struct `SentTransactionOutput`, and `SentTransaction` can now contain
@@ -136,9 +140,6 @@ and this library adheres to Rust's notion of
     the block source and wallet database to which these methods delegate IO
     operations directly, which simplifies error handling in cases where callback
     functions are involved.
-  - The error type of `wallet::decrypt_and_store_transaction` has been changed;
-    the error type produced by the provided `WalletWrite` instance is returned
-    directly.
   - `error::ChainInvalid` has been moved to `chain::error`.
   - `error::Error` has been substantially modified. It now wraps database,
     note selection, builder, and other errors.
