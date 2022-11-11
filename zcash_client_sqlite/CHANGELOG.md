@@ -65,7 +65,8 @@ and this library adheres to Rust's notion of
     (and in the future, outputs to other pools). Values for this column should
     be assigned by inference from the address type in the stored data.
 - MSRV is now 1.56.1.
-- Bumped dependencies to `ff 0.12`, `group 0.12`, `jubjub 0.9`, `zcash_primitives 0.9`.
+- Bumped dependencies to `ff 0.12`, `group 0.12`, `jubjub 0.9`,
+  `zcash_primitives 0.9`, `zcash_client_backend 0.6`.
 - Renamed the following to use lower-case abbreviations (matching Rust
   naming conventions):
   - `zcash_client_sqlite::BlockDB` to `BlockDb`

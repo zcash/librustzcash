@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.6.0] - 2022-11-12
 ### Added
 - Functionality that enables the receiving and spending of transparent funds,
   behind the new `transparent-inputs` feature flag.
