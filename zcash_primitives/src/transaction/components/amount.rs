@@ -265,7 +265,10 @@ impl std::fmt::Display for BalanceError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &self {
             BalanceError::Overflow => {
-                write!(f, "Amount addition resulted in a value the valid range.")
+                write!(
+                    f,
+                    "Amount addition resulted in a value outside the valid range."
+                )
             }
             BalanceError::Underflow => write!(
                 f,

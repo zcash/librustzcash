@@ -105,7 +105,7 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
                 required,
             } => write!(
                 f,
-                "Insufficient funds: required {} ZAT, but only {} ZAT were available.",
+                "Insufficient funds: required {} zatoshis, but only {} zatoshis were available.",
                 i64::from(required),
                 i64::from(available)
             ),
