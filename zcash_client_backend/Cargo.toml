@@ -23,7 +23,7 @@ development = ["zcash_proofs"]
 zcash_address = { version = "0.2", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_note_encryption = { version = "0.2", path = "../components/zcash_note_encryption" }
-zcash_primitives = { version = "0.8", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.9", path = "../zcash_primitives" }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)

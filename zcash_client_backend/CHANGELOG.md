@@ -85,7 +85,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.56.1.
 - Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`
-  `zcash_primitives 0.8`, `orchard 0.3`.
+  `zcash_primitives 0.9`, `orchard 0.3`.
 - `zcash_client_backend::proto`:
   - The Protocol Buffers bindings are now generated for `prost 0.11` instead of
     `protobuf 2`.

@@ -15,7 +15,7 @@ rust-version = "1.56.1"
 
 [dependencies]
 zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
-zcash_primitives = { version = "0.8", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.9", path = "../zcash_primitives" }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
@@ -48,7 +48,7 @@ rand_core = "0.6"
 regex = "1.4"
 tempfile = "3"
 zcash_proofs = { version = "0.8", path = "../zcash_proofs" }
-zcash_primitives = { version = "0.8", path = "../zcash_primitives", features = ["test-dependencies"] }
+zcash_primitives = { version = "0.9", path = "../zcash_primitives", features = ["test-dependencies"] }
 zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]

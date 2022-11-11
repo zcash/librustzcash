@@ -11,7 +11,7 @@ rust-version = "1.56.1"
 
 [dependencies]
 blake2b_simd = "1"
-zcash_primitives = { version = "0.8", path = "../zcash_primitives", features = ["zfuture" ] }
+zcash_primitives = { version = "0.9", path = "../zcash_primitives", features = ["zfuture" ] }
 
 [dev-dependencies]
 ff = "0.12"

@@ -17,7 +17,7 @@ categories = ["cryptography::cryptocurrencies"]
 all-features = true
 
 [dependencies]
-zcash_primitives = { version = "0.8", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.9", path = "../zcash_primitives" }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)

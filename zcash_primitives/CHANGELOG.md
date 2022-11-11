@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.9.0] - 2022-11-12
 ### Added
 - Added to `zcash_primitives::transaction::builder`:
   - `Error::{InsufficientFunds, ChangeRequired, Balance, Fee}`
