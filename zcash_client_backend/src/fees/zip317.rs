@@ -103,8 +103,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             let mut s_disallowed_dust = sapling_dust.len().saturating_sub(s_allowed_dust);
 
             if available_grace_inputs > 0 {
-                // if we have available grace inputs, allocate them first to transparent dust
-                // and then to sapling dust
+                // If we have available grace inputs, allocate them first to transparent dust
+                // and then to Sapling dust. The caller has provided inputs that it is willing
+                // to spend, so we don't need to consider privacy effects at this layer.
                 let t_grace_dust = available_grace_inputs.saturating_sub(t_disallowed_dust);
                 t_disallowed_dust = t_disallowed_dust.saturating_sub(t_grace_dust);
 
@@ -114,9 +115,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 s_disallowed_dust = s_disallowed_dust.saturating_sub(s_grace_dust);
             }
 
-            // truncate the lists of inputs to be disregarded in input selection to just the
-            // disallowed lengths this has the effect of prioritizing inputs for inclusion by the
-            // order of th original input slices, with the most preferred inputs first
+            // Truncate the lists of inputs to be disregarded in input selection to just the
+            // disallowed lengths. This has the effect of prioritizing inputs for inclusion by the
+            // order of the original input slices, with the most preferred inputs first.
             transparent_dust.reverse();
             transparent_dust.truncate(t_disallowed_dust);
             sapling_dust.reverse();
