@@ -189,6 +189,26 @@ pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
 
+impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorError<CE, N> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            GreedyInputSelectorError::Balance(e) => write!(
+                f,
+                "A balance calculation violated amount validity bounds: {:?}.",
+                e
+            ),
+            GreedyInputSelectorError::UnsupportedAddress(_) => {
+                // we can't encode the UA to its string representation because we
+                // don't have network parameters here
+                write!(f, "Unified address contains no supported receivers.")
+            }
+            GreedyInputSelectorError::Change(err) => {
+                write!(f, "An error occurred computing change and fees: {}", err)
+            }
+        }
+    }
+}
+
 impl<DbErrT, ChangeStrategyErrT, NoteRefT>
     From<GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>
     for InputSelectorError<DbErrT, GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT>>

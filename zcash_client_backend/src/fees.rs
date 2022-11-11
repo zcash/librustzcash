@@ -1,3 +1,5 @@
+use std::fmt;
+
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     transaction::{
@@ -93,6 +95,33 @@ pub enum ChangeError<E, NoteRefT> {
     },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
+}
+
+impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            ChangeError::InsufficientFunds {
+                available,
+                required,
+            } => write!(
+                f,
+                "Insufficient funds: required {} ZAT, but only {} ZAT were available.",
+                i64::from(required),
+                i64::from(available)
+            ),
+            ChangeError::DustInputs {
+                transparent,
+                sapling,
+            } => {
+                // we can't encode the UA to its string representation because we
+                // don't have network parameters here
+                write!(f, "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.", transparent.len() + sapling.len())
+            }
+            ChangeError::StrategyError(err) => {
+                write!(f, "{}", err)
+            }
+        }
+    }
 }
 
 impl<NoteRefT> From<BalanceError> for ChangeError<BalanceError, NoteRefT> {
