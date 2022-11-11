@@ -75,32 +75,30 @@ and this library adheres to Rust's notion of
 - The SQLite implementations of `zcash_client_backend::data_api::WalletRead`
   and `WalletWrite` have been updated to reflect the changes to those
   traits.
-- Renamed the following to reflect their Sapling-specific nature:
-  - `zcash_client_sqlite::wallet`:
-    - `get_spendable_notes` to `get_spendable_sapling_notes`.
-    - `select_spendable_notes` to `select_spendable_sapling_notes`.
-- `zcash_client_sqlite::wallet::{get_spendable_sapling_notes, select_spendable_sapling_notes}`
-  have also been changed to take a parameter that permits the caller to
-  specify a set of notes to exclude from consideration.
-- `zcash_client_sqlite::wallet::init_wallet_db` has been modified to
-  take the wallet seed as an argument so that it can correctly perform
-  migrations that require re-deriving key material. In particular for
-  this upgrade, the seed is used to derive UFVKs to replace the currently
-  stored Sapling extfvks (without loss of information) as part of the
-  migration process.
+- `zcash_client_sqlite::wallet`:
+  - `get_spendable_notes` has been renamed to `get_spendable_sapling_notes`.
+  - `select_spendable_notes` has been renamed to `select_spendable_sapling_notes`.
+  - `get_spendable_sapling_notes` and `select_spendable_sapling_notes` have also
+    been changed to take a parameter that permits the caller to specify a set of
+    notes to exclude from consideration.
+  - `init_wallet_db` has been modified to take the wallet seed as an argument so
+    that it can correctly perform migrations that require re-deriving key
+    material. In particular for this upgrade, the seed is used to derive UFVKs
+    to replace the currently stored Sapling ExtFVKs (without losing information)
+    as part of the migration process.
 
 ### Removed
 - The following functions have been removed from the public interface of
   `zcash_client_sqlite::wallet`. Prefer methods defined on
   `zcash_client_backend::data_api::{WalletRead, WalletWrite}` instead.
   - `get_extended_full_viewing_keys` (use `WalletRead::get_unified_full_viewing_keys` instead).
-  - `insert_sent_note` (use `WalletWrite::store_sent_tx` instead)
-  - `insert_sent_utxo` (use `WalletWrite::store_sent_tx` instead)
-  - `put_sent_note` (use `WalletWrite::store_decrypted_tx` instead)
-  - `put_sent_utxo` (use `WalletWrite::store_decrypted_tx` instead)
-  - `delete_utxos_above` (use `WalletWrite::rewind_to_height` instead)
+  - `insert_sent_note` (use `WalletWrite::store_sent_tx` instead).
+  - `insert_sent_utxo` (use `WalletWrite::store_sent_tx` instead).
+  - `put_sent_note` (use `WalletWrite::store_decrypted_tx` instead).
+  - `put_sent_utxo` (use `WalletWrite::store_decrypted_tx` instead).
+  - `delete_utxos_above` (use `WalletWrite::rewind_to_height` instead).
 - `zcash_client_sqlite::with_blocks` (use
-  `zcash_client_backend::data_api::BlockSource::with_blocks` instead)
+  `zcash_client_backend::data_api::BlockSource::with_blocks` instead).
 - `zcash_client_sqlite::error::SqliteClientError` variants:
   - `SqliteClientError::IncorrectHrpExtFvk`
   - `SqliteClientError::Base58`

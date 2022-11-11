@@ -10,23 +10,23 @@ and this library adheres to Rust's notion of
 ### Added
 - Functionality that enables the receiving and spending of transparent funds,
   behind the new `transparent-inputs` feature flag.
-  - A new `data_api::wallet::shield_transparent_funds` method has been added
-    to facilitate the automatic shielding of transparent funds received
-    by the wallet.
-  - A `zcash_client_backend::wallet::WalletTransparentOutput` type
-    in support of `transparent-inputs` functionality.
-- A new `data_api::wallet::spend` method has been added, which is
-  intended to supersede the `data_api::wallet::create_spend_to_address`
-  method. This new method now constructs transactions via interpretation
-  of a `zcash_client_backend::zip321::TransactionRequest` value.
-  This facilitates the implementation of ZIP 321 support in wallets and
-  provides substantially greater flexibility in transaction creation.
+  - A new `zcash_client_backend::data_api::wallet::shield_transparent_funds`
+    method has been added to facilitate the automatic shielding of transparent
+    funds received by the wallet.
+  - A `zcash_client_backend::wallet::WalletTransparentOutput` type in support of
+    `transparent-inputs` functionality.
 - An `unstable` feature flag; this is added to parts of the API that may change
   in any release.
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
   - `AddressMetadata`
+  - `impl Eq for UnifiedAddress`
 - `zcash_client_backend::data_api`:
+  - `wallet::spend` method, intended to supersede the `wallet::create_spend_to_address`
+    method. This new method now constructs transactions via interpretation of a
+    `zcash_client_backend::zip321::TransactionRequest` value. This facilitates
+    the implementation of ZIP 321 support in wallets and provides substantially
+    greater flexibility in transaction creation.
   - `PoolType`
   - `ShieldedPool`
   - `Recipient`
@@ -63,18 +63,16 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::encoding`
   - `KeyError`
   - `AddressCodec` implementations for `sapling::PaymentAddress` and
-    `UnifiedAddress`
+    `UnifiedAddress`.
 - `zcash_client_backend::fees`
   - `ChangeError`
   - `ChangeStrategy`
   - `ChangeValue`
   - `TransactionBalance`
-  - `BasicFixedFeeChangeStrategy` - a `ChangeStrategy` implementation that
-    reproduces current wallet change behavior
-  - `fixed`, a new module containing of change selection strategies for the
-    existing fixed fee rule.
-  - `zip317`, a new module containing change selection strategies for the ZIP
-    317 fee rule.
+  - `fixed`, a module containing change selection strategies for the old fixed
+    fee rule.
+  - `zip317`, a module containing change selection strategies for the ZIP 317
+    fee rule.
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:
@@ -83,11 +81,10 @@ and this library adheres to Rust's notion of
   - `zcash_client_backend::encoding::AddressCodec`
   - `zcash_client_backend::encoding::encode_payment_address`
   - `zcash_client_backend::encoding::encode_transparent_address`
-- `impl Eq for zcash_client_backend::address::UnifiedAddress`
 
 ### Changed
 - MSRV is now 1.56.1.
-- Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`, `jubjub 0.9`,
+- Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`
   `zcash_primitives 0.8`, `orchard 0.3`.
 - `zcash_client_backend::proto`:
   - The Protocol Buffers bindings are now generated for `prost 0.11` instead of
@@ -102,58 +99,74 @@ and this library adheres to Rust's notion of
     been replaced by `ephemeral_key`.
   - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput`: the
     `epk` method has been replaced by `ephemeral_key`.
-- Renamed the following in `zcash_client_backend::data_api` to use lower-case
-  abbreviations (matching Rust naming conventions):
-  - `testing::MockWalletDB` to `testing::MockWalletDb`
-- Changes to the `data_api::WalletRead` trait:
-  - `WalletRead::get_target_and_anchor_heights` now takes
-    a `min_confirmations` argument that is used to compute an upper bound on
-    the anchor height being returned; this had previously been hardcoded to
-    `data_api::wallet::ANCHOR_OFFSET`.
-  - `WalletRead::get_spendable_notes` has been renamed to
-    `get_spendable_sapling_notes` and now takes as an argument a vector of
-    note IDs to be excluded from consideration.
-  - `WalletRead::select_spendable_notes` has been renamed to
-    `select_spendable_sapling_notes` and now takes as an argument a vector of
-    note IDs to be excluded from consideration.
-  - The `WalletRead::NoteRef` and `WalletRead::TxRef` associated types are now
-    required to implement `Eq` and `Ord`
-- The `zcash_client_backend::data_api::SentTransaction` type has been
-  substantially modified to accommodate handling of transparent inputs.
-  Per-output data has been split out into a new struct `SentTransactionOutput`
-  and `SentTransaction` can now contain multiple outputs, and tracks the
-  fee paid.
-- `data_api::WalletWrite::store_received_tx` has been renamed to
-  `store_decrypted_tx`.
-- `data_api::ReceivedTransaction` has been renamed to `DecryptedTransaction`,
-  and its `outputs` field has been renamed to `sapling_outputs`.
-- `data_api::error::Error` has been substantially modified. It now wraps database,
-  note selection, builder, and other errors
-  - `Error::DataSource` has been added.
-  - `Error::NoteSelection` has been added.
-  - `Error::BalanceError` has been added.
-  - `Error::MemoForbidden` has been added.
-  - `Error::AddressNotRecognized` has been added.
-  - `Error::ChildIndexOutOfRange` has been added.
-  - `Error::NoteMismatch` has been added.
-  - `Error::InsufficientBalance` has been renamed `InsufficientFunds` and
-    restructured to have named fields.
-  - `Error::Protobuf` has been removed; these decoding errors are now
-    produced as data source and/or block-source implementation-specific
-    errors.
-  - `Error::InvalidChain` has been removed; its former purpose is now served
-    by `zcash_client_backend::data_api::chain::ChainError`.
-  - `Error::InvalidNewWitnessAnchor` and `Error::InvalidWitnessAnchor` have
-    been moved to `zcash_client_backend::data_api::chain::error::ContinuityError`
-  - `Error::InvalidExtSk` (now unused) has been removed.
-  - `Error::KeyNotFound` (now unused) has been removed.
-  - `Error::KeyDerivationError` (now unused) has been removed.
-  - `Error::SaplingNotActive` (now unused) has been removed.
+- `zcash_client_backend::data_api`:
+  - Renamed the following to use lower-case abbreviations (matching Rust naming
+    conventions):
+    - `testing::MockWalletDB` to `testing::MockWalletDb`
+  - Changes to the `WalletRead` trait:
+    - `WalletRead::get_target_and_anchor_heights` now takes
+      a `min_confirmations` argument that is used to compute an upper bound on
+      the anchor height being returned; this had previously been hardcoded to
+      `wallet::ANCHOR_OFFSET`.
+    - `WalletRead::get_spendable_notes` has been renamed to
+      `get_spendable_sapling_notes`, and now takes as an argument a vector of
+      note IDs to be excluded from consideration.
+    - `WalletRead::select_spendable_notes` has been renamed to
+      `select_spendable_sapling_notes`, and now takes as an argument a vector of
+      note IDs to be excluded from consideration.
+    - The `WalletRead::NoteRef` and `WalletRead::TxRef` associated types are now
+      required to implement `Eq` and `Ord`
+  - `WalletWrite::store_received_tx` has been renamed to `store_decrypted_tx`.
+  - The `SentTransaction` type has been substantially modified to accommodate
+    handling of transparent inputs. Per-output data has been split out into a
+    new struct `SentTransactionOutput`, and `SentTransaction` can now contain
+    multiple outputs, and tracks the fee paid.
+  - `ReceivedTransaction` has been renamed to `DecryptedTransaction`, and its
+    `outputs` field has been renamed to `sapling_outputs`.
+  - `BlockSource` has been moved to the `chain` module.
+  - The types of the `with_row` callback argument to `BlockSource::with_blocks`
+    and the return type of this method have been modified to return
+    `chain::error::Error`.
+  - `testing::MockBlockSource` has been moved to
+    `chain::testing::MockBlockSource` module.
+  - `chain::{validate_chain, scan_cached_blocks}` have altered parameters and
+    result types. The latter have been modified to return`chain::error::Error`
+    instead of abstract error types. This new error type now wraps the errors of
+    the block source and wallet database to which these methods delegate IO
+    operations directly, which simplifies error handling in cases where callback
+    functions are involved.
+  - The error type of `wallet::decrypt_and_store_transaction` has been changed;
+    the error type produced by the provided `WalletWrite` instance is returned
+    directly.
+  - `error::ChainInvalid` has been moved to `chain::error`.
+  - `error::Error` has been substantially modified. It now wraps database,
+    note selection, builder, and other errors.
+    - Added new error cases:
+      - `Error::DataSource`
+      - `Error::NoteSelection`
+      - `Error::BalanceError`
+      - `Error::MemoForbidden`
+      - `Error::AddressNotRecognized`
+      - `Error::ChildIndexOutOfRange`
+      - `Error::NoteMismatch`
+    - `Error::InsufficientBalance` has been renamed to `InsufficientFunds` and
+      restructured to have named fields.
+    - `Error::Protobuf` has been removed; these decoding errors are now
+      produced as data source and/or block-source implementation-specific
+      errors.
+    - `Error::InvalidChain` has been removed; its former purpose is now served
+      by `chain::ChainError`.
+    - `Error::InvalidNewWitnessAnchor` and `Error::InvalidWitnessAnchor` have
+      been moved to `chain::error::ContinuityError`.
+    - `Error::InvalidExtSk` (now unused) has been removed.
+    - `Error::KeyNotFound` (now unused) has been removed.
+    - `Error::KeyDerivationError` (now unused) has been removed.
+    - `Error::SaplingNotActive` (now unused) has been removed.
 - `zcash_client_backend::decrypt`:
   - `decrypt_transaction` now takes a `HashMap<_, UnifiedFullViewingKey>`
     instead of `HashMap<_, ExtendedFullViewingKey>`.
 - If no memo is provided when sending to a shielded recipient, the
-  empty memo will be used
+  empty memo will be used.
 - `zcash_client_backend::keys::spending_key` has been moved to the
   `zcash_client_backend::keys::sapling` module.
 - `zcash_client_backend::zip321::MemoError` has been renamed and
@@ -165,11 +178,11 @@ and this library adheres to Rust's notion of
   - `Zip321Error::TransparentMemo(usize)`
   - `Zip321Error::RecipientMissing(usize)`
   - `Zip321Error::ParseError(String)`
-- The api of `welding_rig::ScanningKey` has changed to accommodate batch
-  decryption and to correctly handle scanning with the internal (change) keys
-  derived from ZIP 316 UFVKs and UIVKs.
-- `welding_rig::scan_block` now uses batching for trial-decryption of
-  transaction outputs.
+- `zcash_client_backend::welding_rig`:
+  - The API of `ScanningKey` has changed to accommodate batch decryption and to
+    correctly handle scanning with the internal (change) keys derived from ZIP
+    316 UFVKs and UIVKs.
+  - `scan_block` now uses batching for trial-decryption of transaction outputs.
 - The return type of the following methods in `zcash_client_backend::encoding`
   have been changed to improve error reporting:
   - `decode_extended_spending_key`
@@ -178,25 +191,6 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::wallet::SpendableNote` is now parameterized by a note
   identifier type and has an additional `note_id` field that is used to hold the
   identifier used to refer to the note in the wallet database.
-- `zcash_client_backend::data_api::BlockSource` has been moved to the
-  `zcash_client_backend::data_api::chain` module.
-- The types of the `with_row` callback argument to `BlockSource::with_blocks`
-  and the return type of this method have been modified to return
-  `zcash_client_backend::data_api::chain::error::Error`.
-- `zcash_client_backend::data_api::testing::MockBlockSource` has been moved to
-  `zcash_client_backend::data_api::chain::testing::MockBlockSource` module.
-- `zcash_client_backend::data_api::chain::{validate_chain, scan_cached_blocks}`
-  have altered parameters and result types. The latter have been modified to
-  return`zcash_client_backend::data_api::chain::error::Error` instead of
-  abstract error types. This new error type now wraps the errors of the block
-  source and wallet database to which these methods delegate IO operations
-  directly, which simplifies error handling in cases where callback functions
-  are involved.
-- `zcash_client_backend::data_api::error::ChainInvalid` has been moved to
-  `zcash_client_backend::data_api::chain::error`.
-- The error type of `zcash_client_backend::data_api::wallet::decrypt_and_store_transaction`
-  has been changed; the error type produced by the provided `WalletWrite` instance is
-  returned directly.
 
 ### Deprecated
 - `zcash_client_backend::data_api::wallet::create_spend_to_address` has been
@@ -210,6 +204,7 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_client_backend::data_api`:
+  - `wallet::ANCHOR_OFFSET`
   - `WalletRead::get_extended_full_viewing_keys` (use
     `WalletRead::get_unified_full_viewing_keys` instead).
   - `WalletRead::get_address` (use `WalletRead::get_current_address` or
@@ -220,10 +215,9 @@ and this library adheres to Rust's notion of
     instead).
   - Getters (use dedicated typed methods or direct field access instead).
   - Setters (use direct field access instead).
-- The hardcoded `data_api::wallet::ANCHOR_OFFSET` constant.
 - `zcash_client_backend::wallet::AccountId` (moved to `zcash_primitives::zip32::AccountId`).
-- The implementation of `welding_rig::ScanningKey` for `ExtendedFullViewingKey`
-  has been removed. Use `DiversifiableFullViewingKey` instead.
+- `impl zcash_client_backend::welding_rig::ScanningKey for ExtendedFullViewingKey`
+  (use `DiversifiableFullViewingKey` instead).
 
 ## [0.5.0] - 2021-03-26
 ### Added
