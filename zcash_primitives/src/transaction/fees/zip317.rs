@@ -2,7 +2,9 @@
 //!
 //! [`FeeRule`]: crate::transaction::fees::FeeRule
 //! [ZIP 317]: https//zips.z.cash/zip-0317
+
 use core::cmp::max;
+use std::error;
 
 use crate::{
     consensus::{self, BlockHeight},
@@ -107,6 +109,15 @@ impl std::fmt::Display for FeeError {
                 e
             ),
             FeeError::NonP2pkhInputs(_) => write!(f, "Only P2PKH inputs are supported."),
+        }
+    }
+}
+
+impl error::Error for FeeError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            FeeError::Balance(e) => Some(e),
+            _ => None,
         }
     }
 }

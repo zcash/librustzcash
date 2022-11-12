@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::error;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
@@ -277,6 +278,8 @@ impl std::fmt::Display for BalanceError {
         }
     }
 }
+
+impl error::Error for BalanceError {}
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {

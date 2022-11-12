@@ -854,6 +854,22 @@ pub enum FsBlockDbError {
 }
 
 #[cfg(feature = "unstable")]
+impl fmt::Display for FsBlockDbError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FsBlockDbError::FsError(e) => e.fmt(f),
+            FsBlockDbError::DbError(e) => e.fmt(f),
+            FsBlockDbError::Protobuf(e) => e.fmt(f),
+            FsBlockDbError::InvalidBlockstoreRoot(path) => {
+                write!(f, "Invalid blockstore root {:?}", path)
+            }
+            FsBlockDbError::InvalidBlockPath(path) => write!(f, "Invalid block path {:?}", path),
+            FsBlockDbError::CorruptedData(msg) => write!(f, "Corrupted block source data: {}", msg),
+        }
+    }
+}
+
+#[cfg(feature = "unstable")]
 impl From<io::Error> for FsBlockDbError {
     fn from(err: io::Error) -> Self {
         FsBlockDbError::FsError(err)
@@ -871,6 +887,18 @@ impl From<rusqlite::Error> for FsBlockDbError {
 impl From<prost::DecodeError> for FsBlockDbError {
     fn from(e: prost::DecodeError) -> Self {
         FsBlockDbError::Protobuf(e)
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl std::error::Error for FsBlockDbError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            FsBlockDbError::FsError(e) => Some(e),
+            FsBlockDbError::DbError(e) => Some(e),
+            FsBlockDbError::Protobuf(e) => Some(e),
+            _ => None,
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 
 use core::marker::PhantomData;
 use std::collections::BTreeSet;
+use std::error;
 use std::fmt;
 
 use zcash_primitives::{
@@ -205,6 +206,16 @@ impl<CE: fmt::Display, N> fmt::Display for GreedyInputSelectorError<CE, N> {
             GreedyInputSelectorError::Change(err) => {
                 write!(f, "An error occurred computing change and fees: {}", err)
             }
+        }
+    }
+}
+
+impl<CE: error::Error + 'static, N: fmt::Debug + 'static> error::Error for GreedyInputSelectorError<CE, N> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            GreedyInputSelectorError::Balance(e) => Some(e),
+            GreedyInputSelectorError::Change(e) => Some(e),
+            _ => None,
         }
     }
 }

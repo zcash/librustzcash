@@ -1,3 +1,4 @@
+use std::error;
 use std::fmt;
 
 use zcash_primitives::{
@@ -120,6 +121,15 @@ impl<CE: fmt::Display, N> fmt::Display for ChangeError<CE, N> {
             ChangeError::StrategyError(err) => {
                 write!(f, "{}", err)
             }
+        }
+    }
+}
+
+impl<CE: error::Error + 'static, N: fmt::Debug> error::Error for ChangeError<CE, N> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            ChangeError::StrategyError(e) => Some(e),
+            _ => None,
         }
     }
 }
