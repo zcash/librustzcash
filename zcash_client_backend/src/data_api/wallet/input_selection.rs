@@ -189,7 +189,7 @@ pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
 
-impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorError<CE, N> {
+impl<CE: fmt::Display, N> fmt::Display for GreedyInputSelectorError<CE, N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             GreedyInputSelectorError::Balance(e) => write!(

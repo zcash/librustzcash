@@ -97,7 +97,7 @@ pub enum ChangeError<E, NoteRefT> {
     StrategyError(E),
 }
 
-impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
+impl<CE: fmt::Display, N> fmt::Display for ChangeError<CE, N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
             ChangeError::InsufficientFunds {
