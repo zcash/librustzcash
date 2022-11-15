@@ -78,6 +78,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 transparent_outputs,
                 sapling_inputs.len(),
                 sapling_outputs.len() + 1,
+                //Orchard is not yet supported in zcash_client_backend
+                0,
             )
             .unwrap(); // fixed::FeeRule::fee_required is infallible.
 

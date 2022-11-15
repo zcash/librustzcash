@@ -129,6 +129,7 @@ impl super::FeeRule for FeeRule {
         transparent_outputs: &[impl transparent::OutputView],
         sapling_input_count: usize,
         sapling_output_count: usize,
+        orchard_action_count: usize,
     ) -> Result<Amount, Self::Error> {
         let non_p2pkh_inputs: Vec<_> = transparent_inputs
             .iter()
@@ -151,7 +152,8 @@ impl super::FeeRule for FeeRule {
         let logical_actions = max(
             ceildiv(t_in_total_size, self.p2pkh_standard_input_size),
             ceildiv(t_out_total_size, self.p2pkh_standard_output_size),
-        ) + max(sapling_input_count, sapling_output_count);
+        ) + max(sapling_input_count, sapling_output_count)
+            + orchard_action_count;
 
         (self.marginal_fee * max(self.grace_actions, logical_actions))
             .ok_or_else(|| BalanceError::Overflow.into())

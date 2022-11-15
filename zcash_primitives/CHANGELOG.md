@@ -7,9 +7,31 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `Builder::add_orchard_spend`
+  - `Builder::add_orchard_output`
+- `zcash_primitives::transaction::components::orchard::builder` module
+
+### Changed
+- `zcash_primitives::transaction`:
+  - `builder::Builder::{new, new_with_rng}` now takes an optional `orchard_anchor` 
+    argument which must be provided in order to enable Orchard spends and recipients.
+  - `builder::Builder::test_only_new_with_rng`
+    now returns an existential type: `Builder<'a, P, impl RngCore + CryptoRng>` 
+    instead of `Builder<'a, P, R>`
+  - `builder::Error` has several additional variants for Orchard-related errors.
+  - `fees::FeeRule::fee_required` now takes an additional argument,
+    `orchard_action_count`
+  - `Unauthorized`'s associated type `OrchardAuth` is now 
+    `orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>`
+    instead of `zcash_primitives::transaction::components::orchard::Unauthorized`
+- `zcash_primitives::consensus::NetworkUpgrade` now implements `PartialEq`, `Eq`
+
 ### Removed
-- Removed `impl {PartialEq, Eq} for transaction::builder::Error` in favor
-  of using `assert_matches!` where error comparisons are required.
+- `impl {PartialEq, Eq} for transaction::builder::Error` 
+  (use `assert_matches!` where error comparisons are required)
+- `zcash_primitives::transaction::components::orchard::Unauthorized`
 
 ## [0.12.0] - 2023-06-06
 ### Added

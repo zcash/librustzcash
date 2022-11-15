@@ -459,7 +459,7 @@ where
 
     // Create the transaction. The type of the proposal ensures that there
     // are no possible transparent inputs, so we ignore those
-    let mut builder = Builder::new(params.clone(), proposal.target_height());
+    let mut builder = Builder::new(params.clone(), proposal.target_height(), None);
 
     for selected in proposal.sapling_inputs() {
         let (note, key, merkle_path) = select_key_for_note(selected, usk.sapling(), &dfvk)

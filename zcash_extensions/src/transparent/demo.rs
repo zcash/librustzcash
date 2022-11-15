@@ -638,7 +638,7 @@ mod tests {
 
     fn demo_builder<'a>(height: BlockHeight) -> DemoBuilder<Builder<'a, FutureNetwork, OsRng>> {
         DemoBuilder {
-            txn_builder: Builder::new(FutureNetwork, height),
+            txn_builder: Builder::new(FutureNetwork, height, None),
             extension_id: 0,
         }
     }
