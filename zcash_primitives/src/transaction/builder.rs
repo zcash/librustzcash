@@ -16,6 +16,7 @@ use crate::{
     transaction::{
         components::{
             amount::{Amount, BalanceError},
+            orchard::builder::{MaybeOrchard, WithOrchard, WithoutOrchard},
             sapling::{
                 builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
                 fees as sapling_fees,
@@ -48,7 +49,7 @@ use crate::{
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
 /// Errors that can occur during transaction construction.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Error<FeeError> {
     /// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
@@ -64,6 +65,15 @@ pub enum Error<FeeError> {
     TransparentBuild(transparent::builder::Error),
     /// An error occurred in constructing the Sapling parts of a transaction.
     SaplingBuild(sapling_builder::Error),
+    /// An error occurred in constructing the Orchard parts of a transaction.
+    OrchardBuild(orchard::builder::Error),
+    /// An error occurred in adding an Orchard Spend a transaction.
+    OrchardSpend(&'static str),
+    /// An error occurred in adding an Orchard Output a transaction.
+    OrchardRecipient(&'static str),
+    /// Orchard is not yet active on the network, and the user attempted to add
+    /// Orchard parts to a transaction.
+    NU5Inactive,
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(feature = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -86,6 +96,13 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::Fee(e) => write!(f, "An error occurred in fee calculation: {}", e),
             Error::TransparentBuild(err) => err.fmt(f),
             Error::SaplingBuild(err) => err.fmt(f),
+            Error::OrchardBuild(err) => write!(f, "{:?}", err),
+            Error::OrchardSpend(err) => write!(f, "Could not add orchard spend: {}", err),
+            Error::OrchardRecipient(err) => write!(f, "Could not add orchard recipient: {}", err),
+            Error::NU5Inactive => write!(
+                f,
+                "Cannot create orchard transactions before NU5 activation"
+            ),
             #[cfg(feature = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
         }
@@ -93,6 +110,30 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
 }
 
 impl<FE: fmt::Debug + fmt::Display> error::Error for Error<FE> {}
+
+impl<FE: PartialEq> PartialEq for Error<FE> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Error::InsufficientFunds(e), Error::InsufficientFunds(f)) => e == f,
+            (Error::ChangeRequired(e), Error::ChangeRequired(f)) => e == f,
+            (Error::Balance(e), Error::Balance(f)) => e == f,
+            (Error::Fee(e), Error::Fee(f)) => e == f,
+            (Error::TransparentBuild(e), Error::TransparentBuild(f)) => e == f,
+            (Error::SaplingBuild(e), Error::SaplingBuild(f)) => e == f,
+            (Error::OrchardBuild(e), Error::OrchardBuild(f)) => {
+                format!("{:?}", e) == format!("{:?}", f)
+            }
+            (Error::OrchardSpend(e), Error::OrchardSpend(f)) => e == f,
+            (Error::OrchardRecipient(e), Error::OrchardRecipient(f)) => e == f,
+            (Error::NU5Inactive, Error::NU5Inactive) => true,
+            #[cfg(feature = "zfuture")]
+            (Error::TzeBuild(e), Error::TzeBuild(f)) => e == f,
+            _ => false,
+        }
+    }
+}
+
+impl<FE: Eq> Eq for Error<FE> {}
 
 impl<FE> From<BalanceError> for Error<FE> {
     fn from(e: BalanceError) -> Self {
@@ -130,13 +171,15 @@ impl Progress {
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
-pub struct Builder<'a, P, R> {
+pub struct Builder<'a, P, R, O: MaybeOrchard = WithoutOrchard> {
     params: P,
     rng: R,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
     transparent_builder: TransparentBuilder,
     sapling_builder: SaplingBuilder<P>,
+    orchard_builder: O,
+    orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(feature = "zfuture"))]
@@ -144,7 +187,27 @@ pub struct Builder<'a, P, R> {
     progress_notifier: Option<Sender<Progress>>,
 }
 
-impl<'a, P, R> Builder<'a, P, R> {
+impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng, WithOrchard> {
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height,
+    /// using default values for general transaction fields and the default OS random.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    ///
+    /// The fee will be set to the default fee (0.0001 ZEC).
+    pub fn with_orchard_anchor(
+        params: P,
+        target_height: BlockHeight,
+        anchor: orchard::tree::Anchor,
+    ) -> Self {
+        let with_orchard = WithOrchard::new(&params, target_height, anchor);
+        Builder::new_internal(params, OsRng, target_height, with_orchard)
+    }
+}
+
+impl<'a, P, R, O: MaybeOrchard> Builder<'a, P, R, O> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -202,16 +265,13 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
     pub fn new_with_rng(params: P, target_height: BlockHeight, rng: R) -> Builder<'a, P, R> {
-        Self::new_internal(params, rng, target_height)
+        Self::new_internal(params, rng, target_height, WithoutOrchard)
     }
 }
 
-impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Builder<'a, P, R, O> {
     /// Common utility function for builder construction.
-    ///
-    /// WARNING: THIS MUST REMAIN PRIVATE AS IT ALLOWS CONSTRUCTION
-    /// OF BUILDERS WITH NON-CryptoRng RNGs
-    fn new_internal(params: P, rng: R, target_height: BlockHeight) -> Builder<'a, P, R> {
+    fn new_internal(params: P, rng: R, target_height: BlockHeight, orchard_builder: O) -> Self {
         Builder {
             params: params.clone(),
             rng,
@@ -219,6 +279,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: SaplingBuilder::new(params, target_height),
+            orchard_builder,
+            orchard_saks: Vec::new(),
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
@@ -473,6 +535,51 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
     }
 }
 
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, WithOrchard> {
+    // TODO: Change the way the builder is constructed so we don't even expose these
+    // functions if you don't provide an Orchard anchor.
+    /// Adds a note to be spent in this bundle.
+    ///
+    /// Returns an error if the given Merkle path does not have the required anchor for
+    /// the given note.
+    pub fn add_orchard_spend<FE>(
+        &mut self,
+        sk: orchard::keys::SpendingKey,
+        note: orchard::Note,
+        merkle_path: orchard::tree::MerklePath,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_saks
+            .push(orchard::keys::SpendAuthorizingKey::from(&sk));
+        self.orchard_builder
+            .0
+            .as_mut()
+            .ok_or(Error::NU5Inactive)?
+            .add_spend(orchard::keys::FullViewingKey::from(&sk), note, merkle_path)
+            .map_err(Error::OrchardSpend)
+    }
+
+    /// Adds an Orchard address which will receive funds in this transaction.
+    pub fn add_orchard_output<FE>(
+        &mut self,
+        ovk: Option<orchard::keys::OutgoingViewingKey>,
+        recipient: orchard::Address,
+        value: u64,
+        memo: MemoBytes,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder
+            .0
+            .as_mut()
+            .ok_or(Error::NU5Inactive)?
+            .add_recipient(
+                ovk,
+                recipient,
+                orchard::value::NoteValue::from_raw(value),
+                Some(*memo.as_array()),
+            )
+            .map_err(Error::OrchardRecipient)
+    }
+}
+
 #[cfg(feature = "zfuture")]
 impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a>
     for Builder<'a, P, R>
@@ -509,13 +616,16 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a
 #[cfg(any(test, feature = "test-dependencies"))]
 mod testing {
     use rand::RngCore;
+    use rand_core::CryptoRng;
     use std::convert::Infallible;
 
     use super::{Builder, Error, SaplingMetadata};
     use crate::{
         consensus::{self, BlockHeight},
         sapling::prover::mock::MockTxProver,
-        transaction::{fees::fixed, Transaction},
+        transaction::components::orchard::builder::WithoutOrchard,
+        transaction::fees::fixed,
+        transaction::Transaction,
     };
 
     impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
@@ -528,10 +638,34 @@ mod testing {
         /// expiry delta (20 blocks).
         ///
         /// WARNING: DO NOT USE IN PRODUCTION
-        pub fn test_only_new_with_rng(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
-            Self::new_internal(params, rng, height)
-        }
+        pub fn test_only_new_with_rng(
+            params: P,
+            height: BlockHeight,
+            rng: R,
+        ) -> Builder<'a, P, impl RngCore + CryptoRng> {
+            struct FakeCryptoRng<R: RngCore>(R);
+            impl<R: RngCore> CryptoRng for FakeCryptoRng<R> {}
+            impl<R: RngCore> RngCore for FakeCryptoRng<R> {
+                fn next_u32(&mut self) -> u32 {
+                    self.0.next_u32()
+                }
 
+                fn next_u64(&mut self) -> u64 {
+                    self.0.next_u64()
+                }
+
+                fn fill_bytes(&mut self, dest: &mut [u8]) {
+                    self.0.fill_bytes(dest)
+                }
+
+                fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+                    self.0.try_fill_bytes(dest)
+                }
+            }
+            Builder::new_internal(params, FakeCryptoRng(rng), height, WithoutOrchard)
+        }
+    }
+    impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
             self.build(&MockTxProver, &fixed::FeeRule::standard())
         }

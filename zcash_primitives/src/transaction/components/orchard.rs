@@ -16,6 +16,8 @@ use zcash_encoding::{Array, CompactSize, Vector};
 use super::Amount;
 use crate::transaction::Transaction;
 
+pub mod builder;
+
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
 pub const FLAG_OUTPUTS_ENABLED: u8 = 0b0000_0010;
 pub const FLAGS_EXPECTED_UNSET: u8 = !(FLAG_SPENDS_ENABLED | FLAG_OUTPUTS_ENABLED);
