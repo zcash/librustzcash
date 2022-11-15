@@ -50,7 +50,7 @@ use crate::{
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 /// Errors that can occur during transaction construction.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Error<FeeError> {
     /// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
@@ -543,6 +543,7 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use ff::Field;
     use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     use rand_core::OsRng;
@@ -691,7 +692,7 @@ mod tests {
 
         // Expect a binding signature error, because our inputs aren't valid, but this shows
         // that a binding signature was attempted
-        assert_eq!(
+        assert_matches!(
             builder.mock_build(),
             Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
         );
@@ -728,7 +729,7 @@ mod tests {
         // 0.0001 t-ZEC fee
         {
             let builder = Builder::new(TEST_NETWORK, tx_height);
-            assert_eq!(
+            assert_matches!(
                 builder.mock_build(),
                 Err(Error::InsufficientFunds(MINIMUM_FEE))
             );
@@ -750,11 +751,10 @@ mod tests {
                     MemoBytes::empty(),
                 )
                 .unwrap();
-            assert_eq!(
+            assert_matches!(
                 builder.mock_build(),
-                Err(Error::InsufficientFunds(
-                    (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
-                ))
+                Err(Error::InsufficientFunds(expected)) if
+                    expected == (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
             );
         }
 
@@ -768,11 +768,10 @@ mod tests {
                     Amount::from_u64(50000).unwrap(),
                 )
                 .unwrap();
-            assert_eq!(
+            assert_matches!(
                 builder.mock_build(),
-                Err(Error::InsufficientFunds(
+                Err(Error::InsufficientFunds(expected)) if expected ==
                     (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
-                ))
             );
         }
 
@@ -808,9 +807,9 @@ mod tests {
                     Amount::from_u64(20000).unwrap(),
                 )
                 .unwrap();
-            assert_eq!(
+            assert_matches!(
                 builder.mock_build(),
-                Err(Error::InsufficientFunds(Amount::from_i64(1).unwrap()))
+                Err(Error::InsufficientFunds(expected)) if expected == Amount::from_i64(1).unwrap()
             );
         }
 
@@ -852,7 +851,7 @@ mod tests {
                     Amount::from_u64(20000).unwrap(),
                 )
                 .unwrap();
-            assert_eq!(
+            assert_matches!(
                 builder.mock_build(),
                 Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
             )
