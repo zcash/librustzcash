@@ -29,6 +29,7 @@ pub trait FeeRule {
         transparent_outputs: &[impl transparent::OutputView],
         sapling_input_count: usize,
         sapling_output_count: usize,
+        orchard_action_count: usize,
     ) -> Result<Amount, Self::Error>;
 }
 

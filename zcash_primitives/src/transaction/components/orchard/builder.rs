@@ -3,7 +3,7 @@ use crate::{
     transaction::components::Amount,
 };
 use orchard::{
-    builder::{Builder, Error, InProgress, Unauthorized, Unproven},
+    builder::{BuildError, Builder, InProgress, Unauthorized, Unproven},
     bundle::Bundle,
     value::OverflowError,
 };
@@ -16,7 +16,7 @@ pub trait MaybeOrchard {
     fn build<V: core::convert::TryFrom<i64>>(
         self,
         rng: impl rand::RngCore,
-    ) -> Option<Result<Bundle<InProgress<Unproven, Unauthorized>, V>, Error>>;
+    ) -> Option<Result<Bundle<InProgress<Unproven, Unauthorized>, V>, BuildError>>;
     fn value_balance(&self) -> Result<Amount, OverflowError>;
 }
 
@@ -24,7 +24,7 @@ impl MaybeOrchard for WithOrchard {
     fn build<V: core::convert::TryFrom<i64>>(
         self,
         rng: impl rand::RngCore,
-    ) -> Option<Result<Bundle<InProgress<Unproven, Unauthorized>, V>, Error>> {
+    ) -> Option<Result<Bundle<InProgress<Unproven, Unauthorized>, V>, BuildError>> {
         self.0.map(|builder| builder.build(rng))
     }
 
@@ -40,7 +40,7 @@ impl MaybeOrchard for WithoutOrchard {
     fn build<V: core::convert::TryFrom<i64>>(
         self,
         _: impl rand::RngCore,
-    ) -> Option<Result<Bundle<InProgress<Unproven, Unauthorized>, V>, Error>> {
+    ) -> Option<Result<Bundle<InProgress<Unproven, Unauthorized>, V>, BuildError>> {
         None
     }
 

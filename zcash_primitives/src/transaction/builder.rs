@@ -66,11 +66,11 @@ pub enum Error<FeeError> {
     /// An error occurred in constructing the Sapling parts of a transaction.
     SaplingBuild(sapling_builder::Error),
     /// An error occurred in constructing the Orchard parts of a transaction.
-    OrchardBuild(orchard::builder::Error),
+    OrchardBuild(orchard::builder::BuildError),
     /// An error occurred in adding an Orchard Spend a transaction.
-    OrchardSpend(&'static str),
+    OrchardSpend(orchard::builder::SpendError),
     /// An error occurred in adding an Orchard Output a transaction.
-    OrchardRecipient(&'static str),
+    OrchardRecipient(orchard::builder::OutputError),
     /// Orchard is not yet active on the network, and the user attempted to add
     /// Orchard parts to a transaction.
     NU5Inactive,
@@ -179,6 +179,10 @@ pub struct Builder<'a, P, R, O: MaybeOrchard = WithoutOrchard> {
     transparent_builder: TransparentBuilder,
     sapling_builder: SaplingBuilder<P>,
     orchard_builder: O,
+    // TODO: These should be calculated by the orchard builder and not cached here
+    // This requires publicizing methods or fields of the orchard builder
+    num_orchard_spends: usize,
+    num_orchard_outputs: usize,
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
@@ -286,6 +290,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
             #[cfg(not(feature = "zfuture"))]
             tze_builder: std::marker::PhantomData,
             progress_notifier: None,
+            num_orchard_spends: 0,
+            num_orchard_outputs: 0,
         }
     }
 
@@ -387,6 +393,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
                 self.transparent_builder.outputs(),
                 self.sapling_builder.inputs().len(),
                 self.sapling_builder.bundle_output_count(),
+                match std::cmp::max(self.num_orchard_spends, self.num_orchard_outputs) {
+                    1 => 2,
+                    n => n,
+                },
             )
             .map_err(Error::Fee)?;
         self.build_internal(prover, fee)
@@ -550,6 +560,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, Wit
     ) -> Result<(), Error<FR::Error>> {
         self.orchard_saks
             .push(orchard::keys::SpendAuthorizingKey::from(&sk));
+        self.num_orchard_spends += 1;
         self.orchard_builder
             .0
             .as_mut()
@@ -566,6 +577,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, Wit
         value: u64,
         memo: MemoBytes,
     ) -> Result<(), Error<FR::Error>> {
+        self.num_orchard_outputs += 1;
         self.orchard_builder
             .0
             .as_mut()

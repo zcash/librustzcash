@@ -46,6 +46,7 @@ impl super::FeeRule for FeeRule {
         _transparent_outputs: &[impl transparent::OutputView],
         _sapling_input_count: usize,
         _sapling_output_count: usize,
+        _orchard_action_count: usize,
     ) -> Result<Amount, Self::Error> {
         Ok(self.fixed_fee)
     }
