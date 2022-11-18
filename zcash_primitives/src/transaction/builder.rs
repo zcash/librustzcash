@@ -361,11 +361,14 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
         self.progress_notifier = Some(progress_notifier);
     }
 
-    /// Returns the sum of the transparent, Sapling, and TZE value balances.
+    /// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
     fn value_balance(&self) -> Result<Amount, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
             self.sapling_builder.value_balance(),
+            self.orchard_builder
+                .value_balance()
+                .map_err(|_| BalanceError::Overflow)?,
             #[cfg(feature = "zfuture")]
             self.tze_builder.value_balance()?,
         ];
