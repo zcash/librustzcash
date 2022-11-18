@@ -238,11 +238,15 @@ impl TransactionRequest {
             parse::lead_addr(params)(uri).map_err(|e| Zip321Error::ParseError(e.to_string()))?;
 
         // Parse the remaining parameters as an undifferentiated list
-        let (_, xs) = all_consuming(preceded(
-            char('?'),
-            separated_list0(char('&'), parse::zcashparam(params)),
-        ))(rest)
-        .map_err(|e| Zip321Error::ParseError(e.to_string()))?;
+        let (_, xs) = if rest.is_empty() {
+            ("", vec![])
+        } else {
+            all_consuming(preceded(
+                char('?'),
+                separated_list0(char('&'), parse::zcashparam(params)),
+            ))(rest)
+            .map_err(|e| Zip321Error::ParseError(e.to_string()))?
+        };
 
         // Construct sets of payment parameters, keyed by the payment index.
         let mut params_by_index: HashMap<usize, Vec<parse::Param>> = HashMap::new();
@@ -379,7 +383,7 @@ mod parse {
     use core::fmt::Debug;
 
     use nom::{
-        bytes::complete::{tag, take_until},
+        bytes::complete::{tag, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
         combinator::{map_opt, map_res, opt, recognize},
         sequence::{preceded, separated_pair, tuple},
@@ -481,7 +485,7 @@ mod parse {
     ) -> impl Fn(&str) -> IResult<&str, Option<IndexedParam>> + '_ {
         move |input: &str| {
             map_opt(
-                preceded(tag("zcash:"), take_until("?")),
+                preceded(tag("zcash:"), take_till(|c| c == '?')),
                 |addr_str: &str| {
                     if addr_str.is_empty() {
                         Some(None) // no address is ok, so wrap in `Some`
