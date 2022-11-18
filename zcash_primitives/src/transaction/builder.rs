@@ -484,6 +484,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
+            // This is not of the right type, and it's not obvious how to implement this generically
+            // for both a `Bundle<InProgress<Unproven, Unauthorized>` and a `Bundle<Authorized, V>`
+            // As such, it's created and authorized at the same time, right before being added to the
+            // authorized bundle
             orchard_bundle: None,
             #[cfg(feature = "zfuture")]
             tze_bundle,
@@ -529,6 +533,26 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
             None => (None, SaplingMetadata::empty()),
         };
 
+        let orchard_saks = self.orchard_saks.clone();
+
+        let orchard_bundle: Option<orchard::Bundle<_, Amount>> = self
+            .orchard_builder
+            .build(&mut rng)
+            .transpose()
+            .map_err(Error::OrchardBuild)?
+            .map(|b| {
+                b.create_proof(&orchard::circuit::ProvingKey::build(), &mut rng)
+                    .and_then(|b| {
+                        b.apply_signatures(
+                            &mut rng,
+                            *shielded_sig_commitment.as_ref(),
+                            &orchard_saks,
+                        )
+                    })
+            })
+            .transpose()
+            .map_err(Error::OrchardBuild)?;
+
         let authorized_tx = TransactionData {
             version: unauthed_tx.version,
             consensus_branch_id: unauthed_tx.consensus_branch_id,
@@ -537,7 +561,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
             transparent_bundle,
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
-            orchard_bundle: None,
+            orchard_bundle,
             #[cfg(feature = "zfuture")]
             tze_bundle,
         };
