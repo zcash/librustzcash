@@ -812,6 +812,27 @@ mod tests {
     }
 
     #[test]
+    fn test_zip321_parse_no_query_params() {
+        let uri = "zcash:ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k";
+        let parse_result = TransactionRequest::from_uri(&TEST_NETWORK, uri).unwrap();
+
+        let expected = TransactionRequest {
+            payments: vec![
+                Payment {
+                    recipient_address: RecipientAddress::Shielded(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    amount: Amount::from_u64(0).unwrap(),
+                    memo: None,
+                    label: None,
+                    message: None,
+                    other_params: vec![],
+                }
+            ]
+        };
+
+        assert_eq!(parse_result, expected);
+    }
+
+    #[test]
     fn test_zip321_roundtrip_empty_message() {
         let req = TransactionRequest {
             payments: vec![
