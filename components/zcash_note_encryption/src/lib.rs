@@ -331,7 +331,7 @@ pub trait PayloadEncryptionDomain: Domain {
     /// Derives a `SymmetricKey` used to encrypt the an arbitrary payload distinct from the note
     /// plaintext.
     ///
-    /// This method provides the ability to use arbitrary personalization for the derivation of the
+    /// This method provides the ability to use personalization for the derivation of the
     /// secret key, so as to provide domain separation of the symmetric key when encrypting a
     /// payload to be readable by the recipient of a shielded note.
     ///

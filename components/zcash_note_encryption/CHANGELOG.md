@@ -33,7 +33,7 @@ and this library adheres to Rust's notion of
   - `Domain::prepare_epk` method, which produces the above type.
 - Feature `encrypt-to-recipient`, which allows the encryption of an arbitrary
   payload decryptable by the recipient of a shielded note. This adds the
-  following trats and functions:
+  following traits and functions:
   - `PayloadEncryptionDomain`
   - `decrypt_associated_ciphertext_ivk`
   - `decrypt_associated_ciphertext_ovk`

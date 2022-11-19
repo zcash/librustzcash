@@ -440,7 +440,7 @@ pub struct OutputDescription<Proof> {
     cv: ValueCommitment,
     cmu: ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    enc_ciphertext: [u8; 580],
+    enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
     out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
     zkproof: Proof,
 }
@@ -461,7 +461,7 @@ impl<Proof> OutputDescription<Proof> {
     }
 
     /// Returns the encrypted note ciphertext.
-    pub fn enc_ciphertext(&self) -> &[u8; 580] {
+    pub fn enc_ciphertext(&self) -> &[u8; ENC_CIPHERTEXT_SIZE] {
         &self.enc_ciphertext
     }
 
@@ -499,7 +499,7 @@ impl<Proof> OutputDescription<Proof> {
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        enc_ciphertext: [u8; 580],
+        enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
         out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
         zkproof: Proof,
     ) -> Self {
@@ -525,7 +525,7 @@ impl<Proof> OutputDescription<Proof> {
     pub(crate) fn ephemeral_key_mut(&mut self) -> &mut EphemeralKeyBytes {
         &mut self.ephemeral_key
     }
-    pub(crate) fn enc_ciphertext_mut(&mut self) -> &mut [u8; 580] {
+    pub(crate) fn enc_ciphertext_mut(&mut self) -> &mut [u8; ENC_CIPHERTEXT_SIZE] {
         &mut self.enc_ciphertext
     }
     pub(crate) fn out_ciphertext_mut(&mut self) -> &mut [u8; OUT_CIPHERTEXT_SIZE] {
@@ -600,7 +600,7 @@ impl OutputDescription<GrothProofBytes> {
         let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
         reader.read_exact(&mut ephemeral_key.0)?;
 
-        let mut enc_ciphertext = [0u8; 580];
+        let mut enc_ciphertext = [0u8; ENC_CIPHERTEXT_SIZE];
         let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
         reader.read_exact(&mut enc_ciphertext)?;
         reader.read_exact(&mut out_ciphertext)?;
@@ -640,7 +640,7 @@ pub struct OutputDescriptionV5 {
     cv: ValueCommitment,
     cmu: ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    enc_ciphertext: [u8; 580],
+    enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
     out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
 }
 
@@ -657,7 +657,7 @@ impl OutputDescriptionV5 {
         let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
         reader.read_exact(&mut ephemeral_key.0)?;
 
-        let mut enc_ciphertext = [0u8; 580];
+        let mut enc_ciphertext = [0u8; ENC_CIPHERTEXT_SIZE];
         let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
         reader.read_exact(&mut enc_ciphertext)?;
         reader.read_exact(&mut out_ciphertext)?;
@@ -730,7 +730,7 @@ pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use rand::{rngs::StdRng, SeedableRng};
-    use zcash_note_encryption::OUT_CIPHERTEXT_SIZE;
+    use zcash_note_encryption::{ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE};
 
     use crate::{
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
@@ -799,8 +799,8 @@ pub mod testing {
             cmu in vec(any::<u8>(), 64)
                 .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
                 .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
-            enc_ciphertext in vec(any::<u8>(), 580)
-                .prop_map(|v| <[u8;580]>::try_from(v.as_slice()).unwrap()),
+            enc_ciphertext in vec(any::<u8>(), ENC_CIPHERTEXT_SIZE)
+                .prop_map(|v| <[u8;ENC_CIPHERTEXT_SIZE]>::try_from(v.as_slice()).unwrap()),
             epk in arb_extended_point(),
             out_ciphertext in vec(any::<u8>(), OUT_CIPHERTEXT_SIZE)
                 .prop_map(|v| <[u8;OUT_CIPHERTEXT_SIZE]>::try_from(v.as_slice()).unwrap()),
