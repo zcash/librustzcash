@@ -301,31 +301,31 @@ mod tests {
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
-        // Empty chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        // Empty chain should return None
+        assert_matches!(db_data.get_max_height_hash(), Ok(None));
 
         // Create a fake CompactBlock sending value to the address
+        let fake_block_hash = BlockHash([0; 32]);
+        let fake_block_height = sapling_activation_height();
+
         let (cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
+            fake_block_height,
+            fake_block_hash,
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
+
         insert_into_cache(&db_cache, &cb);
 
         // Cache-only chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        let validate_chain_result =
+            validate_chain(&db_cache, (fake_block_height, fake_block_hash), Some(1));
+
+        assert_matches!(
+            validate_chain_result,
+            Ok((_fake_block_height, _fake_block_hash))
+        );
 
         // Scan the cache
         let mut db_write = db_data.get_update_ops().unwrap();
@@ -333,9 +333,9 @@ mod tests {
 
         // Data-only chain should be valid
         validate_chain(
-            &tests::network(),
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap().unwrap(),
+            None,
         )
         .unwrap();
 
@@ -351,9 +351,9 @@ mod tests {
 
         // Data+cache chain should be valid
         validate_chain(
-            &tests::network(),
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap().unwrap(),
+            None,
         )
         .unwrap();
 
@@ -362,9 +362,9 @@ mod tests {
 
         // Data-only chain should be valid
         validate_chain(
-            &tests::network(),
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap().unwrap(),
+            None,
         )
         .unwrap();
     }
@@ -406,9 +406,9 @@ mod tests {
 
         // Data-only chain should be valid
         validate_chain(
-            &tests::network(),
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap().unwrap(),
+            None,
         )
         .unwrap();
 
@@ -432,9 +432,9 @@ mod tests {
 
         // Data+cache chain should be invalid at the data/cache boundary
         let val_result = validate_chain(
-            &tests::network(),
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap().unwrap(),
+            None,
         );
 
         assert_matches!(val_result, Err(Error::Chain(e)) if e.at_height() == sapling_activation_height() + 2);
@@ -477,9 +477,9 @@ mod tests {
 
         // Data-only chain should be valid
         validate_chain(
-            &tests::network(),
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap().unwrap(),
+            None,
         )
         .unwrap();
 
@@ -503,9 +503,9 @@ mod tests {
 
         // Data+cache chain should be invalid inside the cache
         let val_result = validate_chain(
-            &tests::network(),
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap().unwrap(),
+            None,
         );
 
         assert_matches!(val_result, Err(Error::Chain(e)) if e.at_height() == sapling_activation_height() + 3);

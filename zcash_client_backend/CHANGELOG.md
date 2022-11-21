@@ -9,20 +9,47 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.60.0.
+
 - `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
   takes a `shielding_threshold` argument that can be used to specify the 
   minimum value allowed as input to a shielding transaction. Previously 
   the shielding threshold was fixed at 100000 zatoshis.
+
 - Note commitments now use
   `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
   `bls12_381::Scalar` in the following places:
   - The `cmu` field of `zcash_client_backend::wallet::WalletShieldedOutput`.
   - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput::cmu`.
 
+- **breaking changes** to `zcash_client_backend::data_api::chain::validate_chain`
+  - `validate_chain` now requires a non-optional `validate_from` parameter that
+    indicates the starting point of the `BlockSourceT` validation. An Optional
+    `limit` can be specified as well.  This allows callers to validate smaller
+    intervals of the given `BlockSourceT` shortening processing times of the
+    function call at the expense of obtaining a partial result on a given
+    section of interest of the block source. 
+
+  - `params: &ParamsT` has been removed from the arguments since they were only
+    needed to fall back to `sapling_activation_height` when `None` as passed as
+    the `validate_from` argument. Passing `None` as validation start point on a
+    pre-populated `block_source` would result in an error
+    `ChainError::block_height_discontinuity(sapling_activation_height - 1, current_height)` 
+
+  - With this new API callers must specify a concrete `validate_from` argument
+    and assume that `validate_chain` will not take any default fallbacks to
+    chain `ParamsT`.
+
+  - The addition of a `limit` to the chain validation function changes the
+    meaning of its successful output, being now a `BlockHeight, BlockHash)`
+    tuple indicating the block height and block has up to which the chain as
+    been validated on its continuity of heights and hashes. Callers providing a
+    `limit` aregumente are responsible of subsequent calls to
+    `validate_chain()` to complete validating the totality of the block_source. 
 
 ### Removed 
 - `zcash_client_backend::data_api`:
   - `WalletWrite::remove_unmined_tx` (was behind the `unstable` feature flag).
+
 ## [0.6.1] - 2022-12-06
 ### Added
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` now generates

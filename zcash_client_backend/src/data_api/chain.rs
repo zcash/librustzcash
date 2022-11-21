@@ -44,7 +44,7 @@
 //! // Given that we assume the server always gives us correct-at-the-time blocks, any
 //! // errors are in the blocks we have previously cached or scanned.
 //! let max_height_hash = db_data.get_max_height_hash().map_err(Error::Wallet)?;
-//! if let Err(e) = validate_chain(&network, &block_source, max_height_hash) {
+//! if let Err(e) = validate_chain(&block_source, max_height_hash, None) {
 //!     match e {
 //!         Error::Chain(e) => {
 //!             // a) Pick a height to rewind to.
@@ -134,59 +134,52 @@ pub trait BlockSource {
 /// block source is more likely to be accurate than the previously-scanned information.
 /// This follows from the design (and trust) assumption that the `lightwalletd` server
 /// provides accurate block information as of the time it was requested.
+/// The addition of a `limit` to the chain validation function changes the meaning of
+/// its successful output, being now a `BlockHeight, BlockHash)` tuple indicating the
+/// block height and block hash up to which the chain as been validated on its continuity
+/// of heights and hashes. Callers providing a `limit` argument are responsible of
+/// making subsequent calls to `validate_chain()` to complete validating the remaining
+/// blocks stored on the `block_source`.
 ///
 /// Arguments:
-/// - `parameters` Network parameters
 /// - `block_source` Source of compact blocks
-/// - `from_tip` Height & hash of last validated block; if no validation has previously
-///    been performed, this will begin scanning from `sapling_activation_height - 1`
+/// - `validate_from` Height & hash of last validated block;
+/// - `limit` Maximum number of blocks that should be validated in this call.
 ///
 /// Returns:
-/// - `Ok(())` if the combined chain is valid.
+/// - `Ok((BlockHeight, BlockHash))` if the combined chain is valid up to the given height
+/// and block hash.
 /// - `Err(Error::Chain(cause))` if the combined chain is invalid.
 /// - `Err(e)` if there was an error during validation unrelated to chain validity.
 ///
 /// This function does not mutate either of the databases.
-pub fn validate_chain<ParamsT, BlockSourceT>(
-    parameters: &ParamsT,
+pub fn validate_chain<BlockSourceT>(
     block_source: &BlockSourceT,
-    validate_from: Option<(BlockHeight, BlockHash)>,
-) -> Result<(), Error<Infallible, BlockSourceT::Error, Infallible>>
+    validate_from: (BlockHeight, BlockHash),
+    limit: Option<u32>,
+) -> Result<(BlockHeight, BlockHash), Error<Infallible, BlockSourceT::Error, Infallible>>
 where
-    ParamsT: consensus::Parameters,
     BlockSourceT: BlockSource,
 {
-    let sapling_activation_height = parameters
-        .activation_height(NetworkUpgrade::Sapling)
-        .expect("Sapling activation height must be known.");
-
     // The block source will contain blocks above the `validate_from` height.  Validate from that
     // maximum height up to the chain tip, returning the hash of the block found in the block
     // source at the `validate_from` height, which can then be used to verify chain integrity by
     // comparing against the `validate_from` hash.
-    let from_height = validate_from
-        .map(|(height, _)| height)
-        .unwrap_or(sapling_activation_height - 1);
 
-    let mut prev_height = from_height;
-    let mut prev_hash: Option<BlockHash> = validate_from.map(|(_, hash)| hash);
-
-    block_source.with_blocks::<_, Infallible, Infallible>(from_height, None, move |block| {
-        let current_height = block.height();
-        let result = if current_height != prev_height + 1 {
-            Err(ChainError::block_height_discontinuity(prev_height + 1, current_height).into())
-        } else {
-            match prev_hash {
-                None => Ok(()),
-                Some(h) if h == block.prev_hash() => Ok(()),
-                Some(_) => Err(ChainError::prev_hash_mismatch(current_height).into()),
+    let (mut valid_height, mut valid_hash) = validate_from;
+    block_source
+        .with_blocks::<_, Infallible, Infallible>(valid_height, limit, move |block| {
+            if block.height() != valid_height + 1 {
+                Err(ChainError::block_height_discontinuity(valid_height + 1, block.height()).into())
+            } else if block.prev_hash() != valid_hash {
+                Err(ChainError::prev_hash_mismatch(block.height()).into())
+            } else {
+                valid_height = block.height();
+                valid_hash = block.hash();
+                Ok(())
             }
-        };
-
-        prev_height = current_height;
-        prev_hash = Some(block.hash());
-        result
-    })
+        })
+        .map(|_| (valid_height, valid_hash))
 }
 
 /// Scans at most `limit` new blocks added to the block source for any transactions received by the
