@@ -106,6 +106,9 @@ enum NoteValidity {
     Invalid,
 }
 
+/// Newtype representing the bytes of the AEAD Tag.
+pub struct AEADBytes(pub [u8; AEAD_TAG_SIZE]);
+
 /// Trait that encapsulates protocol-specific note encryption types and logic.
 ///
 /// This trait enables most of the note encryption logic to be shared between Sapling and
@@ -118,8 +121,8 @@ pub trait Domain {
     type SymmetricKey: AsRef<[u8]>;
     type Note;
     type NotePlaintextBytes: AsMut<[u8]>;
-    type EncNoteCiphertextBytes: From<(Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE])>;
-    type CompactNotePlaintextBytes: From<Self::NotePlaintextBytes> + AsMut<[u8]>;
+    type EncNoteCiphertextBytes: From<(Self::NotePlaintextBytes, AEADBytes)>;
+    type CompactNotePlaintextBytes: From<Self::NotePlaintextBytes> + From<Self::CompactEncNoteCiphertextBytes> + AsMut<[u8]>;
     type CompactEncNoteCiphertextBytes;
     type Recipient;
     type DiversifiedTransmissionKey;
@@ -283,9 +286,7 @@ pub trait Domain {
     /// `EphemeralSecretKey`.
     fn extract_esk(out_plaintext: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey>;
 
-    fn separate_tag_from_ciphertext(enc_ciphertext: &Self::EncNoteCiphertextBytes) -> (Self::NotePlaintextBytes, [u8; AEAD_TAG_SIZE]);
-
-    fn convert_to_compact_plaintext_type(enc_ciphertext: &Self::CompactEncNoteCiphertextBytes) -> Self::CompactNotePlaintextBytes;
+    fn separate_tag_from_ciphertext(enc_ciphertext: &Self::EncNoteCiphertextBytes) -> (Self::NotePlaintextBytes, AEADBytes);
 }
 
 /// Trait that encapsulates protocol-specific batch trial decryption logic.
@@ -475,7 +476,7 @@ impl<D: Domain> NoteEncryption<D> {
                 input.as_mut(),
             )
             .unwrap();
-        D::EncNoteCiphertextBytes::from((input, tag.into()))
+        D::EncNoteCiphertextBytes::from((input, AEADBytes(tag.into())))
     }
 
     /// Generates `outCiphertext` for this note.
@@ -565,7 +566,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
             [0u8; 12][..].into(),
             &[],
             plaintext.as_mut(),
-            &tag.into(),
+            &tag.0.into(),
         )
         .ok()?;
 
@@ -667,7 +668,7 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     let enc_ciphertext = output.enc_ciphertext_compact();
 
     // Start from block 1 to skip over Poly1305 keying output
-    let mut plaintext = D::convert_to_compact_plaintext_type(&enc_ciphertext);
+    let mut plaintext: D::CompactNotePlaintextBytes = enc_ciphertext.into();
     let mut keystream = ChaCha20::new(key.as_ref().into(), [0u8; 12][..].into());
     keystream.seek(64);
     keystream.apply_keystream(plaintext.as_mut());
@@ -759,7 +760,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
             [0u8; 12][..].into(),
             &[],
             plaintext.as_mut(),
-            &tag.into(),
+            &tag.0.into(),
         )
         .ok()?;
 
