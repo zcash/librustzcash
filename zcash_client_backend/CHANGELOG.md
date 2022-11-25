@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_client_backend::address::UnifiedAddress::write_as_raw_encoding`
 
 ## [0.6.0] - 2022-11-12
 ### Added
