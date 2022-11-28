@@ -173,24 +173,24 @@ impl UnifiedAddress {
         for item in self.to_unified().items() {
             match item {
                 unified::Receiver::Orchard(data) => {
-                    writer.write(&[3])?;
-                    writer.write(&data)?;
+                    writer.write_all(&[3])?;
+                    writer.write_all(&data)?;
                 }
                 unified::Receiver::Sapling(data) => {
-                    writer.write(&[2])?;
-                    writer.write(&data)?;
+                    writer.write_all(&[2])?;
+                    writer.write_all(&data)?;
                 }
                 unified::Receiver::P2sh(data) => {
-                    writer.write(&[1])?;
-                    writer.write(&data)?;
+                    writer.write_all(&[1])?;
+                    writer.write_all(&data)?;
                 }
                 unified::Receiver::P2pkh(data) => {
-                    writer.write(&[0])?;
-                    writer.write(&data)?;
+                    writer.write_all(&[0])?;
+                    writer.write_all(&data)?;
                 }
                 unified::Receiver::Unknown { typecode, data } => {
                     zcash_encoding::CompactSize::write(&mut writer, typecode as usize)?;
-                    writer.write(&data)?;
+                    writer.write_all(&data)?;
                 }
             }
         }
