@@ -256,6 +256,19 @@ impl<P> SaplingBuilder<P> {
         &self.outputs
     }
 
+    /// Returns the number of outputs that will be present in the Sapling bundle built by
+    /// this builder.
+    ///
+    /// This may be larger than the number of outputs that have been added to the builder,
+    /// depending on whether padding is going to be applied.
+    pub(in crate::transaction) fn bundle_output_count(&self) -> usize {
+        // This matches the padding behaviour in `Self::build`.
+        match self.spends.len() {
+            0 => self.outputs.len(),
+            _ => std::cmp::max(MIN_SHIELDED_OUTPUTS, self.outputs.len()),
+        }
+    }
+
     /// Returns the net value represented by the spends and outputs added to this builder.
     pub fn value_balance(&self) -> Amount {
         self.value_balance
