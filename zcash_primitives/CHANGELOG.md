@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.9.1] - 2022-12-06
 ### Fixed
 - `zcash_primitives::transaction::builder`:
   - `Builder::build` was calling `FeeRule::fee_required` with the number of
