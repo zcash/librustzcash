@@ -157,6 +157,7 @@ type TaggedBatch<P, S> = Batch<(AccountId, S), SaplingDomain<P>, CompactOutputDe
 type TaggedBatchRunner<P, S, T> =
     BatchRunner<(AccountId, S), SaplingDomain<P>, CompactOutputDescription, T>;
 
+#[tracing::instrument(skip_all, fields(height = block.height))]
 pub(crate) fn add_block_to_runner<P, S, T>(
     params: &P,
     block: CompactBlock,
@@ -189,6 +190,7 @@ pub(crate) fn add_block_to_runner<P, S, T>(
     }
 }
 
+#[tracing::instrument(skip_all, fields(height = block.height))]
 pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,

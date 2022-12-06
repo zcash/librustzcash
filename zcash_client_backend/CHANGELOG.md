@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` now generates
+  `tracing` spans, which can be used for profiling.
 
 ## [0.6.0] - 2022-11-12
 ### Added
