@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.4.1] - 2022-12-06
 ### Added
 - `zcash_client_sqlite::DataConnStmtCache::advance_by_block` now generates a
   `tracing` span, which can be used for profiling.
