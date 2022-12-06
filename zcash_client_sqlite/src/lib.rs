@@ -517,6 +517,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(height = u32::from(block.block_height)))]
     #[allow(clippy::type_complexity)]
     fn advance_by_block(
         &mut self,

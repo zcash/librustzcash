@@ -209,6 +209,7 @@ where
 ///
 /// Scanned blocks are required to be height-sequential. If a block is missing from the block
 /// source, an error will be returned with cause [`error::Cause::BlockHeightDiscontinuity`].
+#[tracing::instrument(skip(params, block_source, data_db))]
 #[allow(clippy::type_complexity)]
 pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,

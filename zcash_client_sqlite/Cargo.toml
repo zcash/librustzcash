@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.4.0"
+version = "0.4.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -22,6 +22,9 @@ zcash_primitives = { version = "0.9", path = "../zcash_primitives" }
 # - Errors
 bs58 = { version = "0.4", features = ["check"] }
 hdwallet = { version = "0.3.1", optional = true }
+
+# - Logging and metrics
+tracing = "0.1"
 
 # - Protobuf interfaces
 prost = "0.11"

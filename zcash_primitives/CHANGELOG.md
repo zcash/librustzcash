@@ -7,6 +7,14 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.9.1] - 2022-12-06
+### Fixed
+- `zcash_primitives::transaction::builder`:
+  - `Builder::build` was calling `FeeRule::fee_required` with the number of
+    Sapling outputs that have been added to the builder. It now instead provides
+    the number of outputs that will be in the final Sapling bundle, including
+    any padding.
+
 ## [0.9.0] - 2022-11-12
 ### Added
 - Added to `zcash_primitives::transaction::builder`:

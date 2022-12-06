@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.1] - 2022-12-06
+### Added
+- `zcash_client_sqlite::DataConnStmtCache::advance_by_block` now generates a
+  `tracing` span, which can be used for profiling.
+
 ## [0.4.0] - 2022-11-12
 ### Added
 - Implementations of `zcash_client_backend::data_api::WalletReadTransparent`

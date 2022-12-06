@@ -320,10 +320,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 self.transparent_builder.inputs(),
                 self.transparent_builder.outputs(),
                 self.sapling_builder.inputs().len(),
-                match self.sapling_builder.inputs().len() {
-                    0 => self.sapling_builder.outputs().len(),
-                    _ => (std::cmp::max(2, self.sapling_builder.outputs().len())),
-                },
+                self.sapling_builder.bundle_output_count(),
             )
             .map_err(Error::Fee)?;
         self.build_internal(prover, fee)
@@ -346,7 +343,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
                 self.transparent_builder.inputs(),
                 self.transparent_builder.outputs(),
                 self.sapling_builder.inputs().len(),
-                self.sapling_builder.outputs().len(),
+                self.sapling_builder.bundle_output_count(),
                 self.tze_builder.inputs(),
                 self.tze_builder.outputs(),
             )
