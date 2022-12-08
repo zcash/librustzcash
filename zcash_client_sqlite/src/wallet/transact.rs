@@ -769,7 +769,7 @@ mod tests {
         );
 
         let to = TransparentAddress::PublicKey([7; 20]).into();
-        assert!(matches!(
+        assert_matches!(
             create_spend_to_address(
                 &mut db_write,
                 &tests::network(),
@@ -782,7 +782,7 @@ mod tests {
                 10,
             ),
             Ok(_)
-        ));
+        );
     }
 
     #[test]
