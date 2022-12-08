@@ -1026,7 +1026,8 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          ON tx.id_tx = u.spent_in_tx
          WHERE u.received_by_account = ?
          AND u.height <= ?
-         AND tx.block IS NULL",
+         AND tx.block IS NULL
+         GROUP BY u.address",
     )?;
 
     let mut res = HashMap::new();
@@ -1371,6 +1372,11 @@ mod tests {
         let uaddr = db_data.get_current_address(account_id).unwrap().unwrap();
         let taddr = uaddr.transparent().unwrap();
 
+        let bal_absent = db_data
+            .get_transparent_balances(account_id, BlockHeight::from_u32(12345))
+            .unwrap();
+        assert!(bal_absent.is_empty());
+
         let utxo = WalletTransparentOutput::from_parts(
             OutPoint::new([1u8; 32], 1),
             TxOut {
@@ -1420,6 +1426,11 @@ mod tests {
                 utxos.iter().any(|rutxo| rutxo.height() == utxo2.height())
             }
         ));
+
+        assert_matches!(
+            db_data.get_transparent_balances(account_id, BlockHeight::from_u32(34567)),
+            Ok(h) if h.get(taddr) == Amount::from_u64(100000).ok().as_ref()
+        );
 
         // Artificially delete the address from the addresses table so that
         // we can ensure the update fails if the join doesn't work.
