@@ -1070,10 +1070,10 @@ mod tests {
         };
 
         // should fail if we have a gap
-        assert!(matches!(
+        assert_matches!(
             init_accounts_table(&db_data, &ufvks(&[0, 2])),
             Err(SqliteClientError::AccountIdDiscontinuity)
-        ));
+        );
 
         // should succeed if there are no gaps
         assert!(init_accounts_table(&db_data, &ufvks(&[0, 1, 2])).is_ok());
