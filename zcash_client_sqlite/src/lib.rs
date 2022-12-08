@@ -845,8 +845,8 @@ pub struct FsBlockDb {
 #[derive(Debug)]
 #[cfg(feature = "unstable")]
 pub enum FsBlockDbError {
-    FsError(io::Error),
-    DbError(rusqlite::Error),
+    Fs(io::Error),
+    Db(rusqlite::Error),
     Protobuf(prost::DecodeError),
     InvalidBlockstoreRoot(PathBuf),
     InvalidBlockPath(PathBuf),
@@ -856,14 +856,14 @@ pub enum FsBlockDbError {
 #[cfg(feature = "unstable")]
 impl From<io::Error> for FsBlockDbError {
     fn from(err: io::Error) -> Self {
-        FsBlockDbError::FsError(err)
+        FsBlockDbError::Fs(err)
     }
 }
 
 #[cfg(feature = "unstable")]
 impl From<rusqlite::Error> for FsBlockDbError {
     fn from(err: rusqlite::Error) -> Self {
-        FsBlockDbError::DbError(err)
+        FsBlockDbError::Db(err)
     }
 }
 
@@ -883,13 +883,13 @@ impl FsBlockDb {
     /// `<fsblockdb_root>/blocks` where this block store will expect to find serialized block
     /// files as described for [`FsBlockDb`].
     pub fn for_path<P: AsRef<Path>>(fsblockdb_root: P) -> Result<Self, FsBlockDbError> {
-        let meta = fs::metadata(&fsblockdb_root).map_err(FsBlockDbError::FsError)?;
+        let meta = fs::metadata(&fsblockdb_root).map_err(FsBlockDbError::Fs)?;
         if meta.is_dir() {
             let db_path = fsblockdb_root.as_ref().join("blockmeta.sqlite");
             let blocks_dir = fsblockdb_root.as_ref().join("blocks");
             fs::create_dir_all(&blocks_dir)?;
             Ok(FsBlockDb {
-                conn: Connection::open(db_path).map_err(FsBlockDbError::DbError)?,
+                conn: Connection::open(db_path).map_err(FsBlockDbError::Db)?,
                 blocks_dir,
             })
         } else {
