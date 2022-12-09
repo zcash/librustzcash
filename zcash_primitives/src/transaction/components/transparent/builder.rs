@@ -294,7 +294,7 @@ impl Bundle<Unauthorized> {
 
                 // Signature has to have "SIGHASH_ALL" appended to it
                 let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
-                sig_bytes.extend([SIGHASH_ALL as u8]);
+                sig_bytes.extend([SIGHASH_ALL]);
 
                 // P2PKH scriptSig
                 Script::default() << &sig_bytes[..] << &info.pubkey[..]

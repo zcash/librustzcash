@@ -191,6 +191,7 @@ pub(crate) fn add_block_to_runner<P, S, T>(
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
+#[allow(clippy::suspicious_else_formatting)]
 pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,

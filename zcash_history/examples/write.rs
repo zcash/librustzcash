@@ -32,7 +32,7 @@ fn main() {
             node.write(&mut buf).expect("Failed to write data");
         }
 
-        let mut file = std::fs::File::create(&out_file_path).expect("Failed to create output file");
+        let mut file = std::fs::File::create(out_file_path).expect("Failed to create output file");
 
         file.write_all(&buf[..])
             .expect("Failed to write data to file");
