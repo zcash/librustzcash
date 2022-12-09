@@ -471,6 +471,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
     params: &ParamsT,
     prover: impl SaplingProver,
     input_selector: &InputsT,
+    shielding_threshold: NonNegativeAmount,
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
     memo: &MemoBytes,
@@ -508,7 +509,7 @@ where
     let proposal = input_selector.propose_shielding(
         params,
         wallet_db,
-        NonNegativeAmount::from_u64(100000).unwrap(),
+        shielding_threshold,
         from_addrs,
         latest_anchor,
         target_height,
