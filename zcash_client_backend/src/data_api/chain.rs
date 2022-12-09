@@ -88,7 +88,7 @@ use std::convert::Infallible;
 
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight, NetworkUpgrade},
+    consensus::{self, BlockHeight},
     merkle_tree::CommitmentTree,
     sapling::{note_encryption::PreparedIncomingViewingKey, Nullifier},
     zip32::Scope,
@@ -111,7 +111,8 @@ pub trait BlockSource {
     type Error;
 
     /// Scan the specified `limit` number of blocks from the blockchain, starting at
-    /// `from_height`, applying the provided callback to each block.
+    /// `from_height`, applying the provided callback to each block. If `from_height`
+    /// is `None` then scanning will begin at the first available block.
     ///
     /// * `WalletErrT`: the types of errors produced by the wallet operations performed
     ///   as part of processing each row.
@@ -119,7 +120,7 @@ pub trait BlockSource {
     ///   reporting errors related to specific notes.
     fn with_blocks<F, WalletErrT, NoteRefT>(
         &self,
-        from_height: BlockHeight,
+        from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
     ) -> Result<(), error::Error<WalletErrT, Self::Error, NoteRefT>>
@@ -147,7 +148,7 @@ pub trait BlockSource {
 /// - `limit` Maximum number of blocks that should be validated in this call.
 ///
 /// Returns:
-/// - `Ok((BlockHeight, BlockHash))` if the combined chain is valid up to the given height
+/// - `Ok(())` if the combined chain is valid up to the given height
 /// and block hash.
 /// - `Err(Error::Chain(cause))` if the combined chain is invalid.
 /// - `Err(e)` if there was an error during validation unrelated to chain validity.
@@ -155,9 +156,9 @@ pub trait BlockSource {
 /// This function does not mutate either of the databases.
 pub fn validate_chain<BlockSourceT>(
     block_source: &BlockSourceT,
-    validate_from: (BlockHeight, BlockHash),
+    mut validate_from: Option<(BlockHeight, BlockHash)>,
     limit: Option<u32>,
-) -> Result<(BlockHeight, BlockHash), Error<Infallible, BlockSourceT::Error, Infallible>>
+) -> Result<(), Error<Infallible, BlockSourceT::Error, Infallible>>
 where
     BlockSourceT: BlockSource,
 {
@@ -166,20 +167,26 @@ where
     // source at the `validate_from` height, which can then be used to verify chain integrity by
     // comparing against the `validate_from` hash.
 
-    let (mut valid_height, mut valid_hash) = validate_from;
-    block_source
-        .with_blocks::<_, Infallible, Infallible>(valid_height, limit, move |block| {
-            if block.height() != valid_height + 1 {
-                Err(ChainError::block_height_discontinuity(valid_height + 1, block.height()).into())
-            } else if block.prev_hash() != valid_hash {
-                Err(ChainError::prev_hash_mismatch(block.height()).into())
-            } else {
-                valid_height = block.height();
-                valid_hash = block.hash();
-                Ok(())
+    block_source.with_blocks::<_, Infallible, Infallible>(
+        validate_from.map(|(h, _)| h),
+        limit,
+        move |block| {
+            if let Some((valid_height, valid_hash)) = validate_from {
+                if block.height() != valid_height + 1 {
+                    return Err(ChainError::block_height_discontinuity(
+                        valid_height + 1,
+                        block.height(),
+                    )
+                    .into());
+                } else if block.prev_hash() != valid_hash {
+                    return Err(ChainError::prev_hash_mismatch(block.height()).into());
+                }
             }
-        })
-        .map(|_| (valid_height, valid_hash))
+
+            validate_from = Some((block.height(), block.hash()));
+            Ok(())
+        },
+    )
 }
 
 /// Scans at most `limit` new blocks added to the block source for any transactions received by the
@@ -215,19 +222,11 @@ where
     BlockSourceT: BlockSource,
     DbT: WalletWrite,
 {
-    let sapling_activation_height = params
-        .activation_height(NetworkUpgrade::Sapling)
-        .expect("Sapling activation height is known.");
-
     // Recall where we synced up to previously.
-    // If we have never synced, use sapling activation height to select all cached CompactBlocks.
     let mut last_height = data_db
         .block_height_extrema()
-        .map(|opt| {
-            opt.map(|(_, max)| max)
-                .unwrap_or(sapling_activation_height - 1)
-        })
-        .map_err(Error::Wallet)?;
+        .map_err(Error::Wallet)?
+        .map(|(_, max)| max);
 
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data_db
@@ -241,13 +240,21 @@ where
         .collect();
 
     // Get the most recent CommitmentTree
-    let mut tree = data_db
-        .get_commitment_tree(last_height)
-        .map(|t| t.unwrap_or_else(CommitmentTree::empty))
-        .map_err(Error::Wallet)?;
+    let mut tree = last_height.map_or_else(
+        || Ok(CommitmentTree::empty()),
+        |h| {
+            data_db
+                .get_commitment_tree(h)
+                .map(|t| t.unwrap_or_else(CommitmentTree::empty))
+                .map_err(Error::Wallet)
+        },
+    )?;
 
     // Get most recent incremental witnesses for the notes we are tracking
-    let mut witnesses = data_db.get_witnesses(last_height).map_err(Error::Wallet)?;
+    let mut witnesses = last_height.map_or_else(
+        || Ok(vec![]),
+        |h| data_db.get_witnesses(h).map_err(Error::Wallet),
+    )?;
 
     // Get the nullifiers for the notes we are tracking
     let mut nullifiers = data_db.get_nullifiers().map_err(Error::Wallet)?;
@@ -283,12 +290,12 @@ where
             let current_height = block.height();
 
             // Scanned blocks MUST be height-sequential.
-            if current_height != (last_height + 1) {
-                return Err(ChainError::block_height_discontinuity(
-                    last_height + 1,
-                    current_height,
-                )
-                .into());
+            if let Some(h) = last_height {
+                if current_height != (h + 1) {
+                    return Err(
+                        ChainError::block_height_discontinuity(h + 1, current_height).into(),
+                    );
+                }
             }
 
             let block_hash = BlockHash::from_slice(&block.hash);
@@ -359,7 +366,7 @@ where
 
             witnesses.extend(new_witnesses);
 
-            last_height = current_height;
+            last_height = Some(current_height);
 
             Ok(())
         },
@@ -384,7 +391,7 @@ pub mod testing {
 
         fn with_blocks<F, DbErrT, NoteRef>(
             &self,
-            _from_height: BlockHeight,
+            _from_height: Option<BlockHeight>,
             _limit: Option<u32>,
             _with_row: F,
         ) -> Result<(), Error<DbErrT, Infallible, NoteRef>>

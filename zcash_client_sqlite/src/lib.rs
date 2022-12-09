@@ -723,7 +723,7 @@ impl BlockSource for BlockDb {
 
     fn with_blocks<F, DbErrT, NoteRef>(
         &self,
-        from_height: BlockHeight,
+        from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
@@ -904,7 +904,7 @@ impl BlockSource for FsBlockDb {
 
     fn with_blocks<F, DbErrT, NoteRef>(
         &self,
-        from_height: BlockHeight,
+        from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
