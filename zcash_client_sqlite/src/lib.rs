@@ -848,6 +848,7 @@ pub enum FsBlockDbError {
     Fs(io::Error),
     Db(rusqlite::Error),
     Protobuf(prost::DecodeError),
+    MissingBlockPath(PathBuf),
     InvalidBlockstoreRoot(PathBuf),
     InvalidBlockPath(PathBuf),
     CorruptedData(String),
@@ -911,9 +912,18 @@ impl FsBlockDb {
     pub fn write_block_metadata(&self, block_meta: &[BlockMeta]) -> Result<(), FsBlockDbError> {
         for m in block_meta {
             let block_path = m.block_file_path(&self.blocks_dir);
-            let meta = fs::metadata(&block_path)?;
-            if !meta.is_file() {
-                return Err(FsBlockDbError::InvalidBlockPath(block_path));
+            match fs::metadata(&block_path) {
+                Err(e) => {
+                    return Err(match e.kind() {
+                        io::ErrorKind::NotFound => FsBlockDbError::MissingBlockPath(block_path),
+                        _ => FsBlockDbError::Fs(e),
+                    });
+                }
+                Ok(meta) => {
+                    if !meta.is_file() {
+                        return Err(FsBlockDbError::InvalidBlockPath(block_path));
+                    }
+                }
             }
         }
 
