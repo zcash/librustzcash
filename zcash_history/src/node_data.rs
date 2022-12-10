@@ -248,7 +248,7 @@ mod tests {
 
     quickcheck! {
         fn serialization_round_trip(node_data: NodeData) -> TestResult {
-            TestResult::from_bool(NodeData::from_bytes(0, &node_data.to_bytes()).unwrap() == node_data)
+            TestResult::from_bool(NodeData::from_bytes(0, node_data.to_bytes()).unwrap() == node_data)
         }
     }
 }
