@@ -120,9 +120,9 @@ impl<A: sapling::Authorization> From<sapling::OutputDescription<A>>
 {
     fn from(out: sapling::OutputDescription<A>) -> compact_formats::CompactSaplingOutput {
         compact_formats::CompactSaplingOutput {
-            cmu: out.cmu.to_repr().to_vec(),
-            ephemeral_key: out.ephemeral_key.as_ref().to_vec(),
-            ciphertext: out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+            cmu: out.cmu().to_repr().to_vec(),
+            ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
+            ciphertext: out.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
         }
     }
 }

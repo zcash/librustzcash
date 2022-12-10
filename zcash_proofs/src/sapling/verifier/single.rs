@@ -39,21 +39,16 @@ impl SaplingVerificationContext {
     ) -> bool {
         let zip216_enabled = self.zip216_enabled;
         self.inner.check_spend(
-            cv,
+            &cv,
             anchor,
             nullifier,
-            rk,
+            &rk,
             sighash_value,
-            spend_auth_sig,
+            &spend_auth_sig,
             zkproof,
             &mut (),
             |_, rk, msg, spend_auth_sig| {
-                rk.verify_with_zip216(
-                    &msg,
-                    &spend_auth_sig,
-                    SPENDING_KEY_GENERATOR,
-                    zip216_enabled,
-                )
+                rk.verify_with_zip216(&msg, spend_auth_sig, SPENDING_KEY_GENERATOR, zip216_enabled)
             },
             |_, proof, public_inputs| {
                 verify_proof(verifying_key, &proof, &public_inputs[..]).is_ok()
@@ -72,7 +67,7 @@ impl SaplingVerificationContext {
         verifying_key: &PreparedVerifyingKey<Bls12>,
     ) -> bool {
         self.inner
-            .check_output(cv, cmu, epk, zkproof, |proof, public_inputs| {
+            .check_output(&cv, cmu, epk, zkproof, |proof, public_inputs| {
                 verify_proof(verifying_key, &proof, &public_inputs[..]).is_ok()
             })
     }

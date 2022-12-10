@@ -539,7 +539,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
         height,
     };
 
-    try_output_recovery_with_ock(&domain, ock, output, &output.out_ciphertext)
+    try_output_recovery_with_ock(&domain, ock, output, output.out_ciphertext())
 }
 
 /// Recovery of the full note plaintext by the sender.
@@ -561,7 +561,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
         height,
     };
 
-    try_output_recovery_with_ovk(&domain, ovk, output, &output.cv, &output.out_ciphertext)
+    try_output_recovery_with_ovk(&domain, ovk, output, output.cv(), output.out_ciphertext())
 }
 
 #[cfg(test)]
@@ -677,14 +677,14 @@ mod tests {
         let epk = *ne.epk();
         let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(&epk));
 
-        let output = OutputDescription {
+        let output = OutputDescription::from_parts(
             cv,
             cmu,
-            ephemeral_key: epk.to_bytes().into(),
-            enc_ciphertext: ne.encrypt_note_plaintext(),
-            out_ciphertext: ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng),
-            zkproof: [0u8; GROTH_PROOF_SIZE],
-        };
+            epk.to_bytes().into(),
+            ne.encrypt_note_plaintext(),
+            ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng),
+            [0u8; GROTH_PROOF_SIZE],
+        );
 
         (ovk, ock, output)
     }
@@ -694,10 +694,10 @@ mod tests {
         cv: &jubjub::ExtendedPoint,
         cmu: &bls12_381::Scalar,
         ephemeral_key: &EphemeralKeyBytes,
-        enc_ciphertext: &mut [u8; ENC_CIPHERTEXT_SIZE],
+        enc_ciphertext: &[u8; ENC_CIPHERTEXT_SIZE],
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
-    ) {
+    ) -> [u8; ENC_CIPHERTEXT_SIZE] {
         let ock = prf_ock(ovk, cv, &cmu.to_repr(), ephemeral_key);
 
         let mut op = [0; OUT_PLAINTEXT_SIZE];
@@ -737,8 +737,10 @@ mod tests {
             .encrypt_in_place_detached([0u8; 12][..].into(), &[], &mut plaintext)
             .unwrap();
 
+        let mut enc_ciphertext = [0u8; ENC_CIPHERTEXT_SIZE];
         enc_ciphertext[..NOTE_PLAINTEXT_SIZE].copy_from_slice(&plaintext);
         enc_ciphertext[NOTE_PLAINTEXT_SIZE..].copy_from_slice(&tag);
+        enc_ciphertext
     }
 
     fn find_invalid_diversifier() -> Diversifier {
@@ -809,7 +811,7 @@ mod tests {
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
+            *output.ephemeral_key_mut() = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
 
             assert_eq!(
                 try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output,),
@@ -828,7 +830,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.cmu = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
 
             assert_eq!(
                 try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
@@ -847,7 +849,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
+            output.enc_ciphertext_mut()[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
 
             assert_eq!(
                 try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
@@ -870,13 +872,13 @@ mod tests {
         for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
             let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
@@ -897,13 +899,13 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
@@ -924,13 +926,13 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
 
@@ -974,7 +976,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
+            *output.ephemeral_key_mut() = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
@@ -998,7 +1000,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.cmu = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
@@ -1026,13 +1028,13 @@ mod tests {
         for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
             let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
@@ -1058,13 +1060,13 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
@@ -1090,13 +1092,13 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
             assert_eq!(
@@ -1163,7 +1165,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (ovk, _, _, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.cv = jubjub::ExtendedPoint::random(&mut rng);
+            *output.cv_mut() = jubjub::ExtendedPoint::random(&mut rng);
 
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
@@ -1182,7 +1184,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.cmu = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
 
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
@@ -1206,7 +1208,7 @@ mod tests {
 
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
-            output.ephemeral_key = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
+            *output.ephemeral_key_mut() = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
 
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
@@ -1231,7 +1233,7 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            output.enc_ciphertext[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
+            output.enc_ciphertext_mut()[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
@@ -1254,7 +1256,7 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            output.out_ciphertext[OUT_CIPHERTEXT_SIZE - 1] ^= 0xff;
+            output.out_ciphertext_mut()[OUT_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
@@ -1280,13 +1282,13 @@ mod tests {
         for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
@@ -1311,13 +1313,13 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
@@ -1342,13 +1344,13 @@ mod tests {
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
 
-            reencrypt_enc_ciphertext(
+            *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
-                &output.cv,
-                &output.cmu,
-                &output.ephemeral_key,
-                &mut output.enc_ciphertext,
-                &output.out_ciphertext,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.enc_ciphertext(),
+                output.out_ciphertext(),
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
             assert_eq!(
@@ -1440,14 +1442,14 @@ mod tests {
             let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm)).unwrap();
             assert_eq!(note.cmu(), cmu);
 
-            let output = OutputDescription {
+            let output = OutputDescription::from_parts(
                 cv,
                 cmu,
                 ephemeral_key,
-                enc_ciphertext: tv.c_enc,
-                out_ciphertext: tv.c_out,
-                zkproof: [0u8; GROTH_PROOF_SIZE],
-            };
+                tv.c_enc,
+                tv.c_out,
+                [0u8; GROTH_PROOF_SIZE],
+            );
 
             //
             // Test decryption

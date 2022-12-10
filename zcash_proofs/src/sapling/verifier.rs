@@ -33,15 +33,15 @@ impl SaplingVerificationContextInner {
     #[allow(clippy::too_many_arguments)]
     fn check_spend<C>(
         &mut self,
-        cv: jubjub::ExtendedPoint,
+        cv: &jubjub::ExtendedPoint,
         anchor: bls12_381::Scalar,
         nullifier: &[u8; 32],
-        rk: PublicKey,
+        rk: &PublicKey,
         sighash_value: &[u8; 32],
-        spend_auth_sig: Signature,
+        spend_auth_sig: &Signature,
         zkproof: Proof<Bls12>,
         verifier_ctx: &mut C,
-        spend_auth_sig_verifier: impl FnOnce(&mut C, PublicKey, [u8; 64], Signature) -> bool,
+        spend_auth_sig_verifier: impl FnOnce(&mut C, &PublicKey, [u8; 64], &Signature) -> bool,
         proof_verifier: impl FnOnce(&mut C, Proof<Bls12>, [bls12_381::Scalar; 7]) -> bool,
     ) -> bool {
         if (cv.is_small_order() | rk.0.is_small_order()).into() {
@@ -100,7 +100,7 @@ impl SaplingVerificationContextInner {
     /// accumulating its value commitment inside the context for later use.
     fn check_output(
         &mut self,
-        cv: jubjub::ExtendedPoint,
+        cv: &jubjub::ExtendedPoint,
         cmu: bls12_381::Scalar,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,

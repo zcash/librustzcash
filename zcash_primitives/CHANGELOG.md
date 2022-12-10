@@ -6,6 +6,16 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- `zcash_primitives::transaction::components`:
+  - `sapling::{Bundle, SpendDescription, OutputDescription}` have had their
+    fields replaced by getter methods.
+
+### Removed
+- `zcash_primitives::transaction::components`:
+  - The fields of `sapling::{SpendDescriptionV5, OutputDescriptionV5}` (they are
+    now opaque types; use `sapling::{SpendDescription, OutputDescription}`
+    instead).
 
 ## [0.9.1] - 2022-12-06
 ### Fixed

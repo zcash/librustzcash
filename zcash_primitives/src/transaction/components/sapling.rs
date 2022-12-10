@@ -83,13 +83,52 @@ impl MapAuth<Authorized, Authorized> for () {
 
 #[derive(Debug, Clone)]
 pub struct Bundle<A: Authorization> {
-    pub shielded_spends: Vec<SpendDescription<A>>,
-    pub shielded_outputs: Vec<OutputDescription<A::Proof>>,
-    pub value_balance: Amount,
-    pub authorization: A,
+    shielded_spends: Vec<SpendDescription<A>>,
+    shielded_outputs: Vec<OutputDescription<A::Proof>>,
+    value_balance: Amount,
+    authorization: A,
 }
 
 impl<A: Authorization> Bundle<A> {
+    /// Constructs a `Bundle` from its constituent parts.
+    pub(crate) fn from_parts(
+        shielded_spends: Vec<SpendDescription<A>>,
+        shielded_outputs: Vec<OutputDescription<A::Proof>>,
+        value_balance: Amount,
+        authorization: A,
+    ) -> Self {
+        Bundle {
+            shielded_spends,
+            shielded_outputs,
+            value_balance,
+            authorization,
+        }
+    }
+
+    /// Returns the list of spends in this bundle.
+    pub fn shielded_spends(&self) -> &[SpendDescription<A>] {
+        &self.shielded_spends
+    }
+
+    /// Returns the list of outputs in this bundle.
+    pub fn shielded_outputs(&self) -> &[OutputDescription<A::Proof>] {
+        &self.shielded_outputs
+    }
+
+    /// Returns the net value moved into or out of the Sapling shielded pool.
+    ///
+    /// This is the sum of Sapling spends minus the sum of Sapling outputs.
+    pub fn value_balance(&self) -> &Amount {
+        &self.value_balance
+    }
+
+    /// Returns the authorization for this bundle.
+    ///
+    /// In the case of a `Bundle<Authorized>`, this is the binding signature.
+    pub fn authorization(&self) -> &A {
+        &self.authorization
+    }
+
     pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
         Bundle {
             shielded_spends: self
@@ -124,12 +163,12 @@ impl<A: Authorization> Bundle<A> {
 
 #[derive(Clone)]
 pub struct SpendDescription<A: Authorization> {
-    pub cv: jubjub::ExtendedPoint,
-    pub anchor: bls12_381::Scalar,
-    pub nullifier: Nullifier,
-    pub rk: PublicKey,
-    pub zkproof: A::Proof,
-    pub spend_auth_sig: A::AuthSig,
+    cv: jubjub::ExtendedPoint,
+    anchor: bls12_381::Scalar,
+    nullifier: Nullifier,
+    rk: PublicKey,
+    zkproof: A::Proof,
+    spend_auth_sig: A::AuthSig,
 }
 
 impl<A: Authorization> std::fmt::Debug for SpendDescription<A> {
@@ -139,6 +178,38 @@ impl<A: Authorization> std::fmt::Debug for SpendDescription<A> {
             "SpendDescription(cv = {:?}, anchor = {:?}, nullifier = {:?}, rk = {:?}, spend_auth_sig = {:?})",
             self.cv, self.anchor, self.nullifier, self.rk, self.spend_auth_sig
         )
+    }
+}
+
+impl<A: Authorization> SpendDescription<A> {
+    /// Returns the commitment to the value consumed by this spend.
+    pub fn cv(&self) -> &jubjub::ExtendedPoint {
+        &self.cv
+    }
+
+    /// Returns the root of the Sapling commitment tree that this spend commits to.
+    pub fn anchor(&self) -> &bls12_381::Scalar {
+        &self.anchor
+    }
+
+    /// Returns the nullifier of the note being spent.
+    pub fn nullifier(&self) -> &Nullifier {
+        &self.nullifier
+    }
+
+    /// Returns the randomized verification key for the note being spent.
+    pub fn rk(&self) -> &PublicKey {
+        &self.rk
+    }
+
+    /// Returns the proof for this spend.
+    pub fn zkproof(&self) -> &A::Proof {
+        &self.zkproof
+    }
+
+    /// Returns the authorization signature for this spend.
+    pub fn spend_auth_sig(&self) -> &A::AuthSig {
+        &self.spend_auth_sig
     }
 }
 
@@ -249,9 +320,9 @@ impl SpendDescription<Authorized> {
 
 #[derive(Clone)]
 pub struct SpendDescriptionV5 {
-    pub cv: jubjub::ExtendedPoint,
-    pub nullifier: Nullifier,
-    pub rk: PublicKey,
+    cv: jubjub::ExtendedPoint,
+    nullifier: Nullifier,
+    rk: PublicKey,
 }
 
 impl SpendDescriptionV5 {
@@ -282,12 +353,79 @@ impl SpendDescriptionV5 {
 
 #[derive(Clone)]
 pub struct OutputDescription<Proof> {
-    pub cv: jubjub::ExtendedPoint,
-    pub cmu: bls12_381::Scalar,
-    pub ephemeral_key: EphemeralKeyBytes,
-    pub enc_ciphertext: [u8; 580],
-    pub out_ciphertext: [u8; 80],
-    pub zkproof: Proof,
+    cv: jubjub::ExtendedPoint,
+    cmu: bls12_381::Scalar,
+    ephemeral_key: EphemeralKeyBytes,
+    enc_ciphertext: [u8; 580],
+    out_ciphertext: [u8; 80],
+    zkproof: Proof,
+}
+
+impl<Proof> OutputDescription<Proof> {
+    /// Returns the commitment to the value consumed by this output.
+    pub fn cv(&self) -> &jubjub::ExtendedPoint {
+        &self.cv
+    }
+
+    /// Returns the commitment to the new note being created.
+    pub fn cmu(&self) -> &bls12_381::Scalar {
+        &self.cmu
+    }
+
+    pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
+        &self.ephemeral_key
+    }
+
+    /// Returns the encrypted note ciphertext.
+    pub fn enc_ciphertext(&self) -> &[u8; 580] {
+        &self.enc_ciphertext
+    }
+
+    /// Returns the output recovery ciphertext.
+    pub fn out_ciphertext(&self) -> &[u8; 80] {
+        &self.out_ciphertext
+    }
+
+    /// Returns the proof for this output.
+    pub fn zkproof(&self) -> &Proof {
+        &self.zkproof
+    }
+}
+
+#[cfg(test)]
+impl<Proof> OutputDescription<Proof> {
+    pub(crate) fn from_parts(
+        cv: jubjub::ExtendedPoint,
+        cmu: bls12_381::Scalar,
+        ephemeral_key: EphemeralKeyBytes,
+        enc_ciphertext: [u8; 580],
+        out_ciphertext: [u8; 80],
+        zkproof: Proof,
+    ) -> Self {
+        OutputDescription {
+            cv,
+            cmu,
+            ephemeral_key,
+            enc_ciphertext,
+            out_ciphertext,
+            zkproof,
+        }
+    }
+    pub(crate) fn cv_mut(&mut self) -> &mut jubjub::ExtendedPoint {
+        &mut self.cv
+    }
+    pub(crate) fn cmu_mut(&mut self) -> &mut bls12_381::Scalar {
+        &mut self.cmu
+    }
+    pub(crate) fn ephemeral_key_mut(&mut self) -> &mut EphemeralKeyBytes {
+        &mut self.ephemeral_key
+    }
+    pub(crate) fn enc_ciphertext_mut(&mut self) -> &mut [u8; 580] {
+        &mut self.enc_ciphertext
+    }
+    pub(crate) fn out_ciphertext_mut(&mut self) -> &mut [u8; 80] {
+        &mut self.out_ciphertext
+    }
 }
 
 impl<Proof: DynamicUsage> DynamicUsage for OutputDescription<Proof> {
@@ -380,11 +518,11 @@ impl OutputDescription<GrothProofBytes> {
 
 #[derive(Clone)]
 pub struct OutputDescriptionV5 {
-    pub cv: jubjub::ExtendedPoint,
-    pub cmu: bls12_381::Scalar,
-    pub ephemeral_key: EphemeralKeyBytes,
-    pub enc_ciphertext: [u8; 580],
-    pub out_ciphertext: [u8; 80],
+    cv: jubjub::ExtendedPoint,
+    cmu: bls12_381::Scalar,
+    ephemeral_key: EphemeralKeyBytes,
+    enc_ciphertext: [u8; 580],
+    out_ciphertext: [u8; 80],
 }
 
 memuse::impl_no_dynamic_usage!(OutputDescriptionV5);

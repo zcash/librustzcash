@@ -630,8 +630,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 // create_spend_to_address. 
                 if let Some((account_id, _)) = nullifiers.iter().find(
                     |(_, nf)|
-                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends.iter())
-                        .any(|input| *nf == input.nullifier)
+                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
+                        .any(|input| nf == input.nullifier())
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
@@ -671,8 +671,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             // Assumes that create_spend_to_address() will never be called in parallel, which is a
             // reasonable assumption for a light client such as a mobile phone.
             if let Some(bundle) = sent_tx.tx.sapling_bundle() {
-                for spend in &bundle.shielded_spends {
-                    wallet::mark_sapling_note_spent(up, tx_ref, &spend.nullifier)?;
+                for spend in bundle.shielded_spends() {
+                    wallet::mark_sapling_note_spent(up, tx_ref, spend.nullifier())?;
                 }
             }
 
