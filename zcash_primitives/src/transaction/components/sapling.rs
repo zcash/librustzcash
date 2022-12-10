@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 
 use ff::PrimeField;
-use group::GroupEncoding;
 use memuse::DynamicUsage;
 
 use std::io::{self, Read, Write};
@@ -15,6 +14,7 @@ use crate::{
     sapling::{
         note_encryption::SaplingDomain,
         redjubjub::{self, PublicKey, Signature},
+        value::ValueCommitment,
         Nullifier,
     },
 };
@@ -163,7 +163,7 @@ impl<A: Authorization> Bundle<A> {
 
 #[derive(Clone)]
 pub struct SpendDescription<A: Authorization> {
-    cv: jubjub::ExtendedPoint,
+    cv: ValueCommitment,
     anchor: bls12_381::Scalar,
     nullifier: Nullifier,
     rk: PublicKey,
@@ -183,7 +183,7 @@ impl<A: Authorization> std::fmt::Debug for SpendDescription<A> {
 
 impl<A: Authorization> SpendDescription<A> {
     /// Returns the commitment to the value consumed by this spend.
-    pub fn cv(&self) -> &jubjub::ExtendedPoint {
+    pub fn cv(&self) -> &ValueCommitment {
         &self.cv
     }
 
@@ -215,20 +215,16 @@ impl<A: Authorization> SpendDescription<A> {
 
 /// Consensus rules (§4.4) & (§4.5):
 /// - Canonical encoding is enforced here.
-/// - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
-///   (located in zcash_proofs::sapling::verifier).
-pub fn read_point<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::ExtendedPoint> {
+/// - "Not small order" is enforced here.
+fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
-    let point = jubjub::ExtendedPoint::from_bytes(&bytes);
+    let cv = ValueCommitment::from_bytes_not_small_order(&bytes);
 
-    if point.is_none().into() {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("invalid {}", field),
-        ))
+    if cv.is_none().into() {
+        Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid cv"))
     } else {
-        Ok(point.unwrap())
+        Ok(cv.unwrap())
     }
 }
 
@@ -283,7 +279,7 @@ impl SpendDescription<Authorized> {
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
         //   (located in zcash_proofs::sapling::verifier).
-        let cv = read_point(&mut reader, "cv")?;
+        let cv = read_value_commitment(&mut reader)?;
         // Consensus rules (§7.3) & (§7.4):
         // - Canonical encoding is enforced here
         let anchor = read_base(&mut reader, "anchor")?;
@@ -320,14 +316,14 @@ impl SpendDescription<Authorized> {
 
 #[derive(Clone)]
 pub struct SpendDescriptionV5 {
-    cv: jubjub::ExtendedPoint,
+    cv: ValueCommitment,
     nullifier: Nullifier,
     rk: PublicKey,
 }
 
 impl SpendDescriptionV5 {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let cv = read_point(&mut reader, "cv")?;
+        let cv = read_value_commitment(&mut reader)?;
         let nullifier = SpendDescription::read_nullifier(&mut reader)?;
         let rk = SpendDescription::read_rk(&mut reader)?;
 
@@ -353,7 +349,7 @@ impl SpendDescriptionV5 {
 
 #[derive(Clone)]
 pub struct OutputDescription<Proof> {
-    cv: jubjub::ExtendedPoint,
+    cv: ValueCommitment,
     cmu: bls12_381::Scalar,
     ephemeral_key: EphemeralKeyBytes,
     enc_ciphertext: [u8; 580],
@@ -363,7 +359,7 @@ pub struct OutputDescription<Proof> {
 
 impl<Proof> OutputDescription<Proof> {
     /// Returns the commitment to the value consumed by this output.
-    pub fn cv(&self) -> &jubjub::ExtendedPoint {
+    pub fn cv(&self) -> &ValueCommitment {
         &self.cv
     }
 
@@ -395,7 +391,7 @@ impl<Proof> OutputDescription<Proof> {
 #[cfg(test)]
 impl<Proof> OutputDescription<Proof> {
     pub(crate) fn from_parts(
-        cv: jubjub::ExtendedPoint,
+        cv: ValueCommitment,
         cmu: bls12_381::Scalar,
         ephemeral_key: EphemeralKeyBytes,
         enc_ciphertext: [u8; 580],
@@ -411,7 +407,7 @@ impl<Proof> OutputDescription<Proof> {
             zkproof,
         }
     }
-    pub(crate) fn cv_mut(&mut self) -> &mut jubjub::ExtendedPoint {
+    pub(crate) fn cv_mut(&mut self) -> &mut ValueCommitment {
         &mut self.cv
     }
     pub(crate) fn cmu_mut(&mut self) -> &mut bls12_381::Scalar {
@@ -470,7 +466,7 @@ impl OutputDescription<GrothProofBytes> {
         // - Canonical encoding is enforced here.
         // - "Not small order" is enforced in SaplingVerificationContext::check_output()
         //   (located in zcash_proofs::sapling::verifier).
-        let cv = read_point(&mut reader, "cv")?;
+        let cv = read_value_commitment(&mut reader)?;
 
         // Consensus rule (§7.4): Canonical encoding is enforced here
         let cmu = read_base(&mut reader, "cmu")?;
@@ -518,7 +514,7 @@ impl OutputDescription<GrothProofBytes> {
 
 #[derive(Clone)]
 pub struct OutputDescriptionV5 {
-    cv: jubjub::ExtendedPoint,
+    cv: ValueCommitment,
     cmu: bls12_381::Scalar,
     ephemeral_key: EphemeralKeyBytes,
     enc_ciphertext: [u8; 580],
@@ -529,7 +525,7 @@ memuse::impl_no_dynamic_usage!(OutputDescriptionV5);
 
 impl OutputDescriptionV5 {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let cv = read_point(&mut reader, "cv")?;
+        let cv = read_value_commitment(&mut reader)?;
         let cmu = read_base(&mut reader, "cmu")?;
 
         // Consensus rules (§4.5):
@@ -614,6 +610,10 @@ pub mod testing {
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         sapling::{
             redjubjub::{PrivateKey, PublicKey},
+            value::{
+                testing::{arb_note_value_bounded, arb_trapdoor},
+                ValueCommitment, MAX_NOTE_VALUE,
+            },
             Nullifier,
         },
         transaction::{
@@ -635,8 +635,9 @@ pub mod testing {
     prop_compose! {
         /// produce a spend description with invalid data (useful only for serialization
         /// roundtrip testing).
-        fn arb_spend_description()(
-            cv in arb_extended_point(),
+        fn arb_spend_description(n_spends: usize)(
+            value in arb_note_value_bounded(MAX_NOTE_VALUE.checked_div(n_spends as u64).unwrap_or(0)),
+            rcv in arb_trapdoor(),
             anchor in vec(any::<u8>(), 64)
                 .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
                 .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
@@ -650,6 +651,7 @@ pub mod testing {
             let mut rng = StdRng::from_seed(rng_seed);
             let sk1 = PrivateKey(jubjub::Fr::random(&mut rng));
             let rk = PublicKey::from_private(&sk1, SPENDING_KEY_GENERATOR);
+            let cv = ValueCommitment::derive(value, rcv);
             SpendDescription {
                 cv,
                 anchor,
@@ -664,8 +666,9 @@ pub mod testing {
     prop_compose! {
         /// produce an output description with invalid data (useful only for serialization
         /// roundtrip testing).
-        pub fn arb_output_description()(
-            cv in arb_extended_point(),
+        pub fn arb_output_description(n_outputs: usize)(
+            value in arb_note_value_bounded(MAX_NOTE_VALUE.checked_div(n_outputs as u64).unwrap_or(0)),
+            rcv in arb_trapdoor(),
             cmu in vec(any::<u8>(), 64)
                 .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
                 .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
@@ -677,6 +680,7 @@ pub mod testing {
             zkproof in vec(any::<u8>(), GROTH_PROOF_SIZE)
                 .prop_map(|v| <[u8;GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
         ) -> OutputDescription<GrothProofBytes> {
+            let cv = ValueCommitment::derive(value, rcv);
             OutputDescription {
                 cv,
                 cmu,
@@ -690,8 +694,11 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_bundle()(
-            shielded_spends in vec(arb_spend_description(), 0..30),
-            shielded_outputs in vec(arb_output_description(), 0..30),
+            n_spends in 0usize..30,
+            n_outputs in 0usize..30,
+        )(
+            shielded_spends in vec(arb_spend_description(n_spends), n_spends),
+            shielded_outputs in vec(arb_output_description(n_outputs), n_outputs),
             value_balance in arb_amount(),
             rng_seed in prop::array::uniform32(prop::num::u8::ANY),
             fake_bvk_bytes in prop::array::uniform32(prop::num::u8::ANY),

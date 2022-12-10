@@ -1,7 +1,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use group::GroupEncoding;
 
 use crate::consensus::BranchId;
 

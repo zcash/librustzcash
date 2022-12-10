@@ -13,13 +13,11 @@ use zcash_primitives::{
             PreparedIncomingViewingKey, SaplingDomain,
         },
         prover::mock::MockTxProver,
+        value::NoteValue,
         Diversifier, PaymentAddress, SaplingIvk,
     },
-    transaction::components::{
-        sapling::{
-            builder::SaplingBuilder, CompactOutputDescription, GrothProofBytes, OutputDescription,
-        },
-        Amount,
+    transaction::components::sapling::{
+        builder::SaplingBuilder, CompactOutputDescription, GrothProofBytes, OutputDescription,
     },
 };
 
@@ -45,7 +43,7 @@ fn bench_note_decryption(c: &mut Criterion) {
                 &mut rng,
                 None,
                 pa,
-                Amount::from_u64(100).unwrap(),
+                NoteValue::from_raw(100),
                 MemoBytes::empty(),
             )
             .unwrap();

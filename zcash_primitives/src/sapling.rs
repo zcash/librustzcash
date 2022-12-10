@@ -7,6 +7,7 @@ pub mod pedersen_hash;
 pub mod prover;
 pub mod redjubjub;
 pub mod util;
+pub mod value;
 
 use bitvec::{order::Lsb0, view::AsBits};
 use blake2s_simd::Params as Blake2sParams;
@@ -24,7 +25,6 @@ use crate::{
     constants::{self, SPENDING_KEY_GENERATOR},
     keys::prf_expand,
     merkle_tree::{HashSer, Hashable},
-    transaction::components::amount::MAX_MONEY,
 };
 
 use self::{
@@ -167,19 +167,6 @@ pub(crate) fn spend_sig_internal<R: RngCore>(
 
     // Do the signing
     rsk.sign(&data_to_be_signed, rng, SPENDING_KEY_GENERATOR)
-}
-
-#[derive(Clone)]
-pub struct ValueCommitment {
-    pub value: u64,
-    pub randomness: jubjub::Fr,
-}
-
-impl ValueCommitment {
-    pub fn commitment(&self) -> jubjub::SubgroupPoint {
-        (constants::VALUE_COMMITMENT_VALUE_GENERATOR * jubjub::Fr::from(self.value))
-            + (constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR * self.randomness)
-    }
 }
 
 #[derive(Clone)]
@@ -391,27 +378,6 @@ impl ConstantTimeEq for Nullifier {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NoteValue(u64);
-
-impl TryFrom<u64> for NoteValue {
-    type Error = ();
-
-    fn try_from(value: u64) -> Result<Self, Self::Error> {
-        if value <= MAX_MONEY as u64 {
-            Ok(NoteValue(value))
-        } else {
-            Err(())
-        }
-    }
-}
-
-impl From<NoteValue> for u64 {
-    fn from(value: NoteValue) -> u64 {
-        value.0
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Note {
     /// The value of the note
@@ -540,29 +506,11 @@ impl Note {
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::*;
-    use std::cmp::min;
-
-    use crate::transaction::components::amount::MAX_MONEY;
 
     use super::{
-        keys::testing::arb_full_viewing_key, Diversifier, Node, Note, NoteValue, PaymentAddress,
-        Rseed, SaplingIvk,
+        keys::testing::arb_full_viewing_key, value::NoteValue, Diversifier, Node, Note,
+        PaymentAddress, Rseed, SaplingIvk,
     };
-
-    prop_compose! {
-        pub fn arb_note_value()(value in 0u64..=MAX_MONEY as u64) -> NoteValue {
-            NoteValue::try_from(value).unwrap()
-        }
-    }
-
-    prop_compose! {
-        /// The
-        pub fn arb_positive_note_value(bound: u64)(
-            value in 1u64..=(min(bound, MAX_MONEY as u64))
-        ) -> NoteValue {
-            NoteValue::try_from(value).unwrap()
-        }
-    }
 
     prop_compose! {
         pub fn arb_incoming_viewing_key()(fvk in arb_full_viewing_key()) -> SaplingIvk {
@@ -593,7 +541,7 @@ pub mod testing {
             rseed in prop::array::uniform32(prop::num::u8::ANY).prop_map(Rseed::AfterZip212)
         ) -> Note {
             Note {
-                value: value.into(),
+                value: value.inner(),
                 g_d: addr.g_d().unwrap(), // this unwrap is safe because arb_payment_address always generates an address with a valid g_d
                 pk_d: *addr.pk_d(),
                 rseed

@@ -20,7 +20,10 @@ use zcash_note_encryption::{
 use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
-    sapling::{keys::OutgoingViewingKey, Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
+    sapling::{
+        keys::OutgoingViewingKey, value::ValueCommitment, Diversifier, Note, PaymentAddress, Rseed,
+        SaplingIvk,
+    },
     transaction::components::{
         amount::Amount,
         sapling::{self, OutputDescription},
@@ -93,7 +96,7 @@ fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, ephemeral_key: &EphemeralKeyByte
 /// Implemented per section 5.4.2 of the Zcash Protocol Specification.
 pub fn prf_ock(
     ovk: &OutgoingViewingKey,
-    cv: &jubjub::ExtendedPoint,
+    cv: &ValueCommitment,
     cmu_bytes: &[u8; 32],
     ephemeral_key: &EphemeralKeyBytes,
 ) -> OutgoingCipherKey {
@@ -191,7 +194,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     type DiversifiedTransmissionKey = jubjub::SubgroupPoint;
     type IncomingViewingKey = PreparedIncomingViewingKey;
     type OutgoingViewingKey = OutgoingViewingKey;
-    type ValueCommitment = jubjub::ExtendedPoint;
+    type ValueCommitment = ValueCommitment;
     type ExtractedCommitment = bls12_381::Scalar;
     type ExtractedCommitmentBytes = [u8; 32];
     type Memo = MemoBytes;
@@ -424,7 +427,8 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 ///     sapling::{
 ///         note_encryption::sapling_note_encryption,
 ///         util::generate_random_rseed,
-///         Diversifier, PaymentAddress, Rseed, ValueCommitment
+///         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+///         Diversifier, PaymentAddress, Rseed,
 ///     },
 /// };
 ///
@@ -435,20 +439,17 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 /// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
 /// let ovk = Some(OutgoingViewingKey([0; 32]));
 ///
-/// let value = 1000;
-/// let rcv = jubjub::Fr::random(&mut rng);
-/// let cv = ValueCommitment {
-///     value,
-///     randomness: rcv.clone(),
-/// };
+/// let value = NoteValue::from_raw(1000);
+/// let rcv = ValueCommitTrapdoor::random(&mut rng);
+/// let cv = ValueCommitment::derive(value, rcv);
 /// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
 /// let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
-/// let note = to.create_note(value, rseed).unwrap();
+/// let note = to.create_note(value.inner(), rseed).unwrap();
 /// let cmu = note.cmu();
 ///
 /// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
-/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu, &mut rng);
+/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
 /// ```
 pub fn sapling_note_encryption<R: RngCore, P: consensus::Parameters>(
     ovk: Option<OutgoingViewingKey>,
@@ -595,10 +596,13 @@ mod tests {
         },
         keys::OutgoingViewingKey,
         memo::MemoBytes,
-        sapling::{note_encryption::PreparedIncomingViewingKey, util::generate_random_rseed},
-        sapling::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
+        sapling::{
+            note_encryption::PreparedIncomingViewingKey,
+            util::generate_random_rseed,
+            value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+            Diversifier, PaymentAddress, Rseed, SaplingIvk,
+        },
         transaction::components::{
-            amount::Amount,
             sapling::{self, CompactOutputDescription, OutputDescription},
             GROTH_PROOF_SIZE,
         },
@@ -654,16 +658,13 @@ mod tests {
         let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
 
         // Construct the value commitment for the proof instance
-        let value = Amount::from_u64(100).unwrap();
-        let value_commitment = ValueCommitment {
-            value: value.into(),
-            randomness: jubjub::Fr::random(&mut rng),
-        };
-        let cv = value_commitment.commitment().into();
+        let value = NoteValue::from_raw(100);
+        let rcv = ValueCommitTrapdoor::random(&mut rng);
+        let cv = ValueCommitment::derive(value, rcv);
 
         let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
 
-        let note = pa.create_note(value.into(), rseed).unwrap();
+        let note = pa.create_note(value.inner(), rseed).unwrap();
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
@@ -677,12 +678,13 @@ mod tests {
         let epk = *ne.epk();
         let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk_bytes(&epk));
 
+        let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
         let output = OutputDescription::from_parts(
             cv,
             cmu,
             epk.to_bytes().into(),
             ne.encrypt_note_plaintext(),
-            ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng),
+            out_ciphertext,
             [0u8; GROTH_PROOF_SIZE],
         );
 
@@ -691,7 +693,7 @@ mod tests {
 
     fn reencrypt_enc_ciphertext(
         ovk: &OutgoingViewingKey,
-        cv: &jubjub::ExtendedPoint,
+        cv: &ValueCommitment,
         cmu: &bls12_381::Scalar,
         ephemeral_key: &EphemeralKeyBytes,
         enc_ciphertext: &[u8; ENC_CIPHERTEXT_SIZE],
@@ -1165,7 +1167,10 @@ mod tests {
 
         for &height in heights.iter() {
             let (ovk, _, _, mut output) = random_enc_ciphertext(height, &mut rng);
-            *output.cv_mut() = jubjub::ExtendedPoint::random(&mut rng);
+            *output.cv_mut() = ValueCommitment::derive(
+                NoteValue::from_raw(7),
+                ValueCommitTrapdoor::random(&mut rng),
+            );
 
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
@@ -1409,6 +1414,12 @@ mod tests {
             };
         }
 
+        macro_rules! read_cv {
+            ($field:expr) => {
+                ValueCommitment::from_bytes_not_small_order(&$field).unwrap()
+            };
+        }
+
         let height = TEST_NETWORK.activation_height(Sapling).unwrap();
 
         for tv in test_vectors {
@@ -1419,7 +1430,7 @@ mod tests {
             let ivk = PreparedIncomingViewingKey::new(&SaplingIvk(read_jubjub_scalar!(tv.ivk)));
             let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
             let rcm = read_jubjub_scalar!(tv.rcm);
-            let cv = read_point!(tv.cv);
+            let cv = read_cv!(tv.cv);
             let cmu = read_bls12_381_scalar!(tv.cmu);
             let esk = read_jubjub_scalar!(tv.esk);
             let ephemeral_key = EphemeralKeyBytes(tv.epk);
@@ -1443,7 +1454,7 @@ mod tests {
             assert_eq!(note.cmu(), cmu);
 
             let output = OutputDescription::from_parts(
-                cv,
+                cv.clone(),
                 cmu,
                 ephemeral_key,
                 tv.c_enc,
