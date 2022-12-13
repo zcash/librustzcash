@@ -951,6 +951,51 @@ impl BlockSource for FsBlockDb {
     }
 }
 
+#[cfg(feature = "unstable")]
+impl std::fmt::Display for FsBlockDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            FsBlockDbError::Fs(io_error) => {
+                write!(f, "Failed to access the file system: {}", io_error)
+            }
+            FsBlockDbError::Db(e) => {
+                write!(f, "There was a problem with the sqlite db: {}", e)
+            }
+            FsBlockDbError::Protobuf(e) => {
+                write!(f, "Failed to parse protobuf-encoded record: {}", e)
+            }
+            FsBlockDbError::MissingBlockPath(block_path) => {
+                write!(
+                    f,
+                    "CompactBlock file expected but not found at {}",
+                    block_path.display(),
+                )
+            }
+            FsBlockDbError::InvalidBlockstoreRoot(fsblockdb_root) => {
+                write!(
+                    f,
+                    "The block storage root {} is not a directory",
+                    fsblockdb_root.display(),
+                )
+            }
+            FsBlockDbError::InvalidBlockPath(block_path) => {
+                write!(
+                    f,
+                    "CompactBlock path {} is not a file",
+                    block_path.display(),
+                )
+            }
+            FsBlockDbError::CorruptedData(e) => {
+                write!(
+                    f,
+                    "The block cache has corrupted data and this caused an error: {}",
+                    e,
+                )
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[macro_use]
 extern crate assert_matches;
