@@ -1,5 +1,6 @@
 /// A BlockID message contains identifiers to select a block: a height or a
 /// hash. Specification by hash is not implemented, but may be in the future.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockId {
     #[prost(uint64, tag = "1")]
@@ -9,6 +10,7 @@ pub struct BlockId {
 }
 /// BlockRange specifies a series of blocks from start to end inclusive.
 /// Both BlockIDs must be heights; specification by hash is not yet supported.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BlockRange {
     #[prost(message, optional, tag = "1")]
@@ -19,6 +21,7 @@ pub struct BlockRange {
 /// A TxFilter contains the information needed to identify a particular
 /// transaction: either a block and an index, or a direct transaction hash.
 /// Currently, only specification by hash is supported.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TxFilter {
     /// block identifier, height or hash
@@ -34,6 +37,7 @@ pub struct TxFilter {
 /// RawTransaction contains the complete transaction data. It also optionally includes
 /// the block height in which the transaction was included, or, when returned
 /// by GetMempoolStream(), the latest block height.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RawTransaction {
     /// exact data returned by Zcash 'getrawtransaction'
@@ -46,6 +50,7 @@ pub struct RawTransaction {
 /// A SendResponse encodes an error code and a string. It is currently used
 /// only by SendTransaction(). If error code is zero, the operation was
 /// successful; if non-zero, it and the message specify the failure.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendResponse {
     #[prost(int32, tag = "1")]
@@ -54,13 +59,16 @@ pub struct SendResponse {
     pub error_message: ::prost::alloc::string::String,
 }
 /// Chainspec is a placeholder to allow specification of a particular chain fork.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChainSpec {}
 /// Empty is for gRPCs that take no arguments, currently only GetLightdInfo.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Empty {}
 /// LightdInfo returns various information about this lightwalletd instance
 /// and the state of the blockchain.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LightdInfo {
     #[prost(string, tag = "1")]
@@ -102,6 +110,7 @@ pub struct LightdInfo {
 }
 /// TransparentAddressBlockFilter restricts the results to the given address
 /// or block range.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransparentAddressBlockFilter {
     /// t-address
@@ -114,6 +123,7 @@ pub struct TransparentAddressBlockFilter {
 /// Duration is currently used only for testing, so that the Ping rpc
 /// can simulate a delay, to create many simultaneous connections. Units
 /// are microseconds.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Duration {
     #[prost(int64, tag = "1")]
@@ -122,6 +132,7 @@ pub struct Duration {
 /// PingResponse is used to indicate concurrency, how many Ping rpcs
 /// are executing upon entry and upon exit (after the delay).
 /// This rpc is used for testing only.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PingResponse {
     #[prost(int64, tag = "1")]
@@ -129,27 +140,32 @@ pub struct PingResponse {
     #[prost(int64, tag = "2")]
     pub exit: i64,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Address {
     #[prost(string, tag = "1")]
     pub address: ::prost::alloc::string::String,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AddressList {
     #[prost(string, repeated, tag = "1")]
     pub addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Balance {
     #[prost(int64, tag = "1")]
     pub value_zat: i64,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Exclude {
     #[prost(bytes = "vec", repeated, tag = "1")]
     pub txid: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
 }
 /// The TreeState is derived from the Zcash z_gettreestate rpc.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TreeState {
     /// "main" or "test"
@@ -173,6 +189,7 @@ pub struct TreeState {
 }
 /// Results are sorted by height, which makes it easy to issue another
 /// request that picks up from where the previous left off.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetAddressUtxosArg {
     #[prost(string, repeated, tag = "1")]
@@ -183,6 +200,7 @@ pub struct GetAddressUtxosArg {
     #[prost(uint32, tag = "3")]
     pub max_entries: u32,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetAddressUtxosReply {
     #[prost(string, tag = "6")]
@@ -198,6 +216,7 @@ pub struct GetAddressUtxosReply {
     #[prost(uint64, tag = "5")]
     pub height: u64,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetAddressUtxosReplyList {
     #[prost(message, repeated, tag = "1")]

@@ -2,6 +2,7 @@
 ///    1. Detect a payment to your shielded Sapling address
 ///    2. Detect a spend of your shielded Sapling notes
 ///    3. Update your witnesses to generate new Sapling spend proofs.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactBlock {
     /// the version of this wire format, for storage
@@ -29,6 +30,7 @@ pub struct CompactBlock {
 /// CompactTx contains the minimum information for a wallet to know if this transaction
 /// is relevant to it (either pays to it or spends from it) via shielded elements
 /// only. This message will not encode a transparent-to-transparent transaction.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactTx {
     /// Index and hash will allow the receiver to call out to chain
@@ -57,6 +59,7 @@ pub struct CompactTx {
 }
 /// CompactSaplingSpend is a Sapling Spend Description as described in 7.3 of the Zcash
 /// protocol specification.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactSaplingSpend {
     /// nullifier (see the Zcash protocol specification)
@@ -68,6 +71,7 @@ pub struct CompactSaplingSpend {
 /// section 7.4 of the Zcash protocol spec:
 /// <https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus>
 /// Total size is 116 bytes.
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactSaplingOutput {
     /// note commitment u-coordinate
@@ -82,6 +86,7 @@ pub struct CompactSaplingOutput {
 }
 /// <https://github.com/zcash/zips/blob/main/zip-0225.rst#orchard-action-description-orchardaction>
 /// (but not all fields are needed)
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CompactOrchardAction {
     /// \[32\] The nullifier of the input note
