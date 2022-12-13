@@ -64,6 +64,7 @@ pub fn read_v5_bundle<R: Read>(
             actions,
             flags,
             value_balance,
+            vec![],
             anchor,
             authorization,
         )))
