@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.2] - 2022-12-13
+### Fixed
+- `zcash_client_sqlite::WalletDb::get_transparent_balances` no longer returns an
+  error if the wallet has no UTXOs.
+
 ## [0.4.1] - 2022-12-06
 ### Added
 - `zcash_client_sqlite::DataConnStmtCache::advance_by_block` now generates a
