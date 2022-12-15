@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
+  takes a `shielding_threshold` argument that can be used to specify the 
+  minimum value allowed as input to a shielding transaction. Previously 
+  the shielding threshold was fixed at 100000 zatoshis.
+
 ## [0.6.1] - 2022-12-06
 ### Added
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` now generates

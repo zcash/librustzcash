@@ -225,6 +225,21 @@ mod tests {
         AccountId, BlockDb, DataConnStmtCache, WalletDb,
     };
 
+    #[cfg(feature = "transparent-inputs")]
+    use {
+        zcash_client_backend::{
+            data_api::wallet::shield_transparent_funds, fees::fixed,
+            wallet::WalletTransparentOutput,
+        },
+        zcash_primitives::{
+            memo::MemoBytes,
+            transaction::{
+                components::{amount::NonNegativeAmount, OutPoint, TxOut},
+                fees::fixed::FeeRule as FixedFeeRule,
+            },
+        },
+    };
+
     fn test_prover() -> impl TxProver {
         match LocalTxProver::with_default_location() {
             Some(tx_prover) => tx_prover,
@@ -943,6 +958,70 @@ mod tests {
                 req,
                 OvkPolicy::Sender,
                 1,
+            ),
+            Ok(_)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn shield_transparent() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        // Add an account to the wallet
+        let mut db_write = db_data.get_update_ops().unwrap();
+        let seed = Secret::new([0u8; 32].to_vec());
+        let (account_id, usk) = db_write.create_account(&seed).unwrap();
+        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let uaddr = db_data.get_current_address(account_id).unwrap().unwrap();
+        let taddr = uaddr.transparent().unwrap();
+
+        let utxo = WalletTransparentOutput::from_parts(
+            OutPoint::new([1u8; 32], 1),
+            TxOut {
+                value: Amount::from_u64(10000).unwrap(),
+                script_pubkey: taddr.script(),
+            },
+            sapling_activation_height(),
+        )
+        .unwrap();
+
+        let res0 = db_write.put_received_transparent_utxo(&utxo);
+        assert!(matches!(res0, Ok(_)));
+
+        let input_selector = GreedyInputSelector::new(
+            fixed::SingleOutputChangeStrategy::new(FixedFeeRule::standard()),
+            DustOutputPolicy::default(),
+        );
+
+        // Add funds to the wallet
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            &dfvk,
+            AddressType::Internal,
+            Amount::from_u64(50000).unwrap(),
+        );
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+
+        assert_matches!(
+            shield_transparent_funds(
+                &mut db_write,
+                &tests::network(),
+                test_prover(),
+                &input_selector,
+                NonNegativeAmount::from_u64(10000).unwrap(),
+                &usk,
+                &[*taddr],
+                &MemoBytes::empty(),
+                0
             ),
             Ok(_)
         );
