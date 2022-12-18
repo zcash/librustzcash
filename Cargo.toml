@@ -6,8 +6,8 @@ members = [
     "components/zcash_encoding",
     "components/zcash_protocol",
     "components/zip321",
-#    "zcash_client_backend",
-#    "zcash_client_sqlite",
+    "zcash_client_backend",
+    "zcash_client_sqlite",
     "zcash_extensions",
     "zcash_history",
     "zcash_keys",
@@ -31,7 +31,7 @@ categories = ["cryptography::cryptocurrencies"]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.3", path = "components/zcash_address" }
-#zcash_client_backend = { version = "0.12", path = "zcash_client_backend" }
+zcash_client_backend = { version = "0.12", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
 zcash_keys = { version = "0.2", path = "zcash_keys" }
 zcash_protocol = { version = "0.1", path = "components/zcash_protocol" }
@@ -95,7 +95,7 @@ maybe-rayon = { version = "0.1.0", default-features = false }
 rayon = "1.5"
 
 # Protobuf and gRPC
-prost = "=0.12.3"
+prost = "0.12"
 tonic = { version = "0.10", default-features = false }
 tonic-build = { version = "0.10", default-features = false }
 
@@ -124,4 +124,7 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", branch = "zsa1" }
+schemer = { git = "https://github.com/aschampion/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }
+schemer-rusqlite = { git = "https://github.com/aschampion/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }
+group = { git = "https://github.com/zkcrypto/group.git", rev = "f61e3e420ed1220c8f1f80988f8c6c5e202d8715" }
+orchard = { version = "0.3", git = "https://github.com/QED-it/orchard", rev = "5a50fb8d11361d3f7d1f3b2f6c0a468f88c0db49" }
