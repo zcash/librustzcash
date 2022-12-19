@@ -45,8 +45,8 @@ fn batch_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>, F, FR>(
     outputs: &[(D, Output)],
     decrypt_inner: F,
 ) -> Vec<Option<(FR, usize)>>
-where
-    F: Fn(&D, &D::IncomingViewingKey, &EphemeralKeyBytes, &Output, &D::SymmetricKey) -> Option<FR>,
+    where
+        F: Fn(&D, &D::IncomingViewingKey, &EphemeralKeyBytes, &Output, &D::SymmetricKey) -> Option<FR>,
 {
     if ivks.is_empty() {
         return (0..outputs.len()).map(|_| None).collect();

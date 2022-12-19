@@ -40,21 +40,25 @@ use subtle::{Choice, ConstantTimeEq};
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub mod batch;
 
-/// The size of a compact note.
-pub const COMPACT_NOTE_SIZE: usize = 1 + // version
+
+/// The size of a v2 compact note.
+pub const COMPACT_NOTE_SIZE_V2: usize = 1 + // version
     11 + // diversifier
     8  + // value
     32; // rseed (or rcm prior to ZIP 212)
 /// The size of the memo.
-const MEMO_SIZE: usize = 512;
-/// The size of the original encoding of NotePlaintextBytes.
-pub const NOTE_PLAINTEXT_SIZE: usize = COMPACT_NOTE_SIZE + MEMO_SIZE;
+pub const MEMO_SIZE: usize = 512;
+/// The size of [`NotePlaintextBytes`] for V2.
+pub const NOTE_PLAINTEXT_SIZE_V2: usize = COMPACT_NOTE_SIZE_V2 + MEMO_SIZE;
+
+/// The size of the autentication tag used for note encryption.
+pub const AEAD_TAG_SIZE: usize = 16;
+/// The size of an encrypted note plaintext.
+pub const ENC_CIPHERTEXT_SIZE_V2: usize = NOTE_PLAINTEXT_SIZE_V2 + AEAD_TAG_SIZE;
+
 /// The size of [`OutPlaintextBytes`].
 pub const OUT_PLAINTEXT_SIZE: usize = 32 + // pk_d
     32; // esk
-const AEAD_TAG_SIZE: usize = 16;
-/// The size of an encrypted note plaintext.
-pub const ENC_CIPHERTEXT_SIZE: usize = NOTE_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 /// The size of an encrypted outgoing plaintext.
 pub const OUT_CIPHERTEXT_SIZE: usize = OUT_PLAINTEXT_SIZE + AEAD_TAG_SIZE;
 
@@ -552,11 +556,7 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     key: &D::SymmetricKey,
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
-    let enc_ciphertext: D::EncNoteCiphertextBytes;
-    match output.enc_ciphertext() {
-        Some(x) => enc_ciphertext = x,
-        None                                    => return None,
-    }
+    let enc_ciphertext: D::EncNoteCiphertextBytes = output.enc_ciphertext()?;
 
     let (enc_plaintext, tag) = D::separate_tag_from_ciphertext(&enc_ciphertext);
     let mut plaintext = enc_plaintext;
@@ -724,11 +724,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
 
-    let enc_ciphertext: D::EncNoteCiphertextBytes;
-    match output.enc_ciphertext() {
-        Some(x) => enc_ciphertext = x,
-        None                                    => return None,
-    }
+    let enc_ciphertext: D::EncNoteCiphertextBytes = output.enc_ciphertext()?;
 
     let mut op = OutPlaintextBytes([0; OUT_PLAINTEXT_SIZE]);
     op.0.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
