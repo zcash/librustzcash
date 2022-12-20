@@ -1,6 +1,6 @@
 use bitvec::{order::Lsb0, view::AsBits};
 use group::{ff::PrimeField, Curve};
-use incrementalmerkletree::Altitude;
+use incrementalmerkletree::{Hashable, Level};
 use lazy_static::lazy_static;
 use std::io::{self, Read, Write};
 
@@ -8,7 +8,7 @@ use super::{
     note::ExtractedNoteCommitment,
     pedersen_hash::{pedersen_hash, Personalization},
 };
-use crate::merkle_tree::{HashSer, Hashable};
+use crate::merkle_tree::HashSer;
 
 pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 pub const SAPLING_COMMITMENT_TREE_DEPTH_U8: u8 = 32;
@@ -16,9 +16,9 @@ pub const SAPLING_COMMITMENT_TREE_DEPTH_U8: u8 = 32;
 lazy_static! {
     static ref UNCOMMITTED_SAPLING: bls12_381::Scalar = bls12_381::Scalar::one();
     static ref EMPTY_ROOTS: Vec<Node> = {
-        let mut v = vec![Node::blank()];
-        for d in 0..SAPLING_COMMITMENT_TREE_DEPTH {
-            let next = Node::combine(d, &v[d], &v[d]);
+        let mut v = vec![Node::empty_leaf()];
+        for d in 0..SAPLING_COMMITMENT_TREE_DEPTH_U8 {
+            let next = Node::combine(d.into(), &v[usize::from(d)], &v[usize::from(d)]);
             v.push(next);
         }
         v
@@ -93,14 +93,14 @@ impl incrementalmerkletree::Hashable for Node {
         }
     }
 
-    fn combine(altitude: Altitude, lhs: &Self, rhs: &Self) -> Self {
+    fn combine(level: Level, lhs: &Self, rhs: &Self) -> Self {
         Node {
-            repr: merkle_hash(altitude.into(), &lhs.repr, &rhs.repr),
+            repr: merkle_hash(level.into(), &lhs.repr, &rhs.repr),
         }
     }
 
-    fn empty_root(altitude: Altitude) -> Self {
-        EMPTY_ROOTS[<usize>::from(altitude)]
+    fn empty_root(level: Level) -> Self {
+        EMPTY_ROOTS[<usize>::from(level)]
     }
 }
 

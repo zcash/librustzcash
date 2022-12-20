@@ -7,6 +7,23 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Removed
+- `merkle_tree::Hashable` has been removed and its uses have been replaced by 
+  `incrementalmerkletree::Hashable` and `merkle_tree::HashSer`.
+- The `Hashable` bound on the `Node` parameter to the `IncrementalWitness`
+  type has been removed.
+- `merkle_tree::incremental::write_auth_fragment_v1`
+
+### Added
+- `merkle_tree::incremental::{read_address, write_address}`
+- `merkle_tree::incremental::read_bridge_v2`
+
+### Changed
+- The bounds on the `H` parameter to the following methods have changed:
+  - `merkle_tree::incremental::read_frontier_v0`
+  - `merkle_tree::incremental::read_auth_fragment_v1`
+
+
 ## [0.11.0] - 2023-04-15
 ### Added
 - `zcash_primitives::zip32::fingerprint` module, containing types for deriving

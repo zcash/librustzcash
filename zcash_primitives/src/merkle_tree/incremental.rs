@@ -1,12 +1,11 @@
 //! Implementations of serialization and parsing for Orchard note commitment trees.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Write};
 
-use incrementalmerkletree::{
-    bridgetree::{AuthFragment, Frontier, Leaf, MerkleBridge, NonEmptyFrontier},
-    Hashable, Position,
-};
+use bridgetree::{Frontier, MerkleBridge, NonEmptyFrontier};
+use incrementalmerkletree::{Address, Hashable, Level, Position};
 use orchard::tree::MerkleHashOrchard;
 use zcash_encoding::{Optional, Vector};
 
@@ -66,7 +65,18 @@ pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
     read_leu64_usize(&mut reader).map(Position::from)
 }
 
-pub fn read_frontier_v0<H: Hashable + super::Hashable, R: Read>(
+pub fn write_address<W: Write>(mut writer: W, addr: Address) -> io::Result<()> {
+    writer.write_u8(addr.level().into())?;
+    write_usize_leu64(&mut writer, addr.index())
+}
+
+pub fn read_address<R: Read>(mut reader: R) -> io::Result<Address> {
+    let level = reader.read_u8().map(Level::from)?;
+    let index = read_leu64_usize(&mut reader)?;
+    Ok(Address::from_parts(level, index))
+}
+
+pub fn read_frontier_v0<H: Hashable + HashSer + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<Frontier<H, 32>> {
     let tree = CommitmentTree::read(&mut reader)?;
@@ -79,17 +89,21 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
     frontier: &NonEmptyFrontier<H>,
 ) -> io::Result<()> {
     write_position(&mut writer, frontier.position())?;
-    match frontier.leaf() {
-        Leaf::Left(a) => {
-            a.write(&mut writer)?;
-            Optional::write(&mut writer, None, |w, n: &H| n.write(w))?;
-        }
-        Leaf::Right(a, b) => {
-            a.write(&mut writer)?;
-            Optional::write(&mut writer, Some(b), |w, n| n.write(w))?;
-        }
+    if frontier.position().is_odd() {
+        // The v1 serialization wrote the sibling of a right-hand leaf as a non-optional value,
+        // rather than as part of the ommers vector.
+        frontier
+            .ommers()
+            .get(0)
+            .expect("ommers vector cannot be empty for right-hand nodes")
+            .write(&mut writer)?;
+        Optional::write(&mut writer, Some(frontier.leaf()), |w, n: &H| n.write(w))?;
+        Vector::write(&mut writer, &frontier.ommers()[1..], |w, e| e.write(w))?;
+    } else {
+        frontier.leaf().write(&mut writer)?;
+        Optional::write(&mut writer, None, |w, n: &H| n.write(w))?;
+        Vector::write(&mut writer, frontier.ommers(), |w, e| e.write(w))?;
     }
-    Vector::write(&mut writer, frontier.ommers(), |w, e| e.write(w))?;
 
     Ok(())
 }
@@ -101,12 +115,15 @@ pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
     let position = read_position(&mut reader)?;
     let left = H::read(&mut reader)?;
     let right = Optional::read(&mut reader, H::read)?;
+    let mut ommers = Vector::read(&mut reader, |r| H::read(r))?;
 
-    let leaf = right.map_or_else(
-        || Leaf::Left(left.clone()),
-        |r| Leaf::Right(left.clone(), r),
-    );
-    let ommers = Vector::read(&mut reader, |r| H::read(r))?;
+    let leaf = if let Some(right) = right {
+        // if the frontier has a right leaf, then the left leaf is the first ommer
+        ommers.insert(0, left);
+        right
+    } else {
+        left
+    };
 
     NonEmptyFrontier::from_parts(position, leaf, ommers).map_err(|err| {
         io::Error::new(
@@ -136,37 +153,42 @@ pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(reader: R) -> io::Result<Fr
     }
 }
 
-pub fn write_auth_fragment_v1<H: HashSer, W: Write>(
-    mut writer: W,
-    fragment: &AuthFragment<H>,
-) -> io::Result<()> {
-    write_position(&mut writer, fragment.position())?;
-    write_usize_leu64(&mut writer, fragment.altitudes_observed())?;
-    Vector::write(&mut writer, fragment.values(), |w, a| a.write(w))
-}
+// pub fn write_auth_fragment_v1<H: HashSer, W: Write>(
+//     mut writer: W,
+//     fragment: &AuthFragment<H>,
+// ) -> io::Result<()> {
+//     write_position(&mut writer, fragment.position())?;
+//     write_usize_leu64(&mut writer, fragment.altitudes_observed())?;
+//     Vector::write(&mut writer, fragment.values(), |w, a| a.write(w))
+// }
 
 #[allow(clippy::redundant_closure)]
-pub fn read_auth_fragment_v1<H: HashSer, R: Read>(mut reader: R) -> io::Result<AuthFragment<H>> {
+pub fn read_auth_fragment_v1<H: HashSer, R: Read>(
+    mut reader: R,
+) -> io::Result<(Position, usize, Vec<H>)> {
     let position = read_position(&mut reader)?;
     let alts_observed = read_leu64_usize(&mut reader)?;
     let values = Vector::read(&mut reader, |r| H::read(r))?;
 
-    Ok(AuthFragment::from_parts(position, alts_observed, values))
+    Ok((position, alts_observed, values))
 }
 
-pub fn write_bridge_v1<H: HashSer + Ord, W: Write>(
+pub fn write_bridge_v2<H: HashSer + Ord, W: Write>(
     mut writer: W,
     bridge: &MerkleBridge<H>,
 ) -> io::Result<()> {
     Optional::write(&mut writer, bridge.prior_position(), |w, pos| {
         write_position(w, pos)
     })?;
-    Vector::write(
+    Vector::write_sized(&mut writer, bridge.tracking().iter(), |mut w, addr| {
+        write_address(&mut w, *addr)
+    })?;
+    Vector::write_sized(
         &mut writer,
-        &bridge.auth_fragments().iter().collect::<Vec<_>>(),
-        |mut w, (pos, a)| {
-            write_position(&mut w, **pos)?;
-            write_auth_fragment_v1(w, a)
+        bridge.ommers().iter(),
+        |mut w, (addr, value)| {
+            write_address(&mut w, *addr)?;
+            value.write(&mut w)
         },
     )?;
     write_nonempty_frontier_v1(&mut writer, bridge.frontier())?;
@@ -177,17 +199,85 @@ pub fn write_bridge_v1<H: HashSer + Ord, W: Write>(
 pub fn read_bridge_v1<H: HashSer + Ord + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<MerkleBridge<H>> {
+    fn levels_required(pos: Position) -> impl Iterator<Item = Level> {
+        (0u8..64).into_iter().filter_map(move |i| {
+            if usize::from(pos) == 0 || usize::from(pos) & (1 << i) == 0 {
+                Some(Level::from(i))
+            } else {
+                None
+            }
+        })
+    }
+
     let prior_position = Optional::read(&mut reader, read_position)?;
-    let auth_fragments = Vector::read(&mut reader, |mut r| {
-        Ok((read_position(&mut r)?, read_auth_fragment_v1(r)?))
-    })?
-    .into_iter()
-    .collect();
+
+    let fragments = Vector::read(&mut reader, |mut r| {
+        let fragment_position = read_position(&mut r)?;
+        let (pos, levels_observed, values) = read_auth_fragment_v1(r)?;
+
+        if fragment_position == pos {
+            Ok((pos, levels_observed, values))
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Auth fragment position mismatch: {:?} != {:?}",
+                    fragment_position, pos
+                ),
+            ))
+        }
+    })?;
+
+    let frontier = read_nonempty_frontier_v1(&mut reader)?;
+
+    let mut tracking = BTreeSet::new();
+    let mut ommers = BTreeMap::new();
+    for (pos, levels_observed, values) in fragments.into_iter() {
+        // get the list of levels at which we expect to find future ommers for the position being
+        // tracked
+        let levels = levels_required(pos)
+            .take(levels_observed + 1)
+            .collect::<Vec<_>>();
+
+        // track the currently-incomplete parent of the tracked position at max height (the one
+        // we're currently building)
+        tracking.insert(Address::above_position(*levels.last().unwrap(), pos));
+
+        for (level, ommer_value) in levels
+            .into_iter()
+            .rev()
+            .skip(1)
+            .zip(values.into_iter().rev())
+        {
+            let ommer_address = Address::above_position(level, pos).sibling();
+            ommers.insert(ommer_address, ommer_value);
+        }
+    }
+
+    Ok(MerkleBridge::from_parts(
+        prior_position,
+        tracking,
+        ommers,
+        frontier,
+    ))
+}
+
+pub fn read_bridge_v2<H: HashSer + Ord + Clone, R: Read>(
+    mut reader: R,
+) -> io::Result<MerkleBridge<H>> {
+    let prior_position = Optional::read(&mut reader, read_position)?;
+    let tracking = Vector::read_collected(&mut reader, |mut r| read_address(&mut r))?;
+    let ommers = Vector::read_collected(&mut reader, |mut r| {
+        let addr = read_address(&mut r)?;
+        let value = H::read(&mut r)?;
+        Ok((addr, value))
+    })?;
     let frontier = read_nonempty_frontier_v1(&mut reader)?;
 
     Ok(MerkleBridge::from_parts(
         prior_position,
-        auth_fragments,
+        tracking,
+        ommers,
         frontier,
     ))
 }
@@ -196,8 +286,8 @@ pub fn write_bridge<H: HashSer + Ord, W: Write>(
     mut writer: W,
     bridge: &MerkleBridge<H>,
 ) -> io::Result<()> {
-    writer.write_u8(SER_V1)?;
-    write_bridge_v1(writer, bridge)
+    writer.write_u8(SER_V2)?;
+    write_bridge_v2(writer, bridge)
 }
 
 pub fn read_bridge<H: HashSer + Ord + Clone, R: Read>(
@@ -205,6 +295,7 @@ pub fn read_bridge<H: HashSer + Ord + Clone, R: Read>(
 ) -> io::Result<MerkleBridge<H>> {
     match reader.read_u8()? {
         SER_V1 => read_bridge_v1(&mut reader),
+        SER_V2 => read_bridge_v2(&mut reader),
         flag => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Unrecognized serialization version: {:?}", flag),
@@ -214,13 +305,9 @@ pub fn read_bridge<H: HashSer + Ord + Clone, R: Read>(
 
 #[cfg(test)]
 mod tests {
+    use bridgetree::{BridgeTree, Frontier};
     use hex;
     use proptest::prelude::*;
-
-    use incrementalmerkletree::{
-        bridgetree::{BridgeTree, Frontier},
-        Tree,
-    };
 
     use super::*;
     use crate::{
@@ -255,28 +342,28 @@ mod tests {
 
     #[test]
     fn test_bridge_roundtrip() {
-        let mut t: BridgeTree<TestNode, 8> = BridgeTree::new(10);
+        let mut t: BridgeTree<TestNode, usize, 8> = BridgeTree::new(10, 0);
         let mut to_unwitness = vec![];
         let mut has_auth_path = vec![];
         for i in 0usize..100 {
             assert!(
-                t.append(&TestNode(i.try_into().unwrap())),
+                t.append(TestNode(i.try_into().unwrap())),
                 "Append should succeed."
             );
-            if i % 5 == 0 {
-                t.checkpoint();
-            }
             if i % 7 == 0 {
-                t.witness();
+                t.mark();
                 if i > 0 && i % 2 == 0 {
                     to_unwitness.push(Position::from(i));
                 } else {
                     has_auth_path.push(Position::from(i));
                 }
             }
+            if i % 5 == 0 {
+                t.checkpoint(i + 1);
+            }
             if i % 11 == 0 && !to_unwitness.is_empty() {
                 let pos = to_unwitness.remove(0);
-                t.remove_witness(pos);
+                t.remove_mark(pos);
             }
         }
 
@@ -290,16 +377,25 @@ mod tests {
             write_bridge(&mut buffer, b).unwrap();
             let b0 = read_bridge(&buffer[..]).unwrap();
             assert_eq!(b, &b0);
+
             let buffer2 = hex::decode(&BRIDGE_V1_VECTORS[i]).unwrap();
             let b2 = read_bridge(&buffer2[..]).unwrap();
-            assert_eq!(b, &b2);
+            assert_eq!(b.prior_position(), b2.prior_position());
+            assert_eq!(b.frontier(), b2.frontier());
+            // Due to the changed nature of garbage collection, bridgetree-v0.2.0 and later
+            // MerkleBridge values may track elements that incrementalmerkletree-v0.3.0 bridges did
+            // not; in the case that we remove the mark on a leaf, the ommers being tracked related
+            // to that mark may be retained until the next garbage collection pass. Therefore, we
+            // can only verify that the legacy tracking set is fully contained in the new tracking
+            // set.
+            assert!(b.tracking().is_superset(b2.tracking()));
+            for (k, v) in b2.ommers() {
+                assert_eq!(b.ommers().get(k), Some(v));
+            }
         }
 
-        let latest_root = t.root(0).unwrap();
         for (pos, witness) in BRIDGE_V1_WITNESSES {
-            let path = t
-                .authentication_path(Position::from(*pos), &latest_root)
-                .unwrap();
+            let path = t.witness(Position::from(*pos), 0).unwrap();
             assert_eq!(witness.to_vec(), path);
         }
     }
