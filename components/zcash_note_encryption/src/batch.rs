@@ -3,8 +3,7 @@
 use alloc::vec::Vec; // module is alloc only
 
 use crate::{
-    try_compact_note_decryption_inner, try_note_decryption_inner,
-    BatchDomain, EphemeralKeyBytes,
+    try_compact_note_decryption_inner, try_note_decryption_inner, BatchDomain, EphemeralKeyBytes,
     ShieldedOutput,
 };
 
@@ -45,8 +44,8 @@ fn batch_note_decryption<D: BatchDomain, Output: ShieldedOutput<D>, F, FR>(
     outputs: &[(D, Output)],
     decrypt_inner: F,
 ) -> Vec<Option<(FR, usize)>>
-    where
-        F: Fn(&D, &D::IncomingViewingKey, &EphemeralKeyBytes, &Output, &D::SymmetricKey) -> Option<FR>,
+where
+    F: Fn(&D, &D::IncomingViewingKey, &EphemeralKeyBytes, &Output, &D::SymmetricKey) -> Option<FR>,
 {
     if ivks.is_empty() {
         return (0..outputs.len()).map(|_| None).collect();
