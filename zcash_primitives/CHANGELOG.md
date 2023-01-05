@@ -6,6 +6,40 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::sapling::value`, containing types for handling Sapling note
+  values and value commitments.
+
+### Changed
+- `zcash_primitives::transaction::components::sapling::builder`:
+  - `SaplingBuilder::add_output` now takes a
+    `zcash_primitives::sapling::value::NoteValue`.
+- Value commitments now use `zcash_primitives::sapling::value::ValueCommitment`
+  instead of `jubjub::ExtendedPoint` in the following places:
+  - `zcash_primitives::sapling::note_encryption`:
+    - `prf_ock`
+    - `SaplingDomain::ValueCommitment`
+  - `zcash_primitives::sapling::prover`:
+    - `TxProver::{spend_proof, output_proof}` return type.
+  - `zcash_primitives::transaction::components`:
+    - `SpendDescription::cv`
+    - `OutputDescription::cv`
+- `zcash_primitives::transaction::components`:
+  - `sapling::{Bundle, SpendDescription, OutputDescription}` have had their
+    fields replaced by getter methods.
+
+### Removed
+- `zcash_primitives::sapling`:
+  - `NoteValue` (use `zcash_primitives::sapling::value::NoteValue` instead).
+  - `ValueCommitment` (use `zcash_primitives::sapling::value::ValueCommitment`
+    or `zcash_proofs::circuit::sapling::ValueCommitmentPreimage` instead).
+  - `testing::{arb_note_value, arb_positive_note_value}` (use the methods in
+    `zcash_primitives::sapling::value::testing` instead).
+- `zcash_primitives::transaction::components`:
+  - The fields of `sapling::{SpendDescriptionV5, OutputDescriptionV5}` (they are
+    now opaque types; use `sapling::{SpendDescription, OutputDescription}`
+    instead).
+  - `sapling::read_point`
 
 ## [0.9.1] - 2022-12-06
 ### Fixed

@@ -18,6 +18,7 @@ use crate::{
         redjubjub::{PrivateKey, Signature},
         spend_sig_internal,
         util::generate_random_rseed_internal,
+        value::{NoteValue, ValueSum},
         Diversifier, Node, Note, PaymentAddress,
     },
     transaction::{
@@ -99,20 +100,17 @@ impl SaplingOutputInfo {
         target_height: BlockHeight,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
-        value: Amount,
+        value: NoteValue,
         memo: MemoBytes,
     ) -> Result<Self, Error> {
         let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
-        if value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
 
         let rseed = generate_random_rseed_internal(params, target_height, rng);
 
         let note = Note {
             g_d,
             pk_d: *to.pk_d(),
-            value: value.into(),
+            value: value.inner(),
             rseed,
         };
 
@@ -212,7 +210,7 @@ pub struct SaplingBuilder<P> {
     params: P,
     anchor: Option<bls12_381::Scalar>,
     target_height: BlockHeight,
-    value_balance: Amount,
+    value_balance: ValueSum,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutputInfo>,
 }
@@ -239,7 +237,7 @@ impl<P> SaplingBuilder<P> {
             params,
             anchor: None,
             target_height,
-            value_balance: Amount::zero(),
+            value_balance: ValueSum::zero(),
             spends: vec![],
             outputs: vec![],
         }
@@ -269,9 +267,21 @@ impl<P> SaplingBuilder<P> {
         }
     }
 
+    /// Returns the net value represented by the spends and outputs added to this builder,
+    /// or an error if the values added to this builder overflow the range of a Zcash
+    /// monetary amount.
+    fn try_value_balance(&self) -> Result<Amount, Error> {
+        self.value_balance
+            .try_into()
+            .map_err(|_| ())
+            .and_then(Amount::from_i64)
+            .map_err(|()| Error::InvalidAmount)
+    }
+
     /// Returns the net value represented by the spends and outputs added to this builder.
     pub fn value_balance(&self) -> Amount {
-        self.value_balance
+        self.try_value_balance()
+            .expect("we check this when mutating self.value_balance")
     }
 }
 
@@ -301,7 +311,9 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
         let alpha = jubjub::Fr::random(&mut rng);
 
-        self.value_balance += Amount::from_u64(note.value).map_err(|_| Error::InvalidAmount)?;
+        self.value_balance =
+            (self.value_balance + NoteValue::from_raw(note.value)).ok_or(Error::InvalidAddress)?;
+        self.try_value_balance()?;
 
         self.spends.push(SpendDescriptionInfo {
             extsk,
@@ -321,7 +333,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         mut rng: R,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
-        value: Amount,
+        value: NoteValue,
         memo: MemoBytes,
     ) -> Result<(), Error> {
         let output = SaplingOutputInfo::new_internal(
@@ -334,7 +346,8 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             memo,
         )?;
 
-        self.value_balance -= value;
+        self.value_balance = (self.value_balance - value).ok_or(Error::InvalidAddress)?;
+        self.try_value_balance()?;
 
         self.outputs.push(output);
 
@@ -349,6 +362,8 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         target_height: BlockHeight,
         progress_notifier: Option<&Sender<Progress>>,
     ) -> Result<Option<Bundle<Unauthorized>>, Error> {
+        let value_balance = self.try_value_balance()?;
+
         // Record initial positions of spends and outputs
         let params = self.params;
         let mut indexed_spends: Vec<_> = self.spends.into_iter().enumerate().collect();
@@ -527,7 +542,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             Some(Bundle {
                 shielded_spends,
                 shielded_outputs,
-                value_balance: self.value_balance,
+                value_balance,
                 authorization: Unauthorized { tx_metadata },
             })
         };
@@ -539,7 +554,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 impl SpendDescription<Unauthorized> {
     pub fn apply_signature(&self, spend_auth_sig: Signature) -> SpendDescription<Authorized> {
         SpendDescription {
-            cv: self.cv,
+            cv: self.cv.clone(),
             anchor: self.anchor,
             nullifier: self.nullifier,
             rk: self.rk.clone(),
@@ -598,7 +613,8 @@ pub mod testing {
         merkle_tree::{testing::arb_commitment_tree, IncrementalWitness},
         sapling::{
             prover::mock::MockTxProver,
-            testing::{arb_node, arb_note, arb_positive_note_value},
+            testing::{arb_node, arb_note},
+            value::testing::arb_positive_note_value,
             Diversifier,
         },
         transaction::components::{

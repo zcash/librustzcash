@@ -418,7 +418,7 @@ impl<A: Authorization> TransactionData<A> {
             )?,
             self.sapling_bundle
                 .as_ref()
-                .map_or_else(Amount::zero, |b| b.value_balance),
+                .map_or_else(Amount::zero, |b| *b.value_balance()),
             self.orchard_bundle
                 .as_ref()
                 .map_or_else(Amount::zero, |b| *b.value_balance()),
@@ -513,7 +513,7 @@ impl<A: Authorization> TransactionData<A> {
     pub fn sapling_value_balance(&self) -> Amount {
         self.sapling_bundle
             .as_ref()
-            .map_or(Amount::zero(), |b| b.value_balance)
+            .map_or(Amount::zero(), |b| *b.value_balance())
     }
 }
 
@@ -648,11 +648,13 @@ impl Transaction {
                 expiry_height,
                 transparent_bundle,
                 sprout_bundle,
-                sapling_bundle: binding_sig.map(|binding_sig| sapling::Bundle {
-                    value_balance,
-                    shielded_spends,
-                    shielded_outputs,
-                    authorization: sapling::Authorized { binding_sig },
+                sapling_bundle: binding_sig.map(|binding_sig| {
+                    sapling::Bundle::from_parts(
+                        shielded_spends,
+                        shielded_outputs,
+                        value_balance,
+                        sapling::Authorized { binding_sig },
+                    )
                 }),
                 orchard_bundle: None,
                 #[cfg(feature = "zfuture")]
@@ -779,11 +781,13 @@ impl Transaction {
             .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
             .collect();
 
-        Ok(binding_sig.map(|binding_sig| sapling::Bundle {
-            value_balance,
-            shielded_spends,
-            shielded_outputs,
-            authorization: sapling::Authorized { binding_sig },
+        Ok(binding_sig.map(|binding_sig| {
+            sapling::Bundle::from_parts(
+                shielded_spends,
+                shielded_outputs,
+                value_balance,
+                sapling::Authorized { binding_sig },
+            )
         }))
     }
 
@@ -827,21 +831,21 @@ impl Transaction {
                 &self
                     .sapling_bundle
                     .as_ref()
-                    .map_or(Amount::zero(), |b| b.value_balance)
+                    .map_or(Amount::zero(), |b| *b.value_balance())
                     .to_i64_le_bytes(),
             )?;
             Vector::write(
                 &mut writer,
                 self.sapling_bundle
                     .as_ref()
-                    .map_or(&[], |b| &b.shielded_spends),
+                    .map_or(&[], |b| b.shielded_spends()),
                 |w, e| e.write_v4(w),
             )?;
             Vector::write(
                 &mut writer,
                 self.sapling_bundle
                     .as_ref()
-                    .map_or(&[], |b| &b.shielded_outputs),
+                    .map_or(&[], |b| b.shielded_outputs()),
                 |w, e| e.write_v4(w),
             )?;
         } else if self.sapling_bundle.is_some() {
@@ -863,7 +867,7 @@ impl Transaction {
 
         if self.version.has_sapling() {
             if let Some(bundle) = self.sapling_bundle.as_ref() {
-                bundle.authorization.binding_sig.write(&mut writer)?;
+                bundle.authorization().binding_sig.write(&mut writer)?;
             }
         }
 
@@ -915,40 +919,40 @@ impl Transaction {
 
     pub fn write_v5_sapling<W: Write>(&self, mut writer: W) -> io::Result<()> {
         if let Some(bundle) = &self.sapling_bundle {
-            Vector::write(&mut writer, &bundle.shielded_spends, |w, e| {
+            Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
                 e.write_v5_without_witness_data(w)
             })?;
 
-            Vector::write(&mut writer, &bundle.shielded_outputs, |w, e| {
+            Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
                 e.write_v5_without_proof(w)
             })?;
 
-            if !(bundle.shielded_spends.is_empty() && bundle.shielded_outputs.is_empty()) {
-                writer.write_all(&bundle.value_balance.to_i64_le_bytes())?;
+            if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+                writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
             }
-            if !bundle.shielded_spends.is_empty() {
-                writer.write_all(bundle.shielded_spends[0].anchor.to_repr().as_ref())?;
+            if !bundle.shielded_spends().is_empty() {
+                writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
             }
 
             Array::write(
                 &mut writer,
-                bundle.shielded_spends.iter().map(|s| s.zkproof),
+                bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
                 |w, e| w.write_all(e),
             )?;
             Array::write(
                 &mut writer,
-                bundle.shielded_spends.iter().map(|s| s.spend_auth_sig),
+                bundle.shielded_spends().iter().map(|s| s.spend_auth_sig()),
                 |w, e| e.write(w),
             )?;
 
             Array::write(
                 &mut writer,
-                bundle.shielded_outputs.iter().map(|s| s.zkproof),
+                bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
                 |w, e| w.write_all(e),
             )?;
 
-            if !(bundle.shielded_spends.is_empty() && bundle.shielded_outputs.is_empty()) {
-                bundle.authorization.binding_sig.write(&mut writer)?;
+            if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+                bundle.authorization().binding_sig.write(&mut writer)?;
             }
         } else {
             CompactSize::write(&mut writer, 0)?;

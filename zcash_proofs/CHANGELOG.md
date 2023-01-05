@@ -6,6 +6,21 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_proofs::circuit::sapling`:
+  - `ValueCommitmentOpening`
+  - A `value_commitment_opening` field on `Spend` and `Output`.
+
+### Changed
+- Value commitments now use `zcash_primitives::sapling::value::ValueCommitment`
+  instead of `jubjub::ExtendedPoint` in `zcash_proofs::sapling`:
+  - `SaplingProvingContext::{spend_proof, output_proof}`
+  - `SaplingVerificationContext::{check_spend, check_output}`
+
+### Removed
+- `zcash_proofs::circuit::sapling`:
+  - The `value_commitment` field of `Spend` and `Output` (use
+    `value_commitment_opening` instead).
 
 ## [0.9.0] - 2022-11-12
 ### Changed

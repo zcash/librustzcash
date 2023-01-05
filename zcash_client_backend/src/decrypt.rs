@@ -74,7 +74,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                     let ovk = dfvk.fvk().ovk;
 
                     bundle
-                        .shielded_outputs
+                        .shielded_outputs()
                         .iter()
                         .enumerate()
                         .flat_map(move |(index, output)| {

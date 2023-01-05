@@ -16,7 +16,7 @@ use crate::{
     legacy::TransparentAddress,
     memo::MemoBytes,
     merkle_tree::MerklePath,
-    sapling::{prover::TxProver, Diversifier, Node, Note, PaymentAddress},
+    sapling::{prover::TxProver, value::NoteValue, Diversifier, Node, Note, PaymentAddress},
     transaction::{
         components::{
             amount::{Amount, BalanceError},
@@ -254,8 +254,16 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         value: Amount,
         memo: MemoBytes,
     ) -> Result<(), sapling::builder::Error> {
-        self.sapling_builder
-            .add_output(&mut self.rng, ovk, to, value, memo)
+        if value.is_negative() {
+            return Err(sapling::builder::Error::InvalidAmount);
+        }
+        self.sapling_builder.add_output(
+            &mut self.rng,
+            ovk,
+            to,
+            NoteValue::from_raw(value.into()),
+            memo,
+        )
     }
 
     /// Adds a transparent coin to be spent in this transaction.

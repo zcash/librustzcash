@@ -1,7 +1,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use group::GroupEncoding;
 
 use crate::consensus::BranchId;
 
@@ -110,11 +109,11 @@ fn shielded_spends_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
 ) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_spends.len() * 384);
     for s_spend in shielded_spends {
-        data.extend_from_slice(&s_spend.cv.to_bytes());
-        data.extend_from_slice(s_spend.anchor.to_repr().as_ref());
-        data.extend_from_slice(s_spend.nullifier.as_ref());
-        s_spend.rk.write(&mut data).unwrap();
-        data.extend_from_slice(&s_spend.zkproof);
+        data.extend_from_slice(&s_spend.cv().to_bytes());
+        data.extend_from_slice(s_spend.anchor().to_repr().as_ref());
+        data.extend_from_slice(s_spend.nullifier().as_ref());
+        s_spend.rk().write(&mut data).unwrap();
+        data.extend_from_slice(s_spend.zkproof());
     }
     Blake2bParams::new()
         .hash_length(32)
@@ -219,15 +218,15 @@ pub fn v4_signature_hash<
                 h,
                 !tx.sapling_bundle
                     .as_ref()
-                    .map_or(true, |b| b.shielded_spends.is_empty()),
-                shielded_spends_hash(&tx.sapling_bundle.as_ref().unwrap().shielded_spends)
+                    .map_or(true, |b| b.shielded_spends().is_empty()),
+                shielded_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
             );
             update_hash!(
                 h,
                 !tx.sapling_bundle
                     .as_ref()
-                    .map_or(true, |b| b.shielded_outputs.is_empty()),
-                shielded_outputs_hash(&tx.sapling_bundle.as_ref().unwrap().shielded_outputs)
+                    .map_or(true, |b| b.shielded_outputs().is_empty()),
+                shielded_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
             );
         }
         update_u32!(h, tx.lock_time, tmp);

@@ -7,7 +7,7 @@ use bellman::{Circuit, ConstraintSystem, SynthesisError};
 use zcash_primitives::constants;
 
 use zcash_primitives::sapling::{
-    PaymentAddress, ProofGenerationKey, ValueCommitment, SAPLING_COMMITMENT_TREE_DEPTH,
+    PaymentAddress, ProofGenerationKey, SAPLING_COMMITMENT_TREE_DEPTH,
 };
 
 use super::ecc;
@@ -28,10 +28,26 @@ use group::ff::PrimeFieldBits;
 
 pub const TREE_DEPTH: usize = SAPLING_COMMITMENT_TREE_DEPTH;
 
+/// The opening (value and randomness) of a Sapling value commitment.
+#[derive(Clone)]
+pub struct ValueCommitmentOpening {
+    pub value: u64,
+    pub randomness: jubjub::Scalar,
+}
+
+#[cfg(test)]
+impl ValueCommitmentOpening {
+    fn commitment(&self) -> jubjub::ExtendedPoint {
+        let cv = (constants::VALUE_COMMITMENT_VALUE_GENERATOR * jubjub::Fr::from(self.value))
+            + (constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR * self.randomness);
+        cv.into()
+    }
+}
+
 /// This is an instance of the `Spend` circuit.
 pub struct Spend {
-    /// Pedersen commitment to the value being spent
-    pub value_commitment: Option<ValueCommitment>,
+    /// The opening of a Pedersen commitment to the value being spent.
+    pub value_commitment_opening: Option<ValueCommitmentOpening>,
 
     /// Key required to construct proofs for spending notes
     /// for a particular spending key
@@ -56,8 +72,8 @@ pub struct Spend {
 
 /// This is an output circuit instance.
 pub struct Output {
-    /// Pedersen commitment to the value being spent
-    pub value_commitment: Option<ValueCommitment>,
+    /// The opening of a Pedersen commitment to the value being spent.
+    pub value_commitment_opening: Option<ValueCommitmentOpening>,
 
     /// The payment address of the recipient
     pub payment_address: Option<PaymentAddress>,
@@ -73,7 +89,7 @@ pub struct Output {
 /// input to the circuit
 fn expose_value_commitment<CS>(
     mut cs: CS,
-    value_commitment: Option<ValueCommitment>,
+    value_commitment_opening: Option<ValueCommitmentOpening>,
 ) -> Result<Vec<boolean::Boolean>, SynthesisError>
 where
     CS: ConstraintSystem<bls12_381::Scalar>,
@@ -81,7 +97,7 @@ where
     // Booleanize the value into little-endian bit order
     let value_bits = boolean::u64_into_boolean_vec_le(
         cs.namespace(|| "value"),
-        value_commitment.as_ref().map(|c| c.value),
+        value_commitment_opening.as_ref().map(|c| c.value),
     )?;
 
     // Compute the note value in the exponent
@@ -96,7 +112,7 @@ where
     // it doesn't matter for security.
     let rcv = boolean::field_into_boolean_vec_le(
         cs.namespace(|| "rcv"),
-        value_commitment.as_ref().map(|c| c.randomness),
+        value_commitment_opening.as_ref().map(|c| c.randomness),
     )?;
 
     // Compute the randomness in the exponent
@@ -230,7 +246,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
             // Get the value in little-endian bit order
             let value_bits = expose_value_commitment(
                 cs.namespace(|| "value commitment"),
-                self.value_commitment,
+                self.value_commitment_opening,
             )?;
 
             // Compute the note's value as a linear combination
@@ -404,7 +420,7 @@ impl Circuit<bls12_381::Scalar> for Output {
         // in the note.
         note_contents.extend(expose_value_commitment(
             cs.namespace(|| "value commitment"),
-            self.value_commitment,
+            self.value_commitment_opening,
         )?);
 
         // Let's deal with g_d
@@ -529,7 +545,7 @@ fn test_input_circuit_with_bls12_381() {
     let tree_depth = 32;
 
     for _ in 0..10 {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitmentOpening {
             value: rng.next_u64(),
             randomness: jubjub::Fr::random(&mut rng),
         };
@@ -564,8 +580,7 @@ fn test_input_circuit_with_bls12_381() {
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
-            let expected_value_commitment =
-                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
+            let expected_value_commitment = value_commitment.commitment().to_affine();
             let note = Note {
                 value: value_commitment.value,
                 g_d,
@@ -617,7 +632,7 @@ fn test_input_circuit_with_bls12_381() {
             let mut cs = TestConstraintSystem::new();
 
             let instance = Spend {
-                value_commitment: Some(value_commitment.clone()),
+                value_commitment_opening: Some(value_commitment.clone()),
                 proof_generation_key: Some(proof_generation_key.clone()),
                 payment_address: Some(payment_address.clone()),
                 commitment_randomness: Some(commitment_randomness),
@@ -698,7 +713,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
     ];
 
     for i in 0..10 {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitmentOpening {
             value: i,
             randomness: jubjub::Fr::from(1000 * (i + 1)),
         };
@@ -733,8 +748,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
-            let expected_value_commitment =
-                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
+            let expected_value_commitment = value_commitment.commitment().to_affine();
             assert_eq!(
                 expected_value_commitment.get_u(),
                 bls12_381::Scalar::from_str_vartime(expected_commitment_us[i as usize]).unwrap()
@@ -794,7 +808,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             let mut cs = TestConstraintSystem::new();
 
             let instance = Spend {
-                value_commitment: Some(value_commitment.clone()),
+                value_commitment_opening: Some(value_commitment.clone()),
                 proof_generation_key: Some(proof_generation_key.clone()),
                 payment_address: Some(payment_address.clone()),
                 commitment_randomness: Some(commitment_randomness),
@@ -847,7 +861,7 @@ fn test_output_circuit_with_bls12_381() {
     ]);
 
     for _ in 0..100 {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitmentOpening {
             value: rng.next_u64(),
             randomness: jubjub::Fr::random(&mut rng),
         };
@@ -881,7 +895,7 @@ fn test_output_circuit_with_bls12_381() {
             let mut cs = TestConstraintSystem::new();
 
             let instance = Output {
-                value_commitment: Some(value_commitment.clone()),
+                value_commitment_opening: Some(value_commitment.clone()),
                 payment_address: Some(payment_address.clone()),
                 commitment_randomness: Some(commitment_randomness),
                 esk: Some(esk),
@@ -904,8 +918,7 @@ fn test_output_circuit_with_bls12_381() {
                 .expect("should be valid")
                 .cmu();
 
-            let expected_value_commitment =
-                jubjub::ExtendedPoint::from(value_commitment.commitment()).to_affine();
+            let expected_value_commitment = value_commitment.commitment().to_affine();
 
             let expected_epk =
                 jubjub::ExtendedPoint::from(payment_address.g_d().expect("should be valid") * esk)

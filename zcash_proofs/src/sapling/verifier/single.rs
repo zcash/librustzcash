@@ -2,7 +2,10 @@ use bellman::groth16::{verify_proof, PreparedVerifyingKey, Proof};
 use bls12_381::Bls12;
 use zcash_primitives::{
     constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
-    sapling::redjubjub::{PublicKey, Signature},
+    sapling::{
+        redjubjub::{PublicKey, Signature},
+        value::ValueCommitment,
+    },
     transaction::components::Amount,
 };
 
@@ -28,7 +31,7 @@ impl SaplingVerificationContext {
     #[allow(clippy::too_many_arguments)]
     pub fn check_spend(
         &mut self,
-        cv: jubjub::ExtendedPoint,
+        cv: &ValueCommitment,
         anchor: bls12_381::Scalar,
         nullifier: &[u8; 32],
         rk: PublicKey,
@@ -42,18 +45,13 @@ impl SaplingVerificationContext {
             cv,
             anchor,
             nullifier,
-            rk,
+            &rk,
             sighash_value,
-            spend_auth_sig,
+            &spend_auth_sig,
             zkproof,
             &mut (),
             |_, rk, msg, spend_auth_sig| {
-                rk.verify_with_zip216(
-                    &msg,
-                    &spend_auth_sig,
-                    SPENDING_KEY_GENERATOR,
-                    zip216_enabled,
-                )
+                rk.verify_with_zip216(&msg, spend_auth_sig, SPENDING_KEY_GENERATOR, zip216_enabled)
             },
             |_, proof, public_inputs| {
                 verify_proof(verifying_key, &proof, &public_inputs[..]).is_ok()
@@ -65,7 +63,7 @@ impl SaplingVerificationContext {
     /// accumulating its value commitment inside the context for later use.
     pub fn check_output(
         &mut self,
-        cv: jubjub::ExtendedPoint,
+        cv: &ValueCommitment,
         cmu: bls12_381::Scalar,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
