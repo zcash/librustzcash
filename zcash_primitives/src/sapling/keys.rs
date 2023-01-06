@@ -8,8 +8,13 @@ use std::io::{self, Read, Write};
 
 use super::{
     address::PaymentAddress,
-    note_encryption::KDF_SAPLING_PERSONALIZATION,
-    spec::{crh_ivk, diversify_hash},
+    note_encryption::{
+        PreparedEphemeralPublicKey, PreparedIncomingViewingKey, KDF_SAPLING_PERSONALIZATION,
+    },
+    spec::{
+        crh_ivk, diversify_hash, ka_sapling_agree, ka_sapling_agree_prepared,
+        ka_sapling_derive_public,
+    },
 };
 use crate::{
     constants::{self, PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
@@ -19,7 +24,7 @@ use crate::{
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
 use group::{Curve, Group, GroupEncoding};
-use subtle::CtOption;
+use subtle::{ConstantTimeEq, CtOption};
 use zcash_note_encryption::EphemeralKeyBytes;
 
 /// Errors that can occur in the decoding of Sapling spending keys.
@@ -257,6 +262,78 @@ impl Diversifier {
     }
 }
 
+/// An ephemeral secret key used to encrypt an output note on-chain.
+///
+/// `esk` is "ephemeral" in the sense that each secret key is only used once. In
+/// practice, `esk` is derived deterministically from the note that it is encrypting.
+///
+/// $\mathsf{KA}^\mathsf{Sapling}.\mathsf{Private} := \mathbb{F}_{r_J}$
+///
+/// Defined in [section 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+#[derive(Debug)]
+pub struct EphemeralSecretKey(pub(crate) jubjub::Scalar);
+
+impl ConstantTimeEq for EphemeralSecretKey {
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl EphemeralSecretKey {
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
+        jubjub::Scalar::from_bytes(bytes).map(EphemeralSecretKey)
+    }
+
+    pub(crate) fn derive_public(&self, g_d: jubjub::ExtendedPoint) -> EphemeralPublicKey {
+        EphemeralPublicKey(ka_sapling_derive_public(&self.0, &g_d))
+    }
+
+    pub(crate) fn agree(&self, pk_d: &jubjub::ExtendedPoint) -> SharedSecret {
+        SharedSecret(ka_sapling_agree(&self.0, pk_d))
+    }
+}
+
+/// An ephemeral public key used to encrypt an output note on-chain.
+///
+/// `epk` is "ephemeral" in the sense that each public key is only used once. In practice,
+/// `epk` is derived deterministically from the note that it is encrypting.
+///
+/// $\mathsf{KA}^\mathsf{Sapling}.\mathsf{Public} := \mathbb{J}$
+///
+/// Defined in [section 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+#[derive(Debug)]
+pub struct EphemeralPublicKey(jubjub::ExtendedPoint);
+
+impl EphemeralPublicKey {
+    /// TODO: Remove once public API is changed.
+    pub(crate) fn from_inner(epk: jubjub::ExtendedPoint) -> Self {
+        EphemeralPublicKey(epk)
+    }
+
+    /// TODO: Remove once public API is changed.
+    pub(crate) fn into_inner(self) -> jubjub::ExtendedPoint {
+        self.0
+    }
+
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
+        jubjub::ExtendedPoint::from_bytes(bytes).map(EphemeralPublicKey)
+    }
+
+    pub(crate) fn to_bytes(&self) -> EphemeralKeyBytes {
+        EphemeralKeyBytes(self.0.to_bytes())
+    }
+}
+
+impl PreparedEphemeralPublicKey {
+    pub(crate) fn agree(&self, ivk: &PreparedIncomingViewingKey) -> SharedSecret {
+        SharedSecret(ka_sapling_agree_prepared(ivk.inner(), self.inner()))
+    }
+}
+
 /// $\mathsf{KA}^\mathsf{Sapling}.\mathsf{SharedSecret} := \mathbb{J}^{(r)}$
 ///
 /// Defined in [section 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
@@ -269,6 +346,11 @@ impl SharedSecret {
     /// TODO: Remove once public API is changed.
     pub(crate) fn from_inner(epk: jubjub::SubgroupPoint) -> Self {
         SharedSecret(epk)
+    }
+
+    /// TODO: Remove once public API is changed.
+    pub(crate) fn into_inner(self) -> jubjub::SubgroupPoint {
+        self.0
     }
 
     /// For checking test vectors only.

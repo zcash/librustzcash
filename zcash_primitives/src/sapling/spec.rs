@@ -1,7 +1,7 @@
 //! Helper functions defined in the Zcash Protocol Specification.
 
 use blake2s_simd::Params as Blake2sParams;
-use group::{ff::PrimeField, Curve, GroupEncoding};
+use group::{cofactor::CofactorGroup, ff::PrimeField, Curve, GroupEncoding, WnafBase, WnafScalar};
 
 use super::{
     group_hash::group_hash,
@@ -11,6 +11,11 @@ use crate::constants::{
     CRH_IVK_PERSONALIZATION, KEY_DIVERSIFICATION_PERSONALIZATION,
     NOTE_COMMITMENT_RANDOMNESS_GENERATOR, NULLIFIER_POSITION_GENERATOR, PRF_NF_PERSONALIZATION,
 };
+
+const PREPARED_WINDOW_SIZE: usize = 4;
+pub(crate) type PreparedBase = WnafBase<jubjub::ExtendedPoint, PREPARED_WINDOW_SIZE>;
+pub(crate) type PreparedBaseSubgroup = WnafBase<jubjub::SubgroupPoint, PREPARED_WINDOW_SIZE>;
+pub(crate) type PreparedScalar = WnafScalar<jubjub::Scalar, PREPARED_WINDOW_SIZE>;
 
 /// $CRH^\mathsf{ivk}(ak, nk)$
 ///
@@ -70,6 +75,51 @@ pub(crate) fn prf_nf(nk: &jubjub::SubgroupPoint, rho: &jubjub::SubgroupPoint) ->
         .as_bytes()
         .try_into()
         .expect("output length is correct")
+}
+
+/// Defined in [Zcash Protocol Spec § 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+pub(crate) fn ka_sapling_derive_public(
+    sk: &jubjub::Scalar,
+    b: &jubjub::ExtendedPoint,
+) -> jubjub::ExtendedPoint {
+    ka_sapling_derive_public_prepared(&PreparedScalar::new(sk), &PreparedBase::new(*b))
+}
+
+/// Defined in [Zcash Protocol Spec § 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+pub(crate) fn ka_sapling_derive_public_prepared(
+    sk: &PreparedScalar,
+    b: &PreparedBase,
+) -> jubjub::ExtendedPoint {
+    // [sk] b
+    b * sk
+}
+
+/// Defined in [Zcash Protocol Spec § 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+pub(crate) fn ka_sapling_agree(
+    sk: &jubjub::Scalar,
+    b: &jubjub::ExtendedPoint,
+) -> jubjub::SubgroupPoint {
+    ka_sapling_agree_prepared(&PreparedScalar::new(sk), &PreparedBase::new(*b))
+}
+
+/// Defined in [Zcash Protocol Spec § 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+pub(crate) fn ka_sapling_agree_prepared(
+    sk: &PreparedScalar,
+    b: &PreparedBase,
+) -> jubjub::SubgroupPoint {
+    // [8 sk] b
+    // <ExtendedPoint as CofactorGroup>::clear_cofactor is implemented using
+    // ExtendedPoint::mul_by_cofactor in the jubjub crate.
+
+    (b * sk).clear_cofactor()
 }
 
 /// $WindowedPedersenCommit_r(s)$
