@@ -8,6 +8,7 @@ use std::io::{self, Read, Write};
 
 use super::{
     address::PaymentAddress,
+    note_encryption::KDF_SAPLING_PERSONALIZATION,
     spec::{crh_ivk, diversify_hash},
 };
 use crate::{
@@ -15,9 +16,11 @@ use crate::{
     keys::prf_expand,
 };
 
+use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
-use group::{Group, GroupEncoding};
+use group::{Curve, Group, GroupEncoding};
 use subtle::CtOption;
+use zcash_note_encryption::EphemeralKeyBytes;
 
 /// Errors that can occur in the decoding of Sapling spending keys.
 pub enum DecodingError {
@@ -251,6 +254,72 @@ pub struct Diversifier(pub [u8; 11]);
 impl Diversifier {
     pub fn g_d(&self) -> Option<jubjub::SubgroupPoint> {
         diversify_hash(&self.0)
+    }
+}
+
+/// $\mathsf{KA}^\mathsf{Sapling}.\mathsf{SharedSecret} := \mathbb{J}^{(r)}$
+///
+/// Defined in [section 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+#[derive(Debug)]
+pub struct SharedSecret(jubjub::SubgroupPoint);
+
+impl SharedSecret {
+    /// TODO: Remove once public API is changed.
+    pub(crate) fn from_inner(epk: jubjub::SubgroupPoint) -> Self {
+        SharedSecret(epk)
+    }
+
+    /// For checking test vectors only.
+    #[cfg(test)]
+    pub(crate) fn to_bytes(&self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+
+    /// Only for use in batched note encryption.
+    pub(crate) fn batch_to_affine(
+        shared_secrets: Vec<Option<Self>>,
+    ) -> impl Iterator<Item = Option<jubjub::AffinePoint>> {
+        // Filter out the positions for which ephemeral_key was not a valid encoding.
+        let secrets: Vec<_> = shared_secrets
+            .iter()
+            .filter_map(|s| s.as_ref().map(|s| jubjub::ExtendedPoint::from(s.0)))
+            .collect();
+
+        // Batch-normalize the shared secrets.
+        let mut secrets_affine = vec![jubjub::AffinePoint::identity(); secrets.len()];
+        group::Curve::batch_normalize(&secrets, &mut secrets_affine);
+
+        // Re-insert the invalid ephemeral_key positions.
+        let mut secrets_affine = secrets_affine.into_iter();
+        shared_secrets
+            .into_iter()
+            .map(move |s| s.and_then(|_| secrets_affine.next()))
+    }
+
+    /// Defined in [Zcash Protocol Spec § 5.4.5.4: Sapling Key Agreement][concretesaplingkdf].
+    ///
+    /// [concretesaplingkdf]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkdf
+    pub(crate) fn kdf_sapling(self, ephemeral_key: &EphemeralKeyBytes) -> Blake2bHash {
+        Self::kdf_sapling_inner(
+            jubjub::ExtendedPoint::from(self.0).to_affine(),
+            ephemeral_key,
+        )
+    }
+
+    /// Only for direct use in batched note encryption.
+    pub(crate) fn kdf_sapling_inner(
+        secret: jubjub::AffinePoint,
+        ephemeral_key: &EphemeralKeyBytes,
+    ) -> Blake2bHash {
+        Blake2bParams::new()
+            .hash_length(32)
+            .personal(KDF_SAPLING_PERSONALIZATION)
+            .to_state()
+            .update(&secret.to_bytes())
+            .update(ephemeral_key.as_ref())
+            .finalize()
     }
 }
 

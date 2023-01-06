@@ -6,7 +6,6 @@ use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::{cofactor::CofactorGroup, GroupEncoding, WnafBase, WnafScalar};
-use jubjub::{AffinePoint, ExtendedPoint};
 use memuse::DynamicUsage;
 use rand_core::RngCore;
 
@@ -21,8 +20,9 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{
-        keys::OutgoingViewingKey, value::ValueCommitment, Diversifier, Note, PaymentAddress, Rseed,
-        SaplingIvk,
+        keys::{OutgoingViewingKey, SharedSecret},
+        value::ValueCommitment,
+        Diversifier, Note, PaymentAddress, Rseed, SaplingIvk,
     },
     transaction::components::{
         amount::Amount,
@@ -76,19 +76,6 @@ fn sapling_ka_agree_prepared(esk: &PreparedScalar, pk_d: &PreparedBase) -> jubju
     // ExtendedPoint::mul_by_cofactor in the jubjub crate.
 
     (pk_d * esk).clear_cofactor()
-}
-
-/// Sapling KDF for note encryption.
-///
-/// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-fn kdf_sapling(dhsecret: jubjub::SubgroupPoint, ephemeral_key: &EphemeralKeyBytes) -> Blake2bHash {
-    Blake2bParams::new()
-        .hash_length(32)
-        .personal(KDF_SAPLING_PERSONALIZATION)
-        .to_state()
-        .update(&dhsecret.to_bytes())
-        .update(ephemeral_key.as_ref())
-        .finalize()
 }
 
 /// Sapling PRF^ock.
@@ -241,7 +228,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     ///
     /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
     fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &EphemeralKeyBytes) -> Blake2bHash {
-        kdf_sapling(dhsecret, epk)
+        SharedSecret::from_inner(dhsecret).kdf_sapling(epk)
     }
 
     fn note_plaintext_bytes(
@@ -361,30 +348,16 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
     fn batch_kdf<'a>(
         items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
     ) -> Vec<Option<Self::SymmetricKey>> {
-        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items.unzip();
+        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items
+            .map(|(shared_secret, ephemeral_key)| {
+                (shared_secret.map(SharedSecret::from_inner), ephemeral_key)
+            })
+            .unzip();
 
-        let secrets: Vec<_> = shared_secrets
-            .iter()
-            .filter_map(|s| s.map(ExtendedPoint::from))
-            .collect();
-        let mut secrets_affine = vec![AffinePoint::identity(); shared_secrets.len()];
-        group::Curve::batch_normalize(&secrets, &mut secrets_affine);
-
-        let mut secrets_affine = secrets_affine.into_iter();
-        shared_secrets
-            .into_iter()
-            .map(|s| s.and_then(|_| secrets_affine.next()))
+        SharedSecret::batch_to_affine(shared_secrets)
             .zip(ephemeral_keys.into_iter())
             .map(|(secret, ephemeral_key)| {
-                secret.map(|dhsecret| {
-                    Blake2bParams::new()
-                        .hash_length(32)
-                        .personal(KDF_SAPLING_PERSONALIZATION)
-                        .to_state()
-                        .update(&dhsecret.to_bytes())
-                        .update(ephemeral_key.as_ref())
-                        .finalize()
-                })
+                secret.map(|dhsecret| SharedSecret::kdf_sapling_inner(dhsecret, ephemeral_key))
             })
             .collect()
     }
@@ -583,7 +556,7 @@ mod tests {
     };
 
     use super::{
-        epk_bytes, kdf_sapling, prf_ock, sapling_ka_agree, sapling_note_encryption,
+        epk_bytes, prf_ock, sapling_ka_agree, sapling_note_encryption,
         try_sapling_compact_note_decryption, try_sapling_note_decryption,
         try_sapling_output_recovery, try_sapling_output_recovery_with_ock, SaplingDomain,
     };
@@ -597,6 +570,7 @@ mod tests {
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::{
+            keys::SharedSecret,
             note_encryption::PreparedIncomingViewingKey,
             util::generate_random_rseed,
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
@@ -718,8 +692,8 @@ mod tests {
 
         let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
-        let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
-        let key = kdf_sapling(shared_secret, ephemeral_key);
+        let shared_secret = SharedSecret::from_inner(sapling_ka_agree(&esk, &pk_d.into()));
+        let key = shared_secret.kdf_sapling(ephemeral_key);
 
         let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
         plaintext.copy_from_slice(&enc_ciphertext[..NOTE_PLAINTEXT_SIZE]);
@@ -1439,10 +1413,10 @@ mod tests {
             // Test the individual components
             //
 
-            let shared_secret = sapling_ka_agree(&esk, &pk_d.into());
+            let shared_secret = SharedSecret::from_inner(sapling_ka_agree(&esk, &pk_d.into()));
             assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
-            let k_enc = kdf_sapling(shared_secret, &ephemeral_key);
+            let k_enc = shared_secret.kdf_sapling(&ephemeral_key);
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);

@@ -7,8 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
-- `zcash_primitives::sapling::value`, containing types for handling Sapling note
-  values and value commitments.
+- `zcash_primitives::sapling`:
+  - `keys::SharedSecret`
+  - `value`, containing types for handling Sapling note values and value
+    commitments.
 
 ### Changed
 - `zcash_primitives::transaction::components::sapling::builder`:
