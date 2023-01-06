@@ -6,13 +6,15 @@
 
 use std::io::{self, Read, Write};
 
-use super::{address::PaymentAddress, group_hash::group_hash};
+use super::{
+    address::PaymentAddress,
+    spec::{crh_ivk, diversify_hash},
+};
 use crate::{
     constants::{self, PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
     keys::prf_expand,
 };
 
-use blake2s_simd::Params as Blake2sParams;
 use ff::PrimeField;
 use group::{Group, GroupEncoding};
 use subtle::CtOption;
@@ -137,22 +139,7 @@ impl ViewingKey {
     }
 
     pub fn ivk(&self) -> SaplingIvk {
-        let mut h = [0; 32];
-        h.copy_from_slice(
-            Blake2sParams::new()
-                .hash_length(32)
-                .personal(constants::CRH_IVK_PERSONALIZATION)
-                .to_state()
-                .update(&self.ak.to_bytes())
-                .update(&self.nk.0.to_bytes())
-                .finalize()
-                .as_bytes(),
-        );
-
-        // Drop the most significant five bits, so it can be interpreted as a scalar.
-        h[31] &= 0b0000_0111;
-
-        SaplingIvk(jubjub::Fr::from_repr(h).unwrap())
+        SaplingIvk(crh_ivk(self.ak.to_bytes(), self.nk.0.to_bytes()))
     }
 
     pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
@@ -263,7 +250,7 @@ pub struct Diversifier(pub [u8; 11]);
 
 impl Diversifier {
     pub fn g_d(&self) -> Option<jubjub::SubgroupPoint> {
-        group_hash(&self.0, constants::KEY_DIVERSIFICATION_PERSONALIZATION)
+        diversify_hash(&self.0)
     }
 }
 
