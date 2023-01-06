@@ -2,6 +2,11 @@ use std::array::TryFromSliceError;
 
 use subtle::{Choice, ConstantTimeEq};
 
+use crate::sapling::{
+    keys::NullifierDerivingKey,
+    spec::{mixing_pedersen_hash, prf_nf},
+};
+
 /// Typesafe wrapper for nullifier values.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Nullifier(pub [u8; 32]);
@@ -13,6 +18,20 @@ impl Nullifier {
 
     pub fn to_vec(&self) -> Vec<u8> {
         self.0.to_vec()
+    }
+
+    /// $DeriveNullifier$.
+    ///
+    /// Defined in [Zcash Protocol Spec § 4.16: Note Commitments and Nullifiers][commitmentsandnullifiers].
+    ///
+    /// [commitmentsandnullifiers]: https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
+    pub(super) fn derive(
+        nk: &NullifierDerivingKey,
+        cm: jubjub::SubgroupPoint,
+        position: u64,
+    ) -> Self {
+        let rho = mixing_pedersen_hash(cm, position);
+        Nullifier(prf_nf(&nk.0, &rho))
     }
 }
 

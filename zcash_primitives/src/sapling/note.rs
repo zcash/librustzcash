@@ -1,4 +1,3 @@
-use blake2s_simd::Params as Blake2sParams;
 use byteorder::{LittleEndian, WriteBytesExt};
 use group::{
     ff::{Field, PrimeField},
@@ -84,22 +83,7 @@ impl Note {
     /// Computes the nullifier given the nullifier deriving key and
     /// note position
     pub fn nf(&self, nk: &NullifierDerivingKey, position: u64) -> Nullifier {
-        // Compute rho = cm + position.G
-        let rho = self.cm_full_point()
-            + (constants::NULLIFIER_POSITION_GENERATOR * jubjub::Fr::from(position));
-
-        // Compute nf = BLAKE2s(nk | rho)
-        Nullifier::from_slice(
-            Blake2sParams::new()
-                .hash_length(32)
-                .personal(constants::PRF_NF_PERSONALIZATION)
-                .to_state()
-                .update(&nk.0.to_bytes())
-                .update(&rho.to_bytes())
-                .finalize()
-                .as_bytes(),
-        )
-        .unwrap()
+        Nullifier::derive(nk, self.cm_full_point(), position)
     }
 
     /// Computes the note commitment

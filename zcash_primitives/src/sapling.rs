@@ -8,6 +8,7 @@ pub mod note_encryption;
 pub mod pedersen_hash;
 pub mod prover;
 pub mod redjubjub;
+mod spec;
 mod tree;
 pub mod util;
 pub mod value;
