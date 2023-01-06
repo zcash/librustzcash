@@ -2,6 +2,7 @@ use std::array::TryFromSliceError;
 
 use subtle::{Choice, ConstantTimeEq};
 
+use super::NoteCommitment;
 use crate::sapling::{
     keys::NullifierDerivingKey,
     spec::{mixing_pedersen_hash, prf_nf},
@@ -25,12 +26,8 @@ impl Nullifier {
     /// Defined in [Zcash Protocol Spec § 4.16: Note Commitments and Nullifiers][commitmentsandnullifiers].
     ///
     /// [commitmentsandnullifiers]: https://zips.z.cash/protocol/protocol.pdf#commitmentsandnullifiers
-    pub(super) fn derive(
-        nk: &NullifierDerivingKey,
-        cm: jubjub::SubgroupPoint,
-        position: u64,
-    ) -> Self {
-        let rho = mixing_pedersen_hash(cm, position);
+    pub(super) fn derive(nk: &NullifierDerivingKey, cm: NoteCommitment, position: u64) -> Self {
+        let rho = mixing_pedersen_hash(cm.inner(), position);
         Nullifier(prf_nf(&nk.0, &rho))
     }
 }

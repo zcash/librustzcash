@@ -1,15 +1,14 @@
-use byteorder::{LittleEndian, WriteBytesExt};
 use group::{
     ff::{Field, PrimeField},
-    Curve, GroupEncoding,
+    GroupEncoding,
 };
 use rand_core::{CryptoRng, RngCore};
 
-use super::{
-    pedersen_hash::{pedersen_hash, Personalization},
-    Node, Nullifier, NullifierDerivingKey,
-};
-use crate::{constants, keys::prf_expand};
+use super::{value::NoteValue, Node, Nullifier, NullifierDerivingKey};
+use crate::keys::prf_expand;
+
+mod commitment;
+pub use self::commitment::{ExtractedNoteCommitment, NoteCommitment};
 
 pub(super) mod nullifier;
 
@@ -22,6 +21,20 @@ pub(super) mod nullifier;
 pub enum Rseed {
     BeforeZip212(jubjub::Fr),
     AfterZip212([u8; 32]),
+}
+
+impl Rseed {
+    /// Defined in [Zcash Protocol Spec § 4.7.2: Sending Notes (Sapling)][saplingsend].
+    ///
+    /// [saplingsend]: https://zips.z.cash/protocol/protocol.pdf#saplingsend
+    pub(crate) fn rcm(&self) -> commitment::NoteCommitTrapdoor {
+        commitment::NoteCommitTrapdoor(match self {
+            Rseed::BeforeZip212(rcm) => *rcm,
+            Rseed::AfterZip212(rseed) => {
+                jubjub::Fr::from_bytes_wide(prf_expand(rseed, &[0x04]).as_array())
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -53,31 +66,13 @@ impl Note {
     }
 
     /// Computes the note commitment, returning the full point.
-    fn cm_full_point(&self) -> jubjub::SubgroupPoint {
-        // Calculate the note contents, as bytes
-        let mut note_contents = vec![];
-
-        // Writing the value in little endian
-        note_contents.write_u64::<LittleEndian>(self.value).unwrap();
-
-        // Write g_d
-        note_contents.extend_from_slice(&self.g_d.to_bytes());
-
-        // Write pk_d
-        note_contents.extend_from_slice(&self.pk_d.to_bytes());
-
-        assert_eq!(note_contents.len(), 32 + 32 + 8);
-
-        // Compute the Pedersen hash of the note contents
-        let hash_of_contents = pedersen_hash(
-            Personalization::NoteCommitment,
-            note_contents
-                .into_iter()
-                .flat_map(|byte| (0..8).map(move |i| ((byte >> i) & 1) == 1)),
-        );
-
-        // Compute final commitment
-        (constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR * self.rcm()) + hash_of_contents
+    fn cm_full_point(&self) -> NoteCommitment {
+        NoteCommitment::derive(
+            self.g_d.to_bytes(),
+            self.pk_d.to_bytes(),
+            NoteValue::from_raw(self.value),
+            self.rseed.rcm(),
+        )
     }
 
     /// Computes the nullifier given the nullifier deriving key and
@@ -88,20 +83,12 @@ impl Note {
 
     /// Computes the note commitment
     pub fn cmu(&self) -> bls12_381::Scalar {
-        // The commitment is in the prime order subgroup, so mapping the
-        // commitment to the u-coordinate is an injective encoding.
-        jubjub::ExtendedPoint::from(self.cm_full_point())
-            .to_affine()
-            .get_u()
+        // TODO: Expose typed representation.
+        ExtractedNoteCommitment::from(self.cm_full_point()).inner()
     }
 
     pub fn rcm(&self) -> jubjub::Fr {
-        match self.rseed {
-            Rseed::BeforeZip212(rcm) => rcm,
-            Rseed::AfterZip212(rseed) => {
-                jubjub::Fr::from_bytes_wide(prf_expand(&rseed, &[0x04]).as_array())
-            }
-        }
+        self.rseed.rcm().0
     }
 
     pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(&self, rng: &mut R) -> jubjub::Fr {
