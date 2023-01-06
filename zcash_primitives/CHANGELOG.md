@@ -30,6 +30,10 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::components`:
   - `sapling::{Bundle, SpendDescription, OutputDescription}` have had their
     fields replaced by getter methods.
+  - The associated type `sapling::Authorization::Proof` has been replaced by
+    `Authorization::{SpendProof, OutputProof}`.
+  - `sapling::MapAuth::map_proof` has been replaced by
+    `MapAuth::{map_spend_proof, map_output_proof}`.
 
 ### Removed
 - `zcash_primitives::sapling`:

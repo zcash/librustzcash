@@ -227,7 +227,8 @@ impl std::fmt::Debug for Unauthorized {
 }
 
 impl Authorization for Unauthorized {
-    type Proof = GrothProofBytes;
+    type SpendProof = GrothProofBytes;
+    type OutputProof = GrothProofBytes;
     type AuthSig = SpendDescriptionInfo;
 }
 

@@ -26,8 +26,10 @@ pub type GrothProofBytes = [u8; GROTH_PROOF_SIZE];
 pub mod builder;
 pub mod fees;
 
+/// Defines the authorization type of a Sapling bundle.
 pub trait Authorization: Debug {
-    type Proof: Clone + Debug;
+    type SpendProof: Clone + Debug;
+    type OutputProof: Clone + Debug;
     type AuthSig: Clone + Debug;
 }
 
@@ -35,22 +37,27 @@ pub trait Authorization: Debug {
 pub struct Unproven;
 
 impl Authorization for Unproven {
-    type Proof = ();
+    type SpendProof = ();
+    type OutputProof = ();
     type AuthSig = ();
 }
 
+/// Authorizing data for a bundle of Sapling spends and outputs, ready to be committed to
+/// the ledger.
 #[derive(Debug, Copy, Clone)]
 pub struct Authorized {
     pub binding_sig: redjubjub::Signature,
 }
 
 impl Authorization for Authorized {
-    type Proof = GrothProofBytes;
+    type SpendProof = GrothProofBytes;
+    type OutputProof = GrothProofBytes;
     type AuthSig = redjubjub::Signature;
 }
 
 pub trait MapAuth<A: Authorization, B: Authorization> {
-    fn map_proof(&self, p: A::Proof) -> B::Proof;
+    fn map_spend_proof(&self, p: A::SpendProof) -> B::SpendProof;
+    fn map_output_proof(&self, p: A::OutputProof) -> B::OutputProof;
     fn map_auth_sig(&self, s: A::AuthSig) -> B::AuthSig;
     fn map_authorization(&self, a: A) -> B;
 }
@@ -62,10 +69,17 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
 ///
 /// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
-    fn map_proof(
+    fn map_spend_proof(
         &self,
-        p: <Authorized as Authorization>::Proof,
-    ) -> <Authorized as Authorization>::Proof {
+        p: <Authorized as Authorization>::SpendProof,
+    ) -> <Authorized as Authorization>::SpendProof {
+        p
+    }
+
+    fn map_output_proof(
+        &self,
+        p: <Authorized as Authorization>::OutputProof,
+    ) -> <Authorized as Authorization>::OutputProof {
         p
     }
 
@@ -84,7 +98,7 @@ impl MapAuth<Authorized, Authorized> for () {
 #[derive(Debug, Clone)]
 pub struct Bundle<A: Authorization> {
     shielded_spends: Vec<SpendDescription<A>>,
-    shielded_outputs: Vec<OutputDescription<A::Proof>>,
+    shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
     value_balance: Amount,
     authorization: A,
 }
@@ -93,7 +107,7 @@ impl<A: Authorization> Bundle<A> {
     /// Constructs a `Bundle` from its constituent parts.
     pub(crate) fn from_parts(
         shielded_spends: Vec<SpendDescription<A>>,
-        shielded_outputs: Vec<OutputDescription<A::Proof>>,
+        shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
         value_balance: Amount,
         authorization: A,
     ) -> Self {
@@ -111,7 +125,7 @@ impl<A: Authorization> Bundle<A> {
     }
 
     /// Returns the list of outputs in this bundle.
-    pub fn shielded_outputs(&self) -> &[OutputDescription<A::Proof>] {
+    pub fn shielded_outputs(&self) -> &[OutputDescription<A::OutputProof>] {
         &self.shielded_outputs
     }
 
@@ -139,7 +153,7 @@ impl<A: Authorization> Bundle<A> {
                     anchor: d.anchor,
                     nullifier: d.nullifier,
                     rk: d.rk,
-                    zkproof: f.map_proof(d.zkproof),
+                    zkproof: f.map_spend_proof(d.zkproof),
                     spend_auth_sig: f.map_auth_sig(d.spend_auth_sig),
                 })
                 .collect(),
@@ -152,7 +166,7 @@ impl<A: Authorization> Bundle<A> {
                     ephemeral_key: o.ephemeral_key,
                     enc_ciphertext: o.enc_ciphertext,
                     out_ciphertext: o.out_ciphertext,
-                    zkproof: f.map_proof(o.zkproof),
+                    zkproof: f.map_output_proof(o.zkproof),
                 })
                 .collect(),
             value_balance: self.value_balance,
@@ -167,7 +181,7 @@ pub struct SpendDescription<A: Authorization> {
     anchor: bls12_381::Scalar,
     nullifier: Nullifier,
     rk: PublicKey,
-    zkproof: A::Proof,
+    zkproof: A::SpendProof,
     spend_auth_sig: A::AuthSig,
 }
 
@@ -203,7 +217,7 @@ impl<A: Authorization> SpendDescription<A> {
     }
 
     /// Returns the proof for this spend.
-    pub fn zkproof(&self) -> &A::Proof {
+    pub fn zkproof(&self) -> &A::SpendProof {
         &self.zkproof
     }
 

@@ -104,7 +104,9 @@ fn joinsplits_hash(
         .hash(&data)
 }
 
-fn shielded_spends_hash<A: sapling::Authorization<Proof = GrothProofBytes>>(
+fn shielded_spends_hash<
+    A: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+>(
     shielded_spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_spends.len() * 384);
@@ -133,7 +135,7 @@ fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]
 }
 
 pub fn v4_signature_hash<
-    SA: sapling::Authorization<Proof = GrothProofBytes>,
+    SA: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,
