@@ -7,7 +7,9 @@ use zcash_primitives::{
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     merkle_tree::IncrementalWitness,
-    sapling::{Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed},
+    sapling::{
+        note::ExtractedNoteCommitment, Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed,
+    },
     transaction::{
         components::{
             sapling,
@@ -99,7 +101,7 @@ pub struct WalletShieldedSpend {
 /// [`OutputDescription`]: zcash_primitives::transaction::components::OutputDescription
 pub struct WalletShieldedOutput<N> {
     pub index: usize,
-    pub cmu: bls12_381::Scalar,
+    pub cmu: ExtractedNoteCommitment,
     pub ephemeral_key: EphemeralKeyBytes,
     pub account: AccountId,
     pub note: Note,

@@ -74,12 +74,6 @@ impl From<NoteCommitment> for ExtractedNoteCommitment {
     }
 }
 
-impl ExtractedNoteCommitment {
-    pub(crate) fn inner(&self) -> bls12_381::Scalar {
-        self.0
-    }
-}
-
 impl From<&ExtractedNoteCommitment> for [u8; 32] {
     fn from(cmu: &ExtractedNoteCommitment) -> Self {
         cmu.to_bytes()

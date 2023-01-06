@@ -31,6 +31,8 @@ use crate::{
     },
 };
 
+use super::note::ExtractedNoteCommitment;
+
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
 
@@ -178,7 +180,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     type IncomingViewingKey = PreparedIncomingViewingKey;
     type OutgoingViewingKey = OutgoingViewingKey;
     type ValueCommitment = ValueCommitment;
-    type ExtractedCommitment = bls12_381::Scalar;
+    type ExtractedCommitment = ExtractedNoteCommitment;
     type ExtractedCommitmentBytes = [u8; 32];
     type Memo = MemoBytes;
 
@@ -572,6 +574,7 @@ mod tests {
         memo::MemoBytes,
         sapling::{
             keys::{EphemeralPublicKey, EphemeralSecretKey},
+            note::ExtractedNoteCommitment,
             note_encryption::PreparedIncomingViewingKey,
             util::generate_random_rseed,
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
@@ -651,7 +654,7 @@ mod tests {
             &mut rng,
         );
         let epk = EphemeralPublicKey::from_inner(*ne.epk());
-        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk.to_bytes());
+        let ock = prf_ock(&ovk, &cv, &cmu.to_bytes(), &epk.to_bytes());
 
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
         let output = OutputDescription::from_parts(
@@ -669,13 +672,13 @@ mod tests {
     fn reencrypt_enc_ciphertext(
         ovk: &OutgoingViewingKey,
         cv: &ValueCommitment,
-        cmu: &bls12_381::Scalar,
+        cmu: &ExtractedNoteCommitment,
         ephemeral_key: &EphemeralKeyBytes,
         enc_ciphertext: &[u8; ENC_CIPHERTEXT_SIZE],
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
         modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
     ) -> [u8; ENC_CIPHERTEXT_SIZE] {
-        let ock = prf_ock(ovk, cv, &cmu.to_repr(), ephemeral_key);
+        let ock = prf_ock(ovk, cv, &cmu.to_bytes(), ephemeral_key);
 
         let mut op = [0; OUT_PLAINTEXT_SIZE];
         op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
@@ -807,7 +810,9 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() =
+                ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
+                    .unwrap();
 
             assert_eq!(
                 try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
@@ -977,7 +982,9 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() =
+                ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
+                    .unwrap();
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
@@ -1164,7 +1171,9 @@ mod tests {
 
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
-            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() =
+                ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
+                    .unwrap();
 
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
@@ -1371,9 +1380,9 @@ mod tests {
     fn test_vectors() {
         let test_vectors = crate::test_vectors::note_encryption::make_test_vectors();
 
-        macro_rules! read_bls12_381_scalar {
+        macro_rules! read_cmu {
             ($field:expr) => {{
-                bls12_381::Scalar::from_repr($field[..].try_into().unwrap()).unwrap()
+                ExtractedNoteCommitment::from_bytes($field[..].try_into().unwrap()).unwrap()
             }};
         }
 
@@ -1406,7 +1415,7 @@ mod tests {
             let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
             let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_cv!(tv.cv);
-            let cmu = read_bls12_381_scalar!(tv.cmu);
+            let cmu = read_cmu!(tv.cmu);
             let esk = read_jubjub_scalar!(tv.esk);
             let ephemeral_key = EphemeralKeyBytes(tv.epk);
 
@@ -1421,7 +1430,7 @@ mod tests {
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);
-            let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &ephemeral_key);
+            let ock = prf_ock(&ovk, &cv, &cmu.to_bytes(), &ephemeral_key);
             assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();

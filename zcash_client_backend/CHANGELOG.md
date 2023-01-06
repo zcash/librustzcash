@@ -13,6 +13,11 @@ and this library adheres to Rust's notion of
   takes a `shielding_threshold` argument that can be used to specify the 
   minimum value allowed as input to a shielding transaction. Previously 
   the shielding threshold was fixed at 100000 zatoshis.
+- Note commitments now use
+  `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
+  `bls12_381::Scalar` in the following places:
+  - The `cmu` field of `zcash_client_backend::wallet::WalletShieldedOutput`.
+  - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput::cmu`.
 
 ## [0.6.1] - 2022-12-06
 ### Added

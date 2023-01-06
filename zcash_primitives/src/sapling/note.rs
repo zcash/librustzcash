@@ -1,7 +1,4 @@
-use group::{
-    ff::{Field, PrimeField},
-    GroupEncoding,
-};
+use group::{ff::Field, GroupEncoding};
 use rand_core::{CryptoRng, RngCore};
 
 use super::{value::NoteValue, Node, Nullifier, NullifierDerivingKey};
@@ -82,9 +79,8 @@ impl Note {
     }
 
     /// Computes the note commitment
-    pub fn cmu(&self) -> bls12_381::Scalar {
-        // TODO: Expose typed representation.
-        ExtractedNoteCommitment::from(self.cm_full_point()).inner()
+    pub fn cmu(&self) -> ExtractedNoteCommitment {
+        self.cm_full_point().into()
     }
 
     pub fn rcm(&self) -> jubjub::Fr {
@@ -116,7 +112,7 @@ impl Note {
     /// note commitment tree.
     pub fn commitment(&self) -> Node {
         Node {
-            repr: self.cmu().to_repr(),
+            repr: self.cmu().to_bytes(),
         }
     }
 }

@@ -9,6 +9,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_primitives::sapling`:
   - `keys::{EphemeralSecretKey, EphemeralPublicKey, SharedSecret}`
+  - `note`, a module containing types related to Sapling notes. The existing
+    `Note` and `Rseed` types are re-exported here, and new types are added.
+  - `Node::from_cmu`
   - `value`, containing types for handling Sapling note values and value
     commitments.
 
@@ -17,6 +20,16 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::components::sapling::builder`:
   - `SaplingBuilder::add_output` now takes a
     `zcash_primitives::sapling::value::NoteValue`.
+- Note commitments now use
+  `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
+  `bls12_381::Scalar` in the following places:
+  - `zcash_primitives::sapling`:
+    - `Note::cmu`
+  - `zcash_primitives::sapling::note_encryption`:
+    - `SaplingDomain::ExtractedCommitment`
+  - `zcash_primitives::transaction::components::sapling`:
+    - `OutputDescription::cmu`
+    - The `cmu` field of `CompactOutputDescription`.
 - Value commitments now use `zcash_primitives::sapling::value::ValueCommitment`
   instead of `jubjub::ExtendedPoint` in the following places:
   - `zcash_primitives::sapling::note_encryption`:

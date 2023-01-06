@@ -1003,7 +1003,7 @@ extern crate assert_matches;
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use group::{ff::PrimeField, GroupEncoding};
+    use group::GroupEncoding;
     use prost::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
@@ -1145,7 +1145,7 @@ mod tests {
             MemoBytes::empty(),
             &mut rng,
         );
-        let cmu = note.cmu().to_repr().as_ref().to_vec();
+        let cmu = note.cmu().to_bytes().to_vec();
         let ephemeral_key = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
@@ -1210,7 +1210,7 @@ mod tests {
                 MemoBytes::empty(),
                 &mut rng,
             );
-            let cmu = note.cmu().to_repr().as_ref().to_vec();
+            let cmu = note.cmu().to_bytes().to_vec();
             let ephemeral_key = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
@@ -1238,7 +1238,7 @@ mod tests {
                 MemoBytes::empty(),
                 &mut rng,
             );
-            let cmu = note.cmu().to_repr().as_ref().to_vec();
+            let cmu = note.cmu().to_bytes().to_vec();
             let ephemeral_key = encryptor.epk().to_bytes().to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 

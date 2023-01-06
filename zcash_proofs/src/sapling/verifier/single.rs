@@ -3,6 +3,7 @@ use bls12_381::Bls12;
 use zcash_primitives::{
     constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
     sapling::{
+        note::ExtractedNoteCommitment,
         redjubjub::{PublicKey, Signature},
         value::ValueCommitment,
     },
@@ -64,7 +65,7 @@ impl SaplingVerificationContext {
     pub fn check_output(
         &mut self,
         cv: &ValueCommitment,
-        cmu: bls12_381::Scalar,
+        cmu: ExtractedNoteCommitment,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,

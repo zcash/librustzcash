@@ -334,7 +334,7 @@ pub(crate) fn scan_block_with_runner<
                     .collect();
 
                 // Increment tree and witnesses
-                let node = Node::from_scalar(output.cmu);
+                let node = Node::from_cmu(&output.cmu);
                 for witness in &mut *existing_witnesses {
                     witness.append(node).unwrap();
                 }
@@ -477,7 +477,7 @@ mod tests {
             MemoBytes::empty(),
             &mut rng,
         );
-        let cmu = note.cmu().to_repr().as_ref().to_owned();
+        let cmu = note.cmu().to_bytes().to_vec();
         let ephemeral_key = encryptor.epk().to_bytes().to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 

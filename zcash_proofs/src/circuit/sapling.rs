@@ -590,7 +590,7 @@ fn test_input_circuit_with_bls12_381() {
 
             let mut position = 0u64;
             let cmu = note.cmu();
-            let mut cur = cmu;
+            let mut cur = bls12_381::Scalar::from_bytes(&cmu.to_bytes()).unwrap();
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
                 let (uncle, b) = val.unwrap();
@@ -650,7 +650,10 @@ fn test_input_circuit_with_bls12_381() {
                 "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89"
             );
 
-            assert_eq!(cs.get("randomization of note commitment/u3/num"), cmu);
+            assert_eq!(
+                cs.get("randomization of note commitment/u3/num").to_repr(),
+                cmu.to_bytes()
+            );
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
@@ -664,7 +667,10 @@ fn test_input_circuit_with_bls12_381() {
                 cs.get_input(4, "value commitment/commitment point/v/input variable"),
                 expected_value_commitment.get_v()
             );
-            assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
+            assert_eq!(
+                cs.get_input(5, "anchor/input variable").to_repr(),
+                cur.to_bytes()
+            );
             assert_eq!(cs.get_input(6, "pack nullifier/input 0"), expected_nf[0]);
             assert_eq!(cs.get_input(7, "pack nullifier/input 1"), expected_nf[1]);
         }
@@ -766,7 +772,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
             let mut position = 0u64;
             let cmu = note.cmu();
-            let mut cur = cmu;
+            let mut cur = bls12_381::Scalar::from_bytes(&cmu.to_bytes()).unwrap();
 
             for (i, val) in auth_path.clone().into_iter().enumerate() {
                 let (uncle, b) = val.unwrap();
@@ -826,7 +832,10 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 "d37c738e83df5d9b0bb6495ac96abf21bcb2697477e2c15c2c7916ff7a3b6a89"
             );
 
-            assert_eq!(cs.get("randomization of note commitment/u3/num"), cmu);
+            assert_eq!(
+                cs.get("randomization of note commitment/u3/num").to_repr(),
+                cmu.to_bytes()
+            );
 
             assert_eq!(cs.num_inputs(), 8);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());
@@ -840,7 +849,10 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 cs.get_input(4, "value commitment/commitment point/v/input variable"),
                 expected_value_commitment.get_v()
             );
-            assert_eq!(cs.get_input(5, "anchor/input variable"), cur);
+            assert_eq!(
+                cs.get_input(5, "anchor/input variable").to_repr(),
+                cur.to_bytes()
+            );
             assert_eq!(cs.get_input(6, "pack nullifier/input 0"), expected_nf[0]);
             assert_eq!(cs.get_input(7, "pack nullifier/input 1"), expected_nf[1]);
         }
@@ -942,7 +954,10 @@ fn test_output_circuit_with_bls12_381() {
                 cs.get_input(4, "epk/v/input variable"),
                 expected_epk.get_v()
             );
-            assert_eq!(cs.get_input(5, "commitment/input variable"), expected_cmu);
+            assert_eq!(
+                cs.get_input(5, "commitment/input variable").to_repr(),
+                expected_cmu.to_bytes()
+            );
         }
     }
 }

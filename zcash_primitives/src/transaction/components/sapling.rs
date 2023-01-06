@@ -12,6 +12,7 @@ use zcash_note_encryption::{
 use crate::{
     consensus,
     sapling::{
+        note::ExtractedNoteCommitment,
         note_encryption::SaplingDomain,
         redjubjub::{self, PublicKey, Signature},
         value::ValueCommitment,
@@ -244,6 +245,15 @@ fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> 
 
 /// Consensus rules (§7.3) & (§7.4):
 /// - Canonical encoding is enforced here
+fn read_cmu<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
+    let mut f = [0u8; 32];
+    reader.read_exact(&mut f)?;
+    Option::from(ExtractedNoteCommitment::from_bytes(&f))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "cmu not in field"))
+}
+
+/// Consensus rules (§7.3) & (§7.4):
+/// - Canonical encoding is enforced here
 pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<bls12_381::Scalar> {
     let mut f = [0u8; 32];
     reader.read_exact(&mut f)?;
@@ -364,7 +374,7 @@ impl SpendDescriptionV5 {
 #[derive(Clone)]
 pub struct OutputDescription<Proof> {
     cv: ValueCommitment,
-    cmu: bls12_381::Scalar,
+    cmu: ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
     enc_ciphertext: [u8; 580],
     out_ciphertext: [u8; 80],
@@ -378,7 +388,7 @@ impl<Proof> OutputDescription<Proof> {
     }
 
     /// Returns the commitment to the new note being created.
-    pub fn cmu(&self) -> &bls12_381::Scalar {
+    pub fn cmu(&self) -> &ExtractedNoteCommitment {
         &self.cmu
     }
 
@@ -406,7 +416,7 @@ impl<Proof> OutputDescription<Proof> {
 impl<Proof> OutputDescription<Proof> {
     pub(crate) fn from_parts(
         cv: ValueCommitment,
-        cmu: bls12_381::Scalar,
+        cmu: ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
         enc_ciphertext: [u8; 580],
         out_ciphertext: [u8; 80],
@@ -424,7 +434,7 @@ impl<Proof> OutputDescription<Proof> {
     pub(crate) fn cv_mut(&mut self) -> &mut ValueCommitment {
         &mut self.cv
     }
-    pub(crate) fn cmu_mut(&mut self) -> &mut bls12_381::Scalar {
+    pub(crate) fn cmu_mut(&mut self) -> &mut ExtractedNoteCommitment {
         &mut self.cmu
     }
     pub(crate) fn ephemeral_key_mut(&mut self) -> &mut EphemeralKeyBytes {
@@ -456,7 +466,7 @@ impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>, ENC_CIPHERTEX
     }
 
     fn cmstar_bytes(&self) -> [u8; 32] {
-        self.cmu.to_repr()
+        self.cmu.to_bytes()
     }
 
     fn enc_ciphertext(&self) -> &[u8; ENC_CIPHERTEXT_SIZE] {
@@ -483,7 +493,7 @@ impl OutputDescription<GrothProofBytes> {
         let cv = read_value_commitment(&mut reader)?;
 
         // Consensus rule (§7.4): Canonical encoding is enforced here
-        let cmu = read_base(&mut reader, "cmu")?;
+        let cmu = read_cmu(&mut reader)?;
 
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
@@ -510,7 +520,7 @@ impl OutputDescription<GrothProofBytes> {
 
     pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.cv.to_bytes())?;
-        writer.write_all(self.cmu.to_repr().as_ref())?;
+        writer.write_all(self.cmu.to_bytes().as_ref())?;
         writer.write_all(self.ephemeral_key.as_ref())?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)?;
@@ -519,7 +529,7 @@ impl OutputDescription<GrothProofBytes> {
 
     pub fn write_v5_without_proof<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(&self.cv.to_bytes())?;
-        writer.write_all(self.cmu.to_repr().as_ref())?;
+        writer.write_all(self.cmu.to_bytes().as_ref())?;
         writer.write_all(self.ephemeral_key.as_ref())?;
         writer.write_all(&self.enc_ciphertext)?;
         writer.write_all(&self.out_ciphertext)
@@ -529,7 +539,7 @@ impl OutputDescription<GrothProofBytes> {
 #[derive(Clone)]
 pub struct OutputDescriptionV5 {
     cv: ValueCommitment,
-    cmu: bls12_381::Scalar,
+    cmu: ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
     enc_ciphertext: [u8; 580],
     out_ciphertext: [u8; 80],
@@ -540,7 +550,7 @@ memuse::impl_no_dynamic_usage!(OutputDescriptionV5);
 impl OutputDescriptionV5 {
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let cv = read_value_commitment(&mut reader)?;
-        let cmu = read_base(&mut reader, "cmu")?;
+        let cmu = read_cmu(&mut reader)?;
 
         // Consensus rules (§4.5):
         // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
@@ -580,7 +590,7 @@ impl OutputDescriptionV5 {
 #[derive(Clone)]
 pub struct CompactOutputDescription {
     pub ephemeral_key: EphemeralKeyBytes,
-    pub cmu: bls12_381::Scalar,
+    pub cmu: ExtractedNoteCommitment,
     pub enc_ciphertext: [u8; COMPACT_NOTE_SIZE],
 }
 
@@ -604,7 +614,7 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZ
     }
 
     fn cmstar_bytes(&self) -> [u8; 32] {
-        self.cmu.to_repr()
+        self.cmu.to_bytes()
     }
 
     fn enc_ciphertext(&self) -> &[u8; COMPACT_NOTE_SIZE] {
@@ -623,6 +633,7 @@ pub mod testing {
     use crate::{
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         sapling::{
+            note::ExtractedNoteCommitment,
             redjubjub::{PrivateKey, PublicKey},
             value::{
                 testing::{arb_note_value_bounded, arb_trapdoor},
@@ -695,6 +706,7 @@ pub mod testing {
                 .prop_map(|v| <[u8;GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
         ) -> OutputDescription<GrothProofBytes> {
             let cv = ValueCommitment::derive(value, rcv);
+            let cmu = ExtractedNoteCommitment::from_bytes(&cmu.to_bytes()).unwrap();
             OutputDescription {
                 cv,
                 cmu,

@@ -1,8 +1,9 @@
 use bellman::{gadgets::multipack, groth16::Proof};
 use bls12_381::Bls12;
-use group::{Curve, GroupEncoding};
+use group::{ff::PrimeField, Curve, GroupEncoding};
 use zcash_primitives::{
     sapling::{
+        note::ExtractedNoteCommitment,
         redjubjub::{PublicKey, Signature},
         value::{CommitmentSum, ValueCommitment},
     },
@@ -105,7 +106,7 @@ impl SaplingVerificationContextInner {
     fn check_output(
         &mut self,
         cv: &ValueCommitment,
-        cmu: bls12_381::Scalar,
+        cmu: ExtractedNoteCommitment,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
         proof_verifier: impl FnOnce(Proof<Bls12>, [bls12_381::Scalar; 5]) -> bool,
@@ -134,7 +135,7 @@ impl SaplingVerificationContextInner {
             public_input[2] = u;
             public_input[3] = v;
         }
-        public_input[4] = cmu;
+        public_input[4] = bls12_381::Scalar::from_repr(cmu.to_bytes()).unwrap();
 
         // Verify the proof
         proof_verifier(zkproof, public_input)

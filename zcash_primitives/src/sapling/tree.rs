@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 use std::io::{self, Read, Write};
 
 use super::{
-    note::Note,
+    note::{ExtractedNoteCommitment, Note},
     pedersen_hash::{pedersen_hash, Personalization},
 };
 use crate::merkle_tree::{HashSer, Hashable};
@@ -68,6 +68,13 @@ impl Node {
     #[cfg(test)]
     pub(crate) fn new(repr: [u8; 32]) -> Self {
         Node { repr }
+    }
+
+    /// Creates a tree leaf from the given Sapling note commitment.
+    pub fn from_cmu(value: &ExtractedNoteCommitment) -> Self {
+        Node {
+            repr: value.to_bytes(),
+        }
     }
 
     /// Constructs a new note commitment tree node from a [`bls12_381::Scalar`]
