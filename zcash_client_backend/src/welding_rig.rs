@@ -402,6 +402,7 @@ mod tests {
         sapling::{
             note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey},
             util::generate_random_rseed,
+            value::NoteValue,
             Note, Nullifier, SaplingIvk,
         },
         transaction::components::Amount,
@@ -464,12 +465,7 @@ mod tests {
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
-        let note = Note {
-            g_d: to.diversifier().g_d().unwrap(),
-            pk_d: *to.pk_d(),
-            value: value.into(),
-            rseed,
-        };
+        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -577,7 +573,7 @@ mod tests {
             assert_eq!(tx.shielded_outputs.len(), 1);
             assert_eq!(tx.shielded_outputs[0].index, 0);
             assert_eq!(tx.shielded_outputs[0].account, account);
-            assert_eq!(tx.shielded_outputs[0].note.value, 5);
+            assert_eq!(tx.shielded_outputs[0].note.value().inner(), 5);
 
             // Check that the witness root matches
             assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
@@ -640,7 +636,7 @@ mod tests {
             assert_eq!(tx.shielded_outputs.len(), 1);
             assert_eq!(tx.shielded_outputs[0].index, 0);
             assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
-            assert_eq!(tx.shielded_outputs[0].note.value, 5);
+            assert_eq!(tx.shielded_outputs[0].note.value().inner(), 5);
 
             // Check that the witness root matches
             assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());

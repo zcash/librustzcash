@@ -670,7 +670,7 @@ mod tests {
 
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let addr2 = extsk2.default_address().1;
-        let to = addr2.clone().into();
+        let to = addr2.into();
 
         let send_and_recover_with_policy = |db_write: &mut DataConnStmtCache<'_, _>, ovk_policy| {
             let tx_row = create_spend_to_address(

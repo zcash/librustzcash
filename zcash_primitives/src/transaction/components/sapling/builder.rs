@@ -13,6 +13,7 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
+        keys::EphemeralSecretKey,
         note_encryption::sapling_note_encryption,
         prover::TxProver,
         redjubjub::{PrivateKey, Signature},
@@ -78,7 +79,7 @@ impl fees::InputView<()> for SpendDescriptionInfo {
 
     fn value(&self) -> Amount {
         // An existing note to be spent must have a valid amount value.
-        Amount::from_u64(self.note.value).unwrap()
+        Amount::from_u64(self.note.value().inner()).unwrap()
     }
 }
 
@@ -103,16 +104,9 @@ impl SaplingOutputInfo {
         value: NoteValue,
         memo: MemoBytes,
     ) -> Self {
-        let g_d = to.g_d();
-
         let rseed = generate_random_rseed_internal(params, target_height, rng);
 
-        let note = Note {
-            g_d,
-            pk_d: *to.pk_d(),
-            value: value.inner(),
-            rseed,
-        };
+        let note = Note::from_parts(to, value, rseed);
 
         SaplingOutputInfo {
             ovk,
@@ -128,20 +122,15 @@ impl SaplingOutputInfo {
         ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription<GrothProofBytes> {
-        let encryptor = sapling_note_encryption::<R, P>(
-            self.ovk,
-            self.note.clone(),
-            self.to.clone(),
-            self.memo,
-            rng,
-        );
+        let encryptor =
+            sapling_note_encryption::<R, P>(self.ovk, self.note.clone(), self.to, self.memo, rng);
 
         let (zkproof, cv) = prover.output_proof(
             ctx,
             *encryptor.esk(),
             self.to,
             self.note.rcm(),
-            self.note.value,
+            self.note.value().inner(),
         );
 
         let cmu = self.note.cmu();
@@ -164,7 +153,8 @@ impl SaplingOutputInfo {
 
 impl fees::OutputView for SaplingOutputInfo {
     fn value(&self) -> Amount {
-        Amount::from_u64(self.note.value).expect("Note values should be checked at construction.")
+        Amount::from_u64(self.note.value().inner())
+            .expect("Note values should be checked at construction.")
     }
 }
 
@@ -312,8 +302,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
         let alpha = jubjub::Fr::random(&mut rng);
 
-        self.value_balance =
-            (self.value_balance + NoteValue::from_raw(note.value)).ok_or(Error::InvalidAddress)?;
+        self.value_balance = (self.value_balance + note.value()).ok_or(Error::InvalidAmount)?;
         self.try_value_balance()?;
 
         self.spends.push(SpendDescriptionInfo {
@@ -418,9 +407,9 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                             ctx,
                             proof_generation_key,
                             spend.diversifier,
-                            spend.note.rseed,
+                            *spend.note.rseed(),
                             spend.alpha,
-                            spend.note.value,
+                            spend.note.value().inner(),
                             anchor,
                             spend.merkle_path.clone(),
                         )
@@ -464,7 +453,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     output.clone().build::<P, _, _>(prover, ctx, &mut rng)
                 } else {
                     // This is a dummy output
-                    let (dummy_to, dummy_note) = {
+                    let dummy_note = {
                         let (diversifier, g_d) = {
                             let mut diversifier;
                             let g_d;
@@ -479,33 +468,38 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                             }
                             (diversifier, g_d)
                         };
-                        let (pk_d, payment_address) = loop {
+                        let payment_address = loop {
                             let dummy_ivk = jubjub::Fr::random(&mut rng);
                             let pk_d = g_d * dummy_ivk;
                             if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d) {
-                                break (pk_d, addr);
+                                break addr;
                             }
                         };
 
                         let rseed =
                             generate_random_rseed_internal(&params, target_height, &mut rng);
 
-                        (
-                            payment_address,
-                            Note {
-                                g_d,
-                                pk_d,
-                                rseed,
-                                value: 0,
-                            },
-                        )
+                        Note::from_parts(payment_address, NoteValue::from_raw(0), rseed)
                     };
 
-                    let esk = dummy_note.generate_or_derive_esk_internal(&mut rng);
-                    let epk = dummy_note.g_d * esk;
+                    let esk =
+                        EphemeralSecretKey(dummy_note.generate_or_derive_esk_internal(&mut rng));
+                    let epk = esk.derive_public(
+                        dummy_note
+                            .recipient()
+                            .diversifier()
+                            .g_d()
+                            .expect("checked at construction")
+                            .into(),
+                    );
 
-                    let (zkproof, cv) =
-                        prover.output_proof(ctx, esk, dummy_to, dummy_note.rcm(), dummy_note.value);
+                    let (zkproof, cv) = prover.output_proof(
+                        ctx,
+                        esk.0,
+                        dummy_note.recipient(),
+                        dummy_note.rcm(),
+                        dummy_note.value().inner(),
+                    );
 
                     let cmu = dummy_note.cmu();
 
@@ -517,7 +511,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     OutputDescription {
                         cv,
                         cmu,
-                        ephemeral_key: epk.to_bytes().into(),
+                        ephemeral_key: epk.to_bytes(),
                         enc_ciphertext,
                         out_ciphertext,
                         zkproof,

@@ -3,6 +3,7 @@ use group::{Group, GroupEncoding};
 use super::{
     keys::Diversifier,
     note::{Note, Rseed},
+    value::NoteValue,
 };
 
 /// A Sapling payment address.
@@ -12,7 +13,7 @@ use super::{
 /// - `diversifier` is guaranteed to be valid for Sapling (only 50% of diversifiers are).
 /// - `pk_d` is guaranteed to be prime-order (i.e. in the prime-order subgroup of Jubjub,
 ///  and not the identity).
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct PaymentAddress {
     pk_d: jubjub::SubgroupPoint,
     diversifier: Diversifier,
@@ -97,12 +98,7 @@ impl PaymentAddress {
     }
 
     pub fn create_note(&self, value: u64, rseed: Rseed) -> Note {
-        Note {
-            value,
-            rseed,
-            g_d: self.g_d(),
-            pk_d: self.pk_d,
-        }
+        Note::from_parts(*self, NoteValue::from_raw(value), rseed)
     }
 }
 

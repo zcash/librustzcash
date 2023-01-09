@@ -74,7 +74,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 Spend {
                     value_commitment_opening: Some(value_commitment.clone()),
                     proof_generation_key: Some(proof_generation_key.clone()),
-                    payment_address: Some(payment_address.clone()),
+                    payment_address: Some(payment_address),
                     commitment_randomness: Some(commitment_randomness),
                     ar: Some(ar),
                     auth_path: auth_path.clone(),

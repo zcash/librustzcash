@@ -1188,7 +1188,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     let rcm = output.note().rcm().to_repr();
     let account = output.account();
     let diversifier = output.to().diversifier();
-    let value = output.note().value;
+    let value = output.note().value();
     let memo = output.memo();
     let is_change = output.is_change();
     let output_index = output.index();
@@ -1198,7 +1198,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
     if !stmts.stmt_update_received_note(
         account,
         diversifier,
-        value,
+        value.inner(),
         rcm,
         &nf,
         memo,
@@ -1212,7 +1212,7 @@ pub fn put_received_note<'a, P, T: ShieldedOutput>(
             output_index,
             account,
             diversifier,
-            value,
+            value.inner(),
             rcm,
             &nf,
             memo,

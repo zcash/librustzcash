@@ -1,7 +1,7 @@
 use group::{ff::Field, GroupEncoding};
 use rand_core::{CryptoRng, RngCore};
 
-use super::{value::NoteValue, Node, Nullifier, NullifierDerivingKey};
+use super::{value::NoteValue, Node, Nullifier, NullifierDerivingKey, PaymentAddress};
 use crate::keys::prf_expand;
 
 mod commitment;
@@ -34,28 +34,62 @@ impl Rseed {
     }
 }
 
+/// A discrete amount of funds received by an address.
 #[derive(Clone, Debug)]
 pub struct Note {
-    /// The value of the note
-    pub value: u64,
-    /// The diversified base of the address, GH(d)
-    pub g_d: jubjub::SubgroupPoint,
-    /// The public key of the address, g_d^ivk
-    pub pk_d: jubjub::SubgroupPoint,
-    /// rseed
-    pub rseed: Rseed,
+    /// The recipient of the funds.
+    recipient: PaymentAddress,
+    /// The value of this note.
+    value: NoteValue,
+    /// The seed randomness for various note components.
+    rseed: Rseed,
 }
 
 impl PartialEq for Note {
     fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-            && self.g_d == other.g_d
-            && self.pk_d == other.pk_d
-            && self.rcm() == other.rcm()
+        // Notes are canonically defined by their commitments.
+        self.cmu().eq(&other.cmu())
     }
 }
 
+impl Eq for Note {}
+
 impl Note {
+    /// Creates a note from its component parts.
+    ///
+    /// # Caveats
+    ///
+    /// This low-level constructor enforces that the provided arguments produce an
+    /// internally valid `Note`. However, it allows notes to be constructed in a way that
+    /// violates required security checks for note decryption, as specified in
+    /// [Section 4.19] of the Zcash Protocol Specification. Users of this constructor
+    /// should only call it with note components that have been fully validated by
+    /// decrypting a received note according to [Section 4.19].
+    ///
+    /// [Section 4.19]: https://zips.z.cash/protocol/protocol.pdf#saplingandorchardinband
+    pub fn from_parts(recipient: PaymentAddress, value: NoteValue, rseed: Rseed) -> Self {
+        Note {
+            recipient,
+            value,
+            rseed,
+        }
+    }
+
+    /// Returns the recipient of this note.
+    pub fn recipient(&self) -> PaymentAddress {
+        self.recipient
+    }
+
+    /// Returns the value of this note.
+    pub fn value(&self) -> NoteValue {
+        self.value
+    }
+
+    /// Returns the rseed value of this note.
+    pub fn rseed(&self) -> &Rseed {
+        &self.rseed
+    }
+
     pub fn uncommitted() -> bls12_381::Scalar {
         // The smallest u-coordinate that is not on the curve
         // is one.
@@ -65,9 +99,9 @@ impl Note {
     /// Computes the note commitment, returning the full point.
     fn cm_full_point(&self) -> NoteCommitment {
         NoteCommitment::derive(
-            self.g_d.to_bytes(),
-            self.pk_d.to_bytes(),
-            NoteValue::from_raw(self.value),
+            self.recipient.g_d().to_bytes(),
+            self.recipient.pk_d().to_bytes(),
+            self.value,
             self.rseed.rcm(),
         )
     }
@@ -128,13 +162,12 @@ pub(super) mod testing {
 
     prop_compose! {
         pub fn arb_note(value: NoteValue)(
-            addr in arb_payment_address(),
+            recipient in arb_payment_address(),
             rseed in prop::array::uniform32(prop::num::u8::ANY).prop_map(Rseed::AfterZip212)
         ) -> Note {
             Note {
-                value: value.inner(),
-                g_d: addr.g_d(),
-                pk_d: *addr.pk_d(),
+                recipient,
+                value,
                 rseed
             }
         }

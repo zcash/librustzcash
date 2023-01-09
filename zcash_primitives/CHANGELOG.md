@@ -14,6 +14,10 @@ and this library adheres to Rust's notion of
   - `Node::from_cmu`
   - `value`, containing types for handling Sapling note values and value
     commitments.
+  - `Note::from_parts`
+  - `Note::{recipient, value, rseed}` getter methods.
+  - `impl Eq for Note`
+  - `impl Copy for PaymentAddress`
 
 ### Changed
 - MSRV is now 1.60.0.
@@ -53,6 +57,7 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_primitives::sapling`:
+  - The fields of `Note` are now private (use the new getter methods instead).
   - `PaymentAddress::g_d`
   - `NoteValue` (use `zcash_primitives::sapling::value::NoteValue` instead).
   - `ValueCommitment` (use `zcash_primitives::sapling::value::ValueCommitment`

@@ -26,6 +26,9 @@ use bellman::gadgets::Assignment;
 #[cfg(test)]
 use group::ff::PrimeFieldBits;
 
+#[cfg(test)]
+use zcash_primitives::sapling::value::NoteValue;
+
 pub const TREE_DEPTH: usize = SAPLING_COMMITMENT_TREE_DEPTH;
 
 /// The opening (value and randomness) of a Sapling value commitment.
@@ -578,7 +581,6 @@ fn test_input_circuit_with_bls12_381() {
             }
         }
 
-        let g_d = payment_address.diversifier().g_d().unwrap();
         let commitment_randomness = jubjub::Fr::random(&mut rng);
         let auth_path =
             vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
@@ -587,12 +589,11 @@ fn test_input_circuit_with_bls12_381() {
         {
             let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
             let expected_value_commitment = value_commitment.commitment().to_affine();
-            let note = Note {
-                value: value_commitment.value,
-                g_d,
-                pk_d: *payment_address.pk_d(),
-                rseed: Rseed::BeforeZip212(commitment_randomness),
-            };
+            let note = Note::from_parts(
+                payment_address,
+                NoteValue::from_raw(value_commitment.value),
+                Rseed::BeforeZip212(commitment_randomness),
+            );
 
             let mut position = 0u64;
             let cmu = note.cmu();
@@ -640,7 +641,7 @@ fn test_input_circuit_with_bls12_381() {
             let instance = Spend {
                 value_commitment_opening: Some(value_commitment.clone()),
                 proof_generation_key: Some(proof_generation_key.clone()),
-                payment_address: Some(payment_address.clone()),
+                payment_address: Some(payment_address),
                 commitment_randomness: Some(commitment_randomness),
                 ar: Some(ar),
                 auth_path: auth_path.clone(),
@@ -752,7 +753,6 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             }
         }
 
-        let g_d = payment_address.diversifier().g_d().unwrap();
         let commitment_randomness = jubjub::Fr::random(&mut rng);
         let auth_path =
             vec![Some((bls12_381::Scalar::random(&mut rng), rng.next_u32() % 2 != 0)); tree_depth];
@@ -769,12 +769,11 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
                 expected_value_commitment.get_v(),
                 bls12_381::Scalar::from_str_vartime(expected_commitment_vs[i as usize]).unwrap()
             );
-            let note = Note {
-                value: value_commitment.value,
-                g_d,
-                pk_d: *payment_address.pk_d(),
-                rseed: Rseed::BeforeZip212(commitment_randomness),
-            };
+            let note = Note::from_parts(
+                payment_address,
+                NoteValue::from_raw(value_commitment.value),
+                Rseed::BeforeZip212(commitment_randomness),
+            );
 
             let mut position = 0u64;
             let cmu = note.cmu();
@@ -822,7 +821,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             let instance = Spend {
                 value_commitment_opening: Some(value_commitment.clone()),
                 proof_generation_key: Some(proof_generation_key.clone()),
-                payment_address: Some(payment_address.clone()),
+                payment_address: Some(payment_address),
                 commitment_randomness: Some(commitment_randomness),
                 ar: Some(ar),
                 auth_path: auth_path.clone(),
@@ -914,7 +913,7 @@ fn test_output_circuit_with_bls12_381() {
 
             let instance = Output {
                 value_commitment_opening: Some(value_commitment.clone()),
-                payment_address: Some(payment_address.clone()),
+                payment_address: Some(payment_address),
                 commitment_randomness: Some(commitment_randomness),
                 esk: Some(esk),
             };

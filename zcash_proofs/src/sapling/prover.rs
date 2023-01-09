@@ -82,12 +82,7 @@ impl SaplingProvingContext {
         let rk = PublicKey(proof_generation_key.ak.into()).randomize(ar, SPENDING_KEY_GENERATOR);
 
         // Let's compute the nullifier while we have the position
-        let note = Note {
-            value,
-            g_d: diversifier.g_d().expect("was a valid diversifier before"),
-            pk_d: *payment_address.pk_d(),
-            rseed,
-        };
+        let note = Note::from_parts(payment_address, NoteValue::from_raw(value), rseed);
 
         let nullifier = note.nf(&viewing_key.nk, merkle_path.position);
 

@@ -747,7 +747,7 @@ mod tests {
             builder
                 .add_sapling_output(
                     ovk,
-                    to.clone(),
+                    to,
                     Amount::from_u64(50000).unwrap(),
                     MemoBytes::empty(),
                 )
@@ -799,7 +799,7 @@ mod tests {
             builder
                 .add_sapling_output(
                     ovk,
-                    to.clone(),
+                    to,
                     Amount::from_u64(30000).unwrap(),
                     MemoBytes::empty(),
                 )

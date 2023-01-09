@@ -189,7 +189,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 
     fn get_pk_d(note: &Self::Note) -> Self::DiversifiedTransmissionKey {
-        note.pk_d
+        *note.recipient().pk_d()
     }
 
     fn prepare_epk(epk: Self::EphemeralPublicKey) -> Self::PreparedEphemeralPublicKey {
@@ -201,7 +201,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         esk: &Self::EphemeralSecretKey,
     ) -> Self::EphemeralPublicKey {
         EphemeralSecretKey(*esk)
-            .derive_public(note.g_d.into())
+            .derive_public(note.recipient().g_d().into())
             .into_inner()
     }
 
@@ -234,21 +234,21 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
         let mut input = [0; NOTE_PLAINTEXT_SIZE];
-        input[0] = match note.rseed {
+        input[0] = match note.rseed() {
             Rseed::BeforeZip212(_) => 1,
             Rseed::AfterZip212(_) => 2,
         };
         input[1..12].copy_from_slice(&to.diversifier().0);
         (&mut input[12..20])
-            .write_u64::<LittleEndian>(note.value)
+            .write_u64::<LittleEndian>(note.value().inner())
             .unwrap();
 
-        match note.rseed {
+        match note.rseed() {
             Rseed::BeforeZip212(rcm) => {
                 input[20..COMPACT_NOTE_SIZE].copy_from_slice(rcm.to_repr().as_ref());
             }
             Rseed::AfterZip212(rseed) => {
-                input[20..COMPACT_NOTE_SIZE].copy_from_slice(&rseed);
+                input[20..COMPACT_NOTE_SIZE].copy_from_slice(rseed);
             }
         }
 
@@ -271,7 +271,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         esk: &Self::EphemeralSecretKey,
     ) -> OutPlaintextBytes {
         let mut input = [0u8; OUT_PLAINTEXT_SIZE];
-        input[0..32].copy_from_slice(&note.pk_d.to_bytes());
+        input[0..32].copy_from_slice(&note.recipient().pk_d().to_bytes());
         input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(esk.to_repr().as_ref());
 
         OutPlaintextBytes(input)
