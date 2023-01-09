@@ -602,22 +602,14 @@ mod tests {
 
     #[test]
     fn invalid_diversifier() {
-        let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
-        ]);
-
-        let addr =
-            PaymentAddress::from_parts(Diversifier([1u8; 11]), jubjub::SubgroupPoint::random(rng))
-                .unwrap();
-
+        // Has a diversifier of `[1u8; 11]`.
         let encoded_main =
-            encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr);
+            "zs1qyqszqgpqyqszqgpqycguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ugum9p";
 
         assert_eq!(
             decode_payment_address(
                 constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
-                &encoded_main
+                encoded_main,
             ),
             Err(Bech32DecodeError::ReadError)
         );

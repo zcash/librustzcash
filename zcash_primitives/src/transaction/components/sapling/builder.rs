@@ -102,8 +102,8 @@ impl SaplingOutputInfo {
         to: PaymentAddress,
         value: NoteValue,
         memo: MemoBytes,
-    ) -> Result<Self, Error> {
-        let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
+    ) -> Self {
+        let g_d = to.g_d();
 
         let rseed = generate_random_rseed_internal(params, target_height, rng);
 
@@ -114,12 +114,12 @@ impl SaplingOutputInfo {
             rseed,
         };
 
-        Ok(SaplingOutputInfo {
+        SaplingOutputInfo {
             ovk,
             to,
             note,
             memo,
-        })
+        }
     }
 
     fn build<P: consensus::Parameters, Pr: TxProver, R: RngCore>(
@@ -345,7 +345,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             to,
             value,
             memo,
-        )?;
+        );
 
         self.value_balance = (self.value_balance - value).ok_or(Error::InvalidAddress)?;
         self.try_value_balance()?;

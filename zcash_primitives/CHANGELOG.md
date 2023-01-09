@@ -20,6 +20,9 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::components::sapling::builder`:
   - `SaplingBuilder::add_output` now takes a
     `zcash_primitives::sapling::value::NoteValue`.
+- `zcash_primitives::sapling`:
+  - `PaymentAddress::from_parts` now rejects invalid diversifiers.
+  - `PaymentAddress::create_note` is now infallible.
 - Note commitments now use
   `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
   `bls12_381::Scalar` in the following places:
@@ -50,6 +53,7 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_primitives::sapling`:
+  - `PaymentAddress::g_d`
   - `NoteValue` (use `zcash_primitives::sapling::value::NoteValue` instead).
   - `ValueCommitment` (use `zcash_primitives::sapling::value::ValueCommitment`
     or `zcash_proofs::circuit::sapling::ValueCommitmentPreimage` instead).

@@ -135,7 +135,7 @@ where
     let pk_d = get_validated_pk_d(&diversifier)?;
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(value.into(), rseed)?;
+    let note = to.create_note(value.into(), rseed);
     Some((note, to))
 }
 
@@ -420,7 +420,7 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 /// let cv = ValueCommitment::derive(value, rcv);
 /// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
 /// let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
-/// let note = to.create_note(value.inner(), rseed).unwrap();
+/// let note = to.create_note(value.inner(), rseed);
 /// let cmu = note.cmu();
 ///
 /// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
@@ -642,7 +642,7 @@ mod tests {
 
         let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
 
-        let note = pa.create_note(value.inner(), rseed).unwrap();
+        let note = pa.create_note(value.inner(), rseed);
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
@@ -1434,7 +1434,7 @@ mod tests {
             assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
-            let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm)).unwrap();
+            let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm));
             assert_eq!(note.cmu(), cmu);
 
             let output = OutputDescription::from_parts(

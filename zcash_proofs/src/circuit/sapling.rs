@@ -220,9 +220,12 @@ impl Circuit<bls12_381::Scalar> for Spend {
         let g_d = {
             ecc::EdwardsPoint::witness(
                 cs.namespace(|| "witness g_d"),
-                self.payment_address
-                    .as_ref()
-                    .and_then(|a| a.g_d().map(jubjub::ExtendedPoint::from)),
+                self.payment_address.as_ref().map(|a| {
+                    a.diversifier()
+                        .g_d()
+                        .expect("checked at construction")
+                        .into()
+                }),
             )?
         };
 
@@ -429,9 +432,12 @@ impl Circuit<bls12_381::Scalar> for Output {
             // curve.
             let g_d = ecc::EdwardsPoint::witness(
                 cs.namespace(|| "witness g_d"),
-                self.payment_address
-                    .as_ref()
-                    .and_then(|a| a.g_d().map(jubjub::ExtendedPoint::from)),
+                self.payment_address.as_ref().map(|a| {
+                    a.diversifier()
+                        .g_d()
+                        .expect("checked at construction")
+                        .into()
+                }),
             )?;
 
             // g_d is ensured to be large order. The relationship
@@ -927,14 +933,18 @@ fn test_output_circuit_with_bls12_381() {
                     value_commitment.value,
                     Rseed::BeforeZip212(commitment_randomness),
                 )
-                .expect("should be valid")
                 .cmu();
 
             let expected_value_commitment = value_commitment.commitment().to_affine();
 
-            let expected_epk =
-                jubjub::ExtendedPoint::from(payment_address.g_d().expect("should be valid") * esk)
-                    .to_affine();
+            let expected_epk = jubjub::ExtendedPoint::from(
+                payment_address
+                    .diversifier()
+                    .g_d()
+                    .expect("should be valid")
+                    * esk,
+            )
+            .to_affine();
 
             assert_eq!(cs.num_inputs(), 6);
             assert_eq!(cs.get_input(0, "ONE"), bls12_381::Scalar::one());

@@ -670,9 +670,7 @@ mod tests {
 
         let mut rng = OsRng;
 
-        let note1 = to
-            .create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
-            .unwrap();
+        let note1 = to.create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu1 = note1.commitment();
         let mut tree = CommitmentTree::empty();
         tree.append(cmu1).unwrap();
@@ -780,9 +778,7 @@ mod tests {
             );
         }
 
-        let note1 = to
-            .create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
-            .unwrap();
+        let note1 = to.create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu1 = note1.commitment();
         let mut tree = CommitmentTree::empty();
         tree.append(cmu1).unwrap();
@@ -820,9 +816,7 @@ mod tests {
             );
         }
 
-        let note2 = to
-            .create_note(1, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
-            .unwrap();
+        let note2 = to.create_note(1, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu2 = note2.commitment();
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();

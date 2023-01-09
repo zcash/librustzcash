@@ -610,10 +610,10 @@ fn select_key_for_note<N>(
     // to spend the note that we've used the correct key.
     let external_note = dfvk
         .diversified_address(selected.diversifier)
-        .and_then(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
     let internal_note = dfvk
         .diversified_change_address(selected.diversifier)
-        .and_then(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
 
     let expected_root = selected.witness.root();
     external_note
