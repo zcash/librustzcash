@@ -58,6 +58,9 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_primitives::sapling`:
   - The fields of `Note` are now private (use the new getter methods instead).
+  - `Note::uncommitted` (use `Node::empty_leaf` instead).
+  - `Note::derive_esk` (use `SaplingDomain::derive_esk` instead).
+  - `Note::commitment` (use `Node::from_cmu` instead).
   - `PaymentAddress::g_d`
   - `NoteValue` (use `zcash_primitives::sapling::value::NoteValue` instead).
   - `ValueCommitment` (use `zcash_primitives::sapling::value::ValueCommitment`

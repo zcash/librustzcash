@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     merkle_tree::MerklePath,
-    sapling::{self, prover::TxProver as SaplingProver},
+    sapling::{self, prover::TxProver as SaplingProver, Node},
     transaction::{
         builder::Builder,
         components::amount::{Amount, BalanceError},
@@ -610,11 +610,11 @@ fn select_key_for_note<N>(
 
     let expected_root = selected.witness.root();
     external_note
-        .filter(|n| expected_root == merkle_path.root(n.commitment()))
+        .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
         .map(|n| (n, extsk.clone(), merkle_path.clone()))
         .or_else(|| {
             internal_note
-                .filter(|n| expected_root == merkle_path.root(n.commitment()))
+                .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
                 .map(|n| (n, extsk.derive_internal(), merkle_path))
         })
 }

@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 use std::io::{self, Read, Write};
 
 use super::{
-    note::{ExtractedNoteCommitment, Note},
+    note::ExtractedNoteCommitment,
     pedersen_hash::{pedersen_hash, Personalization},
 };
 use crate::merkle_tree::{HashSer, Hashable};
@@ -14,6 +14,7 @@ pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
 pub const SAPLING_COMMITMENT_TREE_DEPTH_U8: u8 = 32;
 
 lazy_static! {
+    static ref UNCOMMITTED_SAPLING: bls12_381::Scalar = bls12_381::Scalar::one();
     static ref EMPTY_ROOTS: Vec<Node> = {
         let mut v = vec![Node::blank()];
         for d in 0..SAPLING_COMMITMENT_TREE_DEPTH {
@@ -88,7 +89,7 @@ impl Node {
 impl incrementalmerkletree::Hashable for Node {
     fn empty_leaf() -> Self {
         Node {
-            repr: Note::uncommitted().to_repr(),
+            repr: UNCOMMITTED_SAPLING.to_repr(),
         }
     }
 

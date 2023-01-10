@@ -290,7 +290,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         merkle_path: MerklePath<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
-        let node = note.commitment();
+        let node = Node::from_cmu(&note.cmu());
         if let Some(anchor) = self.anchor {
             let path_root: bls12_381::Scalar = merkle_path.root(node).into();
             if path_root != anchor {

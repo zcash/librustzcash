@@ -1,7 +1,7 @@
 use group::{ff::Field, GroupEncoding};
 use rand_core::{CryptoRng, RngCore};
 
-use super::{value::NoteValue, Node, Nullifier, NullifierDerivingKey, PaymentAddress};
+use super::{value::NoteValue, Nullifier, NullifierDerivingKey, PaymentAddress};
 use crate::keys::prf_expand;
 
 mod commitment;
@@ -90,12 +90,6 @@ impl Note {
         &self.rseed
     }
 
-    pub fn uncommitted() -> bls12_381::Scalar {
-        // The smallest u-coordinate that is not on the curve
-        // is one.
-        bls12_381::Scalar::one()
-    }
-
     /// Computes the note commitment, returning the full point.
     fn cm_full_point(&self) -> NoteCommitment {
         NoteCommitment::derive(
@@ -117,10 +111,15 @@ impl Note {
         self.cm_full_point().into()
     }
 
+    /// Defined in [Zcash Protocol Spec § 4.7.2: Sending Notes (Sapling)][saplingsend].
+    ///
+    /// [saplingsend]: https://zips.z.cash/protocol/protocol.pdf#saplingsend
     pub fn rcm(&self) -> jubjub::Fr {
         self.rseed.rcm().0
     }
 
+    /// Derives `esk` from the internal `Rseed` value, or generates a random value if this
+    /// note was created with a v1 (i.e. pre-ZIP 212) note plaintext.
     pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(&self, rng: &mut R) -> jubjub::Fr {
         self.generate_or_derive_esk_internal(rng)
     }
@@ -133,20 +132,12 @@ impl Note {
     }
 
     /// Returns the derived `esk` if this note was created after ZIP 212 activated.
-    pub fn derive_esk(&self) -> Option<jubjub::Fr> {
+    pub(crate) fn derive_esk(&self) -> Option<jubjub::Fr> {
         match self.rseed {
             Rseed::BeforeZip212(_) => None,
             Rseed::AfterZip212(rseed) => Some(jubjub::Fr::from_bytes_wide(
                 prf_expand(&rseed, &[0x05]).as_array(),
             )),
-        }
-    }
-
-    /// Returns [`self.cmu`] in the correct representation for inclusion in the Sapling
-    /// note commitment tree.
-    pub fn commitment(&self) -> Node {
-        Node {
-            repr: self.cmu().to_bytes(),
         }
     }
 }
