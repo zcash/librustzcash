@@ -23,9 +23,8 @@ use crate::{
             DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
             SharedSecret,
         },
-        spec::{PreparedBase, PreparedScalar},
         value::ValueCommitment,
-        Diversifier, Note, PaymentAddress, Rseed, SaplingIvk,
+        Diversifier, Note, PaymentAddress, Rseed,
     },
     transaction::components::{
         amount::Amount,
@@ -35,45 +34,10 @@ use crate::{
 
 use super::note::ExtractedNoteCommitment;
 
+pub use crate::sapling::keys::{PreparedEphemeralPublicKey, PreparedIncomingViewingKey};
+
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
-
-/// A Sapling incoming viewing key that has been precomputed for trial decryption.
-#[derive(Clone, Debug)]
-pub struct PreparedIncomingViewingKey(PreparedScalar);
-
-impl DynamicUsage for PreparedIncomingViewingKey {
-    fn dynamic_usage(&self) -> usize {
-        self.0.dynamic_usage()
-    }
-
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        self.0.dynamic_usage_bounds()
-    }
-}
-
-impl PreparedIncomingViewingKey {
-    /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
-    pub fn new(ivk: &SaplingIvk) -> Self {
-        Self(PreparedScalar::new(&ivk.0))
-    }
-
-    /// TODO: Remove after type changes.
-    pub(crate) fn inner(&self) -> &PreparedScalar {
-        &self.0
-    }
-}
-
-/// A Sapling ephemeral public key that has been precomputed for trial decryption.
-#[derive(Clone, Debug)]
-pub struct PreparedEphemeralPublicKey(PreparedBase);
-
-impl PreparedEphemeralPublicKey {
-    /// TODO: Remove after type changes.
-    pub(crate) fn inner(&self) -> &PreparedBase {
-        &self.0
-    }
-}
 
 /// Sapling PRF^ock.
 ///
@@ -188,7 +152,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 
     fn prepare_epk(epk: Self::EphemeralPublicKey) -> Self::PreparedEphemeralPublicKey {
-        PreparedEphemeralPublicKey(PreparedBase::new(epk))
+        PreparedEphemeralPublicKey::new(epk)
     }
 
     fn ka_derive_public(

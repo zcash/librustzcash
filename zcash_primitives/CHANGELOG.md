@@ -10,6 +10,8 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::sapling`:
   - `keys::DiversifiedTransmissionKey`
   - `keys::{EphemeralSecretKey, EphemeralPublicKey, SharedSecret}`
+  - `keys::{PreparedIncomingViewingKey, PreparedEphemeralPublicKey}`
+    (re-exported from `note_encryption`).
   - `note`, a module containing types related to Sapling notes. The existing
     `Note` and `Rseed` types are re-exported here, and new types are added.
   - `Node::from_cmu`

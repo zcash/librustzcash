@@ -8,12 +8,11 @@ use std::io::{self, Read, Write};
 
 use super::{
     address::PaymentAddress,
-    note_encryption::{
-        PreparedEphemeralPublicKey, PreparedIncomingViewingKey, KDF_SAPLING_PERSONALIZATION,
-    },
+    note_encryption::KDF_SAPLING_PERSONALIZATION,
     spec::{
         crh_ivk, diversify_hash, ka_sapling_agree, ka_sapling_agree_prepared,
-        ka_sapling_derive_public, ka_sapling_derive_public_subgroup_prepared, PreparedBaseSubgroup,
+        ka_sapling_derive_public, ka_sapling_derive_public_subgroup_prepared, PreparedBase,
+        PreparedBaseSubgroup, PreparedScalar,
     },
 };
 use crate::{
@@ -251,6 +250,27 @@ impl SaplingIvk {
     }
 }
 
+/// A Sapling incoming viewing key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedIncomingViewingKey(PreparedScalar);
+
+impl memuse::DynamicUsage for PreparedIncomingViewingKey {
+    fn dynamic_usage(&self) -> usize {
+        self.0.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        self.0.dynamic_usage_bounds()
+    }
+}
+
+impl PreparedIncomingViewingKey {
+    /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
+    pub fn new(ivk: &SaplingIvk) -> Self {
+        Self(PreparedScalar::new(&ivk.0))
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Diversifier(pub [u8; 11]);
 
@@ -280,7 +300,7 @@ impl DiversifiedTransmissionKey {
     pub(crate) fn derive(ivk: &PreparedIncomingViewingKey, d: &Diversifier) -> Option<Self> {
         d.g_d()
             .map(PreparedBaseSubgroup::new)
-            .map(|g_d| ka_sapling_derive_public_subgroup_prepared(ivk.inner(), &g_d))
+            .map(|g_d| ka_sapling_derive_public_subgroup_prepared(&ivk.0, &g_d))
             .map(DiversifiedTransmissionKey)
     }
 
@@ -382,9 +402,17 @@ impl EphemeralPublicKey {
     }
 }
 
+/// A Sapling ephemeral public key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedEphemeralPublicKey(PreparedBase);
+
 impl PreparedEphemeralPublicKey {
+    pub(crate) fn new(epk: jubjub::ExtendedPoint) -> Self {
+        PreparedEphemeralPublicKey(PreparedBase::new(epk))
+    }
+
     pub(crate) fn agree(&self, ivk: &PreparedIncomingViewingKey) -> SharedSecret {
-        SharedSecret(ka_sapling_agree_prepared(ivk.inner(), self.inner()))
+        SharedSecret(ka_sapling_agree_prepared(&ivk.0, &self.0))
     }
 }
 
