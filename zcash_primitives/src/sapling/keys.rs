@@ -383,14 +383,8 @@ impl EphemeralSecretKey {
 pub struct EphemeralPublicKey(jubjub::ExtendedPoint);
 
 impl EphemeralPublicKey {
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn from_inner(epk: jubjub::ExtendedPoint) -> Self {
-        EphemeralPublicKey(epk)
-    }
-
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn into_inner(self) -> jubjub::ExtendedPoint {
-        self.0
+    pub(crate) fn from_affine(epk: jubjub::AffinePoint) -> Self {
+        EphemeralPublicKey(epk.into())
     }
 
     pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
@@ -407,8 +401,8 @@ impl EphemeralPublicKey {
 pub struct PreparedEphemeralPublicKey(PreparedBase);
 
 impl PreparedEphemeralPublicKey {
-    pub(crate) fn new(epk: jubjub::ExtendedPoint) -> Self {
-        PreparedEphemeralPublicKey(PreparedBase::new(epk))
+    pub(crate) fn new(epk: EphemeralPublicKey) -> Self {
+        PreparedEphemeralPublicKey(PreparedBase::new(epk.0))
     }
 
     pub(crate) fn agree(&self, ivk: &PreparedIncomingViewingKey) -> SharedSecret {
@@ -425,16 +419,6 @@ impl PreparedEphemeralPublicKey {
 pub struct SharedSecret(jubjub::SubgroupPoint);
 
 impl SharedSecret {
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn from_inner(epk: jubjub::SubgroupPoint) -> Self {
-        SharedSecret(epk)
-    }
-
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn into_inner(self) -> jubjub::SubgroupPoint {
-        self.0
-    }
-
     /// For checking test vectors only.
     #[cfg(test)]
     pub(crate) fn to_bytes(&self) -> [u8; 32] {

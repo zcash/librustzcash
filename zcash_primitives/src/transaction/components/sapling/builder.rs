@@ -4,7 +4,6 @@ use core::fmt;
 use std::sync::mpsc::Sender;
 
 use ff::Field;
-use group::GroupEncoding;
 use rand::{seq::SliceRandom, RngCore};
 
 use crate::{
@@ -13,7 +12,7 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::{EphemeralSecretKey, SaplingIvk},
+        keys::SaplingIvk,
         note_encryption::sapling_note_encryption,
         prover::TxProver,
         redjubjub::{PrivateKey, Signature},
@@ -127,7 +126,7 @@ impl SaplingOutputInfo {
 
         let (zkproof, cv) = prover.output_proof(
             ctx,
-            *encryptor.esk(),
+            encryptor.esk().0,
             self.to,
             self.note.rcm(),
             self.note.value().inner(),
@@ -138,12 +137,12 @@ impl SaplingOutputInfo {
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
         let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu, rng);
 
-        let epk = *encryptor.epk();
+        let epk = encryptor.epk();
 
         OutputDescription {
             cv,
             cmu,
-            ephemeral_key: epk.to_bytes().into(),
+            ephemeral_key: epk.to_bytes(),
             enc_ciphertext,
             out_ciphertext,
             zkproof,
@@ -471,8 +470,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                         Note::from_parts(payment_address, NoteValue::from_raw(0), rseed)
                     };
 
-                    let esk =
-                        EphemeralSecretKey(dummy_note.generate_or_derive_esk_internal(&mut rng));
+                    let esk = dummy_note.generate_or_derive_esk_internal(&mut rng);
                     let epk = esk.derive_public(
                         dummy_note
                             .recipient()

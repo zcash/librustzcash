@@ -35,6 +35,14 @@ and this library adheres to Rust's notion of
     - `PaymentAddress::from_parts`
     - `PaymentAddress::pk_d`
     - `note_encryption::SaplingDomain::DiversifiedTransmissionKey`
+  - `EphemeralSecretKey` is now used instead of `jubjub::Scalar` in the
+    following places:
+    - `Note::generate_or_derive_esk`
+    - `note_encryption::SaplingDomain::EphemeralSecretKey`
+  - `note_encryption::SaplingDomain::EphemeralPublicKey` is now
+    `EphemeralPublicKey` instead of `jubjub::ExtendedPoint`.
+  - `note_encryption::SaplingDomain::SharedSecret` is now `SharedSecret` instead
+    of `jubjub::SubgroupPoint`.
 - Note commitments now use
   `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
   `bls12_381::Scalar` in the following places:

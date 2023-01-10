@@ -1,7 +1,9 @@
 use group::{ff::Field, GroupEncoding};
 use rand_core::{CryptoRng, RngCore};
 
-use super::{value::NoteValue, Nullifier, NullifierDerivingKey, PaymentAddress};
+use super::{
+    keys::EphemeralSecretKey, value::NoteValue, Nullifier, NullifierDerivingKey, PaymentAddress,
+};
 use crate::keys::prf_expand;
 
 mod commitment;
@@ -120,24 +122,30 @@ impl Note {
 
     /// Derives `esk` from the internal `Rseed` value, or generates a random value if this
     /// note was created with a v1 (i.e. pre-ZIP 212) note plaintext.
-    pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(&self, rng: &mut R) -> jubjub::Fr {
+    pub fn generate_or_derive_esk<R: RngCore + CryptoRng>(
+        &self,
+        rng: &mut R,
+    ) -> EphemeralSecretKey {
         self.generate_or_derive_esk_internal(rng)
     }
 
-    pub(crate) fn generate_or_derive_esk_internal<R: RngCore>(&self, rng: &mut R) -> jubjub::Fr {
+    pub(crate) fn generate_or_derive_esk_internal<R: RngCore>(
+        &self,
+        rng: &mut R,
+    ) -> EphemeralSecretKey {
         match self.derive_esk() {
-            None => jubjub::Fr::random(rng),
+            None => EphemeralSecretKey(jubjub::Fr::random(rng)),
             Some(esk) => esk,
         }
     }
 
     /// Returns the derived `esk` if this note was created after ZIP 212 activated.
-    pub(crate) fn derive_esk(&self) -> Option<jubjub::Fr> {
+    pub(crate) fn derive_esk(&self) -> Option<EphemeralSecretKey> {
         match self.rseed {
             Rseed::BeforeZip212(_) => None,
-            Rseed::AfterZip212(rseed) => Some(jubjub::Fr::from_bytes_wide(
+            Rseed::AfterZip212(rseed) => Some(EphemeralSecretKey(jubjub::Fr::from_bytes_wide(
                 prf_expand(&rseed, &[0x05]).as_array(),
-            )),
+            ))),
         }
     }
 }

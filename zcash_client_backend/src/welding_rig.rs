@@ -394,13 +394,14 @@ mod tests {
         GroupEncoding,
     };
     use rand_core::{OsRng, RngCore};
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         consensus::{BlockHeight, Network},
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
         merkle_tree::CommitmentTree,
         sapling::{
-            note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey},
+            note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
             util::generate_random_rseed,
             value::NoteValue,
             Note, Nullifier, SaplingIvk,
@@ -474,7 +475,9 @@ mod tests {
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+            .0
+            .to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note

@@ -1003,7 +1003,6 @@ extern crate assert_matches;
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use group::GroupEncoding;
     use prost::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
@@ -1012,14 +1011,17 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
 
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{
-            note_encryption::sapling_note_encryption, util::generate_random_rseed,
-            value::NoteValue, Note, Nullifier, PaymentAddress,
+            note_encryption::{sapling_note_encryption, SaplingDomain},
+            util::generate_random_rseed,
+            value::NoteValue,
+            Note, Nullifier, PaymentAddress,
         },
         transaction::components::Amount,
         zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
@@ -1141,7 +1143,9 @@ mod tests {
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+            .0
+            .to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
@@ -1201,7 +1205,9 @@ mod tests {
                 &mut rng,
             );
             let cmu = note.cmu().to_bytes().to_vec();
-            let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+                .0
+                .to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
             CompactSaplingOutput {
@@ -1228,7 +1234,9 @@ mod tests {
                 &mut rng,
             );
             let cmu = note.cmu().to_bytes().to_vec();
-            let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+                .0
+                .to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
             CompactSaplingOutput {

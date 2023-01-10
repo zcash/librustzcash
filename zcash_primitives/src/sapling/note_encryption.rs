@@ -125,13 +125,13 @@ impl<P: consensus::Parameters> SaplingDomain<P> {
 }
 
 impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
-    type EphemeralSecretKey = jubjub::Scalar;
-    // It is acceptable for this to be a point because we enforce by consensus that
-    // points must not be small-order, and all points with non-canonical serialization
-    // are small-order.
-    type EphemeralPublicKey = jubjub::ExtendedPoint;
+    type EphemeralSecretKey = EphemeralSecretKey;
+    // It is acceptable for this to be a point rather than a byte array, because we
+    // enforce by consensus that points must not be small-order, and all points with
+    // non-canonical serialization are small-order.
+    type EphemeralPublicKey = EphemeralPublicKey;
     type PreparedEphemeralPublicKey = PreparedEphemeralPublicKey;
-    type SharedSecret = jubjub::SubgroupPoint;
+    type SharedSecret = SharedSecret;
     type SymmetricKey = Blake2bHash;
     type Note = Note;
     type Recipient = PaymentAddress;
@@ -159,30 +159,28 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         note: &Self::Note,
         esk: &Self::EphemeralSecretKey,
     ) -> Self::EphemeralPublicKey {
-        EphemeralSecretKey(*esk)
-            .derive_public(note.recipient().g_d().into())
-            .into_inner()
+        esk.derive_public(note.recipient().g_d().into())
     }
 
     fn ka_agree_enc(
         esk: &Self::EphemeralSecretKey,
         pk_d: &Self::DiversifiedTransmissionKey,
     ) -> Self::SharedSecret {
-        EphemeralSecretKey(*esk).agree(pk_d).into_inner()
+        esk.agree(pk_d)
     }
 
     fn ka_agree_dec(
         ivk: &Self::IncomingViewingKey,
         epk: &Self::PreparedEphemeralPublicKey,
     ) -> Self::SharedSecret {
-        epk.agree(ivk).into_inner()
+        epk.agree(ivk)
     }
 
     /// Sapling KDF for note encryption.
     ///
     /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-    fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &EphemeralKeyBytes) -> Blake2bHash {
-        SharedSecret::from_inner(dhsecret).kdf_sapling(epk)
+    fn kdf(dhsecret: SharedSecret, epk: &EphemeralKeyBytes) -> Blake2bHash {
+        dhsecret.kdf_sapling(epk)
     }
 
     fn note_plaintext_bytes(
@@ -231,22 +229,20 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     ) -> OutPlaintextBytes {
         let mut input = [0u8; OUT_PLAINTEXT_SIZE];
         input[0..32].copy_from_slice(&note.recipient().pk_d().to_bytes());
-        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(esk.to_repr().as_ref());
+        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(esk.0.to_repr().as_ref());
 
         OutPlaintextBytes(input)
     }
 
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes {
-        EphemeralPublicKey::from_inner(*epk).to_bytes()
+        epk.to_bytes()
     }
 
     fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey> {
         // ZIP 216: We unconditionally reject non-canonical encodings, because these have
         // always been rejected by consensus (due to small-order checks).
         // https://zips.z.cash/zip-0216#specification
-        let res: Option<EphemeralPublicKey> =
-            EphemeralPublicKey::from_bytes(&ephemeral_key.0).into();
-        res.map(|epk| epk.into_inner())
+        EphemeralPublicKey::from_bytes(&ephemeral_key.0).into()
     }
 
     fn parse_note_plaintext_without_memo_ivk(
@@ -267,12 +263,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(self, &plaintext.0, |diversifier| {
-            if EphemeralSecretKey(*esk)
-                .derive_public(diversifier.g_d()?.into())
-                .to_bytes()
-                .0
-                == ephemeral_key.0
-            {
+            if esk.derive_public(diversifier.g_d()?.into()).to_bytes().0 == ephemeral_key.0 {
                 Some(*pk_d)
             } else {
                 None
@@ -292,13 +283,12 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 
     fn extract_esk(op: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey> {
-        let res: Option<EphemeralSecretKey> = EphemeralSecretKey::from_bytes(
+        EphemeralSecretKey::from_bytes(
             op.0[32..OUT_PLAINTEXT_SIZE]
                 .try_into()
                 .expect("slice is the correct length"),
         )
-        .into();
-        res.map(|esk| esk.0)
+        .into()
     }
 
     fn extract_memo(&self, plaintext: &NotePlaintextBytes) -> Self::Memo {
@@ -310,11 +300,7 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
     fn batch_kdf<'a>(
         items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
     ) -> Vec<Option<Self::SymmetricKey>> {
-        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items
-            .map(|(shared_secret, ephemeral_key)| {
-                (shared_secret.map(SharedSecret::from_inner), ephemeral_key)
-            })
-            .unzip();
+        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items.unzip();
 
         SharedSecret::batch_to_affine(shared_secrets)
             .zip(ephemeral_keys.into_iter())
@@ -333,9 +319,9 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
             .zip(ephemeral_keys.into_iter())
             .map(|(epk, ephemeral_key)| {
                 (
-                    epk.map(jubjub::ExtendedPoint::from)
-                        .map(Self::prepare_epk)
-                        .into(),
+                    Option::from(epk)
+                        .map(EphemeralPublicKey::from_affine)
+                        .map(Self::prepare_epk),
                     ephemeral_key,
                 )
             })
@@ -532,7 +518,7 @@ mod tests {
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::{
-            keys::{DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey},
+            keys::{DiversifiedTransmissionKey, EphemeralSecretKey},
             note::ExtractedNoteCommitment,
             note_encryption::PreparedIncomingViewingKey,
             util::generate_random_rseed,
@@ -611,14 +597,14 @@ mod tests {
             MemoBytes::empty(),
             &mut rng,
         );
-        let epk = EphemeralPublicKey::from_inner(*ne.epk());
+        let epk = ne.epk();
         let ock = prf_ock(&ovk, &cv, &cmu.to_bytes(), &epk.to_bytes());
 
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
         let output = OutputDescription::from_parts(
             cv,
             cmu,
-            epk.to_bytes().into(),
+            epk.to_bytes(),
             ne.encrypt_note_plaintext(),
             out_ciphertext,
             [0u8; GROTH_PROOF_SIZE],
@@ -1415,14 +1401,14 @@ mod tests {
             let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_cv!(tv.cv);
             let cmu = read_cmu!(tv.cmu);
-            let esk = read_jubjub_scalar!(tv.esk);
+            let esk = EphemeralSecretKey(read_jubjub_scalar!(tv.esk));
             let ephemeral_key = EphemeralKeyBytes(tv.epk);
 
             //
             // Test the individual components
             //
 
-            let shared_secret = EphemeralSecretKey(esk).agree(&pk_d);
+            let shared_secret = esk.agree(&pk_d);
             assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
             let k_enc = shared_secret.kdf_sapling(&ephemeral_key);
