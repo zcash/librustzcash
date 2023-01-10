@@ -262,11 +262,15 @@ pub mod testing {
         testing::{self as t_orch},
         Authorized, Bundle,
     };
+    use orchard::note::TransmittedNoteCiphertext;
+    use rand_core::OsRng;
 
     use crate::transaction::{
         components::amount::{testing::arb_amount, Amount},
         TxVersion,
     };
+    use crate::transaction::components::orchard::{read_note_ciphertext, write_note_ciphertext};
+    use crate::transaction::util::sha256d::{HashReader, HashWriter};
 
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(
@@ -287,5 +291,30 @@ pub mod testing {
         } else {
             Strategy::boxed(Just(None))
         }
+    }
+
+    #[test]
+    fn serialize() {
+        let mut writer = HashWriter::default();
+
+        let mut rng = OsRng;
+
+        let mut nc = TransmittedNoteCiphertext{
+            epk_bytes: [0u8; 32],
+            enc_ciphertext: [0u8; 580],
+            out_ciphertext: [0u8; 80],
+        };
+
+        rng.fill_bytes(nc.epk_bytes.as_mut());
+        rng.fill_bytes(nc.enc_ciphertext.as_mut());
+        rng.fill_bytes(nc.out_ciphertext.as_mut());
+
+        write_note_ciphertext(&mut writer, &nc)?;
+
+        let mut reader = HashReader::new(writer.into());
+
+        let nc_out = read_note_ciphertext(&mut reader).unwrap();
+
+        assert_eq!(nc_out, nc);
     }
 }

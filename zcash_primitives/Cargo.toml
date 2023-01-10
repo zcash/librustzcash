@@ -50,9 +50,12 @@ zcash_address = { version = "0.1", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.1", path = "../components/zcash_encoding" }
 
 [dependencies.zcash_note_encryption]
-version = "0.1"
-path = "../components/zcash_note_encryption"
-features = ["pre-zip-212"]
+zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption", branch = "encryption_generalization" }
+#path = "../components/zcash_note_encryption"
+
+
+[patch.crates-io]
+uuid = { path = "../path/to/uuid" }
 
 [dev-dependencies]
 criterion = "0.3"

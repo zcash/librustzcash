@@ -466,7 +466,7 @@ impl<D: Domain> NoteEncryption<D> {
         let tag = ChaCha20Poly1305::new(key.as_ref().into())
             .encrypt_in_place_detached([0u8; 12][..].into(), &[], output.as_mut())
             .unwrap();
-        D::NoteCiphertextBytes::from(&[output, tag.as_ref()].concat())
+        D::NoteCiphertextBytes::from(&[output.as_ref(), tag.as_ref()].concat())
     }
 
     /// Generates `outCiphertext` for this note.
@@ -543,13 +543,13 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 ) -> Option<(D::Note, D::Recipient, D::Memo)> {
     let mut enc_ciphertext = output.enc_ciphertext()?.as_ref().to_owned();
 
-    let (to_plaintext, tag) = extract_tag(&mut enc_ciphertext);
+    let (plaintext, tag) = extract_tag(&mut enc_ciphertext);
 
     ChaCha20Poly1305::new(key.as_ref().into())
-        .decrypt_in_place_detached([0u8; 12][..].into(), &[], to_plaintext, &tag.into())
+        .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext, &tag.into())
         .ok()?;
 
-    let (compact, memo) = domain.extract_memo(&to_plaintext.as_ref().into());
+    let (compact, memo) = domain.extract_memo(&D::NotePlaintextBytes::from(plaintext));
     let (note, to) = parse_note_plaintext_without_memo_ivk(
         domain,
         ivk,
@@ -724,13 +724,13 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
 
     let mut enc_ciphertext = output.enc_ciphertext()?.as_ref().to_owned();
 
-    let (to_plaintext, tag) = extract_tag(&mut enc_ciphertext);
+    let (plaintext, tag) = extract_tag(&mut enc_ciphertext);
 
     ChaCha20Poly1305::new(key.as_ref().into())
-        .decrypt_in_place_detached([0u8; 12][..].into(), &[], to_plaintext, &tag.into())
+        .decrypt_in_place_detached([0u8; 12][..].into(), &[], plaintext, &tag.into())
         .ok()?;
 
-    let (compact, memo) = domain.extract_memo(&to_plaintext.as_ref().into());
+    let (compact, memo) = domain.extract_memo(&plaintext.as_ref().into());
 
     let (note, to) =
         domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &compact)?;
