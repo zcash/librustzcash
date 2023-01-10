@@ -1,7 +1,5 @@
-use group::{Group, GroupEncoding};
-
 use super::{
-    keys::Diversifier,
+    keys::{DiversifiedTransmissionKey, Diversifier},
     note::{Note, Rseed},
     value::NoteValue,
 };
@@ -15,7 +13,7 @@ use super::{
 ///  and not the identity).
 #[derive(Clone, Copy, Debug)]
 pub struct PaymentAddress {
-    pk_d: jubjub::SubgroupPoint,
+    pk_d: DiversifiedTransmissionKey,
     diversifier: Diversifier,
 }
 
@@ -34,28 +32,15 @@ impl PaymentAddress {
     /// Note that we cannot verify in this constructor that `pk_d` is derived from
     /// `diversifier`, so addresses for which these values have no known relationship
     /// (and therefore no-one can receive funds at them) can still be constructed.
-    pub fn from_parts(diversifier: Diversifier, pk_d: jubjub::SubgroupPoint) -> Option<Self> {
+    pub fn from_parts(diversifier: Diversifier, pk_d: DiversifiedTransmissionKey) -> Option<Self> {
         // Check that the diversifier is valid
         diversifier.g_d()?;
 
-        if pk_d.is_identity().into() {
+        if pk_d.is_identity() {
             None
         } else {
             Some(PaymentAddress { pk_d, diversifier })
         }
-    }
-
-    /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
-    ///
-    /// Only for test code, as this explicitly bypasses the invariant. [`Self::g_d`] will
-    /// panic on a `PaymentAddress` that has been constructed by passing an invalid
-    /// diversifier to this method.
-    #[cfg(test)]
-    pub(crate) fn from_parts_unchecked(
-        diversifier: Diversifier,
-        pk_d: jubjub::SubgroupPoint,
-    ) -> Self {
-        PaymentAddress { pk_d, diversifier }
     }
 
     /// Parses a PaymentAddress from bytes.
@@ -66,7 +51,7 @@ impl PaymentAddress {
             Diversifier(tmp)
         };
 
-        let pk_d = jubjub::SubgroupPoint::from_bytes(bytes[11..43].try_into().unwrap());
+        let pk_d = DiversifiedTransmissionKey::from_bytes(bytes[11..43].try_into().unwrap());
         if pk_d.is_some().into() {
             // The remaining invariants are checked here.
             PaymentAddress::from_parts(diversifier, pk_d.unwrap())
@@ -89,7 +74,7 @@ impl PaymentAddress {
     }
 
     /// Returns `pk_d` for this `PaymentAddress`.
-    pub fn pk_d(&self) -> &jubjub::SubgroupPoint {
+    pub fn pk_d(&self) -> &DiversifiedTransmissionKey {
         &self.pk_d
     }
 

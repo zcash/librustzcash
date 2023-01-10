@@ -476,7 +476,7 @@ impl Circuit<bls12_381::Scalar> for Output {
             let pk_d = self
                 .payment_address
                 .as_ref()
-                .map(|e| jubjub::ExtendedPoint::from(*e.pk_d()).to_affine());
+                .map(|e| jubjub::ExtendedPoint::from(e.pk_d().inner()).to_affine());
 
             // Witness the v-coordinate, encoded as little
             // endian bits (to match the representation)

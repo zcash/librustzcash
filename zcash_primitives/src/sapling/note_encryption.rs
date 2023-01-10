@@ -5,7 +5,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use group::GroupEncoding;
 use memuse::DynamicUsage;
 use rand_core::RngCore;
 
@@ -20,8 +19,11 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{
-        keys::{EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey, SharedSecret},
-        spec::{PreparedBase, PreparedBaseSubgroup, PreparedScalar},
+        keys::{
+            DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
+            SharedSecret,
+        },
+        spec::{PreparedBase, PreparedScalar},
         value::ValueCommitment,
         Diversifier, Note, PaymentAddress, Rseed, SaplingIvk,
     },
@@ -73,13 +75,6 @@ impl PreparedEphemeralPublicKey {
     }
 }
 
-/// Sapling key agreement for note encryption.
-///
-/// Implements section 5.4.4.3 of the Zcash Protocol Specification.
-pub fn sapling_ka_agree(esk: &jubjub::Fr, pk_d: &jubjub::ExtendedPoint) -> jubjub::SubgroupPoint {
-    EphemeralSecretKey(*esk).agree(pk_d).into_inner()
-}
-
 /// Sapling PRF^ock.
 ///
 /// Implemented per section 5.4.2 of the Zcash Protocol Specification.
@@ -111,7 +106,7 @@ fn sapling_parse_note_plaintext_without_memo<F, P: consensus::Parameters>(
     get_validated_pk_d: F,
 ) -> Option<(Note, PaymentAddress)>
 where
-    F: FnOnce(&Diversifier) -> Option<jubjub::SubgroupPoint>,
+    F: FnOnce(&Diversifier) -> Option<DiversifiedTransmissionKey>,
 {
     assert!(plaintext.len() >= COMPACT_NOTE_SIZE);
 
@@ -176,7 +171,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     type SymmetricKey = Blake2bHash;
     type Note = Note;
     type Recipient = PaymentAddress;
-    type DiversifiedTransmissionKey = jubjub::SubgroupPoint;
+    type DiversifiedTransmissionKey = DiversifiedTransmissionKey;
     type IncomingViewingKey = PreparedIncomingViewingKey;
     type OutgoingViewingKey = OutgoingViewingKey;
     type ValueCommitment = ValueCommitment;
@@ -209,7 +204,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         esk: &Self::EphemeralSecretKey,
         pk_d: &Self::DiversifiedTransmissionKey,
     ) -> Self::SharedSecret {
-        EphemeralSecretKey(*esk).agree(pk_d.into()).into_inner()
+        EphemeralSecretKey(*esk).agree(pk_d).into_inner()
     }
 
     fn ka_agree_dec(
@@ -296,7 +291,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(self, plaintext, |diversifier| {
-            Some(&PreparedBaseSubgroup::new(diversifier.g_d()?) * &ivk.0)
+            DiversifiedTransmissionKey::derive(ivk, diversifier)
         })
     }
 
@@ -326,7 +321,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 
     fn extract_pk_d(op: &OutPlaintextBytes) -> Option<Self::DiversifiedTransmissionKey> {
-        jubjub::SubgroupPoint::from_bytes(
+        DiversifiedTransmissionKey::from_bytes(
             op.0[0..32].try_into().expect("slice is the correct length"),
         )
         .into()
@@ -404,15 +399,15 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 ///         note_encryption::sapling_note_encryption,
 ///         util::generate_random_rseed,
 ///         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
-///         Diversifier, PaymentAddress, Rseed,
+///         Diversifier, PaymentAddress, Rseed, SaplingIvk,
 ///     },
 /// };
 ///
 /// let mut rng = OsRng;
 ///
+/// let ivk = SaplingIvk(jubjub::Scalar::random(&mut rng));
 /// let diversifier = Diversifier([0; 11]);
-/// let pk_d = diversifier.g_d().unwrap();
-/// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
+/// let to = ivk.to_payment_address(diversifier).unwrap();
 /// let ovk = Some(OutgoingViewingKey([0; 32]));
 ///
 /// let value = NoteValue::from_raw(1000);
@@ -549,7 +544,7 @@ mod tests {
     };
     use ff::{Field, PrimeField};
     use group::Group;
-    use group::{cofactor::CofactorGroup, GroupEncoding};
+    use group::GroupEncoding;
     use rand_core::OsRng;
     use rand_core::{CryptoRng, RngCore};
 
@@ -573,7 +568,7 @@ mod tests {
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::{
-            keys::{EphemeralPublicKey, EphemeralSecretKey},
+            keys::{DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey},
             note::ExtractedNoteCommitment,
             note_encryption::PreparedIncomingViewingKey,
             util::generate_random_rseed,
@@ -632,8 +627,7 @@ mod tests {
         OutputDescription<sapling::GrothProofBytes>,
     ) {
         let diversifier = Diversifier([0; 11]);
-        let pk_d = diversifier.g_d().unwrap() * ivk.0;
-        let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
+        let pa = ivk.to_payment_address(diversifier).unwrap();
 
         // Construct the value commitment for the proof instance
         let value = NoteValue::from_raw(100);
@@ -669,6 +663,40 @@ mod tests {
         (ovk, ock, output)
     }
 
+    fn reencrypt_out_ciphertext(
+        ovk: &OutgoingViewingKey,
+        cv: &ValueCommitment,
+        cmu: &ExtractedNoteCommitment,
+        ephemeral_key: &EphemeralKeyBytes,
+        out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
+        modify_plaintext: impl Fn(&mut [u8; OUT_PLAINTEXT_SIZE]),
+    ) -> [u8; OUT_CIPHERTEXT_SIZE] {
+        let ock = prf_ock(ovk, cv, &cmu.to_bytes(), ephemeral_key);
+
+        let mut op = [0; OUT_PLAINTEXT_SIZE];
+        op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
+
+        ChaCha20Poly1305::new(ock.as_ref().into())
+            .decrypt_in_place_detached(
+                [0u8; 12][..].into(),
+                &[],
+                &mut op,
+                out_ciphertext[OUT_PLAINTEXT_SIZE..].into(),
+            )
+            .unwrap();
+
+        modify_plaintext(&mut op);
+
+        let tag = ChaCha20Poly1305::new(ock.as_ref().into())
+            .encrypt_in_place_detached([0u8; 12][..].into(), &[], &mut op)
+            .unwrap();
+
+        let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
+        out_ciphertext[..OUT_PLAINTEXT_SIZE].copy_from_slice(&op);
+        out_ciphertext[OUT_PLAINTEXT_SIZE..].copy_from_slice(&tag);
+        out_ciphertext
+    }
+
     fn reencrypt_enc_ciphertext(
         ovk: &OutgoingViewingKey,
         cv: &ValueCommitment,
@@ -692,11 +720,11 @@ mod tests {
             )
             .unwrap();
 
-        let pk_d = jubjub::SubgroupPoint::from_bytes(&op[0..32].try_into().unwrap()).unwrap();
+        let pk_d = DiversifiedTransmissionKey::from_bytes(&op[0..32].try_into().unwrap()).unwrap();
 
         let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
-        let shared_secret = EphemeralSecretKey(esk).agree(&pk_d.into());
+        let shared_secret = EphemeralSecretKey(esk).agree(&pk_d);
         let key = shared_secret.kdf_sapling(ephemeral_key);
 
         let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
@@ -1362,9 +1390,16 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let ivk = SaplingIvk(jubjub::Fr::zero());
-            let (ovk, ock, output) = random_enc_ciphertext_with(height, &ivk, &mut rng);
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
 
+            *output.out_ciphertext_mut() = reencrypt_out_ciphertext(
+                &ovk,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.out_ciphertext(),
+                |pt| pt[0..32].copy_from_slice(&jubjub::ExtendedPoint::random(rng).to_bytes()),
+            );
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
@@ -1392,9 +1427,9 @@ mod tests {
             }};
         }
 
-        macro_rules! read_point {
+        macro_rules! read_pk_d {
             ($field:expr) => {
-                jubjub::ExtendedPoint::from_bytes(&$field).unwrap()
+                DiversifiedTransmissionKey::from_bytes(&$field).unwrap()
             };
         }
 
@@ -1412,7 +1447,7 @@ mod tests {
             //
 
             let ivk = PreparedIncomingViewingKey::new(&SaplingIvk(read_jubjub_scalar!(tv.ivk)));
-            let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
+            let pk_d = read_pk_d!(tv.default_pk_d);
             let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_cv!(tv.cv);
             let cmu = read_cmu!(tv.cmu);
@@ -1423,7 +1458,7 @@ mod tests {
             // Test the individual components
             //
 
-            let shared_secret = EphemeralSecretKey(esk).agree(&pk_d.into());
+            let shared_secret = EphemeralSecretKey(esk).agree(&pk_d);
             assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
             let k_enc = shared_secret.kdf_sapling(&ephemeral_key);

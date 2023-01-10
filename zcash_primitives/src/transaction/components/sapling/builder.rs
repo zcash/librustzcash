@@ -13,7 +13,7 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
-        keys::EphemeralSecretKey,
+        keys::{EphemeralSecretKey, SaplingIvk},
         note_encryption::sapling_note_encryption,
         prover::TxProver,
         redjubjub::{PrivateKey, Signature},
@@ -454,25 +454,14 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                 } else {
                     // This is a dummy output
                     let dummy_note = {
-                        let (diversifier, g_d) = {
-                            let mut diversifier;
-                            let g_d;
+                        let payment_address = {
+                            let mut diversifier = Diversifier([0; 11]);
                             loop {
-                                let mut d = [0; 11];
-                                rng.fill_bytes(&mut d);
-                                diversifier = Diversifier(d);
-                                if let Some(val) = diversifier.g_d() {
-                                    g_d = val;
-                                    break;
+                                rng.fill_bytes(&mut diversifier.0);
+                                let dummy_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
+                                if let Some(addr) = dummy_ivk.to_payment_address(diversifier) {
+                                    break addr;
                                 }
-                            }
-                            (diversifier, g_d)
-                        };
-                        let payment_address = loop {
-                            let dummy_ivk = jubjub::Fr::random(&mut rng);
-                            let pk_d = g_d * dummy_ivk;
-                            if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d) {
-                                break addr;
                             }
                         };
 

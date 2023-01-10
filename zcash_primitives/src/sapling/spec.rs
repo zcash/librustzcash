@@ -98,6 +98,19 @@ pub(crate) fn ka_sapling_derive_public_prepared(
     b * sk
 }
 
+/// This is defined implicitly by [Zcash Protocol Spec § 4.2.2: Sapling Key Components][saplingkeycomponents]
+/// which uses $KA^\mathsf{Sapling}.\mathsf{DerivePublic}$ to produce a diversified
+/// transmission key with type $KA^\mathsf{Sapling}.\mathsf{PublicPrimeSubgroup}$.
+///
+/// [saplingkeycomponents]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+pub(crate) fn ka_sapling_derive_public_subgroup_prepared(
+    sk: &PreparedScalar,
+    b: &PreparedBaseSubgroup,
+) -> jubjub::SubgroupPoint {
+    // [sk] b
+    b * sk
+}
+
 /// Defined in [Zcash Protocol Spec § 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
 ///
 /// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement

@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - `zcash_primitives::sapling`:
+  - `keys::DiversifiedTransmissionKey`
   - `keys::{EphemeralSecretKey, EphemeralPublicKey, SharedSecret}`
   - `note`, a module containing types related to Sapling notes. The existing
     `Note` and `Rseed` types are re-exported here, and new types are added.
@@ -27,6 +28,11 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::sapling`:
   - `PaymentAddress::from_parts` now rejects invalid diversifiers.
   - `PaymentAddress::create_note` is now infallible.
+  - `DiversifiedTransmissionKey` is now used instead of `jubjub::SubgroupPoint`
+    in the following places:
+    - `PaymentAddress::from_parts`
+    - `PaymentAddress::pk_d`
+    - `note_encryption::SaplingDomain::DiversifiedTransmissionKey`
 - Note commitments now use
   `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
   `bls12_381::Scalar` in the following places:
@@ -65,6 +71,7 @@ and this library adheres to Rust's notion of
   - `NoteValue` (use `zcash_primitives::sapling::value::NoteValue` instead).
   - `ValueCommitment` (use `zcash_primitives::sapling::value::ValueCommitment`
     or `zcash_proofs::circuit::sapling::ValueCommitmentPreimage` instead).
+  - `note_encryption::sapling_ka_agree`
   - `testing::{arb_note_value, arb_positive_note_value}` (use the methods in
     `zcash_primitives::sapling::value::testing` instead).
 - `zcash_primitives::transaction::components`:
