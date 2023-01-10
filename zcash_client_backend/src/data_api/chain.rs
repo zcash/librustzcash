@@ -135,25 +135,21 @@ pub trait BlockSource {
 /// block source is more likely to be accurate than the previously-scanned information.
 /// This follows from the design (and trust) assumption that the `lightwalletd` server
 /// provides accurate block information as of the time it was requested.
-/// The addition of a `limit` to the chain validation function changes the meaning of
-/// its successful output, being now a `BlockHeight, BlockHash)` tuple indicating the
-/// block height and block hash up to which the chain as been validated on its continuity
-/// of heights and hashes. Callers providing a `limit` argument are responsible of
-/// making subsequent calls to `validate_chain()` to complete validating the remaining
-/// blocks stored on the `block_source`.
 ///
 /// Arguments:
 /// - `block_source` Source of compact blocks
 /// - `validate_from` Height & hash of last validated block;
-/// - `limit` Maximum number of blocks that should be validated in this call.
+/// - `limit` specified number of blocks that will be valididated. Callers providing
+/// a `limit` argument are responsible of making subsequent calls to `validate_chain()`
+/// to complete validating the remaining blocks stored on the `block_source`. If `none`
+/// is provided, there will be no limit set to the validation and upper bound of the
+/// validation range will be the latest height present in the `block_source`.
 ///
 /// Returns:
 /// - `Ok(())` if the combined chain is valid up to the given height
 /// and block hash.
 /// - `Err(Error::Chain(cause))` if the combined chain is invalid.
 /// - `Err(e)` if there was an error during validation unrelated to chain validity.
-///
-/// This function does not mutate either of the databases.
 pub fn validate_chain<BlockSourceT>(
     block_source: &BlockSourceT,
     mut validate_from: Option<(BlockHeight, BlockHash)>,

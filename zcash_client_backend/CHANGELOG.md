@@ -25,26 +25,21 @@ and this library adheres to Rust's notion of
   - `validate_chain` now requires a non-optional `validate_from` parameter that
     indicates the starting point of the `BlockSourceT` validation. An Optional
     `limit` can be specified as well.  This allows callers to validate smaller
-    intervals of the given `BlockSourceT` shortening processing times of the
-    function call at the expense of obtaining a partial result on a given
-    section of interest of the block source. 
+    intervals of blocks already present on the provided `BlockSource` shortening
+    processing times of the function call at the expense of obtaining a partial
+    result. 
 
   - `params: &ParamsT` has been removed from the arguments since they were only
     needed to fall back to `sapling_activation_height` when `None` as passed as
-    the `validate_from` argument. Passing `None` as validation start point on a
-    pre-populated `block_source` would result in an error
-    `ChainError::block_height_discontinuity(sapling_activation_height - 1, current_height)` 
+    the `validate_from` argument. Implementors of `BlockSource` are resposible
+    of definining how they will fall back to a suitable value when `validate_from`
+    is `None`. 
 
-  - With this new API callers must specify a concrete `validate_from` argument
-    and assume that `validate_chain` will not take any default fallbacks to
-    chain `ParamsT`.
-
-  - The addition of a `limit` to the chain validation function changes the
-    meaning of its successful output, being now a `BlockHeight, BlockHash)`
-    tuple indicating the block height and block has up to which the chain as
-    been validated on its continuity of heights and hashes. Callers providing a
-    `limit` aregumente are responsible of subsequent calls to
-    `validate_chain()` to complete validating the totality of the block_source. 
+  - When passing a `limit` to the chain validation function, a successful output,
+    indicates that the chain has been validated on its continuity of heights and hashes
+    within the limits of the range `[validate_from, validate_from + limit)`. 
+    Callers providing a `limit` argument are responsible for making subsequent calls to
+    `validate_chain()` in order to complete validating the totality of the block_source. 
 
 ### Removed 
 - `zcash_client_backend::data_api`:
