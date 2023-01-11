@@ -929,6 +929,20 @@ impl FsBlockDb {
 
         Ok(chain::blockmetadb_insert(&self.conn, block_meta)?)
     }
+    /// Rewinds the BlockMeta Db to the `block_height` provided.
+    ///
+    /// This doesn't delete any files referenced by the records
+    /// stored in BlockMeta.
+    ///
+    /// If the requested height is greater than or equal to the height
+    /// of the last scanned block, or if the DB is empty, this function
+    /// does nothing.
+    pub fn rewind_to_height(&self, block_height: BlockHeight) -> Result<(), FsBlockDbError> {
+        Ok(chain::blockmetadb_rewind_to_height(
+            &self.conn,
+            block_height,
+        )?)
+    }
 }
 
 #[cfg(feature = "unstable")]
