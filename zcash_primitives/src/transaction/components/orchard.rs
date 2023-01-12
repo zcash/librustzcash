@@ -268,45 +268,45 @@ pub fn write_action_without_auth<W: Write>(
 
 
 
-#[derive(Clone, Debug)]
-pub enum EncCiphertext {
-    NoteV2([u8; orchard::note_encryption::ENC_CIPHERTEXT_SIZE_V2]),
-    NoteV3([u8; orchard::note_encryption_v3::ENC_CIPHERTEXT_SIZE_V3]),
-}
-
-#[derive(Clone)]
-pub struct TransmittedNoteCiphertextNew {
-    /// The serialization of the ephemeral public key
-    pub epk_bytes: [u8; 32],
-    /// The encrypted note ciphertext
-    pub enc_ciphertext: EncCiphertext,
-    /// An encrypted value that allows the holder of the outgoing cipher
-    /// key for the note to recover the note plaintext.
-    pub out_ciphertext: [u8; 80],
-}
-
-pub fn write_note_ciphertext2<W: Write>(
-    mut writer: W,
-    nc: &TransmittedNoteCiphertextNew,
-) -> io::Result<()> {
-    writer.write_all(&nc.epk_bytes)?;
-    writer.write_all(&nc.enc_ciphertext)?;
-    writer.write_all(&nc.out_ciphertext)
-}
-
-pub fn read_note_ciphertext2<R: Read>(mut reader: R) -> io::Result<TransmittedNoteCiphertext> {
-    let mut tnc = TransmittedNoteCiphertextNew {
-        epk_bytes: [0u8; 32],
-        enc_ciphertext: [0u8; 580],
-        out_ciphertext: [0u8; 80],
-    };
-
-    reader.read_exact(&mut tnc.epk_bytes)?;
-    reader.read_exact(&mut tnc.enc_ciphertext)?;
-    reader.read_exact(&mut tnc.out_ciphertext)?;
-
-    Ok(tnc)
-}
+// #[derive(Clone, Debug)]
+// pub enum EncCiphertext {
+//     NoteV2([u8; orchard::note_encryption::ENC_CIPHERTEXT_SIZE_V2]),
+//     NoteV3([u8; orchard::note_encryption_v3::ENC_CIPHERTEXT_SIZE_V3]),
+// }
+//
+// #[derive(Clone)]
+// pub struct TransmittedNoteCiphertextNew {
+//     /// The serialization of the ephemeral public key
+//     pub epk_bytes: [u8; 32],
+//     /// The encrypted note ciphertext
+//     pub enc_ciphertext: EncCiphertext,
+//     /// An encrypted value that allows the holder of the outgoing cipher
+//     /// key for the note to recover the note plaintext.
+//     pub out_ciphertext: [u8; 80],
+// }
+//
+// pub fn write_note_ciphertext2<W: Write>(
+//     mut writer: W,
+//     nc: &TransmittedNoteCiphertextNew,
+// ) -> io::Result<()> {
+//     writer.write_all(&nc.epk_bytes)?;
+//     writer.write_all(&nc.enc_ciphertext)?;
+//     writer.write_all(&nc.out_ciphertext)
+// }
+//
+// pub fn read_note_ciphertext2<R: Read>(mut reader: R) -> io::Result<TransmittedNoteCiphertext> {
+//     let mut tnc = TransmittedNoteCiphertextNew {
+//         epk_bytes: [0u8; 32],
+//         enc_ciphertext: [0u8; 580],
+//         out_ciphertext: [0u8; 80],
+//     };
+//
+//     reader.read_exact(&mut tnc.epk_bytes)?;
+//     reader.read_exact(&mut tnc.enc_ciphertext)?;
+//     reader.read_exact(&mut tnc.out_ciphertext)?;
+//
+//     Ok(tnc)
+// }
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
@@ -372,7 +372,6 @@ pub mod testing {
         let mut writer =  Vec::with_capacity(TEST_DATA_SIZE);
 
         write_note_ciphertext(&mut writer, &nc).unwrap();
-
 
 
         let mut reader = writer.as_slice();
