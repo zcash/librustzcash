@@ -42,7 +42,7 @@ pub mod batch;
 
 /// The size of the memo.
 pub const MEMO_SIZE: usize = 512;
-/// The size of the autentication tag used for note encryption.
+/// The size of the authentication tag used for note encryption.
 pub const AEAD_TAG_SIZE: usize = 16;
 
 /// The size of [`OutPlaintextBytes`].

@@ -38,7 +38,7 @@ jubjub = "0.9"
 lazy_static = "1"
 memuse = "0.2"
 nonempty = "0.7"
-orchard = "0.2"
+orchard = { version = "0.3", path = "../../orchard" }
 proptest = { version = "1.0.0", optional = true }
 rand = "0.8"
 rand_core = "0.6"
@@ -48,20 +48,18 @@ sha2 = "0.9"
 subtle = "2.2.3"
 zcash_address = { version = "0.1", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.1", path = "../components/zcash_encoding" }
-
-[dependencies.zcash_note_encryption]
-zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption", branch = "encryption_generalization" }
-#path = "../components/zcash_note_encryption"
-
-
-[patch.crates-io]
-uuid = { path = "../path/to/uuid" }
+zcash_note_encryption = { version = "0.2", path = "../components/zcash_note_encryption", features = ["pre-zip-212"] }
 
 [dev-dependencies]
 criterion = "0.3"
 proptest = "1.0.0"
 rand_xorshift = "0.3"
-orchard = { version = "0.2", features = ["test-dependencies"] }
+orchard = { version = "0.3", features = ["test-dependencies"], path = "../../orchard" }
+
+[patch.crates-io]
+#zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption" }
+#orchard = { version = "0.3", path = "../../orchard"}
+#orchard = { version = "0.3", path = "../../orchard" }
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.9", features = ["criterion", "flamegraph"] } # MSRV 1.56
