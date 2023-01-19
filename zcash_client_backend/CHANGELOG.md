@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api::wallet`:
+  - `propose_transfer`
+  - `propose_shielding`
+  - `create_proposed_transaction`
+
 ### Changed
 - MSRV is now 1.60.0.
 - `zcash_client_backend::data_api::wallet::shield_transparent_funds` now

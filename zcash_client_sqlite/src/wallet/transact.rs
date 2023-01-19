@@ -194,7 +194,7 @@ mod tests {
         legacy::TransparentAddress,
         sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
         transaction::{components::Amount, fees::zip317::FeeRule as Zip317FeeRule, Transaction},
-        zip32::sapling::ExtendedSpendingKey,
+        zip32::{sapling::ExtendedSpendingKey, Scope},
     };
 
     use zcash_client_backend::{
@@ -699,26 +699,21 @@ mod tests {
                 .unwrap();
             let tx = Transaction::read(&raw_tx[..], BranchId::Canopy).unwrap();
 
-            // Fetch the output index from the database
-            let output_index: i64 = db_write
-                .wallet_db
-                .conn
-                .query_row(
-                    "SELECT output_index FROM sent_notes
-                    WHERE tx = ?",
-                    [tx_row],
-                    |row| row.get(0),
-                )
-                .unwrap();
+            for output in tx.sapling_bundle().unwrap().shielded_outputs() {
+                // Find the output that decrypts with the external OVK
+                let result = try_sapling_output_recovery(
+                    &network,
+                    sapling_activation_height(),
+                    &dfvk.to_ovk(Scope::External),
+                    output,
+                );
 
-            let output = &tx.sapling_bundle().unwrap().shielded_outputs()[output_index as usize];
+                if result.is_some() {
+                    return result;
+                }
+            }
 
-            try_sapling_output_recovery(
-                &network,
-                sapling_activation_height(),
-                &dfvk.fvk().ovk,
-                output,
-            )
+            None
         };
 
         // Send some of the funds to another address, keeping history.
