@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
+- MSRV is now 1.60.0.
 - `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
   takes a `shielding_threshold` argument that can be used to specify the 
   minimum value allowed as input to a shielding transaction. Previously 

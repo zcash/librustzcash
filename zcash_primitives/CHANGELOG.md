@@ -11,6 +11,7 @@ and this library adheres to Rust's notion of
   values and value commitments.
 
 ### Changed
+- MSRV is now 1.60.0.
 - `zcash_primitives::transaction::components::sapling::builder`:
   - `SaplingBuilder::add_output` now takes a
     `zcash_primitives::sapling::value::NoteValue`.

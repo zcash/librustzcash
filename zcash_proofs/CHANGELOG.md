@@ -12,6 +12,7 @@ and this library adheres to Rust's notion of
   - A `value_commitment_opening` field on `Spend` and `Output`.
 
 ### Changed
+- MSRV is now 1.60.0.
 - Value commitments now use `zcash_primitives::sapling::value::ValueCommitment`
   instead of `jubjub::ExtendedPoint` in `zcash_proofs::sapling`:
   - `SaplingProvingContext::{spend_proof, output_proof}`
