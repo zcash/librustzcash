@@ -37,6 +37,7 @@
 //! [`SaplingBuilder::add_output`]: crate::transaction::components::sapling::builder::SaplingBuilder::add_output
 //! [Rust documentation]: https://doc.rust-lang.org/stable/std/primitive.i64.html
 
+use bitvec::{array::BitArray, order::Lsb0};
 use ff::Field;
 use group::GroupEncoding;
 use rand::RngCore;
@@ -66,6 +67,10 @@ impl NoteValue {
     /// enforce any additional constraints on the value's valid range themselves.
     pub fn from_raw(value: u64) -> Self {
         NoteValue(value)
+    }
+
+    pub(crate) fn to_le_bits(self) -> BitArray<[u8; 8], Lsb0> {
+        BitArray::<_, Lsb0>::new(self.0.to_le_bytes())
     }
 }
 
