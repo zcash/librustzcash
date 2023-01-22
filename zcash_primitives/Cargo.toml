@@ -56,11 +56,6 @@ proptest = "1.0.0"
 rand_xorshift = "0.3"
 orchard = { version = "0.3", features = ["test-dependencies"], path = "../../orchard" }
 
-[patch.crates-io]
-#zcash_note_encryption = { version = "0.1", path = "../components/zcash_note_encryption" }
-#orchard = { version = "0.3", path = "../../orchard"}
-#orchard = { version = "0.3", path = "../../orchard" }
-
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.9", features = ["criterion", "flamegraph"] } # MSRV 1.56
 

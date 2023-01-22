@@ -389,8 +389,8 @@ pub trait ShieldedOutput<D: Domain> {
 /// let cmu = note.cmu();
 ///
 /// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
-/// let encCiphertext = enc.encrypt_note_plaintext();
-/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu, &mut rng);
+/// let enc_ciphertext = enc.encrypt_note_plaintext();
+/// let out_ciphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu, &mut rng);
 /// ```
 pub struct NoteEncryption<D: Domain> {
     epk: D::EphemeralPublicKey,
