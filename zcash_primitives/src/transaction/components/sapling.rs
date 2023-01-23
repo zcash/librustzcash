@@ -4,14 +4,14 @@ use ff::PrimeField;
 use group::GroupEncoding;
 use std::io::{self, Read, Write};
 
-use zcash_note_encryption::{
-    EphemeralKeyBytes, ShieldedOutput,
-};
+use zcash_note_encryption::{EphemeralKeyBytes, ShieldedOutput};
 
 use crate::{
     consensus,
     sapling::{
-        note_encryption::{SaplingDomain,COMPACT_NOTE_SIZE, CompactNoteCiphertextBytes, NoteCiphertextBytes},
+        note_encryption::{
+            CompactNoteCiphertextBytes, NoteCiphertextBytes, SaplingDomain, COMPACT_NOTE_SIZE,
+        },
         redjubjub::{self, PublicKey, Signature},
         Nullifier,
     },
@@ -261,9 +261,7 @@ pub struct OutputDescription<Proof> {
     pub zkproof: Proof,
 }
 
-impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>>
-    for OutputDescription<A>
-{
+impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>> for OutputDescription<A> {
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
         self.ephemeral_key.clone()
     }
@@ -277,7 +275,11 @@ impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>>
     }
 
     fn enc_ciphertext_compact(&self) -> CompactNoteCiphertextBytes {
-        CompactNoteCiphertextBytes(self.enc_ciphertext[0..COMPACT_NOTE_SIZE].try_into().unwrap())
+        CompactNoteCiphertextBytes(
+            self.enc_ciphertext[0..COMPACT_NOTE_SIZE]
+                .try_into()
+                .unwrap(),
+        )
     }
 }
 
@@ -409,9 +411,7 @@ impl<A> From<OutputDescription<A>> for CompactOutputDescription {
     }
 }
 
-impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>>
-    for CompactOutputDescription
-{
+impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutputDescription {
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
         self.ephemeral_key.clone()
     }

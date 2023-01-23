@@ -9,10 +9,9 @@ use rand_core::RngCore;
 use zcash_note_encryption::{
     try_compact_note_decryption, try_note_decryption, try_output_recovery_with_ock,
     try_output_recovery_with_ovk, BatchDomain, Domain, EphemeralKeyBytes, NoteEncryption,
-    OutgoingCipherKey, ShieldedOutput, OutPlaintextBytes,
-    OUT_PLAINTEXT_SIZE, MEMO_SIZE, AEAD_TAG_SIZE
+    OutPlaintextBytes, OutgoingCipherKey, ShieldedOutput, AEAD_TAG_SIZE, MEMO_SIZE,
+    OUT_PLAINTEXT_SIZE,
 };
-
 
 /// The size of a compact note.
 pub const COMPACT_NOTE_SIZE: usize = 1 + // version
@@ -48,8 +47,8 @@ impl AsMut<[u8]> for NotePlaintextBytes {
 
 impl From<&[u8]> for NotePlaintextBytes {
     fn from(s: &[u8]) -> Self
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         NotePlaintextBytes(s.try_into().unwrap())
     }
@@ -63,8 +62,8 @@ impl AsRef<[u8]> for NoteCiphertextBytes {
 
 impl From<&[u8]> for NoteCiphertextBytes {
     fn from(s: &[u8]) -> Self
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         NoteCiphertextBytes(s.try_into().unwrap())
     }
@@ -78,8 +77,8 @@ impl AsMut<[u8]> for CompactNotePlaintextBytes {
 
 impl From<&[u8]> for CompactNotePlaintextBytes {
     fn from(s: &[u8]) -> Self
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         CompactNotePlaintextBytes(s.try_into().unwrap())
     }
@@ -401,12 +400,18 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
                 .try_into()
                 .expect("slice is the correct length"),
         )
-            .into()
+        .into()
     }
 
-    fn extract_memo(&self, plaintext: &NotePlaintextBytes) -> (Self::CompactNotePlaintextBytes, Self::Memo) {
+    fn extract_memo(
+        &self,
+        plaintext: &NotePlaintextBytes,
+    ) -> (Self::CompactNotePlaintextBytes, Self::Memo) {
         let (compact, memo) = plaintext.0.split_at(COMPACT_NOTE_SIZE);
-        (compact.try_into().unwrap(), MemoBytes::from_bytes(memo).unwrap())
+        (
+            compact.try_into().unwrap(),
+            MemoBytes::from_bytes(memo).unwrap(),
+        )
     }
 }
 
@@ -592,8 +597,8 @@ mod tests {
     use rand_core::{CryptoRng, RngCore};
 
     use zcash_note_encryption::{
-        batch, EphemeralKeyBytes, NoteEncryption, OutgoingCipherKey,
-        OUT_PLAINTEXT_SIZE, OUT_CIPHERTEXT_SIZE
+        batch, EphemeralKeyBytes, NoteEncryption, OutgoingCipherKey, OUT_CIPHERTEXT_SIZE,
+        OUT_PLAINTEXT_SIZE,
     };
 
     use super::{
@@ -610,7 +615,12 @@ mod tests {
         },
         keys::OutgoingViewingKey,
         memo::MemoBytes,
-        sapling::{note_encryption::{PreparedIncomingViewingKey, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE}, util::generate_random_rseed},
+        sapling::{
+            note_encryption::{
+                PreparedIncomingViewingKey, ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE,
+            },
+            util::generate_random_rseed,
+        },
         sapling::{Diversifier, PaymentAddress, Rseed, SaplingIvk, ValueCommitment},
         transaction::components::{
             amount::Amount,
