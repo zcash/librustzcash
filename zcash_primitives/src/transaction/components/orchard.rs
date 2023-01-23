@@ -137,7 +137,7 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 pub fn read_note_ciphertext<R: Read>(mut reader: R) -> io::Result<TransmittedNoteCiphertext> {
     let mut tnc = TransmittedNoteCiphertext {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: [0u8; 580],
+        enc_ciphertext: [0u8; 612],
         out_ciphertext: [0u8; 80],
     };
 
@@ -266,48 +266,6 @@ pub fn write_action_without_auth<W: Write>(
     Ok(())
 }
 
-
-
-// #[derive(Clone, Debug)]
-// pub enum EncCiphertext {
-//     NoteV2([u8; orchard::note_encryption::ENC_CIPHERTEXT_SIZE_V2]),
-//     NoteV3([u8; orchard::note_encryption_v3::ENC_CIPHERTEXT_SIZE_V3]),
-// }
-//
-// #[derive(Clone)]
-// pub struct TransmittedNoteCiphertextNew {
-//     /// The serialization of the ephemeral public key
-//     pub epk_bytes: [u8; 32],
-//     /// The encrypted note ciphertext
-//     pub enc_ciphertext: EncCiphertext,
-//     /// An encrypted value that allows the holder of the outgoing cipher
-//     /// key for the note to recover the note plaintext.
-//     pub out_ciphertext: [u8; 80],
-// }
-//
-// pub fn write_note_ciphertext2<W: Write>(
-//     mut writer: W,
-//     nc: &TransmittedNoteCiphertextNew,
-// ) -> io::Result<()> {
-//     writer.write_all(&nc.epk_bytes)?;
-//     writer.write_all(&nc.enc_ciphertext)?;
-//     writer.write_all(&nc.out_ciphertext)
-// }
-//
-// pub fn read_note_ciphertext2<R: Read>(mut reader: R) -> io::Result<TransmittedNoteCiphertext> {
-//     let mut tnc = TransmittedNoteCiphertextNew {
-//         epk_bytes: [0u8; 32],
-//         enc_ciphertext: [0u8; 580],
-//         out_ciphertext: [0u8; 80],
-//     };
-//
-//     reader.read_exact(&mut tnc.epk_bytes)?;
-//     reader.read_exact(&mut tnc.enc_ciphertext)?;
-//     reader.read_exact(&mut tnc.out_ciphertext)?;
-//
-//     Ok(tnc)
-// }
-
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::*;
@@ -316,16 +274,11 @@ pub mod testing {
         testing::{self as t_orch},
         Authorized, Bundle,
     };
-    use orchard::note::TransmittedNoteCiphertext;
-    use orchard::note_encryption::{ENC_CIPHERTEXT_SIZE_V2, NoteCiphertextBytes};
-    use orchard::note_encryption_v3::ENC_CIPHERTEXT_SIZE_V3;
-    use rand_core::OsRng;
 
     use crate::transaction::{
         components::amount::{testing::arb_amount, Amount},
         TxVersion,
     };
-    use crate::transaction::components::orchard::{read_note_ciphertext, write_note_ciphertext};
 
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(
@@ -346,43 +299,5 @@ pub mod testing {
         } else {
             Strategy::boxed(Just(None))
         }
-    }
-
-
-
-    #[test]
-    fn backward_compatible_roundtest() {
-        const TEST_DATA_SIZE: usize =
-            32 + //epk_bytes
-            580 + // enc_ciphertext
-            80; // out_ciphertext
-
-        let mut rng = OsRng;
-
-        let mut nc = TransmittedNoteCiphertext{
-            epk_bytes: [0u8; 32],
-            enc_ciphertext: [0u8; 580],
-            out_ciphertext: [0u8; 80],
-        };
-
-        rng.fill_bytes(nc.epk_bytes.as_mut());
-        rng.fill_bytes(nc.enc_ciphertext.as_mut());
-        rng.fill_bytes(nc.out_ciphertext.as_mut());
-
-        let mut writer =  Vec::with_capacity(TEST_DATA_SIZE);
-
-        write_note_ciphertext(&mut writer, &nc).unwrap();
-
-
-        let mut reader = writer.as_slice();
-
-        let nc_out = read_note_ciphertext(&mut reader).unwrap();
-
-        assert_eq!(nc_out.epk_bytes, nc.epk_bytes);
-        assert_eq!(nc_out.enc_ciphertext, nc.enc_ciphertext);
-        assert_eq!(nc_out.out_ciphertext, nc.out_ciphertext);
-
-        //print!(nc)
-
     }
 }
