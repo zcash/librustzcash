@@ -929,6 +929,13 @@ impl FsBlockDb {
 
         Ok(chain::blockmetadb_insert(&self.conn, block_meta)?)
     }
+
+    /// Returns the metadata for the block with the given height, if it exists in the
+    /// database.
+    pub fn find_block(&self, height: BlockHeight) -> Result<Option<BlockMeta>, FsBlockDbError> {
+        Ok(chain::blockmetadb_find_block(&self.conn, height)?)
+    }
+
     /// Rewinds the BlockMeta Db to the `block_height` provided.
     ///
     /// This doesn't delete any files referenced by the records
