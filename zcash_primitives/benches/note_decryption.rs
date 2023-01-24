@@ -14,7 +14,7 @@ use zcash_primitives::{
         },
         prover::mock::MockTxProver,
         value::NoteValue,
-        Diversifier, PaymentAddress, SaplingIvk,
+        Diversifier, SaplingIvk,
     },
     transaction::components::sapling::{
         builder::SaplingBuilder, CompactOutputDescription, GrothProofBytes, OutputDescription,
@@ -34,8 +34,7 @@ fn bench_note_decryption(c: &mut Criterion) {
     // Construct a Sapling output.
     let output: OutputDescription<GrothProofBytes> = {
         let diversifier = Diversifier([0; 11]);
-        let pk_d = diversifier.g_d().unwrap() * valid_ivk.0;
-        let pa = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
+        let pa = valid_ivk.to_payment_address(diversifier).unwrap();
 
         let mut builder = SaplingBuilder::new(TEST_NETWORK, height);
         builder

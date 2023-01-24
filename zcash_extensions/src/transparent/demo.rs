@@ -488,7 +488,7 @@ mod tests {
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::Rseed,
+        sapling::{Node, Rseed},
         transaction::{
             builder::Builder,
             components::{
@@ -814,10 +814,8 @@ mod tests {
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
         let to = extsk.default_address().1;
-        let note1 = to
-            .create_note(101000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
-            .unwrap();
-        let cm1 = note1.commitment();
+        let note1 = to.create_note(101000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let cm1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::empty();
         // fake that the note appears in some previous
         // shielded output

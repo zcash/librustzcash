@@ -8,15 +8,51 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - `zcash_primitives::sapling`:
+  - `keys::DiversifiedTransmissionKey`
   - `keys::{EphemeralSecretKey, EphemeralPublicKey, SharedSecret}`
+  - `keys::{PreparedIncomingViewingKey, PreparedEphemeralPublicKey}`
+    (re-exported from `note_encryption`).
+  - `note`, a module containing types related to Sapling notes. The existing
+    `Note` and `Rseed` types are re-exported here, and new types are added.
+  - `Node::from_cmu`
   - `value`, containing types for handling Sapling note values and value
     commitments.
+  - `Note::from_parts`
+  - `Note::{recipient, value, rseed}` getter methods.
+  - `impl Eq for Note`
+  - `impl Copy for PaymentAddress`
 
 ### Changed
 - MSRV is now 1.60.0.
 - `zcash_primitives::transaction::components::sapling::builder`:
   - `SaplingBuilder::add_output` now takes a
     `zcash_primitives::sapling::value::NoteValue`.
+- `zcash_primitives::sapling`:
+  - `PaymentAddress::from_parts` now rejects invalid diversifiers.
+  - `PaymentAddress::create_note` is now infallible.
+  - `DiversifiedTransmissionKey` is now used instead of `jubjub::SubgroupPoint`
+    in the following places:
+    - `PaymentAddress::from_parts`
+    - `PaymentAddress::pk_d`
+    - `note_encryption::SaplingDomain::DiversifiedTransmissionKey`
+  - `EphemeralSecretKey` is now used instead of `jubjub::Scalar` in the
+    following places:
+    - `Note::generate_or_derive_esk`
+    - `note_encryption::SaplingDomain::EphemeralSecretKey`
+  - `note_encryption::SaplingDomain::EphemeralPublicKey` is now
+    `EphemeralPublicKey` instead of `jubjub::ExtendedPoint`.
+  - `note_encryption::SaplingDomain::SharedSecret` is now `SharedSecret` instead
+    of `jubjub::SubgroupPoint`.
+- Note commitments now use
+  `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
+  `bls12_381::Scalar` in the following places:
+  - `zcash_primitives::sapling`:
+    - `Note::cmu`
+  - `zcash_primitives::sapling::note_encryption`:
+    - `SaplingDomain::ExtractedCommitment`
+  - `zcash_primitives::transaction::components::sapling`:
+    - `OutputDescription::cmu`
+    - The `cmu` field of `CompactOutputDescription`.
 - Value commitments now use `zcash_primitives::sapling::value::ValueCommitment`
   instead of `jubjub::ExtendedPoint` in the following places:
   - `zcash_primitives::sapling::note_encryption`:
@@ -30,12 +66,22 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::components`:
   - `sapling::{Bundle, SpendDescription, OutputDescription}` have had their
     fields replaced by getter methods.
+  - The associated type `sapling::Authorization::Proof` has been replaced by
+    `Authorization::{SpendProof, OutputProof}`.
+  - `sapling::MapAuth::map_proof` has been replaced by
+    `MapAuth::{map_spend_proof, map_output_proof}`.
 
 ### Removed
 - `zcash_primitives::sapling`:
+  - The fields of `Note` are now private (use the new getter methods instead).
+  - `Note::uncommitted` (use `Node::empty_leaf` instead).
+  - `Note::derive_esk` (use `SaplingDomain::derive_esk` instead).
+  - `Note::commitment` (use `Node::from_cmu` instead).
+  - `PaymentAddress::g_d`
   - `NoteValue` (use `zcash_primitives::sapling::value::NoteValue` instead).
   - `ValueCommitment` (use `zcash_primitives::sapling::value::ValueCommitment`
     or `zcash_proofs::circuit::sapling::ValueCommitmentPreimage` instead).
+  - `note_encryption::sapling_ka_agree`
   - `testing::{arb_note_value, arb_positive_note_value}` (use the methods in
     `zcash_primitives::sapling::value::testing` instead).
 - `zcash_primitives::transaction::components`:

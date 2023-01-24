@@ -78,7 +78,7 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
 pub fn signature_hash<
     'a,
     TA: TransparentAuthorizingContext,
-    SA: sapling::Authorization<Proof = GrothProofBytes>,
+    SA: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,

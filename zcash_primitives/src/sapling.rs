@@ -3,7 +3,7 @@
 mod address;
 pub mod group_hash;
 pub mod keys;
-mod note;
+pub mod note;
 pub mod note_encryption;
 pub mod pedersen_hash;
 pub mod prover;

@@ -8,12 +8,11 @@ use std::io::{self, Read, Write};
 
 use super::{
     address::PaymentAddress,
-    note_encryption::{
-        PreparedEphemeralPublicKey, PreparedIncomingViewingKey, KDF_SAPLING_PERSONALIZATION,
-    },
+    note_encryption::KDF_SAPLING_PERSONALIZATION,
     spec::{
         crh_ivk, diversify_hash, ka_sapling_agree, ka_sapling_agree_prepared,
-        ka_sapling_derive_public,
+        ka_sapling_derive_public, ka_sapling_derive_public_subgroup_prepared, PreparedBase,
+        PreparedBaseSubgroup, PreparedScalar,
     },
 };
 use crate::{
@@ -24,7 +23,7 @@ use crate::{
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
 use group::{Curve, Group, GroupEncoding};
-use subtle::{ConstantTimeEq, CtOption};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::EphemeralKeyBytes;
 
 /// Errors that can occur in the decoding of Sapling spending keys.
@@ -241,15 +240,34 @@ pub struct SaplingIvk(pub jubjub::Fr);
 
 impl SaplingIvk {
     pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
-        diversifier.g_d().and_then(|g_d| {
-            let pk_d = g_d * self.0;
-
-            PaymentAddress::from_parts(diversifier, pk_d)
-        })
+        let prepared_ivk = PreparedIncomingViewingKey::new(self);
+        DiversifiedTransmissionKey::derive(&prepared_ivk, &diversifier)
+            .and_then(|pk_d| PaymentAddress::from_parts(diversifier, pk_d))
     }
 
     pub fn to_repr(&self) -> [u8; 32] {
         self.0.to_repr()
+    }
+}
+
+/// A Sapling incoming viewing key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedIncomingViewingKey(PreparedScalar);
+
+impl memuse::DynamicUsage for PreparedIncomingViewingKey {
+    fn dynamic_usage(&self) -> usize {
+        self.0.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        self.0.dynamic_usage_bounds()
+    }
+}
+
+impl PreparedIncomingViewingKey {
+    /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
+    pub fn new(ivk: &SaplingIvk) -> Self {
+        Self(PreparedScalar::new(&ivk.0))
     }
 }
 
@@ -259,6 +277,62 @@ pub struct Diversifier(pub [u8; 11]);
 impl Diversifier {
     pub fn g_d(&self) -> Option<jubjub::SubgroupPoint> {
         diversify_hash(&self.0)
+    }
+}
+
+/// The diversified transmission key for a given payment address.
+///
+/// Defined in [Zcash Protocol Spec § 4.2.2: Sapling Key Components][saplingkeycomponents].
+///
+/// Note that this type is allowed to be the identity in the protocol, but we reject this
+/// in [`PaymentAddress::from_parts`].
+///
+/// [saplingkeycomponents]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiversifiedTransmissionKey(jubjub::SubgroupPoint);
+
+impl DiversifiedTransmissionKey {
+    /// Defined in [Zcash Protocol Spec § 4.2.2: Sapling Key Components][saplingkeycomponents].
+    ///
+    /// Returns `None` if `d` is an invalid diversifier.
+    ///
+    /// [saplingkeycomponents]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    pub(crate) fn derive(ivk: &PreparedIncomingViewingKey, d: &Diversifier) -> Option<Self> {
+        d.g_d()
+            .map(PreparedBaseSubgroup::new)
+            .map(|g_d| ka_sapling_derive_public_subgroup_prepared(&ivk.0, &g_d))
+            .map(DiversifiedTransmissionKey)
+    }
+
+    /// $abst_J(bytes)$
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
+        jubjub::SubgroupPoint::from_bytes(bytes).map(DiversifiedTransmissionKey)
+    }
+
+    /// $repr_J(self)$
+    pub(crate) fn to_bytes(self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+
+    /// Returns true if this is the identity.
+    pub(crate) fn is_identity(&self) -> bool {
+        self.0.is_identity().into()
+    }
+
+    /// Exposes the inner Jubjub point.
+    ///
+    /// This API is exposed for `zcash_proof` usage, and will be removed when this type is
+    /// refactored into the `sapling-crypto` crate.
+    pub fn inner(&self) -> jubjub::SubgroupPoint {
+        self.0
+    }
+}
+
+impl ConditionallySelectable for DiversifiedTransmissionKey {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        DiversifiedTransmissionKey(jubjub::SubgroupPoint::conditional_select(
+            &a.0, &b.0, choice,
+        ))
     }
 }
 
@@ -290,8 +364,8 @@ impl EphemeralSecretKey {
         EphemeralPublicKey(ka_sapling_derive_public(&self.0, &g_d))
     }
 
-    pub(crate) fn agree(&self, pk_d: &jubjub::ExtendedPoint) -> SharedSecret {
-        SharedSecret(ka_sapling_agree(&self.0, pk_d))
+    pub(crate) fn agree(&self, pk_d: &DiversifiedTransmissionKey) -> SharedSecret {
+        SharedSecret(ka_sapling_agree(&self.0, &pk_d.0.into()))
     }
 }
 
@@ -309,14 +383,8 @@ impl EphemeralSecretKey {
 pub struct EphemeralPublicKey(jubjub::ExtendedPoint);
 
 impl EphemeralPublicKey {
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn from_inner(epk: jubjub::ExtendedPoint) -> Self {
-        EphemeralPublicKey(epk)
-    }
-
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn into_inner(self) -> jubjub::ExtendedPoint {
-        self.0
+    pub(crate) fn from_affine(epk: jubjub::AffinePoint) -> Self {
+        EphemeralPublicKey(epk.into())
     }
 
     pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
@@ -328,9 +396,17 @@ impl EphemeralPublicKey {
     }
 }
 
+/// A Sapling ephemeral public key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedEphemeralPublicKey(PreparedBase);
+
 impl PreparedEphemeralPublicKey {
+    pub(crate) fn new(epk: EphemeralPublicKey) -> Self {
+        PreparedEphemeralPublicKey(PreparedBase::new(epk.0))
+    }
+
     pub(crate) fn agree(&self, ivk: &PreparedIncomingViewingKey) -> SharedSecret {
-        SharedSecret(ka_sapling_agree_prepared(ivk.inner(), self.inner()))
+        SharedSecret(ka_sapling_agree_prepared(&ivk.0, &self.0))
     }
 }
 
@@ -343,16 +419,6 @@ impl PreparedEphemeralPublicKey {
 pub struct SharedSecret(jubjub::SubgroupPoint);
 
 impl SharedSecret {
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn from_inner(epk: jubjub::SubgroupPoint) -> Self {
-        SharedSecret(epk)
-    }
-
-    /// TODO: Remove once public API is changed.
-    pub(crate) fn into_inner(self) -> jubjub::SubgroupPoint {
-        self.0
-    }
-
     /// For checking test vectors only.
     #[cfg(test)]
     pub(crate) fn to_bytes(&self) -> [u8; 32] {

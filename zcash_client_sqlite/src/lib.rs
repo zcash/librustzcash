@@ -584,7 +584,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.to.clone())
+                            Recipient::Sapling(output.to)
                         } else {
                             Recipient::InternalAccount(output.account, PoolType::Sapling)
                         };
@@ -595,7 +595,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                             tx_ref,
                             output.index,
                             &recipient,
-                            Amount::from_u64(output.note.value).map_err(|_|
+                            Amount::from_u64(output.note.value().inner()).map_err(|_|
                                 SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
                             Some(&output.memo),
                         )?;
@@ -1003,7 +1003,6 @@ extern crate assert_matches;
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use group::{ff::PrimeField, GroupEncoding};
     use prost::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
@@ -1012,14 +1011,17 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
 
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{
-            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
-            PaymentAddress,
+            note_encryption::{sapling_note_encryption, SaplingDomain},
+            util::generate_random_rseed,
+            value::NoteValue,
+            Note, Nullifier, PaymentAddress,
         },
         transaction::components::Amount,
         zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
@@ -1132,12 +1134,7 @@ mod tests {
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(&network(), height, &mut rng);
-        let note = Note {
-            g_d: to.diversifier().g_d().unwrap(),
-            pk_d: *to.pk_d(),
-            value: value.into(),
-            rseed,
-        };
+        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -1145,8 +1142,10 @@ mod tests {
             MemoBytes::empty(),
             &mut rng,
         );
-        let cmu = note.cmu().to_repr().as_ref().to_vec();
-        let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+        let cmu = note.cmu().to_bytes().to_vec();
+        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+            .0
+            .to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
@@ -1197,12 +1196,7 @@ mod tests {
 
         // Create a fake Note for the payment
         ctx.outputs.push({
-            let note = Note {
-                g_d: to.diversifier().g_d().unwrap(),
-                pk_d: *to.pk_d(),
-                value: value.into(),
-                rseed,
-            };
+            let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
             let encryptor = sapling_note_encryption::<_, Network>(
                 Some(dfvk.fvk().ovk),
                 note.clone(),
@@ -1210,8 +1204,10 @@ mod tests {
                 MemoBytes::empty(),
                 &mut rng,
             );
-            let cmu = note.cmu().to_repr().as_ref().to_vec();
-            let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+            let cmu = note.cmu().to_bytes().to_vec();
+            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+                .0
+                .to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
             CompactSaplingOutput {
@@ -1225,12 +1221,11 @@ mod tests {
         ctx.outputs.push({
             let change_addr = dfvk.default_address().1;
             let rseed = generate_random_rseed(&network(), height, &mut rng);
-            let note = Note {
-                g_d: change_addr.diversifier().g_d().unwrap(),
-                pk_d: *change_addr.pk_d(),
-                value: (in_value - value).unwrap().into(),
+            let note = Note::from_parts(
+                change_addr,
+                NoteValue::from_raw((in_value - value).unwrap().into()),
                 rseed,
-            };
+            );
             let encryptor = sapling_note_encryption::<_, Network>(
                 Some(dfvk.fvk().ovk),
                 note.clone(),
@@ -1238,8 +1233,10 @@ mod tests {
                 MemoBytes::empty(),
                 &mut rng,
             );
-            let cmu = note.cmu().to_repr().as_ref().to_vec();
-            let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+            let cmu = note.cmu().to_bytes().to_vec();
+            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+                .0
+                .to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
             CompactSaplingOutput {

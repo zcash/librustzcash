@@ -5,7 +5,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use group::GroupEncoding;
 use memuse::DynamicUsage;
 use rand_core::RngCore;
 
@@ -20,10 +19,12 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{
-        keys::{EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey, SharedSecret},
-        spec::{PreparedBase, PreparedBaseSubgroup, PreparedScalar},
+        keys::{
+            DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
+            SharedSecret,
+        },
         value::ValueCommitment,
-        Diversifier, Note, PaymentAddress, Rseed, SaplingIvk,
+        Diversifier, Note, PaymentAddress, Rseed,
     },
     transaction::components::{
         amount::Amount,
@@ -31,52 +32,12 @@ use crate::{
     },
 };
 
+use super::note::ExtractedNoteCommitment;
+
+pub use crate::sapling::keys::{PreparedEphemeralPublicKey, PreparedIncomingViewingKey};
+
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
-
-/// A Sapling incoming viewing key that has been precomputed for trial decryption.
-#[derive(Clone, Debug)]
-pub struct PreparedIncomingViewingKey(PreparedScalar);
-
-impl DynamicUsage for PreparedIncomingViewingKey {
-    fn dynamic_usage(&self) -> usize {
-        self.0.dynamic_usage()
-    }
-
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        self.0.dynamic_usage_bounds()
-    }
-}
-
-impl PreparedIncomingViewingKey {
-    /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
-    pub fn new(ivk: &SaplingIvk) -> Self {
-        Self(PreparedScalar::new(&ivk.0))
-    }
-
-    /// TODO: Remove after type changes.
-    pub(crate) fn inner(&self) -> &PreparedScalar {
-        &self.0
-    }
-}
-
-/// A Sapling ephemeral public key that has been precomputed for trial decryption.
-#[derive(Clone, Debug)]
-pub struct PreparedEphemeralPublicKey(PreparedBase);
-
-impl PreparedEphemeralPublicKey {
-    /// TODO: Remove after type changes.
-    pub(crate) fn inner(&self) -> &PreparedBase {
-        &self.0
-    }
-}
-
-/// Sapling key agreement for note encryption.
-///
-/// Implements section 5.4.4.3 of the Zcash Protocol Specification.
-pub fn sapling_ka_agree(esk: &jubjub::Fr, pk_d: &jubjub::ExtendedPoint) -> jubjub::SubgroupPoint {
-    EphemeralSecretKey(*esk).agree(pk_d).into_inner()
-}
 
 /// Sapling PRF^ock.
 ///
@@ -109,7 +70,7 @@ fn sapling_parse_note_plaintext_without_memo<F, P: consensus::Parameters>(
     get_validated_pk_d: F,
 ) -> Option<(Note, PaymentAddress)>
 where
-    F: FnOnce(&Diversifier) -> Option<jubjub::SubgroupPoint>,
+    F: FnOnce(&Diversifier) -> Option<DiversifiedTransmissionKey>,
 {
     assert!(plaintext.len() >= COMPACT_NOTE_SIZE);
 
@@ -133,7 +94,7 @@ where
     let pk_d = get_validated_pk_d(&diversifier)?;
 
     let to = PaymentAddress::from_parts(diversifier, pk_d)?;
-    let note = to.create_note(value.into(), rseed)?;
+    let note = to.create_note(value.into(), rseed);
     Some((note, to))
 }
 
@@ -164,21 +125,21 @@ impl<P: consensus::Parameters> SaplingDomain<P> {
 }
 
 impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
-    type EphemeralSecretKey = jubjub::Scalar;
-    // It is acceptable for this to be a point because we enforce by consensus that
-    // points must not be small-order, and all points with non-canonical serialization
-    // are small-order.
-    type EphemeralPublicKey = jubjub::ExtendedPoint;
+    type EphemeralSecretKey = EphemeralSecretKey;
+    // It is acceptable for this to be a point rather than a byte array, because we
+    // enforce by consensus that points must not be small-order, and all points with
+    // non-canonical serialization are small-order.
+    type EphemeralPublicKey = EphemeralPublicKey;
     type PreparedEphemeralPublicKey = PreparedEphemeralPublicKey;
-    type SharedSecret = jubjub::SubgroupPoint;
+    type SharedSecret = SharedSecret;
     type SymmetricKey = Blake2bHash;
     type Note = Note;
     type Recipient = PaymentAddress;
-    type DiversifiedTransmissionKey = jubjub::SubgroupPoint;
+    type DiversifiedTransmissionKey = DiversifiedTransmissionKey;
     type IncomingViewingKey = PreparedIncomingViewingKey;
     type OutgoingViewingKey = OutgoingViewingKey;
     type ValueCommitment = ValueCommitment;
-    type ExtractedCommitment = bls12_381::Scalar;
+    type ExtractedCommitment = ExtractedNoteCommitment;
     type ExtractedCommitmentBytes = [u8; 32];
     type Memo = MemoBytes;
 
@@ -187,41 +148,39 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 
     fn get_pk_d(note: &Self::Note) -> Self::DiversifiedTransmissionKey {
-        note.pk_d
+        *note.recipient().pk_d()
     }
 
     fn prepare_epk(epk: Self::EphemeralPublicKey) -> Self::PreparedEphemeralPublicKey {
-        PreparedEphemeralPublicKey(PreparedBase::new(epk))
+        PreparedEphemeralPublicKey::new(epk)
     }
 
     fn ka_derive_public(
         note: &Self::Note,
         esk: &Self::EphemeralSecretKey,
     ) -> Self::EphemeralPublicKey {
-        EphemeralSecretKey(*esk)
-            .derive_public(note.g_d.into())
-            .into_inner()
+        esk.derive_public(note.recipient().g_d().into())
     }
 
     fn ka_agree_enc(
         esk: &Self::EphemeralSecretKey,
         pk_d: &Self::DiversifiedTransmissionKey,
     ) -> Self::SharedSecret {
-        EphemeralSecretKey(*esk).agree(pk_d.into()).into_inner()
+        esk.agree(pk_d)
     }
 
     fn ka_agree_dec(
         ivk: &Self::IncomingViewingKey,
         epk: &Self::PreparedEphemeralPublicKey,
     ) -> Self::SharedSecret {
-        epk.agree(ivk).into_inner()
+        epk.agree(ivk)
     }
 
     /// Sapling KDF for note encryption.
     ///
     /// Implements section 5.4.4.4 of the Zcash Protocol Specification.
-    fn kdf(dhsecret: jubjub::SubgroupPoint, epk: &EphemeralKeyBytes) -> Blake2bHash {
-        SharedSecret::from_inner(dhsecret).kdf_sapling(epk)
+    fn kdf(dhsecret: SharedSecret, epk: &EphemeralKeyBytes) -> Blake2bHash {
+        dhsecret.kdf_sapling(epk)
     }
 
     fn note_plaintext_bytes(
@@ -232,21 +191,21 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
         let mut input = [0; NOTE_PLAINTEXT_SIZE];
-        input[0] = match note.rseed {
+        input[0] = match note.rseed() {
             Rseed::BeforeZip212(_) => 1,
             Rseed::AfterZip212(_) => 2,
         };
         input[1..12].copy_from_slice(&to.diversifier().0);
         (&mut input[12..20])
-            .write_u64::<LittleEndian>(note.value)
+            .write_u64::<LittleEndian>(note.value().inner())
             .unwrap();
 
-        match note.rseed {
+        match note.rseed() {
             Rseed::BeforeZip212(rcm) => {
                 input[20..COMPACT_NOTE_SIZE].copy_from_slice(rcm.to_repr().as_ref());
             }
             Rseed::AfterZip212(rseed) => {
-                input[20..COMPACT_NOTE_SIZE].copy_from_slice(&rseed);
+                input[20..COMPACT_NOTE_SIZE].copy_from_slice(rseed);
             }
         }
 
@@ -269,23 +228,21 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         esk: &Self::EphemeralSecretKey,
     ) -> OutPlaintextBytes {
         let mut input = [0u8; OUT_PLAINTEXT_SIZE];
-        input[0..32].copy_from_slice(&note.pk_d.to_bytes());
-        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(esk.to_repr().as_ref());
+        input[0..32].copy_from_slice(&note.recipient().pk_d().to_bytes());
+        input[32..OUT_PLAINTEXT_SIZE].copy_from_slice(esk.0.to_repr().as_ref());
 
         OutPlaintextBytes(input)
     }
 
     fn epk_bytes(epk: &Self::EphemeralPublicKey) -> EphemeralKeyBytes {
-        EphemeralPublicKey::from_inner(*epk).to_bytes()
+        epk.to_bytes()
     }
 
     fn epk(ephemeral_key: &EphemeralKeyBytes) -> Option<Self::EphemeralPublicKey> {
         // ZIP 216: We unconditionally reject non-canonical encodings, because these have
         // always been rejected by consensus (due to small-order checks).
         // https://zips.z.cash/zip-0216#specification
-        let res: Option<EphemeralPublicKey> =
-            EphemeralPublicKey::from_bytes(&ephemeral_key.0).into();
-        res.map(|epk| epk.into_inner())
+        EphemeralPublicKey::from_bytes(&ephemeral_key.0).into()
     }
 
     fn parse_note_plaintext_without_memo_ivk(
@@ -294,7 +251,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         plaintext: &[u8],
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(self, plaintext, |diversifier| {
-            Some(&PreparedBaseSubgroup::new(diversifier.g_d()?) * &ivk.0)
+            DiversifiedTransmissionKey::derive(ivk, diversifier)
         })
     }
 
@@ -306,12 +263,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(self, &plaintext.0, |diversifier| {
-            if EphemeralSecretKey(*esk)
-                .derive_public(diversifier.g_d()?.into())
-                .to_bytes()
-                .0
-                == ephemeral_key.0
-            {
+            if esk.derive_public(diversifier.g_d()?.into()).to_bytes().0 == ephemeral_key.0 {
                 Some(*pk_d)
             } else {
                 None
@@ -324,20 +276,19 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 
     fn extract_pk_d(op: &OutPlaintextBytes) -> Option<Self::DiversifiedTransmissionKey> {
-        jubjub::SubgroupPoint::from_bytes(
+        DiversifiedTransmissionKey::from_bytes(
             op.0[0..32].try_into().expect("slice is the correct length"),
         )
         .into()
     }
 
     fn extract_esk(op: &OutPlaintextBytes) -> Option<Self::EphemeralSecretKey> {
-        let res: Option<EphemeralSecretKey> = EphemeralSecretKey::from_bytes(
+        EphemeralSecretKey::from_bytes(
             op.0[32..OUT_PLAINTEXT_SIZE]
                 .try_into()
                 .expect("slice is the correct length"),
         )
-        .into();
-        res.map(|esk| esk.0)
+        .into()
     }
 
     fn extract_memo(&self, plaintext: &NotePlaintextBytes) -> Self::Memo {
@@ -349,11 +300,7 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
     fn batch_kdf<'a>(
         items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
     ) -> Vec<Option<Self::SymmetricKey>> {
-        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items
-            .map(|(shared_secret, ephemeral_key)| {
-                (shared_secret.map(SharedSecret::from_inner), ephemeral_key)
-            })
-            .unzip();
+        let (shared_secrets, ephemeral_keys): (Vec<_>, Vec<_>) = items.unzip();
 
         SharedSecret::batch_to_affine(shared_secrets)
             .zip(ephemeral_keys.into_iter())
@@ -372,9 +319,9 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
             .zip(ephemeral_keys.into_iter())
             .map(|(epk, ephemeral_key)| {
                 (
-                    epk.map(jubjub::ExtendedPoint::from)
-                        .map(Self::prepare_epk)
-                        .into(),
+                    Option::from(epk)
+                        .map(EphemeralPublicKey::from_affine)
+                        .map(Self::prepare_epk),
                     ephemeral_key,
                 )
             })
@@ -402,15 +349,15 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 ///         note_encryption::sapling_note_encryption,
 ///         util::generate_random_rseed,
 ///         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
-///         Diversifier, PaymentAddress, Rseed,
+///         Diversifier, PaymentAddress, Rseed, SaplingIvk,
 ///     },
 /// };
 ///
 /// let mut rng = OsRng;
 ///
+/// let ivk = SaplingIvk(jubjub::Scalar::random(&mut rng));
 /// let diversifier = Diversifier([0; 11]);
-/// let pk_d = diversifier.g_d().unwrap();
-/// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
+/// let to = ivk.to_payment_address(diversifier).unwrap();
 /// let ovk = Some(OutgoingViewingKey([0; 32]));
 ///
 /// let value = NoteValue::from_raw(1000);
@@ -418,7 +365,7 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 /// let cv = ValueCommitment::derive(value, rcv);
 /// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
 /// let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
-/// let note = to.create_note(value.inner(), rseed).unwrap();
+/// let note = to.create_note(value.inner(), rseed);
 /// let cmu = note.cmu();
 ///
 /// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
@@ -547,7 +494,7 @@ mod tests {
     };
     use ff::{Field, PrimeField};
     use group::Group;
-    use group::{cofactor::CofactorGroup, GroupEncoding};
+    use group::GroupEncoding;
     use rand_core::OsRng;
     use rand_core::{CryptoRng, RngCore};
 
@@ -571,7 +518,8 @@ mod tests {
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::{
-            keys::{EphemeralPublicKey, EphemeralSecretKey},
+            keys::{DiversifiedTransmissionKey, EphemeralSecretKey},
+            note::ExtractedNoteCommitment,
             note_encryption::PreparedIncomingViewingKey,
             util::generate_random_rseed,
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
@@ -629,8 +577,7 @@ mod tests {
         OutputDescription<sapling::GrothProofBytes>,
     ) {
         let diversifier = Diversifier([0; 11]);
-        let pk_d = diversifier.g_d().unwrap() * ivk.0;
-        let pa = PaymentAddress::from_parts_unchecked(diversifier, pk_d);
+        let pa = ivk.to_payment_address(diversifier).unwrap();
 
         // Construct the value commitment for the proof instance
         let value = NoteValue::from_raw(100);
@@ -639,7 +586,7 @@ mod tests {
 
         let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
 
-        let note = pa.create_note(value.inner(), rseed).unwrap();
+        let note = pa.create_note(value.inner(), rseed);
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
@@ -650,14 +597,14 @@ mod tests {
             MemoBytes::empty(),
             &mut rng,
         );
-        let epk = EphemeralPublicKey::from_inner(*ne.epk());
-        let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &epk.to_bytes());
+        let epk = ne.epk();
+        let ock = prf_ock(&ovk, &cv, &cmu.to_bytes(), &epk.to_bytes());
 
         let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
         let output = OutputDescription::from_parts(
             cv,
             cmu,
-            epk.to_bytes().into(),
+            epk.to_bytes(),
             ne.encrypt_note_plaintext(),
             out_ciphertext,
             [0u8; GROTH_PROOF_SIZE],
@@ -666,16 +613,15 @@ mod tests {
         (ovk, ock, output)
     }
 
-    fn reencrypt_enc_ciphertext(
+    fn reencrypt_out_ciphertext(
         ovk: &OutgoingViewingKey,
         cv: &ValueCommitment,
-        cmu: &bls12_381::Scalar,
+        cmu: &ExtractedNoteCommitment,
         ephemeral_key: &EphemeralKeyBytes,
-        enc_ciphertext: &[u8; ENC_CIPHERTEXT_SIZE],
         out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
-        modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
-    ) -> [u8; ENC_CIPHERTEXT_SIZE] {
-        let ock = prf_ock(ovk, cv, &cmu.to_repr(), ephemeral_key);
+        modify_plaintext: impl Fn(&mut [u8; OUT_PLAINTEXT_SIZE]),
+    ) -> [u8; OUT_CIPHERTEXT_SIZE] {
+        let ock = prf_ock(ovk, cv, &cmu.to_bytes(), ephemeral_key);
 
         let mut op = [0; OUT_PLAINTEXT_SIZE];
         op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
@@ -689,11 +635,46 @@ mod tests {
             )
             .unwrap();
 
-        let pk_d = jubjub::SubgroupPoint::from_bytes(&op[0..32].try_into().unwrap()).unwrap();
+        modify_plaintext(&mut op);
+
+        let tag = ChaCha20Poly1305::new(ock.as_ref().into())
+            .encrypt_in_place_detached([0u8; 12][..].into(), &[], &mut op)
+            .unwrap();
+
+        let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
+        out_ciphertext[..OUT_PLAINTEXT_SIZE].copy_from_slice(&op);
+        out_ciphertext[OUT_PLAINTEXT_SIZE..].copy_from_slice(&tag);
+        out_ciphertext
+    }
+
+    fn reencrypt_enc_ciphertext(
+        ovk: &OutgoingViewingKey,
+        cv: &ValueCommitment,
+        cmu: &ExtractedNoteCommitment,
+        ephemeral_key: &EphemeralKeyBytes,
+        enc_ciphertext: &[u8; ENC_CIPHERTEXT_SIZE],
+        out_ciphertext: &[u8; OUT_CIPHERTEXT_SIZE],
+        modify_plaintext: impl Fn(&mut [u8; NOTE_PLAINTEXT_SIZE]),
+    ) -> [u8; ENC_CIPHERTEXT_SIZE] {
+        let ock = prf_ock(ovk, cv, &cmu.to_bytes(), ephemeral_key);
+
+        let mut op = [0; OUT_PLAINTEXT_SIZE];
+        op.copy_from_slice(&out_ciphertext[..OUT_PLAINTEXT_SIZE]);
+
+        ChaCha20Poly1305::new(ock.as_ref().into())
+            .decrypt_in_place_detached(
+                [0u8; 12][..].into(),
+                &[],
+                &mut op,
+                out_ciphertext[OUT_PLAINTEXT_SIZE..].into(),
+            )
+            .unwrap();
+
+        let pk_d = DiversifiedTransmissionKey::from_bytes(&op[0..32].try_into().unwrap()).unwrap();
 
         let esk = jubjub::Fr::from_repr(op[32..OUT_PLAINTEXT_SIZE].try_into().unwrap()).unwrap();
 
-        let shared_secret = EphemeralSecretKey(esk).agree(&pk_d.into());
+        let shared_secret = EphemeralSecretKey(esk).agree(&pk_d);
         let key = shared_secret.kdf_sapling(ephemeral_key);
 
         let mut plaintext = [0; NOTE_PLAINTEXT_SIZE];
@@ -807,7 +788,9 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() =
+                ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
+                    .unwrap();
 
             assert_eq!(
                 try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
@@ -977,7 +960,9 @@ mod tests {
 
         for &height in heights.iter() {
             let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
-            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() =
+                ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
+                    .unwrap();
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
@@ -1164,7 +1149,9 @@ mod tests {
 
         for &height in heights.iter() {
             let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
-            *output.cmu_mut() = bls12_381::Scalar::random(&mut rng);
+            *output.cmu_mut() =
+                ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
+                    .unwrap();
 
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
@@ -1353,9 +1340,16 @@ mod tests {
         ];
 
         for &height in heights.iter() {
-            let ivk = SaplingIvk(jubjub::Fr::zero());
-            let (ovk, ock, output) = random_enc_ciphertext_with(height, &ivk, &mut rng);
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
 
+            *output.out_ciphertext_mut() = reencrypt_out_ciphertext(
+                &ovk,
+                output.cv(),
+                output.cmu(),
+                output.ephemeral_key(),
+                output.out_ciphertext(),
+                |pt| pt[0..32].copy_from_slice(&jubjub::ExtendedPoint::random(rng).to_bytes()),
+            );
             assert_eq!(
                 try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
                 None
@@ -1371,9 +1365,9 @@ mod tests {
     fn test_vectors() {
         let test_vectors = crate::test_vectors::note_encryption::make_test_vectors();
 
-        macro_rules! read_bls12_381_scalar {
+        macro_rules! read_cmu {
             ($field:expr) => {{
-                bls12_381::Scalar::from_repr($field[..].try_into().unwrap()).unwrap()
+                ExtractedNoteCommitment::from_bytes($field[..].try_into().unwrap()).unwrap()
             }};
         }
 
@@ -1383,9 +1377,9 @@ mod tests {
             }};
         }
 
-        macro_rules! read_point {
+        macro_rules! read_pk_d {
             ($field:expr) => {
-                jubjub::ExtendedPoint::from_bytes(&$field).unwrap()
+                DiversifiedTransmissionKey::from_bytes(&$field).unwrap()
             };
         }
 
@@ -1403,29 +1397,29 @@ mod tests {
             //
 
             let ivk = PreparedIncomingViewingKey::new(&SaplingIvk(read_jubjub_scalar!(tv.ivk)));
-            let pk_d = read_point!(tv.default_pk_d).into_subgroup().unwrap();
+            let pk_d = read_pk_d!(tv.default_pk_d);
             let rcm = read_jubjub_scalar!(tv.rcm);
             let cv = read_cv!(tv.cv);
-            let cmu = read_bls12_381_scalar!(tv.cmu);
-            let esk = read_jubjub_scalar!(tv.esk);
+            let cmu = read_cmu!(tv.cmu);
+            let esk = EphemeralSecretKey(read_jubjub_scalar!(tv.esk));
             let ephemeral_key = EphemeralKeyBytes(tv.epk);
 
             //
             // Test the individual components
             //
 
-            let shared_secret = EphemeralSecretKey(esk).agree(&pk_d.into());
+            let shared_secret = esk.agree(&pk_d);
             assert_eq!(shared_secret.to_bytes(), tv.shared_secret);
 
             let k_enc = shared_secret.kdf_sapling(&ephemeral_key);
             assert_eq!(k_enc.as_bytes(), tv.k_enc);
 
             let ovk = OutgoingViewingKey(tv.ovk);
-            let ock = prf_ock(&ovk, &cv, &cmu.to_repr(), &ephemeral_key);
+            let ock = prf_ock(&ovk, &cv, &cmu.to_bytes(), &ephemeral_key);
             assert_eq!(ock.as_ref(), tv.ock);
 
             let to = PaymentAddress::from_parts(Diversifier(tv.default_d), pk_d).unwrap();
-            let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm)).unwrap();
+            let note = to.create_note(tv.v, Rseed::BeforeZip212(rcm));
             assert_eq!(note.cmu(), cmu);
 
             let output = OutputDescription::from_parts(

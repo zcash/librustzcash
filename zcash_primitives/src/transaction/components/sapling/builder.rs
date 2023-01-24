@@ -4,7 +4,6 @@ use core::fmt;
 use std::sync::mpsc::Sender;
 
 use ff::Field;
-use group::GroupEncoding;
 use rand::{seq::SliceRandom, RngCore};
 
 use crate::{
@@ -13,6 +12,7 @@ use crate::{
     memo::MemoBytes,
     merkle_tree::MerklePath,
     sapling::{
+        keys::SaplingIvk,
         note_encryption::sapling_note_encryption,
         prover::TxProver,
         redjubjub::{PrivateKey, Signature},
@@ -78,7 +78,7 @@ impl fees::InputView<()> for SpendDescriptionInfo {
 
     fn value(&self) -> Amount {
         // An existing note to be spent must have a valid amount value.
-        Amount::from_u64(self.note.value).unwrap()
+        Amount::from_u64(self.note.value().inner()).unwrap()
     }
 }
 
@@ -102,24 +102,17 @@ impl SaplingOutputInfo {
         to: PaymentAddress,
         value: NoteValue,
         memo: MemoBytes,
-    ) -> Result<Self, Error> {
-        let g_d = to.g_d().ok_or(Error::InvalidAddress)?;
-
+    ) -> Self {
         let rseed = generate_random_rseed_internal(params, target_height, rng);
 
-        let note = Note {
-            g_d,
-            pk_d: *to.pk_d(),
-            value: value.inner(),
-            rseed,
-        };
+        let note = Note::from_parts(to, value, rseed);
 
-        Ok(SaplingOutputInfo {
+        SaplingOutputInfo {
             ovk,
             to,
             note,
             memo,
-        })
+        }
     }
 
     fn build<P: consensus::Parameters, Pr: TxProver, R: RngCore>(
@@ -128,20 +121,15 @@ impl SaplingOutputInfo {
         ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
     ) -> OutputDescription<GrothProofBytes> {
-        let encryptor = sapling_note_encryption::<R, P>(
-            self.ovk,
-            self.note.clone(),
-            self.to.clone(),
-            self.memo,
-            rng,
-        );
+        let encryptor =
+            sapling_note_encryption::<R, P>(self.ovk, self.note.clone(), self.to, self.memo, rng);
 
         let (zkproof, cv) = prover.output_proof(
             ctx,
-            *encryptor.esk(),
+            encryptor.esk().0,
             self.to,
             self.note.rcm(),
-            self.note.value,
+            self.note.value().inner(),
         );
 
         let cmu = self.note.cmu();
@@ -149,12 +137,12 @@ impl SaplingOutputInfo {
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
         let out_ciphertext = encryptor.encrypt_outgoing_plaintext(&cv, &cmu, rng);
 
-        let epk = *encryptor.epk();
+        let epk = encryptor.epk();
 
         OutputDescription {
             cv,
             cmu,
-            ephemeral_key: epk.to_bytes().into(),
+            ephemeral_key: epk.to_bytes(),
             enc_ciphertext,
             out_ciphertext,
             zkproof,
@@ -164,7 +152,8 @@ impl SaplingOutputInfo {
 
 impl fees::OutputView for SaplingOutputInfo {
     fn value(&self) -> Amount {
-        Amount::from_u64(self.note.value).expect("Note values should be checked at construction.")
+        Amount::from_u64(self.note.value().inner())
+            .expect("Note values should be checked at construction.")
     }
 }
 
@@ -227,7 +216,8 @@ impl std::fmt::Debug for Unauthorized {
 }
 
 impl Authorization for Unauthorized {
-    type Proof = GrothProofBytes;
+    type SpendProof = GrothProofBytes;
+    type OutputProof = GrothProofBytes;
     type AuthSig = SpendDescriptionInfo;
 }
 
@@ -299,7 +289,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         merkle_path: MerklePath<Node>,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
-        let node = note.commitment();
+        let node = Node::from_cmu(&note.cmu());
         if let Some(anchor) = self.anchor {
             let path_root: bls12_381::Scalar = merkle_path.root(node).into();
             if path_root != anchor {
@@ -311,8 +301,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
         let alpha = jubjub::Fr::random(&mut rng);
 
-        self.value_balance =
-            (self.value_balance + NoteValue::from_raw(note.value)).ok_or(Error::InvalidAddress)?;
+        self.value_balance = (self.value_balance + note.value()).ok_or(Error::InvalidAmount)?;
         self.try_value_balance()?;
 
         self.spends.push(SpendDescriptionInfo {
@@ -344,7 +333,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             to,
             value,
             memo,
-        )?;
+        );
 
         self.value_balance = (self.value_balance - value).ok_or(Error::InvalidAddress)?;
         self.try_value_balance()?;
@@ -417,9 +406,9 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                             ctx,
                             proof_generation_key,
                             spend.diversifier,
-                            spend.note.rseed,
+                            *spend.note.rseed(),
                             spend.alpha,
-                            spend.note.value,
+                            spend.note.value().inner(),
                             anchor,
                             spend.merkle_path.clone(),
                         )
@@ -463,48 +452,41 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     output.clone().build::<P, _, _>(prover, ctx, &mut rng)
                 } else {
                     // This is a dummy output
-                    let (dummy_to, dummy_note) = {
-                        let (diversifier, g_d) = {
-                            let mut diversifier;
-                            let g_d;
+                    let dummy_note = {
+                        let payment_address = {
+                            let mut diversifier = Diversifier([0; 11]);
                             loop {
-                                let mut d = [0; 11];
-                                rng.fill_bytes(&mut d);
-                                diversifier = Diversifier(d);
-                                if let Some(val) = diversifier.g_d() {
-                                    g_d = val;
-                                    break;
+                                rng.fill_bytes(&mut diversifier.0);
+                                let dummy_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
+                                if let Some(addr) = dummy_ivk.to_payment_address(diversifier) {
+                                    break addr;
                                 }
-                            }
-                            (diversifier, g_d)
-                        };
-                        let (pk_d, payment_address) = loop {
-                            let dummy_ivk = jubjub::Fr::random(&mut rng);
-                            let pk_d = g_d * dummy_ivk;
-                            if let Some(addr) = PaymentAddress::from_parts(diversifier, pk_d) {
-                                break (pk_d, addr);
                             }
                         };
 
                         let rseed =
                             generate_random_rseed_internal(&params, target_height, &mut rng);
 
-                        (
-                            payment_address,
-                            Note {
-                                g_d,
-                                pk_d,
-                                rseed,
-                                value: 0,
-                            },
-                        )
+                        Note::from_parts(payment_address, NoteValue::from_raw(0), rseed)
                     };
 
                     let esk = dummy_note.generate_or_derive_esk_internal(&mut rng);
-                    let epk = dummy_note.g_d * esk;
+                    let epk = esk.derive_public(
+                        dummy_note
+                            .recipient()
+                            .diversifier()
+                            .g_d()
+                            .expect("checked at construction")
+                            .into(),
+                    );
 
-                    let (zkproof, cv) =
-                        prover.output_proof(ctx, esk, dummy_to, dummy_note.rcm(), dummy_note.value);
+                    let (zkproof, cv) = prover.output_proof(
+                        ctx,
+                        esk.0,
+                        dummy_note.recipient(),
+                        dummy_note.rcm(),
+                        dummy_note.value().inner(),
+                    );
 
                     let cmu = dummy_note.cmu();
 
@@ -516,7 +498,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     OutputDescription {
                         cv,
                         cmu,
-                        ephemeral_key: epk.to_bytes().into(),
+                        ephemeral_key: epk.to_bytes(),
                         enc_ciphertext,
                         out_ciphertext,
                         zkproof,

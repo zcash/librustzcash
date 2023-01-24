@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     merkle_tree::MerklePath,
-    sapling::{self, prover::TxProver as SaplingProver},
+    sapling::{self, prover::TxProver as SaplingProver, Node},
     transaction::{
         builder::Builder,
         components::amount::{Amount, BalanceError},
@@ -341,9 +341,7 @@ where
             RecipientAddress::Unified(ua) => {
                 builder.add_sapling_output(
                     ovk,
-                    ua.sapling()
-                        .expect("TODO: Add Orchard support to builder")
-                        .clone(),
+                    *ua.sapling().expect("TODO: Add Orchard support to builder"),
                     payment.amount,
                     payment.memo.clone().unwrap_or_else(MemoBytes::empty),
                 )?;
@@ -351,7 +349,7 @@ where
             RecipientAddress::Shielded(to) => {
                 builder.add_sapling_output(
                     ovk,
-                    to.clone(),
+                    *to,
                     payment.amount,
                     payment.memo.clone().unwrap_or_else(MemoBytes::empty),
                 )?;
@@ -386,7 +384,7 @@ where
             // Sapling outputs are shuffled, so we need to look up where the output ended up.
             RecipientAddress::Shielded(addr) => {
                 let idx = tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment.");
-                (idx, Recipient::Sapling(addr.clone()))
+                (idx, Recipient::Sapling(*addr))
             }
             RecipientAddress::Unified(addr) => {
                 // TODO: When we add Orchard support, we will need to trial-decrypt to find them,
@@ -549,12 +547,7 @@ where
     for change_value in proposal.balance().proposed_change() {
         match change_value {
             ChangeValue::Sapling(amount) => {
-                builder.add_sapling_output(
-                    Some(ovk),
-                    shielding_address.clone(),
-                    *amount,
-                    memo.clone(),
-                )?;
+                builder.add_sapling_output(Some(ovk), shielding_address, *amount, memo.clone())?;
             }
         }
     }
@@ -610,18 +603,18 @@ fn select_key_for_note<N>(
     // to spend the note that we've used the correct key.
     let external_note = dfvk
         .diversified_address(selected.diversifier)
-        .and_then(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
     let internal_note = dfvk
         .diversified_change_address(selected.diversifier)
-        .and_then(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
 
     let expected_root = selected.witness.root();
     external_note
-        .filter(|n| expected_root == merkle_path.root(n.commitment()))
+        .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
         .map(|n| (n, extsk.clone(), merkle_path.clone()))
         .or_else(|| {
             internal_note
-                .filter(|n| expected_root == merkle_path.root(n.commitment()))
+                .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
                 .map(|n| (n, extsk.derive_internal(), merkle_path))
         })
 }

@@ -1,11 +1,9 @@
 //! Generated code for handling light client protobuf structs.
 
-use group::ff::PrimeField;
-
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
-    sapling::Nullifier,
+    sapling::{note::ExtractedNoteCommitment, Nullifier},
     transaction::{components::sapling, TxId},
 };
 
@@ -96,10 +94,10 @@ impl compact_formats::CompactSaplingOutput {
     /// A convenience method that parses [`CompactOutput.cmu`].
     ///
     /// [`CompactOutput.cmu`]: #structfield.cmu
-    pub fn cmu(&self) -> Result<bls12_381::Scalar, ()> {
+    pub fn cmu(&self) -> Result<ExtractedNoteCommitment, ()> {
         let mut repr = [0; 32];
         repr.as_mut().copy_from_slice(&self.cmu[..]);
-        Option::from(bls12_381::Scalar::from_repr(repr)).ok_or(())
+        Option::from(ExtractedNoteCommitment::from_bytes(&repr)).ok_or(())
     }
 
     /// Returns the ephemeral public key for this output.
@@ -120,7 +118,7 @@ impl<A: sapling::Authorization> From<sapling::OutputDescription<A>>
 {
     fn from(out: sapling::OutputDescription<A>) -> compact_formats::CompactSaplingOutput {
         compact_formats::CompactSaplingOutput {
-            cmu: out.cmu().to_repr().to_vec(),
+            cmu: out.cmu().to_bytes().to_vec(),
             ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
             ciphertext: out.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
         }

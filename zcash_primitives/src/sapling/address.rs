@@ -1,19 +1,19 @@
-use group::{Group, GroupEncoding};
-
 use super::{
-    keys::Diversifier,
+    keys::{DiversifiedTransmissionKey, Diversifier},
     note::{Note, Rseed},
+    value::NoteValue,
 };
 
 /// A Sapling payment address.
 ///
 /// # Invariants
 ///
-/// `pk_d` is guaranteed to be prime-order (i.e. in the prime-order subgroup of Jubjub,
-/// and not the identity).
-#[derive(Clone, Debug)]
+/// - `diversifier` is guaranteed to be valid for Sapling (only 50% of diversifiers are).
+/// - `pk_d` is guaranteed to be prime-order (i.e. in the prime-order subgroup of Jubjub,
+///  and not the identity).
+#[derive(Clone, Copy, Debug)]
 pub struct PaymentAddress {
-    pk_d: jubjub::SubgroupPoint,
+    pk_d: DiversifiedTransmissionKey,
     diversifier: Diversifier,
 }
 
@@ -28,24 +28,19 @@ impl Eq for PaymentAddress {}
 impl PaymentAddress {
     /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
     ///
-    /// Returns None if `pk_d` is the identity.
-    pub fn from_parts(diversifier: Diversifier, pk_d: jubjub::SubgroupPoint) -> Option<Self> {
-        if pk_d.is_identity().into() {
+    /// Returns None if `diversifier` is not valid for Sapling, or `pk_d` is the identity.
+    /// Note that we cannot verify in this constructor that `pk_d` is derived from
+    /// `diversifier`, so addresses for which these values have no known relationship
+    /// (and therefore no-one can receive funds at them) can still be constructed.
+    pub fn from_parts(diversifier: Diversifier, pk_d: DiversifiedTransmissionKey) -> Option<Self> {
+        // Check that the diversifier is valid
+        diversifier.g_d()?;
+
+        if pk_d.is_identity() {
             None
         } else {
             Some(PaymentAddress { pk_d, diversifier })
         }
-    }
-
-    /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
-    ///
-    /// Only for test code, as this explicitly bypasses the invariant.
-    #[cfg(test)]
-    pub(crate) fn from_parts_unchecked(
-        diversifier: Diversifier,
-        pk_d: jubjub::SubgroupPoint,
-    ) -> Self {
-        PaymentAddress { pk_d, diversifier }
     }
 
     /// Parses a PaymentAddress from bytes.
@@ -55,11 +50,10 @@ impl PaymentAddress {
             tmp.copy_from_slice(&bytes[0..11]);
             Diversifier(tmp)
         };
-        // Check that the diversifier is valid
-        diversifier.g_d()?;
 
-        let pk_d = jubjub::SubgroupPoint::from_bytes(bytes[11..43].try_into().unwrap());
+        let pk_d = DiversifiedTransmissionKey::from_bytes(bytes[11..43].try_into().unwrap());
         if pk_d.is_some().into() {
+            // The remaining invariants are checked here.
             PaymentAddress::from_parts(diversifier, pk_d.unwrap())
         } else {
             None
@@ -80,21 +74,16 @@ impl PaymentAddress {
     }
 
     /// Returns `pk_d` for this `PaymentAddress`.
-    pub fn pk_d(&self) -> &jubjub::SubgroupPoint {
+    pub fn pk_d(&self) -> &DiversifiedTransmissionKey {
         &self.pk_d
     }
 
-    pub fn g_d(&self) -> Option<jubjub::SubgroupPoint> {
-        self.diversifier.g_d()
+    pub(crate) fn g_d(&self) -> jubjub::SubgroupPoint {
+        self.diversifier.g_d().expect("checked at construction")
     }
 
-    pub fn create_note(&self, value: u64, rseed: Rseed) -> Option<Note> {
-        self.g_d().map(|g_d| Note {
-            value,
-            rseed,
-            g_d,
-            pk_d: self.pk_d,
-        })
+    pub fn create_note(&self, value: u64, rseed: Rseed) -> Note {
+        Note::from_parts(*self, NoteValue::from_raw(value), rseed)
     }
 }
 

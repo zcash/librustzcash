@@ -175,7 +175,7 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
         let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
         let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
         for s_out in shielded_outputs {
-            ch.write_all(s_out.cmu().to_repr().as_ref()).unwrap();
+            ch.write_all(s_out.cmu().to_bytes().as_ref()).unwrap();
             ch.write_all(s_out.ephemeral_key().as_ref()).unwrap();
             ch.write_all(&s_out.enc_ciphertext()[..52]).unwrap();
 

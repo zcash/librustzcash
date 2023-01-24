@@ -334,7 +334,7 @@ pub(crate) fn scan_block_with_runner<
                     .collect();
 
                 // Increment tree and witnesses
-                let node = Node::from_scalar(output.cmu);
+                let node = Node::from_cmu(&output.cmu);
                 for witness in &mut *existing_witnesses {
                     witness.append(node).unwrap();
                 }
@@ -394,14 +394,16 @@ mod tests {
         GroupEncoding,
     };
     use rand_core::{OsRng, RngCore};
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         consensus::{BlockHeight, Network},
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
         merkle_tree::CommitmentTree,
         sapling::{
-            note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey},
+            note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
             util::generate_random_rseed,
+            value::NoteValue,
             Note, Nullifier, SaplingIvk,
         },
         transaction::components::Amount,
@@ -464,12 +466,7 @@ mod tests {
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
-        let note = Note {
-            g_d: to.diversifier().g_d().unwrap(),
-            pk_d: *to.pk_d(),
-            value: value.into(),
-            rseed,
-        };
+        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -477,8 +474,10 @@ mod tests {
             MemoBytes::empty(),
             &mut rng,
         );
-        let cmu = note.cmu().to_repr().as_ref().to_owned();
-        let ephemeral_key = encryptor.epk().to_bytes().to_vec();
+        let cmu = note.cmu().to_bytes().to_vec();
+        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+            .0
+            .to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
@@ -577,7 +576,7 @@ mod tests {
             assert_eq!(tx.shielded_outputs.len(), 1);
             assert_eq!(tx.shielded_outputs[0].index, 0);
             assert_eq!(tx.shielded_outputs[0].account, account);
-            assert_eq!(tx.shielded_outputs[0].note.value, 5);
+            assert_eq!(tx.shielded_outputs[0].note.value().inner(), 5);
 
             // Check that the witness root matches
             assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
@@ -640,7 +639,7 @@ mod tests {
             assert_eq!(tx.shielded_outputs.len(), 1);
             assert_eq!(tx.shielded_outputs[0].index, 0);
             assert_eq!(tx.shielded_outputs[0].account, AccountId::from(0));
-            assert_eq!(tx.shielded_outputs[0].note.value, 5);
+            assert_eq!(tx.shielded_outputs[0].note.value().inner(), 5);
 
             // Check that the witness root matches
             assert_eq!(tx.shielded_outputs[0].witness.root(), tree.root());
