@@ -1,43 +1,41 @@
 use std::collections::HashSet;
 
-use rusqlite::{Transaction, NO_PARAMS};
-use schemer::Migration;
+use rusqlite::Transaction;
+use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{address::RecipientAddress, keys::UnifiedFullViewingKey};
 use zcash_primitives::{consensus, zip32::AccountId};
 
-use super::super::WalletMigrationError;
-use crate::wallet::add_account_internal;
+use crate::wallet::{add_account_internal, init::WalletMigrationError};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::keys::IncomingViewingKey;
+
+use super::ufvk_support;
 
 /// The migration that removed the address columns from the `accounts` table, and created
 /// the `accounts` table.
 ///
 /// d956978c-9c87-4d6e-815d-fb8f088d094c
-pub(super) const ADDRESSES_TABLE_MIGRATION: Uuid = Uuid::from_fields(
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
     0xd956978c,
     0x9c87,
     0x4d6e,
     b"\x81\x5d\xfb\x8f\x08\x8d\x09\x4c",
 );
 
-pub(crate) struct AddressesTableMigration<P: consensus::Parameters> {
+pub(crate) struct Migration<P: consensus::Parameters> {
     pub(crate) params: P,
 }
 
-impl<P: consensus::Parameters> Migration for AddressesTableMigration<P> {
+impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
     fn id(&self) -> Uuid {
-        ADDRESSES_TABLE_MIGRATION
+        MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        ["be57ef3b-388e-42ea-97e2-678dafcf9754"]
-            .iter()
-            .map(|uuidstr| ::uuid::Uuid::parse_str(uuidstr).unwrap())
-            .collect()
+        [ufvk_support::MIGRATION_ID].into_iter().collect()
     }
 
     fn description(&self) -> &'static str {
@@ -45,7 +43,7 @@ impl<P: consensus::Parameters> Migration for AddressesTableMigration<P> {
     }
 }
 
-impl<P: consensus::Parameters> RusqliteMigration for AddressesTableMigration<P> {
+impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
@@ -54,6 +52,7 @@ impl<P: consensus::Parameters> RusqliteMigration for AddressesTableMigration<P> 
                 account INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
+                cached_transparent_receiver_address TEXT,
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
             );
@@ -66,7 +65,7 @@ impl<P: consensus::Parameters> RusqliteMigration for AddressesTableMigration<P> 
         let mut stmt_fetch_accounts = transaction
             .prepare("SELECT account, ufvk, address, transparent_address FROM accounts")?;
 
-        let mut rows = stmt_fetch_accounts.query(NO_PARAMS)?;
+        let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             let account: u32 = row.get(0)?;
             let account = AccountId::from(account);

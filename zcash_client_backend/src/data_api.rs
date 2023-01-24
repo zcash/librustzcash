@@ -1,36 +1,31 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
 use std::cmp;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-
-#[cfg(feature = "transparent-inputs")]
-use std::collections::HashSet;
 
 use secrecy::SecretVec;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
+    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier},
+    sapling::{Node, Nullifier, PaymentAddress},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{AccountId, ExtendedFullViewingKey},
 };
 
 use crate::{
-    address::{RecipientAddress, UnifiedAddress},
+    address::UnifiedAddress,
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::{SpendableNote, WalletTx},
+    wallet::{SpendableNote, WalletTransparentOutput, WalletTx},
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    crate::wallet::WalletTransparentOutput,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
-};
+use zcash_primitives::transaction::components::transparent::OutPoint;
 
 pub mod chain;
 pub mod error;
@@ -130,6 +125,13 @@ pub trait WalletRead {
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error>;
 
+    /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`],
+    /// if any.
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<AccountId>, Self::Error>;
+
     /// Checks whether the specified extended full viewing key is
     /// associated with the account.
     fn is_valid_account_extfvk(
@@ -196,10 +198,7 @@ pub trait WalletRead {
         target_value: Amount,
         anchor_height: BlockHeight,
     ) -> Result<Vec<SpendableNote>, Self::Error>;
-}
 
-#[cfg(feature = "transparent-inputs")]
-pub trait WalletReadTransparent: WalletRead {
     /// Returns the set of all transparent receivers associated with the given account.
     ///
     /// The set contains all transparent receivers that are known to have been derived
@@ -248,13 +247,34 @@ pub struct SentTransaction<'a> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,
     pub account: AccountId,
-    pub outputs: Vec<SentTransactionOutput<'a>>,
+    pub outputs: Vec<SentTransactionOutput>,
     pub fee_amount: Amount,
     #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
 }
 
-pub struct SentTransactionOutput<'a> {
+/// A value pool to which the wallet supports sending transaction outputs.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PoolType {
+    /// The transparent value pool
+    Transparent,
+    /// The Sapling value pool
+    Sapling,
+}
+
+/// A type that represents the recipient of a transaction output; a recipient address (and, for
+/// unified addresses, the pool to which the payment is sent) in the case of outgoing output, or an
+/// internal account ID and the pool to which funds were sent in the case of a wallet-internal
+/// output.
+#[derive(Debug, Clone)]
+pub enum Recipient {
+    Transparent(TransparentAddress),
+    Sapling(PaymentAddress),
+    Unified(UnifiedAddress, PoolType),
+    InternalAccount(AccountId, PoolType),
+}
+
+pub struct SentTransactionOutput {
     /// The index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
@@ -262,14 +282,21 @@ pub struct SentTransactionOutput<'a> {
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
     pub output_index: usize,
-    pub recipient_address: &'a RecipientAddress,
+    /// The recipient address of the transaction, or the account
+    /// id for wallet-internal transactions.
+    pub recipient: Recipient,
+    /// The value of the newly created output
     pub value: Amount,
+    /// The memo that was attached to the output, if any
     pub memo: Option<MemoBytes>,
 }
 
 /// This trait encapsulates the write capabilities required to update stored
 /// wallet data.
 pub trait WalletWrite: WalletRead {
+    /// The type of identifiers used to look up transparent UTXOs.
+    type UtxoRef;
+
     /// Tells the wallet to track the next available account-level spend authority, given
     /// the current set of [ZIP 316] account identifiers known to the wallet database.
     ///
@@ -343,12 +370,8 @@ pub trait WalletWrite: WalletRead {
     ///
     /// There may be restrictions on how far it is possible to rewind.
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
-}
 
-#[cfg(feature = "transparent-inputs")]
-pub trait WalletWriteTransparent: WalletWrite + WalletReadTransparent {
-    type UtxoRef;
-
+    /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
         &mut self,
         output: &WalletTransparentOutput,
@@ -403,9 +426,6 @@ pub mod testing {
         WalletWrite,
     };
 
-    #[cfg(feature = "transparent-inputs")]
-    use super::WalletReadTransparent;
-
     pub struct MockBlockSource {}
 
     impl BlockSource for MockBlockSource {
@@ -459,6 +479,13 @@ pub mod testing {
             &self,
         ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
             Ok(HashMap::new())
+        }
+
+        fn get_account_for_ufvk(
+            &self,
+            _ufvk: &UnifiedFullViewingKey,
+        ) -> Result<Option<AccountId>, Self::Error> {
+            Ok(None)
         }
 
         fn is_valid_account_extfvk(
@@ -524,10 +551,7 @@ pub mod testing {
         ) -> Result<Vec<SpendableNote>, Self::Error> {
             Ok(Vec::new())
         }
-    }
 
-    #[cfg(feature = "transparent-inputs")]
-    impl WalletReadTransparent for MockWalletDb {
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
@@ -545,6 +569,8 @@ pub mod testing {
     }
 
     impl WalletWrite for MockWalletDb {
+        type UtxoRef = u32;
+
         fn create_account(
             &mut self,
             seed: &SecretVec<u8>,
@@ -592,6 +618,14 @@ pub mod testing {
 
         fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
             Ok(())
+        }
+
+        /// Adds a transparent UTXO received by the wallet to the data store.
+        fn put_received_transparent_utxo(
+            &mut self,
+            _output: &WalletTransparentOutput,
+        ) -> Result<Self::UtxoRef, Self::Error> {
+            Ok(0)
         }
     }
 }

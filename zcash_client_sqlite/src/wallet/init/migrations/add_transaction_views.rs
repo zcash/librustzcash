@@ -1,22 +1,28 @@
-//! Functions for initializing the various databases.
-use rusqlite::{self, types::ToSql, OptionalExtension, NO_PARAMS};
-use schemer::{self};
-use schemer_rusqlite::RusqliteMigration;
-
+//! Migration that adds transaction summary views & add fee information to transactions.
 use std::collections::HashSet;
 
+use rusqlite::{self, types::ToSql, OptionalExtension};
+use schemer::{self};
+use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight, BranchId},
-    transaction::{components::amount::Amount, Transaction},
+    transaction::{
+        components::amount::{Amount, BalanceError},
+        Transaction,
+    },
 };
 
-use super::super::{WalletMigration2, WalletMigrationError};
+use super::{add_utxo_account, sent_notes_to_internal};
+use crate::wallet::init::WalletMigrationError;
 
-pub(crate) fn migration_id() -> Uuid {
-    Uuid::parse_str("282fad2e-8372-4ca0-8bed-71821320909f").unwrap()
-}
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
+    0x282fad2e,
+    0x8372,
+    0x4ca0,
+    b"\x8b\xed\x71\x82\x13\x20\x90\x9f",
+);
 
 pub(crate) struct Migration<P> {
     pub(super) params: P,
@@ -24,13 +30,16 @@ pub(crate) struct Migration<P> {
 
 impl<P> schemer::Migration for Migration<P> {
     fn id(&self) -> Uuid {
-        migration_id()
+        MIGRATION_ID
     }
 
     fn dependencies(&self) -> HashSet<Uuid> {
-        let mut deps = HashSet::new();
-        deps.insert(WalletMigration2::<P>::id());
-        deps
+        [
+            add_utxo_account::MIGRATION_ID,
+            sent_notes_to_internal::MIGRATION_ID,
+        ]
+        .into_iter()
+        .collect()
     }
 
     fn description(&self) -> &'static str {
@@ -42,6 +51,25 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
+        enum FeeError {
+            Db(rusqlite::Error),
+            UtxoNotFound,
+            Balance(BalanceError),
+            CorruptedData(String),
+        }
+
+        impl From<BalanceError> for FeeError {
+            fn from(e: BalanceError) -> Self {
+                FeeError::Balance(e)
+            }
+        }
+
+        impl From<rusqlite::Error> for FeeError {
+            fn from(e: rusqlite::Error) -> Self {
+                FeeError::Db(e)
+            }
+        }
+
         transaction.execute_batch("ALTER TABLE transactions ADD COLUMN fee INTEGER;")?;
 
         let mut stmt_list_txs =
@@ -53,7 +81,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut stmt_find_utxo_value = transaction
             .prepare("SELECT value_zat FROM utxos WHERE prevout_txid = ? AND prevout_idx = ?")?;
 
-        let mut tx_rows = stmt_list_txs.query(NO_PARAMS)?;
+        let mut tx_rows = stmt_list_txs.query([])?;
         while let Some(row) = tx_rows.next()? {
             let id_tx: i64 = row.get(0)?;
             let tx_bytes: Option<Vec<u8>> = row.get(1)?;
@@ -74,31 +102,42 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                 let fee_paid = tx.fee_paid(|op| {
                     let op_amount = stmt_find_utxo_value
-                        .query_row(&[op.hash().to_sql()?, op.n().to_sql()?], |row| {
+                        .query_row([op.hash().to_sql()?, op.n().to_sql()?], |row| {
                             row.get::<_, i64>(0)
                         })
                         .optional()
-                        .map_err(WalletMigrationError::DbError)?;
+                        .map_err(FeeError::Db)?;
 
                     op_amount.map_or_else(
-                        || {
-                            Err(WalletMigrationError::CorruptedData(format!(
-                                "Unable to find UTXO corresponding to outpoint {:?}",
-                                op
-                            )))
-                        },
+                        || Err(FeeError::UtxoNotFound),
                         |i| {
                             Amount::from_i64(i).map_err(|_| {
-                                WalletMigrationError::CorruptedData(format!(
+                                FeeError::CorruptedData(format!(
                                     "UTXO amount out of range in outpoint {:?}",
                                     op
                                 ))
                             })
                         },
                     )
-                })?;
+                });
 
-                stmt_set_fee.execute(&[i64::from(fee_paid), id_tx])?;
+                match fee_paid {
+                    Ok(fee_paid) => {
+                        stmt_set_fee.execute([i64::from(fee_paid), id_tx])?;
+                    }
+                    Err(FeeError::UtxoNotFound) => {
+                        // The fee and net value will end up being null in the transactions view.
+                    }
+                    Err(FeeError::Db(e)) => {
+                        return Err(WalletMigrationError::from(e));
+                    }
+                    Err(FeeError::Balance(e)) => {
+                        return Err(WalletMigrationError::from(e));
+                    }
+                    Err(FeeError::CorruptedData(s)) => {
+                        return Err(WalletMigrationError::CorruptedData(s));
+                    }
+                }
             }
         }
 
@@ -110,32 +149,39 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         transaction.execute_batch(
             "CREATE VIEW v_tx_sent AS
-            SELECT transactions.id_tx         AS id_tx,
-                   transactions.block         AS mined_height,
-                   transactions.tx_index      AS tx_index,
-                   transactions.txid          AS txid,
-                   transactions.expiry_height AS expiry_height,
-                   transactions.raw           AS raw,
-                   SUM(sent_notes.value)      AS sent_total,
-                   COUNT(sent_notes.id_note)  AS sent_note_count,
+            SELECT transactions.id_tx           AS id_tx,
+                   transactions.block           AS mined_height,
+                   transactions.tx_index        AS tx_index,
+                   transactions.txid            AS txid,
+                   transactions.expiry_height   AS expiry_height,
+                   transactions.raw             AS raw,
+                   MAX(sent_notes.from_account) AS sent_from_account,
+                   SUM(sent_notes.value)        AS sent_total,
+                   COUNT(sent_notes.id_note)    AS sent_note_count,
                    SUM(
                        CASE
                            WHEN sent_notes.memo IS NULL THEN 0
                            ELSE 1
                        END
                    ) AS memo_count,
-                   blocks.time                AS block_time
+                   blocks.time                  AS block_time
             FROM   transactions
                    JOIN sent_notes
                           ON transactions.id_tx = sent_notes.tx
                    LEFT JOIN blocks
                           ON transactions.block = blocks.height
-            GROUP BY sent_notes.tx;
-            CREATE VIEW v_tx_received AS
+            GROUP BY sent_notes.tx, sent_notes.from_account;",
+        )?;
+
+        transaction.execute_batch(
+            "CREATE VIEW v_tx_received AS
             SELECT transactions.id_tx            AS id_tx,
                    transactions.block            AS mined_height,
                    transactions.tx_index         AS tx_index,
                    transactions.txid             AS txid,
+                   transactions.expiry_height    AS expiry_height,
+                   transactions.raw              AS raw,
+                   MAX(received_notes.account)   AS received_by_account,
                    SUM(received_notes.value)     AS received_total,
                    COUNT(received_notes.id_note) AS received_note_count,
                    SUM(
@@ -150,17 +196,25 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                           ON transactions.id_tx = received_notes.tx
                    LEFT JOIN blocks
                           ON transactions.block = blocks.height
-            GROUP BY received_notes.tx;
-            CREATE VIEW v_transactions AS
-            SELECT id_tx,
-                   mined_height,
-                   tx_index,
-                   txid,
-                   expiry_height,
-                   raw,
-                   SUM(value) + MAX(fee) AS net_value,
-                   SUM(is_change) > 0 AS has_change,
-                   SUM(memo_present) AS memo_count
+            GROUP BY received_notes.tx, received_notes.account;",
+        )?;
+
+        transaction.execute_batch(
+            "CREATE VIEW v_transactions AS
+            SELECT notes.id_tx,
+                   notes.mined_height,
+                   notes.tx_index,
+                   notes.txid,
+                   notes.expiry_height,
+                   notes.raw,
+                   SUM(notes.value) + MAX(notes.fee) AS net_value,
+                   MAX(notes.fee)                    AS fee_paid,
+                   SUM(notes.sent_count) == 0        AS is_wallet_internal,
+                   SUM(notes.is_change) > 0          AS has_change,
+                   SUM(notes.sent_count)             AS sent_note_count,
+                   SUM(notes.received_count)         AS received_note_count,
+                   SUM(notes.memo_present)           AS memo_count,
+                   blocks.time                       AS block_time
             FROM (
                 SELECT transactions.id_tx            AS id_tx,
                        transactions.block            AS mined_height,
@@ -173,7 +227,15 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             WHEN received_notes.is_change THEN 0
                             ELSE value
                        END AS value,
-                       received_notes.is_change      AS is_change,
+                       0                             AS sent_count,
+                       CASE
+                            WHEN received_notes.is_change THEN 1
+                            ELSE 0
+                       END AS is_change,
+                       CASE
+                            WHEN received_notes.is_change THEN 0
+                            ELSE 1
+                       END AS received_count,
                        CASE
                            WHEN received_notes.memo IS NULL THEN 0
                            ELSE 1
@@ -189,15 +251,21 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                        transactions.raw              AS raw,
                        transactions.fee              AS fee,
                        -sent_notes.value             AS value,
-                       false                         AS is_change,
+                       CASE
+                           WHEN sent_notes.from_account = sent_notes.to_account THEN 0
+                           ELSE 1
+                       END AS sent_count,
+                       0                             AS is_change,
+                       0                             AS received_count,
                        CASE
                            WHEN sent_notes.memo IS NULL THEN 0
                            ELSE 1
                        END AS memo_present
                 FROM   transactions
                        JOIN sent_notes ON transactions.id_tx = sent_notes.tx
-            )
-            GROUP BY id_tx;",
+            ) AS notes
+            LEFT JOIN blocks ON notes.mined_height = blocks.height
+            GROUP BY notes.id_tx;",
         )?;
 
         Ok(())
@@ -211,16 +279,24 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::{self, NO_PARAMS};
+    use rusqlite::{self, params};
     use tempfile::NamedTempFile;
+
+    use zcash_client_backend::keys::UnifiedSpendingKey;
+    use zcash_primitives::zip32::AccountId;
+
+    use crate::{
+        tests,
+        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
+        WalletDb,
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::wallet::init::WalletMigration2,
-        rusqlite::params,
-        zcash_client_backend::{encoding::AddressCodec, keys::UnifiedSpendingKey},
+        crate::wallet::init::migrations::{ufvk_support, utxos_table},
+        zcash_client_backend::encoding::AddressCodec,
         zcash_primitives::{
-            consensus::{BlockHeight, BranchId, Network},
+            consensus::{BlockHeight, BranchId},
             legacy::{keys::IncomingViewingKey, Script},
             transaction::{
                 components::{
@@ -229,28 +305,29 @@ mod tests {
                 },
                 TransactionData, TxVersion,
             },
-            zip32::AccountId,
         },
-    };
-
-    use crate::{
-        tests,
-        wallet::init::{
-            init_wallet_db, init_wallet_db_internal,
-            migrations::addresses_table::ADDRESSES_TABLE_MIGRATION,
-        },
-        WalletDb,
     };
 
     #[test]
     fn transaction_views() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, Some(ADDRESSES_TABLE_MIGRATION)).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID]).unwrap();
+        let usk =
+            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
+                .unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
+                params![ufvk.encode(&tests::network())],
+            )
+            .unwrap();
 
         db_data.conn.execute_batch(
-            "INSERT INTO accounts (account, ufvk) VALUES (0, '');
-            INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
 
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
@@ -274,7 +351,7 @@ mod tests {
             .conn
             .prepare("SELECT received_total, received_note_count, memo_count FROM v_tx_received")
             .unwrap();
-        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut rows = q.query([]).unwrap();
         let mut row_count = 0;
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
@@ -291,7 +368,7 @@ mod tests {
             .conn
             .prepare("SELECT sent_total, sent_note_count, memo_count FROM v_tx_sent")
             .unwrap();
-        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut rows = q.query([]).unwrap();
         let mut row_count = 0;
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
@@ -308,7 +385,7 @@ mod tests {
             .conn
             .prepare("SELECT net_value, has_change, memo_count FROM v_transactions")
             .unwrap();
-        let mut rows = q.query(NO_PARAMS).unwrap();
+        let mut rows = q.query([]).unwrap();
         let mut row_count = 0;
         while let Some(row) = rows.next().unwrap() {
             row_count += 1;
@@ -327,8 +404,12 @@ mod tests {
     fn migrate_from_wm2() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db_internal(&mut db_data, None, Some(WalletMigration2::<Network>::id()))
-            .unwrap();
+        init_wallet_db_internal(
+            &mut db_data,
+            None,
+            &[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
+        )
+        .unwrap();
 
         // create a UTXO to spend
         let tx = TransactionData::from_parts(
@@ -385,7 +466,7 @@ mod tests {
         db_data.conn.execute(
             "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
             VALUES (?, X'0101010101010101010101010101010101010101010101010101010101010101', 1, X'', 1400000000, 1)",
-            &[taddr]
+            [taddr]
         ).unwrap();
         db_data
             .conn
@@ -399,11 +480,9 @@ mod tests {
 
         let fee = db_data
             .conn
-            .query_row(
-                "SELECT fee FROM transactions WHERE id_tx = 0",
-                NO_PARAMS,
-                |row| Ok(Amount::from_i64(row.get(0)?).unwrap()),
-            )
+            .query_row("SELECT fee FROM transactions WHERE id_tx = 0", [], |row| {
+                Ok(Amount::from_i64(row.get(0)?).unwrap())
+            })
             .unwrap();
 
         assert_eq!(fee, Amount::from_i64(300000000).unwrap());

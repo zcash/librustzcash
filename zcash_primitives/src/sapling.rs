@@ -71,7 +71,7 @@ pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
 }
 
 /// A node within the Sapling commitment tree.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Node {
     repr: [u8; 32],
 }
@@ -155,7 +155,7 @@ pub(crate) fn spend_sig_internal<R: RngCore>(
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
     data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
-    (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash[..]);
+    data_to_be_signed[32..64].copy_from_slice(&sighash[..]);
 
     // Do the signing
     rsk.sign(&data_to_be_signed, rng, SPENDING_KEY_GENERATOR)
@@ -245,7 +245,7 @@ impl SaplingIvk {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Diversifier(pub [u8; 11]);
 
 impl Diversifier {
@@ -381,7 +381,7 @@ impl ConstantTimeEq for Nullifier {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NoteValue(u64);
 
 impl TryFrom<u64> for NoteValue {
@@ -436,9 +436,7 @@ impl Note {
         let mut note_contents = vec![];
 
         // Writing the value in little endian
-        (&mut note_contents)
-            .write_u64::<LittleEndian>(self.value)
-            .unwrap();
+        note_contents.write_u64::<LittleEndian>(self.value).unwrap();
 
         // Write g_d
         note_contents.extend_from_slice(&self.g_d.to_bytes());
@@ -526,11 +524,12 @@ pub mod testing {
     use proptest::prelude::*;
     use std::cmp::min;
 
-    use crate::{
-        transaction::components::amount::MAX_MONEY, zip32::testing::arb_extended_spending_key,
-    };
+    use crate::transaction::components::amount::MAX_MONEY;
 
-    use super::{Node, Note, NoteValue, PaymentAddress, Rseed};
+    use super::{
+        keys::testing::arb_full_viewing_key, Diversifier, Node, Note, NoteValue, PaymentAddress,
+        Rseed, SaplingIvk,
+    };
 
     prop_compose! {
         pub fn arb_note_value()(value in 0u64..=MAX_MONEY as u64) -> NoteValue {
@@ -547,8 +546,19 @@ pub mod testing {
         }
     }
 
+    prop_compose! {
+        pub fn arb_incoming_viewing_key()(fvk in arb_full_viewing_key()) -> SaplingIvk {
+            fvk.vk.ivk()
+        }
+    }
+
     pub fn arb_payment_address() -> impl Strategy<Value = PaymentAddress> {
-        arb_extended_spending_key().prop_map(|sk| sk.default_address().1)
+        arb_incoming_viewing_key().prop_flat_map(|ivk: SaplingIvk| {
+            any::<[u8; 11]>().prop_filter_map(
+                "Sampled diversifier must generate a valid Sapling payment address.",
+                move |d| ivk.to_payment_address(Diversifier(d)),
+            )
+        })
     }
 
     prop_compose! {

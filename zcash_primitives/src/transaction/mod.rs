@@ -13,6 +13,7 @@ mod tests;
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::PrimeField;
+use memuse::DynamicUsage;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
@@ -64,6 +65,8 @@ const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct TxId([u8; 32]);
+
+memuse::impl_no_dynamic_usage!(TxId);
 
 impl fmt::Debug for TxId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

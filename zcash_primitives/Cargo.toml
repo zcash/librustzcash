@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.7.0"
+version = "0.8.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -26,17 +26,17 @@ blake2s_simd = "1"
 bls12_381 = "0.7"
 bs58 = { version = "0.4", features = ["check"], optional = true }
 byteorder = "1"
-chacha20poly1305 = "0.9"
+chacha20poly1305 = "0.10"
 equihash = { version = "0.2", path = "../components/equihash" }
 ff = "0.12"
 fpe = "0.5"
-group = "0.12"
+group = { version = "0.12.1", features = ["wnaf-memuse"] }
 hdwallet = { version = "0.3.1", optional = true }
 hex = "0.4"
 incrementalmerkletree = "0.3"
 jubjub = "0.9"
 lazy_static = "1"
-memuse = "0.2"
+memuse = "0.2.1"
 nonempty = "0.7"
 orchard = { version = "0.3", git = "https://github.com/QED-it/orchard.git", rev = "c6e048a4474f0bef5182ed56e5d2ecff6fea0389" }
 proptest = { version = "1.0.0", optional = true }
@@ -46,9 +46,13 @@ ripemd = { version = "0.1", optional = true }
 secp256k1 = { version = "0.21", optional = true }
 sha2 = "0.9"
 subtle = "2.2.3"
-zcash_address = { version = "0.1", path = "../components/zcash_address" }
-zcash_encoding = { version = "0.1", path = "../components/zcash_encoding" }
-zcash_note_encryption = { version = "0.2", path = "../components/zcash_note_encryption", features = ["pre-zip-212"] }
+zcash_address = { version = "0.2", path = "../components/zcash_address" }
+zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
+
+[dependencies.zcash_note_encryption]
+version = "0.2"
+path = "../components/zcash_note_encryption"
+features = ["pre-zip-212"]
 
 [dev-dependencies]
 criterion = "0.3"

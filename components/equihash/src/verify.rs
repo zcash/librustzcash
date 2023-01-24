@@ -170,7 +170,7 @@ fn generate_hash(base_state: &Blake2bState, i: u32) -> Blake2bHash {
 
 fn expand_array(vin: &[u8], bit_len: usize, byte_pad: usize) -> Vec<u8> {
     assert!(bit_len >= 8);
-    assert!(8 * size_of::<u32>() >= 7 + bit_len);
+    assert!(u32::BITS as usize >= 7 + bit_len);
 
     let out_width = (bit_len + 7) / 8 + byte_pad;
     let out_len = 8 * out_width * vin.len() / bit_len;
@@ -221,7 +221,7 @@ fn indices_from_minimal(p: Params, minimal: &[u8]) -> Result<Vec<u32>, Error> {
     }
 
     assert!(((c_bit_len + 1) + 7) / 8 <= size_of::<u32>());
-    let len_indices = 8 * size_of::<u32>() * minimal.len() / (c_bit_len + 1);
+    let len_indices = u32::BITS as usize * minimal.len() / (c_bit_len + 1);
     let byte_pad = size_of::<u32>() - ((c_bit_len + 1) + 7) / 8;
 
     let mut csr = Cursor::new(expand_array(minimal, c_bit_len + 1, byte_pad));

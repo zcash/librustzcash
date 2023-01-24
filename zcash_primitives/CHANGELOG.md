@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.8.1] - 2022-10-19
 ### Added
 - `zcash_primitives::legacy`:
   - `impl {Copy, Eq, Ord} for TransparentAddress`
@@ -13,7 +15,6 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::sapling::NullifierDerivingKey`
 - Added in `zcash_primitives::sapling::keys`
   - `DecodingError`
-  - `DiversifiableFullViewingKey`
   - `Scope`
   - `ExpandedSpendingKey::from_bytes`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`
@@ -22,10 +23,14 @@ and this library adheres to Rust's notion of
   - `PreparedEphemeralPublicKey`
 - Added in `zcash_primitives::zip32`
   - `ChainCode::as_bytes`
-  - `DiversifierKey::{from_bytes, as_bytes}`
   - `DiversifierIndex::{as_bytes}`
-  - `ExtendedSpendingKey::{from_bytes, to_bytes}`
   - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
+- `zcash_primitives::zip32::sapling` has been added and now contains 
+  all of the Sapling zip32 key types that were previously located in
+  `zcash_primitives::zip32` directly. The base `zip32` module reexports 
+  the moved types for backwards compatibility.
+  - `DiversifierKey::{from_bytes, as_bytes}`
+  - `ExtendedSpendingKey::{from_bytes, to_bytes}`
 - `zcash_primitives::transaction::Builder` constructors:
   - `Builder::new_with_fee`
   - `Builder::new_with_rng_and_fee`
@@ -36,9 +41,24 @@ and this library adheres to Rust's notion of
   - `JSDescription::net_value`
 - Added in `zcash_primitives::transaction::components::transparent`
   - `Bundle::value_balance`
+  - `TxOut::recipient_address`
+- Implementations of `memuse::DynamicUsage` for the following types:
+  - `zcash_primitives::block::BlockHash`
+  - `zcash_primitives::consensus`:
+    - `BlockHeight`
+    - `MainNetwork`, `TestNetwork`, `Network`
+    - `NetworkUpgrade`, `BranchId`
+  - `zcash_primitives::sapling`:
+    - `keys::Scope`
+    - `note_encryption::SaplingDomain`
+  - `zcash_primitives::transaction`:
+    - `TxId`
+    - `components::sapling::CompactOutputDescription`
+    - `components::sapling::{OutputDescription, OutputDescriptionV5}`
+  - `zcash_primitives::zip32::AccountId`
 
 ### Changed
-- Migrated to `group 0.13`.
+- Migrated to `group 0.13`, `orchard 0.3`, `zcash_address 0.2`, `zcash_encoding 0.2`.
 - `zcash_primitives::sapling::ViewingKey` now stores `nk` as a
   `NullifierDerivingKey` instead of as a bare `jubjub::SubgroupPoint`.
 - The signature of `zcash_primitives::sapling::Note::nf` has changed to
@@ -55,6 +75,16 @@ and this library adheres to Rust's notion of
     instead of `SaplingIvk`.
   - `try_sapling_note_decryption` and `try_sapling_compact_note_decryption` now
     take `&PreparedIncomingViewingKey` instead of `&SaplingIvk`.
+
+### Removed
+- `zcash_primitives::legacy::Script::address` This method was not generally
+  safe to use on arbitrary scripts, only on script_pubkey values. Its
+  functionality is now available via
+  `zcash_primitives::transaction::components::transparent::TxOut::recipient_address`
+
+## [0.8.0] - 2022-10-19
+This release was yanked because it depended on the wrong versions of `zcash_address`
+and `zcash_encoding`.
 
 ## [0.7.0] - 2022-06-24
 ### Changed

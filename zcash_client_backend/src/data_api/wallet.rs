@@ -8,29 +8,22 @@ use zcash_primitives::{
         components::{amount::DEFAULT_FEE, Amount},
         Transaction,
     },
-    zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey},
-};
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_address::unified::Typecode,
-    zcash_primitives::{
-        keys::OutgoingViewingKey, legacy::keys as transparent, legacy::keys::IncomingViewingKey,
-    },
 };
 
 use crate::{
     address::RecipientAddress,
     data_api::{
-        error::Error, DecryptedTransaction, SentTransaction, SentTransactionOutput, WalletWrite,
+        error::Error, DecryptedTransaction, PoolType, Recipient, SentTransaction,
+        SentTransactionOutput, WalletWrite,
     },
     decrypt_transaction,
+    keys::UnifiedSpendingKey,
     wallet::OvkPolicy,
     zip321::{Payment, TransactionRequest},
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::data_api::WalletWriteTransparent;
+use zcash_primitives::{legacy::keys::IncomingViewingKey, sapling::keys::OutgoingViewingKey};
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.
@@ -57,14 +50,10 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .ok_or(Error::SaplingNotActive)?;
 
-    let sapling_outputs = decrypt_transaction(params, height, tx, &ufvks);
-
-    if !(sapling_outputs.is_empty() && tx.transparent_bundle().iter().all(|b| b.vout.is_empty())) {
-        data.store_decrypted_tx(&DecryptedTransaction {
-            tx,
-            sapling_outputs: &sapling_outputs,
-        })?;
-    }
+    data.store_decrypted_tx(&DecryptedTransaction {
+        tx,
+        sapling_outputs: &decrypt_transaction(params, height, tx, &ufvks),
+    })?;
 
     Ok(())
 }
@@ -127,7 +116,7 @@ where
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
-///     keys::sapling,
+///     keys::UnifiedSpendingKey,
 ///     data_api::{wallet::create_spend_to_address, error::Error, testing},
 ///     wallet::OvkPolicy,
 /// };
@@ -146,8 +135,8 @@ where
 /// };
 ///
 /// let account = AccountId::from(0);
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, account);
-/// let to = extsk.default_address().1.into();
+/// let usk = UnifiedSpendingKey::from_seed(&Network::TestNetwork, &[0; 32][..], account).unwrap();
+/// let to = usk.to_unified_full_viewing_key().default_address().0.into();
 ///
 /// let mut db_read = testing::MockWalletDb {
 ///     network: Network::TestNetwork
@@ -157,8 +146,7 @@ where
 ///     &mut db_read,
 ///     &Network::TestNetwork,
 ///     tx_prover,
-///     account,
-///     &extsk,
+///     &usk,
 ///     &to,
 ///     Amount::from_u64(1).unwrap(),
 ///     None,
@@ -174,8 +162,7 @@ pub fn create_spend_to_address<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    account: AccountId,
-    extsk: &ExtendedSpendingKey,
+    usk: &UnifiedSpendingKey,
     to: &RecipientAddress,
     amount: Amount,
     memo: Option<MemoBytes>,
@@ -204,8 +191,7 @@ where
         wallet_db,
         params,
         prover,
-        extsk,
-        account,
+        usk,
         &req,
         ovk_policy,
         min_confirmations,
@@ -246,7 +232,7 @@ where
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
 /// * `prover`: The TxProver to use in constructing the shielded transaction.
-/// * `extsk`: The extended spending key that controls the funds that will be spent
+/// * `usk`: The unified spending key that controls the funds that will be spent
 ///   in the resulting transaction.
 /// * `account`: The ZIP32 account identifier associated with the extended spending
 ///   key that controls the funds to be used in creating this transaction.  This
@@ -263,8 +249,7 @@ pub fn spend<E, N, P, D, R>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    extsk: &ExtendedSpendingKey,
-    account: AccountId,
+    usk: &UnifiedSpendingKey,
     request: &TransactionRequest,
     ovk_policy: OvkPolicy,
     min_confirmations: u32,
@@ -275,12 +260,11 @@ where
     R: Copy + Debug,
     D: WalletWrite<Error = E, TxRef = R>,
 {
-    // Check that the ExtendedSpendingKey we have been given corresponds to the
-    // ExtendedFullViewingKey for the account we are spending from.
-    let extfvk = ExtendedFullViewingKey::from(extsk);
-    if !wallet_db.is_valid_account_extfvk(account, &extfvk)? {
-        return Err(E::from(Error::InvalidExtSk(account)));
-    }
+    let account = wallet_db
+        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())?
+        .ok_or(Error::KeyNotRecognized)?;
+
+    let extfvk = usk.sapling().to_extended_full_viewing_key();
 
     // Apply the outgoing viewing key policy.
     let ovk = match ovk_policy {
@@ -333,7 +317,12 @@ where
         let merkle_path = selected.witness.path().expect("the tree is not empty");
 
         builder
-            .add_sapling_spend(extsk.clone(), selected.diversifier, note, merkle_path)
+            .add_sapling_spend(
+                usk.sapling().clone(),
+                selected.diversifier,
+                note,
+                merkle_path,
+            )
             .map_err(Error::Builder)?;
     }
 
@@ -372,14 +361,21 @@ where
     let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
 
     let sent_outputs = request.payments().iter().enumerate().map(|(i, payment)| {
-        let idx = match &payment.recipient_address {
+        let (output_index, recipient) = match &payment.recipient_address {
             // Sapling outputs are shuffled, so we need to look up where the output ended up.
-            // TODO: When we add Orchard support, we will need to trial-decrypt to find them.
-            RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) =>
-                tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment."),
+            RecipientAddress::Shielded(addr) => {
+                let idx = tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment.");
+                (idx, Recipient::Sapling(addr.clone()))
+            }
+            RecipientAddress::Unified(addr) => {
+                // TODO: When we add Orchard support, we will need to trial-decrypt to find them,
+                // and return the appropriate pool type.
+                let idx = tx_metadata.output_index(i).expect("An output should exist in the transaction for each shielded payment.");
+                (idx, Recipient::Unified(addr.clone(), PoolType::Sapling))
+            }
             RecipientAddress::Transparent(addr) => {
                 let script = addr.script();
-                tx.transparent_bundle()
+                let idx = tx.transparent_bundle()
                     .and_then(|b| {
                         b.vout
                             .iter()
@@ -387,13 +383,15 @@ where
                             .find(|(_, tx_out)| tx_out.script_pubkey == script)
                     })
                     .map(|(index, _)| index)
-                    .expect("An output should exist in the transaction for each transparent payment.")
+                    .expect("An output should exist in the transaction for each transparent payment.");
+
+                (idx, Recipient::Transparent(*addr))
             }
         };
 
         SentTransactionOutput {
-            output_index: idx,
-            recipient_address: &payment.recipient_address,
+            output_index,
+            recipient,
             value: payment.amount,
             memo: payment.memo.clone()
         }
@@ -441,8 +439,7 @@ pub fn shield_transparent_funds<E, N, P, D, R, U>(
     wallet_db: &mut D,
     params: &P,
     prover: impl TxProver,
-    sk: &transparent::AccountPrivKey,
-    account: AccountId,
+    usk: &UnifiedSpendingKey,
     memo: &MemoBytes,
     min_confirmations: u32,
 ) -> Result<D::TxRef, E>
@@ -450,30 +447,22 @@ where
     E: From<Error<N>>,
     P: consensus::Parameters,
     R: Copy + Debug,
-    D: WalletWrite<Error = E, TxRef = R> + WalletWriteTransparent<UtxoRef = U>,
+    D: WalletWrite<Error = E, TxRef = R, UtxoRef = U>,
 {
-    // Obtain the UFVK for the specified account & use its internal change address
-    // as the destination for shielded funds.
-    let shielding_address = wallet_db
-        .get_unified_full_viewing_keys()
-        .and_then(|ufvks| {
-            ufvks
-                .get(&account)
-                .ok_or_else(|| E::from(Error::AccountNotFound(account)))
-                .and_then(|ufvk| {
-                    // TODO: select the most preferred shielded receiver once we have the ability to
-                    // spend Orchard funds.
-                    ufvk.sapling()
-                        .map(|dfvk| dfvk.change_address().1)
-                        .ok_or_else(|| E::from(Error::KeyNotFound(account, Typecode::Sapling)))
-                })
-        })?;
+    let account = wallet_db
+        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())?
+        .ok_or(Error::KeyNotRecognized)?;
 
+    let shielding_address = usk
+        .sapling()
+        .to_diversifiable_full_viewing_key()
+        .change_address()
+        .1;
     let (latest_scanned_height, latest_anchor) = wallet_db
         .get_target_and_anchor_heights(min_confirmations)
         .and_then(|x| x.ok_or_else(|| Error::ScanRequired.into()))?;
 
-    let account_pubkey = sk.to_account_pubkey();
+    let account_pubkey = usk.transparent().to_account_pubkey();
     let ovk = OutgoingViewingKey(account_pubkey.internal_ovk().as_bytes());
 
     // derive the t-address for the extpubkey at the minimum valid child index
@@ -486,7 +475,7 @@ where
     let utxos = wallet_db.get_unspent_transparent_outputs(&taddr, latest_anchor)?;
     let total_amount = utxos
         .iter()
-        .map(|utxo| utxo.txout.value)
+        .map(|utxo| utxo.txout().value)
         .sum::<Option<Amount>>()
         .ok_or_else(|| E::from(Error::InvalidAmount))?;
 
@@ -499,10 +488,13 @@ where
 
     let mut builder = Builder::new_with_fee(params.clone(), latest_scanned_height, fee);
 
-    let secret_key = sk.derive_external_secret_key(child_index).unwrap();
+    let secret_key = usk
+        .transparent()
+        .derive_external_secret_key(child_index)
+        .unwrap();
     for utxo in &utxos {
         builder
-            .add_transparent_input(secret_key, utxo.outpoint.clone(), utxo.txout.clone())
+            .add_transparent_input(secret_key, utxo.outpoint().clone(), utxo.txout().clone())
             .map_err(Error::Builder)?;
     }
 
@@ -511,12 +503,7 @@ where
 
     // add the sapling output to shield the funds
     builder
-        .add_sapling_output(
-            Some(ovk),
-            shielding_address.clone(),
-            amount_to_shield,
-            memo.clone(),
-        )
+        .add_sapling_output(Some(ovk), shielding_address, amount_to_shield, memo.clone())
         .map_err(Error::Builder)?;
 
     let (tx, tx_metadata) = builder.build(&prover).map_err(Error::Builder)?;
@@ -530,11 +517,11 @@ where
         account,
         outputs: vec![SentTransactionOutput {
             output_index,
-            recipient_address: &RecipientAddress::Shielded(shielding_address),
             value: amount_to_shield,
+            recipient: Recipient::InternalAccount(account, PoolType::Sapling),
             memo: Some(memo.clone()),
         }],
         fee_amount: fee,
-        utxos_spent: utxos.iter().map(|utxo| utxo.outpoint.clone()).collect(),
+        utxos_spent: utxos.iter().map(|utxo| utxo.outpoint().clone()).collect(),
     })
 }

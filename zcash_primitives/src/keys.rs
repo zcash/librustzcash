@@ -1,5 +1,7 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 
+pub use crate::sapling::keys::OutgoingViewingKey;
+
 pub const PRF_EXPAND_PERSONALIZATION: &[u8; 16] = b"Zcash_ExpandSeed";
 
 /// PRF^expand(sk, t) := BLAKE2b-512("Zcash_ExpandSeed", sk || t)
@@ -18,7 +20,3 @@ pub fn prf_expand_vec(sk: &[u8], ts: &[&[u8]]) -> Blake2bHash {
     }
     h.finalize()
 }
-
-/// An outgoing viewing key
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct OutgoingViewingKey(pub [u8; 32]);

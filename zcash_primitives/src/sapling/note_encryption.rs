@@ -1,9 +1,13 @@
 //! Implementation of in-band secret distribution for Zcash transactions.
+//!
+//! NB: the example code is only covering the post-Canopy case.
+
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use group::{cofactor::CofactorGroup, GroupEncoding, WnafBase, WnafScalar};
 use jubjub::{AffinePoint, ExtendedPoint};
+use memuse::DynamicUsage;
 use rand_core::RngCore;
 
 use zcash_note_encryption::{
@@ -92,9 +96,8 @@ impl AsRef<[u8]> for CompactNoteCiphertextBytes {
 
 use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
-    keys::OutgoingViewingKey,
     memo::MemoBytes,
-    sapling::{Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
+    sapling::{keys::OutgoingViewingKey, Diversifier, Note, PaymentAddress, Rseed, SaplingIvk},
     transaction::components::{
         amount::Amount,
         sapling::{self, OutputDescription},
@@ -112,6 +115,16 @@ type PreparedScalar = WnafScalar<jubjub::Scalar, PREPARED_WINDOW_SIZE>;
 /// A Sapling incoming viewing key that has been precomputed for trial decryption.
 #[derive(Clone, Debug)]
 pub struct PreparedIncomingViewingKey(PreparedScalar);
+
+impl DynamicUsage for PreparedIncomingViewingKey {
+    fn dynamic_usage(&self) -> usize {
+        self.0.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        self.0.dynamic_usage_bounds()
+    }
+}
 
 impl PreparedIncomingViewingKey {
     /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
@@ -218,6 +231,21 @@ where
 pub struct SaplingDomain<P: consensus::Parameters> {
     params: P,
     height: BlockHeight,
+}
+
+impl<P: consensus::Parameters + DynamicUsage> DynamicUsage for SaplingDomain<P> {
+    fn dynamic_usage(&self) -> usize {
+        self.params.dynamic_usage() + self.height.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        let (params_lower, params_upper) = self.params.dynamic_usage_bounds();
+        let (height_lower, height_upper) = self.height.dynamic_usage_bounds();
+        (
+            params_lower + height_lower,
+            params_upper.zip(height_upper).map(|(a, b)| a + b),
+        )
+    }
 }
 
 impl<P: consensus::Parameters> SaplingDomain<P> {
@@ -470,6 +498,47 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 ///
 /// Setting `ovk` to `None` represents the `ovk = ⊥` case, where the note cannot be
 /// recovered by the sender.
+///
+/// NB: the example code here only covers the post-Canopy case.
+///
+/// # Examples
+///
+/// ```
+/// use ff::Field;
+/// use rand_core::OsRng;
+/// use zcash_primitives::{
+///     keys::{OutgoingViewingKey, prf_expand},
+///     consensus::{TEST_NETWORK, TestNetwork, NetworkUpgrade, Parameters},
+///     memo::MemoBytes,
+///     sapling::{
+///         note_encryption::sapling_note_encryption,
+///         util::generate_random_rseed,
+///         Diversifier, PaymentAddress, Rseed, ValueCommitment
+///     },
+/// };
+///
+/// let mut rng = OsRng;
+///
+/// let diversifier = Diversifier([0; 11]);
+/// let pk_d = diversifier.g_d().unwrap();
+/// let to = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
+/// let ovk = Some(OutgoingViewingKey([0; 32]));
+///
+/// let value = 1000;
+/// let rcv = jubjub::Fr::random(&mut rng);
+/// let cv = ValueCommitment {
+///     value,
+///     randomness: rcv.clone(),
+/// };
+/// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
+/// let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
+/// let note = to.create_note(value, rseed).unwrap();
+/// let cmu = note.cmu();
+///
+/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
+/// let encCiphertext = enc.encrypt_note_plaintext();
+/// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv.commitment().into(), &cmu, &mut rng);
+/// ```
 pub fn sapling_note_encryption<R: RngCore, P: consensus::Parameters>(
     ovk: Option<OutgoingViewingKey>,
     note: Note,
@@ -587,7 +656,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
 #[cfg(test)]
 mod tests {
     use chacha20poly1305::{
-        aead::{AeadInPlace, NewAead},
+        aead::{AeadInPlace, KeyInit},
         ChaCha20Poly1305,
     };
     use ff::{Field, PrimeField};

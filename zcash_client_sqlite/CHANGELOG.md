@@ -17,7 +17,7 @@ and this library adheres to Rust's notion of
   - `SqliteClientError::RequestedRewindInvalid`, to report when requested
     rewinds exceed supported bounds.
   - `SqliteClientError::DiversifierIndexOutOfRange`, to report when the space
-    of available diversifier indices has been exhausted. 
+    of available diversifier indices has been exhausted.
   - `SqliteClientError::AccountIdDiscontinuity`, to report when a user attempts
     to initialize the accounts table with a noncontiguous set of account identifiers.
   - `SqliteClientError::AccountIdOutOfRange`, to report when the maximum account
@@ -62,7 +62,7 @@ and this library adheres to Rust's notion of
     (and in the future, outputs to other pools). Values for this column should
     be assigned by inference from the address type in the stored data.
 - MSRV is now 1.56.1.
-- Bumped dependencies to `ff 0.12`, `group 0.12`, `jubjub 0.9`.
+- Bumped dependencies to `ff 0.12`, `group 0.12`, `jubjub 0.9`, `zcash_primitives 0.8`.
 - Renamed the following to use lower-case abbreviations (matching Rust
   naming conventions):
   - `zcash_client_sqlite::BlockDB` to `BlockDb`
@@ -76,11 +76,6 @@ and this library adheres to Rust's notion of
   - `zcash_client_sqlite::wallet`:
     - `get_spendable_notes` to `get_spendable_sapling_notes`.
     - `select_spendable_notes` to `select_spendable_sapling_notes`.
-- Altered the arguments to `zcash_client_sqlite::wallet::put_sent_note`
-  to take the components of a `DecryptedOutput` value to allow this
-  method to be used in contexts where a transaction has just been
-  constructed, rather than only in the case that a transaction has
-  been decrypted after being retrieved from the network.
 - `zcash_client_sqlite::wallet::init_wallet_db` has been modified to
   take the wallet seed as an argument so that it can correctly perform
   migrations that require re-deriving key material. In particular for
@@ -89,10 +84,15 @@ and this library adheres to Rust's notion of
   migration process.
 
 ### Removed
-- `zcash_client_sqlite::wallet`:
-  - `get_extended_full_viewing_keys` (use
-    `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
-    instead).
+- The following functions have been removed from the public interface of
+  `zcash_client_sqlite::wallet`. Prefer methods defined on
+  `zcash_client_backend::data_api::{WalletRead, WalletWrite}` instead.
+  - `get_extended_full_viewing_keys` (use `WalletRead::get_unified_full_viewing_keys` instead).
+  - `insert_sent_note` (use `WalletWrite::store_sent_tx` instead)
+  - `insert_sent_utxo` (use `WalletWrite::store_sent_tx` instead)
+  - `put_sent_note` (use `WalletWrite::store_decrypted_tx` instead)
+  - `put_sent_utxo` (use `WalletWrite::store_decrypted_tx` instead)
+  - `delete_utxos_above` (use `WalletWrite::rewind_to_height` instead)
 - `zcash_client_sqlite::with_blocks` (use
   `zcash_client_backend::data_api::BlockSource::with_blocks` instead)
 
@@ -109,7 +109,6 @@ and this library adheres to Rust's notion of
   `zcash_client_backend::data_api` traits mentioned above instead.
   - Deprecated in `zcash_client_sqlite::wallet`:
     - `get_address`
-    - `get_extended_full_viewing_keys`
     - `is_valid_account_extfvk`
     - `get_balance`
     - `get_balance_at`
@@ -125,15 +124,10 @@ and this library adheres to Rust's notion of
     - `put_tx_meta`
     - `put_tx_data`
     - `mark_sapling_note_spent`
-    - `delete_utxos_above`
     - `put_receiverd_note`
     - `insert_witness`
     - `prune_witnesses`
     - `update_expired_notes`
-    - `put_sent_note`
-    - `put_sent_utxo`
-    - `insert_sent_note`
-    - `insert_sent_utxo`
     - `get_address`
   - Deprecated in `zcash_client_sqlite::wallet::transact`:
     - `get_spendable_sapling_notes`

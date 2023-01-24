@@ -3,18 +3,19 @@
 
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
+    consensus::BlockHeight,
     keys::OutgoingViewingKey,
+    legacy::TransparentAddress,
     merkle_tree::IncrementalWitness,
     sapling::{Diversifier, Node, Note, Nullifier, PaymentAddress, Rseed},
-    transaction::{components::Amount, TxId},
+    transaction::{
+        components::{
+            transparent::{OutPoint, TxOut},
+            Amount,
+        },
+        TxId,
+    },
     zip32::AccountId,
-};
-
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{
-    consensus::BlockHeight,
-    legacy::TransparentAddress,
-    transaction::components::{OutPoint, TxOut},
 };
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
@@ -29,17 +30,44 @@ pub struct WalletTx<N> {
     pub shielded_outputs: Vec<WalletShieldedOutput<N>>,
 }
 
-#[cfg(feature = "transparent-inputs")]
+#[derive(Debug, Clone)]
 pub struct WalletTransparentOutput {
-    pub outpoint: OutPoint,
-    pub txout: TxOut,
-    pub height: BlockHeight,
+    outpoint: OutPoint,
+    txout: TxOut,
+    height: BlockHeight,
+    recipient_address: TransparentAddress,
 }
 
-#[cfg(feature = "transparent-inputs")]
 impl WalletTransparentOutput {
-    pub fn address(&self) -> TransparentAddress {
-        self.txout.script_pubkey.address().unwrap()
+    pub fn from_parts(
+        outpoint: OutPoint,
+        txout: TxOut,
+        height: BlockHeight,
+    ) -> Option<WalletTransparentOutput> {
+        txout
+            .recipient_address()
+            .map(|recipient_address| WalletTransparentOutput {
+                outpoint,
+                txout,
+                height,
+                recipient_address,
+            })
+    }
+
+    pub fn outpoint(&self) -> &OutPoint {
+        &self.outpoint
+    }
+
+    pub fn txout(&self) -> &TxOut {
+        &self.txout
+    }
+
+    pub fn height(&self) -> BlockHeight {
+        self.height
+    }
+
+    pub fn recipient_address(&self) -> &TransparentAddress {
+        &self.recipient_address
     }
 }
 

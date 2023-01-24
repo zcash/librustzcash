@@ -1,7 +1,7 @@
 [package]
 name = "zcash_encoding"
 description = "Binary encodings used throughout the Zcash ecosystem."
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@electriccoin.co>",

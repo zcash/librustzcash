@@ -32,19 +32,16 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+use rusqlite::Connection;
 use secrecy::{ExposeSecret, SecretVec};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
-
-#[cfg(feature = "transparent-inputs")]
-use std::collections::HashSet;
-
-use rusqlite::{Connection, NO_PARAMS};
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    legacy::TransparentAddress,
     memo::Memo,
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier},
@@ -53,25 +50,21 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::{RecipientAddress, UnifiedAddress},
+    address::UnifiedAddress,
     data_api::{
-        BlockSource, DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
+        BlockSource, DecryptedTransaction, PoolType, PrunedBlock, Recipient, SentTransaction,
+        WalletRead, WalletWrite,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::SpendableNote,
+    wallet::{SpendableNote, WalletTransparentOutput},
+    TransferType,
 };
 
 use crate::error::SqliteClientError;
 
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::{
-        data_api::{WalletReadTransparent, WalletWriteTransparent},
-        wallet::WalletTransparentOutput,
-    },
-    zcash_primitives::legacy::TransparentAddress,
-};
+#[cfg(not(feature = "transparent-inputs"))]
+use zcash_client_backend::data_api::error::Error;
 
 #[cfg(feature = "unstable")]
 use {
@@ -111,7 +104,7 @@ impl fmt::Display for NoteId {
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct UtxoId(pub i64);
 
 /// A wrapper for the SQLite connection to the wallet database.
@@ -159,6 +152,13 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
         #[allow(deprecated)]
         wallet::get_unified_full_viewing_keys(self)
+    }
+
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<AccountId>, Self::Error> {
+        wallet::get_account_for_ufvk(self, ufvk)
     }
 
     fn get_current_address(
@@ -244,23 +244,32 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         #[allow(deprecated)]
         wallet::transact::select_spendable_sapling_notes(self, account, target_value, anchor_height)
     }
-}
 
-#[cfg(feature = "transparent-inputs")]
-impl<P: consensus::Parameters> WalletReadTransparent for WalletDb<P> {
     fn get_transparent_receivers(
         &self,
-        account: AccountId,
+        _account: AccountId,
     ) -> Result<HashSet<TransparentAddress>, Self::Error> {
-        wallet::get_transparent_receivers(self, account)
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::get_transparent_receivers(&self.params, &self.conn, _account);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(SqliteClientError::BackendError(
+            Error::TransparentInputsNotSupported,
+        ));
     }
 
     fn get_unspent_transparent_outputs(
         &self,
-        address: &TransparentAddress,
-        max_height: BlockHeight,
+        _address: &TransparentAddress,
+        _max_height: BlockHeight,
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        wallet::get_unspent_transparent_outputs(self, address, max_height)
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::get_unspent_transparent_outputs(self, _address, _max_height);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(SqliteClientError::BackendError(
+            Error::TransparentInputsNotSupported,
+        ));
     }
 }
 
@@ -285,6 +294,13 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
         self.wallet_db.get_unified_full_viewing_keys()
+    }
+
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<AccountId>, Self::Error> {
+        self.wallet_db.get_account_for_ufvk(ufvk)
     }
 
     fn get_current_address(
@@ -359,10 +375,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db
             .select_spendable_sapling_notes(account, target_value, anchor_height)
     }
-}
 
-#[cfg(feature = "transparent-inputs")]
-impl<'a, P: consensus::Parameters> WalletReadTransparent for DataConnStmtCache<'a, P> {
     fn get_transparent_receivers(
         &self,
         account: AccountId,
@@ -385,14 +398,14 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     where
         F: FnOnce(&mut Self) -> Result<A, SqliteClientError>,
     {
-        self.wallet_db.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+        self.wallet_db.conn.execute("BEGIN IMMEDIATE", [])?;
         match f(self) {
             Ok(result) => {
-                self.wallet_db.conn.execute("COMMIT", NO_PARAMS)?;
+                self.wallet_db.conn.execute("COMMIT", [])?;
                 Ok(result)
             }
             Err(error) => {
-                match self.wallet_db.conn.execute("ROLLBACK", NO_PARAMS) {
+                match self.wallet_db.conn.execute("ROLLBACK", []) {
                     Ok(_) => Err(error),
                     Err(e) =>
                         // Panicking here is probably the right thing to do, because it
@@ -410,6 +423,8 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 
 #[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
+    type UtxoRef = UtxoId;
+
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
@@ -523,40 +538,55 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         &mut self,
         d_tx: &DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error> {
-        let nullifiers = self.wallet_db.get_all_nullifiers()?;
         self.transactionally(|up| {
             let tx_ref = wallet::put_tx_data(up, d_tx.tx, None, None)?;
 
             let mut spending_account_id: Option<AccountId> = None;
             for output in d_tx.sapling_outputs {
-                if output.outgoing {
-                    wallet::put_sent_note(
-                        up,
-                        tx_ref,
-                        output.index,
-                        output.account,
-                        &output.to,
-                        Amount::from_u64(output.note.value)
-                            .map_err(|_| SqliteClientError::CorruptedData("Note value invalid.".to_string()))?,
-                        Some(&output.memo),
-                    )?;
-                } else {
-                    match spending_account_id {
-                        Some(id) =>
-                            if id != output.account {
-                                panic!("Unable to determine a unique account identifier for z->t spend.");
-                            }
-                        None => {
-                            spending_account_id = Some(output.account);
-                        }
-                    }
+                match output.transfer_type {
+                    TransferType::Outgoing | TransferType::WalletInternal => {
+                        let recipient = if output.transfer_type == TransferType::Outgoing {
+                            Recipient::Sapling(output.to.clone())
+                        } else {
+                            Recipient::InternalAccount(output.account, PoolType::Sapling)
+                        };
 
-                    wallet::put_received_note(up, output, tx_ref)?;
+                        wallet::put_sent_output(
+                            up,
+                            output.account,
+                            tx_ref,
+                            output.index,
+                            &recipient,
+                            Amount::from_u64(output.note.value).map_err(|_|
+                                SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
+                            Some(&output.memo),
+                        )?;
+                    }
+                    TransferType::Incoming => {
+                        match spending_account_id {
+                            Some(id) =>
+                                if id != output.account {
+                                    panic!("Unable to determine a unique account identifier for z->t spend.");
+                                }
+                            None => {
+                                spending_account_id = Some(output.account);
+                            }
+                        }
+
+                        wallet::put_received_note(up, output, tx_ref)?;
+                    }
                 }
+            }
+
+            // If any of the utxos spent in the transaction are ours, mark them as spent.
+            #[cfg(feature = "transparent-inputs")]
+            for txin in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
+                wallet::mark_transparent_utxo_spent(up, tx_ref, &txin.prevout)?;
             }
 
             // If we have some transparent outputs:
             if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
+                let nullifiers = self.wallet_db.get_all_nullifiers()?;
                 // If the transaction contains shielded spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address. 
@@ -566,14 +596,17 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         .any(|input| *nf == input.nullifier)
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
-                        wallet::put_sent_utxo(
-                            up,
-                            tx_ref,
-                            output_index,
-                            *account_id,
-                            &txout.script_pubkey.address().unwrap(),
-                            txout.value,
-                        )?;
+                        if let Some(address) = txout.recipient_address() {
+                            wallet::put_sent_output(
+                                up,
+                                *account_id,
+                                tx_ref,
+                                output_index,
+                                &Recipient::Transparent(address),
+                                txout.value,
+                                None
+                            )?;
+                        }
                     }
                 }
             }
@@ -611,36 +644,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             for output in &sent_tx.outputs {
-                match output.recipient_address {
-                    // TODO: Store the entire UA, not just the Sapling component.
-                    // This will require more info about the output index.
-                    RecipientAddress::Unified(ua) => wallet::insert_sent_note(
-                        up,
-                        tx_ref,
-                        output.output_index,
-                        sent_tx.account,
-                        ua.sapling().expect("TODO: Add Orchard support"),
-                        output.value,
-                        output.memo.as_ref(),
-                    )?,
-                    RecipientAddress::Shielded(addr) => wallet::insert_sent_note(
-                        up,
-                        tx_ref,
-                        output.output_index,
-                        sent_tx.account,
-                        addr,
-                        output.value,
-                        output.memo.as_ref(),
-                    )?,
-                    RecipientAddress::Transparent(addr) => wallet::insert_sent_utxo(
-                        up,
-                        tx_ref,
-                        output.output_index,
-                        sent_tx.account,
-                        addr,
-                        output.value,
-                    )?,
-                }
+                wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
             }
 
             // Return the row number of the transaction, so the caller can fetch it for sending.
@@ -710,17 +714,18 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
         wallet::rewind_to_height(self.wallet_db, block_height)
     }
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl<'a, P: consensus::Parameters> WalletWriteTransparent for DataConnStmtCache<'a, P> {
-    type UtxoRef = UtxoId;
 
     fn put_received_transparent_utxo(
         &mut self,
-        output: &WalletTransparentOutput,
+        _output: &WalletTransparentOutput,
     ) -> Result<Self::UtxoRef, Self::Error> {
-        wallet::put_received_transparent_utxo(self, output)
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::put_received_transparent_utxo(self, _output);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return Err(SqliteClientError::BackendError(
+            Error::TransparentInputsNotSupported,
+        ));
     }
 }
 
@@ -887,8 +892,7 @@ impl BlockSource for FsBlockDb {
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use ff::PrimeField;
-    use group::GroupEncoding;
+    use group::{ff::PrimeField, GroupEncoding};
     use protobuf::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
@@ -903,11 +907,11 @@ mod tests {
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{
-            keys::DiversifiableFullViewingKey, note_encryption::sapling_note_encryption,
-            util::generate_random_rseed, Note, Nullifier, PaymentAddress,
+            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
+            PaymentAddress,
         },
         transaction::components::Amount,
-        zip32::ExtendedFullViewingKey,
+        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
     };
 
     use zcash_client_backend::{
@@ -1165,7 +1169,6 @@ mod tests {
     fn transparent_receivers() {
         use secrecy::Secret;
         use tempfile::NamedTempFile;
-        use zcash_client_backend::data_api::WalletReadTransparent;
 
         use crate::{chain::init::init_cache_database, wallet::init::init_wallet_db};
 

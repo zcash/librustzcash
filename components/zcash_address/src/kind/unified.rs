@@ -105,7 +105,7 @@ impl Typecode {
 }
 
 /// An error while attempting to parse a string as a Zcash address.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParseError {
     /// The unified container contains both P2PKH and P2SH items.
     BothP2phkAndP2sh,

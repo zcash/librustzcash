@@ -28,7 +28,7 @@ where
 }
 
 /// Errors that may result from attempting to construct an invalid memo.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     InvalidUtf8(std::str::Utf8Error),
     TooLong(usize),
@@ -125,7 +125,7 @@ impl MemoBytes {
 }
 
 /// Type-safe wrapper around String to enforce memo length requirements.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct TextMemo(String);
 
 impl From<TextMemo> for String {

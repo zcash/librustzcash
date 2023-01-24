@@ -520,7 +520,7 @@ impl<Node: Hashable> IncrementalWitness<Node> {
 }
 
 /// A path from a position in a particular commitment tree to the root of that tree.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MerklePath<Node: Hashable> {
     pub auth_path: Vec<(Node, bool)>,
     pub position: u64,

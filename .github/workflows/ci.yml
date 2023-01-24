@@ -23,7 +23,7 @@ jobs:
         run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v3.0.8
+        uses: actions/cache@v3.0.11
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-params
@@ -141,7 +141,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: install
-          args: --git https://github.com/xd009642/tarpaulin.git --branch feat/llvm-profparser-integration cargo-tarpaulin
+          args: cargo-tarpaulin
 
       - name: Fetch path to Zcash parameters
         working-directory: ./zcash_proofs
@@ -149,7 +149,7 @@ jobs:
         run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v3.0.8
+        uses: actions/cache@v3.0.11
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-params
@@ -164,7 +164,7 @@ jobs:
           command: tarpaulin
           args: --engine llvm --all-features --release --timeout 600 --out Xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.1.0
+        uses: codecov/codecov-action@v3.1.1
 
   doc-links:
     name: Intra-doc links

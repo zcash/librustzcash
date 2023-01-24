@@ -23,7 +23,7 @@ pub const MAX_NODE_DATA_SIZE: usize = 32 + // subtree commitment
 /// V1 node metadata.
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct NodeData {
     /// Consensus branch id, should be provided by deserializing node.
     pub consensus_branch_id: u32,
@@ -171,7 +171,7 @@ impl NodeData {
 
 /// V2 node metadata.
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(test, derive(PartialEq))]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub struct V2 {
     /// The V1 node data retained in V2.
     pub v1: NodeData,

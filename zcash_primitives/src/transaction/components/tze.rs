@@ -21,7 +21,7 @@ pub trait Authorization: Debug {
     type Witness: Debug + Clone + PartialEq;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Authorized;
 
 impl Authorization for Authorized {
@@ -57,7 +57,7 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutPoint {
     txid: TxId,
     n: u32,
@@ -88,7 +88,7 @@ impl OutPoint {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TzeIn<Payload> {
     pub prevout: OutPoint,
     pub witness: tze::Witness<Payload>,
@@ -166,7 +166,7 @@ impl TzeIn<<Authorized as Authorization>::Witness> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TzeOut {
     pub value: Amount,
     pub precondition: tze::Precondition,

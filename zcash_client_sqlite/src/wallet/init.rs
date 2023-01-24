@@ -1,10 +1,11 @@
 //! Functions for initializing the various databases.
-use rusqlite::{self, params, types::ToSql, NO_PARAMS};
-use schemer::{migration, Migration, Migrator, MigratorError};
-use schemer_rusqlite::{RusqliteAdapter, RusqliteMigration};
-use secrecy::{ExposeSecret, SecretVec};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
+
+use rusqlite::{self, types::ToSql};
+use schemer::{Migrator, MigratorError};
+use schemer_rusqlite::RusqliteAdapter;
+use secrecy::SecretVec;
 use uuid::Uuid;
 
 use zcash_primitives::{
@@ -14,22 +15,9 @@ use zcash_primitives::{
     zip32::AccountId,
 };
 
-use zcash_client_backend::{
-    address::RecipientAddress,
-    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-};
+use zcash_client_backend::keys::UnifiedFullViewingKey;
 
-use crate::{
-    error::SqliteClientError,
-    wallet::{self, PoolType},
-    WalletDb,
-};
-
-#[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::encoding::AddressCodec,
-    zcash_primitives::legacy::keys::IncomingViewingKey,
-};
+use crate::{error::SqliteClientError, wallet, WalletDb};
 
 mod migrations;
 
@@ -87,375 +75,6 @@ impl std::error::Error for WalletMigrationError {
     }
 }
 
-struct WalletMigration0;
-
-migration!(
-    WalletMigration0,
-    "bc4f5e57-d600-4b6c-990f-b3538f0bfce1",
-    [],
-    "Initialize the wallet database."
-);
-
-impl RusqliteMigration for WalletMigration0 {
-    type Error = WalletMigrationError;
-
-    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch(
-            // We set the user_version field of the database to a constant value of 8 to allow
-            // correct integration with the Android SDK with versions of the database that were
-            // created prior to the introduction of migrations in this crate.  This constant should
-            // remain fixed going forward, and should not be altered by migrations; migration
-            // status is maintained exclusively by the schemer_migrations table.
-            "PRAGMA user_version = 8;
-            CREATE TABLE IF NOT EXISTS accounts (
-                account INTEGER PRIMARY KEY,
-                extfvk TEXT NOT NULL,
-                address TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS blocks (
-                height INTEGER PRIMARY KEY,
-                hash BLOB NOT NULL,
-                time INTEGER NOT NULL,
-                sapling_tree BLOB NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS transactions (
-                id_tx INTEGER PRIMARY KEY,
-                txid BLOB NOT NULL UNIQUE,
-                created TEXT,
-                block INTEGER,
-                tx_index INTEGER,
-                expiry_height INTEGER,
-                raw BLOB,
-                FOREIGN KEY (block) REFERENCES blocks(height)
-            );
-            CREATE TABLE IF NOT EXISTS received_notes (
-                id_note INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                account INTEGER NOT NULL,
-                diversifier BLOB NOT NULL,
-                value INTEGER NOT NULL,
-                rcm BLOB NOT NULL,
-                nf BLOB NOT NULL UNIQUE,
-                is_change INTEGER NOT NULL,
-                memo BLOB,
-                spent INTEGER,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account) REFERENCES accounts(account),
-                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
-                CONSTRAINT tx_output UNIQUE (tx, output_index)
-            );
-            CREATE TABLE IF NOT EXISTS sapling_witnesses (
-                id_witness INTEGER PRIMARY KEY,
-                note INTEGER NOT NULL,
-                block INTEGER NOT NULL,
-                witness BLOB NOT NULL,
-                FOREIGN KEY (note) REFERENCES received_notes(id_note),
-                FOREIGN KEY (block) REFERENCES blocks(height),
-                CONSTRAINT witness_height UNIQUE (note, block)
-            );
-            CREATE TABLE IF NOT EXISTS sent_notes (
-                id_note INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_index INTEGER NOT NULL,
-                from_account INTEGER NOT NULL,
-                address TEXT NOT NULL,
-                value INTEGER NOT NULL,
-                memo BLOB,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account) REFERENCES accounts(account),
-                CONSTRAINT tx_output UNIQUE (tx, output_index)
-            );",
-        )?;
-        Ok(())
-    }
-
-    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        // We should never down-migrate the first migration, as that can irreversibly
-        // destroy data.
-        panic!("Cannot revert the initial migration.");
-    }
-}
-
-struct WalletMigration1;
-
-migration!(
-    WalletMigration1,
-    "a2e0ed2e-8852-475e-b0a4-f154b15b9dbe",
-    ["bc4f5e57-d600-4b6c-990f-b3538f0bfce1"],
-    "Add support for receiving transparent UTXOs."
-);
-
-impl RusqliteMigration for WalletMigration1 {
-    type Error = WalletMigrationError;
-
-    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch(
-            "CREATE TABLE IF NOT EXISTS utxos (
-                id_utxo INTEGER PRIMARY KEY,
-                address TEXT NOT NULL,
-                prevout_txid BLOB NOT NULL,
-                prevout_idx INTEGER NOT NULL,
-                script BLOB NOT NULL,
-                value_zat INTEGER NOT NULL,
-                height INTEGER NOT NULL,
-                spent_in_tx INTEGER,
-                FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
-                CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-            );",
-        )?;
-        Ok(())
-    }
-
-    fn down(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch("DROP TABLE utxos;")?;
-        Ok(())
-    }
-}
-
-struct WalletMigration2<P> {
-    params: P,
-    seed: Option<SecretVec<u8>>,
-}
-
-impl<P> WalletMigration2<P> {
-    fn id() -> Uuid {
-        Uuid::parse_str("be57ef3b-388e-42ea-97e2-678dafcf9754").unwrap()
-    }
-}
-
-impl<P> Migration for WalletMigration2<P> {
-    fn id(&self) -> Uuid {
-        WalletMigration2::<P>::id()
-    }
-
-    fn dependencies(&self) -> HashSet<Uuid> {
-        ["a2e0ed2e-8852-475e-b0a4-f154b15b9dbe"]
-            .iter()
-            .map(|uuidstr| ::uuid::Uuid::parse_str(uuidstr).unwrap())
-            .collect()
-    }
-
-    fn description(&self) -> &'static str {
-        "Add support for unified full viewing keys"
-    }
-}
-
-impl<P: consensus::Parameters> RusqliteMigration for WalletMigration2<P> {
-    type Error = WalletMigrationError;
-
-    fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        //
-        // Update the accounts table to store ufvks rather than extfvks
-        //
-
-        transaction.execute_batch(
-            "CREATE TABLE accounts_new (
-                account INTEGER PRIMARY KEY,
-                ufvk TEXT NOT NULL,
-                address TEXT,
-                transparent_address TEXT
-            );",
-        )?;
-
-        let mut stmt_fetch_accounts =
-            transaction.prepare("SELECT account, address FROM accounts")?;
-
-        let mut rows = stmt_fetch_accounts.query(NO_PARAMS)?;
-        while let Some(row) = rows.next()? {
-            // We only need to check for the presence of the seed if we have keys that
-            // need to be migrated; otherwise, it's fine to not supply the seed if this
-            // migration is being used to initialize an empty database.
-            if let Some(seed) = &self.seed {
-                let account: u32 = row.get(0)?;
-                let account = AccountId::from(account);
-                let usk =
-                    UnifiedSpendingKey::from_seed(&self.params, seed.expose_secret(), account)
-                        .unwrap();
-                let ufvk = usk.to_unified_full_viewing_key();
-
-                let address: String = row.get(1)?;
-                let decoded =
-                    RecipientAddress::decode(&self.params, &address).ok_or_else(|| {
-                        WalletMigrationError::CorruptedData(format!(
-                            "Could not decode {} as a valid Zcash address.",
-                            address
-                        ))
-                    })?;
-                match decoded {
-                    RecipientAddress::Shielded(decoded_address) => {
-                        let dfvk = ufvk.sapling().expect(
-                            "Derivation should have produced a UFVK containing a Sapling component.",
-                        );
-                        let (idx, expected_address) = dfvk.default_address();
-                        if decoded_address != expected_address {
-                            return Err(WalletMigrationError::CorruptedData(
-                                format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
-                                    address,
-                                    RecipientAddress::Shielded(expected_address).encode(&self.params),
-                                    idx)));
-                        }
-                    }
-                    RecipientAddress::Transparent(_) => {
-                        return Err(WalletMigrationError::CorruptedData(
-                            "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
-                    }
-                    RecipientAddress::Unified(decoded_address) => {
-                        let (expected_address, idx) = ufvk.default_address();
-                        if decoded_address != expected_address {
-                            return Err(WalletMigrationError::CorruptedData(
-                                format!("Decoded unified address {} does not match the ufvk's default address {} at {:?}.",
-                                    address,
-                                    RecipientAddress::Unified(expected_address).encode(&self.params),
-                                    idx)));
-                        }
-                    }
-                }
-
-                let ufvk_str: String = ufvk.encode(&self.params);
-                let address_str: String = ufvk.default_address().0.encode(&self.params);
-
-                // This migration, and the wallet behaviour before it, stored the default
-                // transparent address in the `accounts` table. This does not necessarily
-                // match the transparent receiver in the default Unified Address. Starting
-                // from `AddressesTableMigration` below, we no longer store transparent
-                // addresses directly, but instead extract them from the Unified Address
-                // (or from the UFVK if the UA was derived without a transparent receiver,
-                // which is not the case for UAs generated by this crate).
-                #[cfg(feature = "transparent-inputs")]
-                let taddress_str: Option<String> = ufvk.transparent().and_then(|k| {
-                    k.derive_external_ivk()
-                        .ok()
-                        .map(|k| k.default_address().0.encode(&self.params))
-                });
-                #[cfg(not(feature = "transparent-inputs"))]
-                let taddress_str: Option<String> = None;
-
-                transaction.execute_named(
-                    "INSERT INTO accounts_new (account, ufvk, address, transparent_address)
-                    VALUES (:account, :ufvk, :address, :transparent_address)",
-                    &[
-                        (":account", &<u32>::from(account)),
-                        (":ufvk", &ufvk_str),
-                        (":address", &address_str),
-                        (":transparent_address", &taddress_str),
-                    ],
-                )?;
-            } else {
-                return Err(WalletMigrationError::SeedRequired);
-            }
-        }
-
-        transaction.execute_batch(
-            "DROP TABLE accounts;
-            ALTER TABLE accounts_new RENAME TO accounts;",
-        )?;
-
-        //
-        // Update the sent_notes table to inclue an output_pool column that
-        // is respected by the uniqueness constraint
-        //
-
-        transaction.execute_batch(
-            "CREATE TABLE sent_notes_new (
-                id_note INTEGER PRIMARY KEY,
-                tx INTEGER NOT NULL,
-                output_pool INTEGER NOT NULL ,
-                output_index INTEGER NOT NULL,
-                from_account INTEGER NOT NULL,
-                address TEXT NOT NULL,
-                value INTEGER NOT NULL,
-                memo BLOB,
-                FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account) REFERENCES accounts(account),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
-            );",
-        )?;
-
-        // we query in a nested scope so that the col_names iterator is correctly
-        // dropped and doesn't maintain a lock on the table.
-        let has_output_pool = {
-            let mut stmt_fetch_columns = transaction.prepare("PRAGMA TABLE_INFO('sent_notes')")?;
-            let mut col_names = stmt_fetch_columns.query_map(NO_PARAMS, |row| {
-                let col_name: String = row.get(1)?;
-                Ok(col_name)
-            })?;
-
-            col_names.any(|cname| cname == Ok("output_pool".to_string()))
-        };
-
-        if has_output_pool {
-            transaction.execute_batch(
-                "INSERT INTO sent_notes_new
-                    (id_note, tx, output_pool, output_index, from_account, address, value, memo)
-                    SELECT id_note, tx, output_pool, output_index, from_account, address, value, memo
-                    FROM sent_notes;"
-            )?;
-        } else {
-            let mut stmt_fetch_sent_notes = transaction.prepare(
-                "SELECT id_note, tx, output_index, from_account, address, value, memo
-                    FROM sent_notes",
-            )?;
-
-            let mut stmt_insert_sent_note = transaction.prepare(
-                "INSERT INTO sent_notes_new
-                    (id_note, tx, output_pool, output_index, from_account, address, value, memo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            )?;
-
-            let mut rows = stmt_fetch_sent_notes.query(NO_PARAMS)?;
-            while let Some(row) = rows.next()? {
-                let id_note: i64 = row.get(0)?;
-                let tx_ref: i64 = row.get(1)?;
-                let output_index: i64 = row.get(2)?;
-                let account_id: u32 = row.get(3)?;
-                let address: String = row.get(4)?;
-                let value: i64 = row.get(5)?;
-                let memo: Option<Vec<u8>> = row.get(6)?;
-
-                let decoded_address =
-                    RecipientAddress::decode(&self.params, &address).ok_or_else(|| {
-                        WalletMigrationError::CorruptedData(format!(
-                            "Could not decode {} as a valid Zcash address.",
-                            address
-                        ))
-                    })?;
-                let output_pool = match decoded_address {
-                    RecipientAddress::Shielded(_) => Ok(PoolType::Sapling.typecode()),
-                    RecipientAddress::Transparent(_) => Ok(PoolType::Transparent.typecode()),
-                    RecipientAddress::Unified(_) => Err(WalletMigrationError::CorruptedData(
-                        "Unified addresses should not yet appear in the sent_notes table."
-                            .to_string(),
-                    )),
-                }?;
-
-                stmt_insert_sent_note.execute(params![
-                    id_note,
-                    tx_ref,
-                    output_pool,
-                    output_index,
-                    account_id,
-                    address,
-                    value,
-                    memo
-                ])?;
-            }
-        }
-
-        transaction.execute_batch(
-            "DROP TABLE sent_notes;
-            ALTER TABLE sent_notes_new RENAME TO sent_notes;",
-        )?;
-
-        Ok(())
-    }
-
-    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        // TODO: something better than just panic?
-        panic!("Cannot revert this migration.");
-    }
-}
-
 /// Sets up the internal structure of the data database.
 ///
 /// This procedure will automatically perform migration operations to update the wallet database to
@@ -495,16 +114,21 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, None)
+    init_wallet_db_internal(wdb, seed, &[])
 }
 
 fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<P>,
     seed: Option<SecretVec<u8>>,
-    target_migration: Option<Uuid>,
+    target_migrations: &[Uuid],
 ) -> Result<(), MigratorError<WalletMigrationError>> {
+    // Turn off foreign keys, and ensure that table replacement/modification
+    // does not break views
     wdb.conn
-        .execute("PRAGMA foreign_keys = OFF", NO_PARAMS)
+        .execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             PRAGMA legacy_alter_table = TRUE;",
+        )
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     let adapter = RusqliteAdapter::new(&mut wdb.conn, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
@@ -513,9 +137,15 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     migrator
         .register_multiple(migrations::all_migrations(&wdb.params, seed))
         .expect("Wallet migration registration should have been successful.");
-    migrator.up(target_migration)?;
+    if target_migrations.is_empty() {
+        migrator.up(None)?;
+    } else {
+        for target_migration in target_migrations {
+            migrator.up(Some(*target_migration))?;
+        }
+    }
     wdb.conn
-        .execute("PRAGMA foreign_keys = ON", NO_PARAMS)
+        .execute("PRAGMA foreign_keys = ON", [])
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
     Ok(())
 }
@@ -582,7 +212,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     keys: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
-    if empty_check.exists(NO_PARAMS)? {
+    if empty_check.exists([])? {
         return Err(SqliteClientError::TableNotEmpty);
     }
 
@@ -594,11 +224,11 @@ pub fn init_accounts_table<P: consensus::Parameters>(
     }
 
     // Insert accounts atomically
-    wdb.conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    wdb.conn.execute("BEGIN IMMEDIATE", [])?;
     for (account, key) in keys.iter() {
         wallet::add_account(wdb, *account, key)?;
     }
-    wdb.conn.execute("COMMIT", NO_PARAMS)?;
+    wdb.conn.execute("COMMIT", [])?;
 
     Ok(())
 }
@@ -643,14 +273,14 @@ pub fn init_blocks_table<P>(
     sapling_tree: &[u8],
 ) -> Result<(), SqliteClientError> {
     let mut empty_check = wdb.conn.prepare("SELECT * FROM blocks LIMIT 1")?;
-    if empty_check.exists(NO_PARAMS)? {
+    if empty_check.exists([])? {
         return Err(SqliteClientError::TableNotEmpty);
     }
 
     wdb.conn.execute(
         "INSERT INTO blocks (height, hash, time, sapling_tree)
         VALUES (?, ?, ?, ?)",
-        &[
+        [
             u32::from(height).to_sql()?,
             hash.0.to_sql()?,
             time.to_sql()?,
@@ -664,7 +294,7 @@ pub fn init_blocks_table<P>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use rusqlite::{self, ToSql, NO_PARAMS};
+    use rusqlite::{self, ToSql};
     use secrecy::Secret;
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
@@ -678,9 +308,8 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, BranchId, Parameters},
-        sapling::keys::DiversifiableFullViewingKey,
         transaction::{TransactionData, TxVersion},
-        zip32::ExtendedFullViewingKey,
+        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
     };
 
     use crate::{
@@ -693,7 +322,16 @@ mod tests {
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
 
     #[cfg(feature = "transparent-inputs")]
-    use {crate::wallet::PoolType, zcash_primitives::legacy::keys as transparent};
+    use {
+        crate::{
+            wallet::{self, pool_code, PoolType},
+            WalletWrite,
+        },
+        zcash_address::test_vectors,
+        zcash_primitives::{
+            consensus::Network, legacy::keys as transparent, zip32::DiversifierIndex,
+        },
+    };
 
     #[test]
     fn verify_schema() {
@@ -713,6 +351,7 @@ mod tests {
                 account INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
+                cached_transparent_receiver_address TEXT,
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
             )",
@@ -754,15 +393,20 @@ mod tests {
             "CREATE TABLE \"sent_notes\" (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
-                output_pool INTEGER NOT NULL ,
+                output_pool INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
                 from_account INTEGER NOT NULL,
-                address TEXT NOT NULL,
+                to_address TEXT,
+                to_account INTEGER,
                 value INTEGER NOT NULL,
                 memo BLOB,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (from_account) REFERENCES accounts(account),
-                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
+                FOREIGN KEY (to_account) REFERENCES accounts(account),
+                CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
+                CONSTRAINT note_recipient CHECK (
+                    (to_address IS NOT NULL) != (to_account IS NOT NULL)
+                )
             )",
             "CREATE TABLE transactions (
                 id_tx INTEGER PRIMARY KEY,
@@ -775,8 +419,9 @@ mod tests {
                 fee INTEGER,
                 FOREIGN KEY (block) REFERENCES blocks(height)
             )",
-            "CREATE TABLE utxos (
+            "CREATE TABLE \"utxos\" (
                 id_utxo INTEGER PRIMARY KEY,
+                received_by_account INTEGER NOT NULL,
                 address TEXT NOT NULL,
                 prevout_txid BLOB NOT NULL,
                 prevout_idx INTEGER NOT NULL,
@@ -784,6 +429,7 @@ mod tests {
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
                 spent_in_tx INTEGER,
+                FOREIGN KEY (received_by_account) REFERENCES accounts(account),
                 FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
             )",
@@ -793,7 +439,7 @@ mod tests {
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
             .unwrap();
-        let mut rows = tables_query.query(NO_PARAMS).unwrap();
+        let mut rows = tables_query.query([]).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
@@ -805,16 +451,22 @@ mod tests {
         }
 
         let expected_views = vec![
+            // v_transactions
             "CREATE VIEW v_transactions AS
-            SELECT id_tx,
-                   mined_height,
-                   tx_index,
-                   txid,
-                   expiry_height,
-                   raw,
-                   SUM(value) + MAX(fee) AS net_value,
-                   SUM(is_change) > 0 AS has_change,
-                   SUM(memo_present) AS memo_count
+            SELECT notes.id_tx,
+                   notes.mined_height,
+                   notes.tx_index,
+                   notes.txid,
+                   notes.expiry_height,
+                   notes.raw,
+                   SUM(notes.value) + MAX(notes.fee) AS net_value,
+                   MAX(notes.fee)                    AS fee_paid,
+                   SUM(notes.sent_count) == 0        AS is_wallet_internal,
+                   SUM(notes.is_change) > 0          AS has_change,
+                   SUM(notes.sent_count)             AS sent_note_count,
+                   SUM(notes.received_count)         AS received_note_count,
+                   SUM(notes.memo_present)           AS memo_count,
+                   blocks.time                       AS block_time
             FROM (
                 SELECT transactions.id_tx            AS id_tx,
                        transactions.block            AS mined_height,
@@ -827,7 +479,15 @@ mod tests {
                             WHEN received_notes.is_change THEN 0
                             ELSE value
                        END AS value,
-                       received_notes.is_change      AS is_change,
+                       0                             AS sent_count,
+                       CASE
+                            WHEN received_notes.is_change THEN 1
+                            ELSE 0
+                       END AS is_change,
+                       CASE
+                            WHEN received_notes.is_change THEN 0
+                            ELSE 1
+                       END AS received_count,
                        CASE
                            WHEN received_notes.memo IS NULL THEN 0
                            ELSE 1
@@ -843,20 +503,30 @@ mod tests {
                        transactions.raw              AS raw,
                        transactions.fee              AS fee,
                        -sent_notes.value             AS value,
-                       false                         AS is_change,
+                       CASE
+                           WHEN sent_notes.from_account = sent_notes.to_account THEN 0
+                           ELSE 1
+                       END AS sent_count,
+                       0                             AS is_change,
+                       0                             AS received_count,
                        CASE
                            WHEN sent_notes.memo IS NULL THEN 0
                            ELSE 1
                        END AS memo_present
                 FROM   transactions
                        JOIN sent_notes ON transactions.id_tx = sent_notes.tx
-            )
-            GROUP BY id_tx",
+            ) AS notes
+            LEFT JOIN blocks ON notes.mined_height = blocks.height
+            GROUP BY notes.id_tx",
+            // v_tx_received
             "CREATE VIEW v_tx_received AS
             SELECT transactions.id_tx            AS id_tx,
                    transactions.block            AS mined_height,
                    transactions.tx_index         AS tx_index,
                    transactions.txid             AS txid,
+                   transactions.expiry_height    AS expiry_height,
+                   transactions.raw              AS raw,
+                   MAX(received_notes.account)   AS received_by_account,
                    SUM(received_notes.value)     AS received_total,
                    COUNT(received_notes.id_note) AS received_note_count,
                    SUM(
@@ -871,36 +541,38 @@ mod tests {
                           ON transactions.id_tx = received_notes.tx
                    LEFT JOIN blocks
                           ON transactions.block = blocks.height
-            GROUP BY received_notes.tx",
+            GROUP BY received_notes.tx, received_notes.account",
+            // v_tx_received
             "CREATE VIEW v_tx_sent AS
-            SELECT transactions.id_tx         AS id_tx,
-                   transactions.block         AS mined_height,
-                   transactions.tx_index      AS tx_index,
-                   transactions.txid          AS txid,
-                   transactions.expiry_height AS expiry_height,
-                   transactions.raw           AS raw,
-                   SUM(sent_notes.value)      AS sent_total,
-                   COUNT(sent_notes.id_note)  AS sent_note_count,
+            SELECT transactions.id_tx           AS id_tx,
+                   transactions.block           AS mined_height,
+                   transactions.tx_index        AS tx_index,
+                   transactions.txid            AS txid,
+                   transactions.expiry_height   AS expiry_height,
+                   transactions.raw             AS raw,
+                   MAX(sent_notes.from_account) AS sent_from_account,
+                   SUM(sent_notes.value)        AS sent_total,
+                   COUNT(sent_notes.id_note)    AS sent_note_count,
                    SUM(
                        CASE
                            WHEN sent_notes.memo IS NULL THEN 0
                            ELSE 1
                        END
                    ) AS memo_count,
-                   blocks.time                AS block_time
+                   blocks.time                  AS block_time
             FROM   transactions
                    JOIN sent_notes
                           ON transactions.id_tx = sent_notes.tx
                    LEFT JOIN blocks
                           ON transactions.block = blocks.height
-            GROUP BY sent_notes.tx",
+            GROUP BY sent_notes.tx, sent_notes.from_account",
         ];
 
         let mut views_query = db_data
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
             .unwrap();
-        let mut rows = views_query.query(NO_PARAMS).unwrap();
+        let mut rows = views_query.query([]).unwrap();
         let mut expected_idx = 0;
         while let Some(row) = rows.next().unwrap() {
             let sql: String = row.get(0).unwrap();
@@ -925,7 +597,7 @@ mod tests {
                     extfvk TEXT NOT NULL,
                     address TEXT NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE blocks (
@@ -934,7 +606,7 @@ mod tests {
                     time INTEGER NOT NULL,
                     sapling_tree BLOB NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE transactions (
@@ -947,7 +619,7 @@ mod tests {
                     raw BLOB,
                     FOREIGN KEY (block) REFERENCES blocks(height)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE received_notes (
@@ -967,7 +639,7 @@ mod tests {
                     FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sapling_witnesses (
@@ -979,7 +651,7 @@ mod tests {
                     FOREIGN KEY (block) REFERENCES blocks(height),
                     CONSTRAINT witness_height UNIQUE (note, block)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sent_notes (
@@ -994,7 +666,7 @@ mod tests {
                     FOREIGN KEY (from_account) REFERENCES accounts(account),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
 
             let address = encode_payment_address(
@@ -1008,7 +680,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO accounts (account, extfvk, address)
                 VALUES (?, ?, ?)",
-                &[
+                [
                     u32::from(account).to_sql()?,
                     extfvk.to_sql()?,
                     address.to_sql()?,
@@ -1042,7 +714,7 @@ mod tests {
                     address TEXT NOT NULL,
                     transparent_address TEXT NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE blocks (
@@ -1051,7 +723,7 @@ mod tests {
                     time INTEGER NOT NULL,
                     sapling_tree BLOB NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE transactions (
@@ -1064,7 +736,7 @@ mod tests {
                     raw BLOB,
                     FOREIGN KEY (block) REFERENCES blocks(height)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE received_notes (
@@ -1084,7 +756,7 @@ mod tests {
                     FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sapling_witnesses (
@@ -1096,7 +768,7 @@ mod tests {
                     FOREIGN KEY (block) REFERENCES blocks(height),
                     CONSTRAINT witness_height UNIQUE (note, block)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sent_notes (
@@ -1111,7 +783,7 @@ mod tests {
                     FOREIGN KEY (from_account) REFERENCES accounts(account),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE utxos (
@@ -1126,7 +798,7 @@ mod tests {
                     FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
                 )",
-                NO_PARAMS,
+                [],
             )?;
 
             let address = encode_payment_address(
@@ -1140,7 +812,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO accounts (account, extfvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
-                &[
+                [
                     u32::from(account).to_sql()?,
                     extfvk.to_sql()?,
                     address.to_sql()?,
@@ -1150,7 +822,7 @@ mod tests {
             // add a sapling sent note
             wdb.conn.execute(
                 "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
-                NO_PARAMS,
+                [],
             )?;
 
             let tx = TransactionData::from_parts(
@@ -1170,12 +842,12 @@ mod tests {
             tx.write(&mut tx_bytes).unwrap();
             wdb.conn.execute(
                 "INSERT INTO transactions (block, id_tx, txid, raw) VALUES (0, 0, '', ?)",
-                &[&tx_bytes[..]],
+                [&tx_bytes[..]],
             )?;
             wdb.conn.execute(
                 "INSERT INTO sent_notes (tx, output_index, from_account, address, value)
                 VALUES (0, 0, ?, ?, 0)",
-                &[u32::from(account).to_sql()?, address.to_sql()?],
+                [u32::from(account).to_sql()?, address.to_sql()?],
             )?;
 
             Ok(())
@@ -1205,7 +877,7 @@ mod tests {
                     address TEXT,
                     transparent_address TEXT
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE blocks (
@@ -1214,7 +886,7 @@ mod tests {
                     time INTEGER NOT NULL,
                     sapling_tree BLOB NOT NULL
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE transactions (
@@ -1227,7 +899,7 @@ mod tests {
                     raw BLOB,
                     FOREIGN KEY (block) REFERENCES blocks(height)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE received_notes (
@@ -1247,7 +919,7 @@ mod tests {
                     FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_output UNIQUE (tx, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sapling_witnesses (
@@ -1259,7 +931,7 @@ mod tests {
                     FOREIGN KEY (block) REFERENCES blocks(height),
                     CONSTRAINT witness_height UNIQUE (note, block)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE sent_notes (
@@ -1275,7 +947,7 @@ mod tests {
                     FOREIGN KEY (from_account) REFERENCES accounts(account),
                     CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index)
                 )",
-                NO_PARAMS,
+                [],
             )?;
             wdb.conn.execute(
                 "CREATE TABLE utxos (
@@ -1290,7 +962,7 @@ mod tests {
                     FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                     CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
                 )",
-                NO_PARAMS,
+                [],
             )?;
 
             let ufvk_str = ufvk.encode(&tests::network());
@@ -1299,7 +971,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
-                &[
+                [
                     u32::from(account).to_sql()?,
                     ufvk_str.to_sql()?,
                     address_str.to_sql()?,
@@ -1314,16 +986,16 @@ mod tests {
                         .encode(&tests::network());
                 wdb.conn.execute(
                     "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
-                    NO_PARAMS,
+                    [],
                 )?;
                 wdb.conn.execute(
                     "INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '')",
-                    NO_PARAMS,
+                    [],
                 )?;
                 wdb.conn.execute(
                     "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
                     VALUES (0, ?, 0, ?, ?, 0)",
-                    &[PoolType::Transparent.typecode().to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
+                    [pool_code(PoolType::Transparent).to_sql()?, u32::from(account).to_sql()?, taddr.to_sql()?])?;
             }
 
             Ok(())
@@ -1438,7 +1110,7 @@ mod tests {
     fn init_accounts_table_stores_correct_address() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
 
         let seed = [0u8; 32];
 
@@ -1453,5 +1125,41 @@ mod tests {
         // The account's address should be in the data DB
         let pa = get_address(&db_data, AccountId::from(0)).unwrap();
         assert_eq!(pa.unwrap(), expected_address);
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn account_produces_expected_ua_sequence() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::MainNetwork).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        let mut ops = db_data.get_update_ops().unwrap();
+        let seed = test_vectors::UNIFIED[0].root_seed;
+        let (account, _usk) = ops.create_account(&Secret::new(seed.to_vec())).unwrap();
+        assert_eq!(account, AccountId::from(0u32));
+
+        for tv in &test_vectors::UNIFIED[..3] {
+            if let Some(RecipientAddress::Unified(tvua)) =
+                RecipientAddress::decode(&Network::MainNetwork, tv.unified_addr)
+            {
+                let (ua, di) = wallet::get_current_address(&db_data, account)
+                    .unwrap()
+                    .expect("create_account generated the first address");
+                assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
+                assert_eq!(tvua.transparent(), ua.transparent());
+                assert_eq!(tvua.sapling(), ua.sapling());
+                assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
+
+                ops.get_next_available_address(account)
+                    .unwrap()
+                    .expect("get_next_available_address generated an address");
+            } else {
+                panic!(
+                    "{} did not decode to a valid unified address",
+                    tv.unified_addr
+                );
+            }
+        }
     }
 }

@@ -1,7 +1,6 @@
 //! The Sapling circuits.
 
-use ff::PrimeField;
-use group::Curve;
+use group::{ff::PrimeField, Curve};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
@@ -25,7 +24,7 @@ use bellman::gadgets::num;
 use bellman::gadgets::Assignment;
 
 #[cfg(test)]
-use ff::PrimeFieldBits;
+use group::ff::PrimeFieldBits;
 
 pub const TREE_DEPTH: usize = SAPLING_COMMITMENT_TREE_DEPTH;
 
@@ -517,8 +516,7 @@ impl Circuit<bls12_381::Scalar> for Output {
 #[test]
 fn test_input_circuit_with_bls12_381() {
     use bellman::gadgets::test::*;
-    use ff::Field;
-    use group::Group;
+    use group::{ff::Field, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
@@ -661,8 +659,7 @@ fn test_input_circuit_with_bls12_381() {
 #[test]
 fn test_input_circuit_with_bls12_381_external_test_vectors() {
     use bellman::gadgets::test::*;
-    use ff::Field;
-    use group::Group;
+    use group::{ff::Field, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
@@ -839,8 +836,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 #[test]
 fn test_output_circuit_with_bls12_381() {
     use bellman::gadgets::test::*;
-    use ff::Field;
-    use group::Group;
+    use group::{ff::Field, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
     use zcash_primitives::sapling::{Diversifier, ProofGenerationKey, Rseed};

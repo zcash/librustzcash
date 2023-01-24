@@ -645,7 +645,7 @@ pub mod testing {
     use proptest::strategy::Strategy;
     use zcash_primitives::{
         consensus::TEST_NETWORK, legacy::testing::arb_transparent_addr,
-        sapling::keys::testing::arb_shielded_addr,
+        sapling::testing::arb_payment_address,
         transaction::components::amount::testing::arb_nonnegative_amount,
     };
 
@@ -655,7 +655,7 @@ pub mod testing {
 
     prop_compose! {
         fn arb_unified_addr()(
-            sapling in arb_shielded_addr(),
+            sapling in arb_payment_address(),
             transparent in option::of(arb_transparent_addr()),
         ) -> UnifiedAddress {
             UnifiedAddress::from_receivers(None, Some(sapling), transparent).unwrap()
@@ -664,7 +664,7 @@ pub mod testing {
 
     pub fn arb_addr() -> impl Strategy<Value = RecipientAddress> {
         prop_oneof![
-            arb_shielded_addr().prop_map(RecipientAddress::Shielded),
+            arb_payment_address().prop_map(RecipientAddress::Shielded),
             arb_transparent_addr().prop_map(RecipientAddress::Transparent),
             arb_unified_addr().prop_map(RecipientAddress::Unified),
         ]

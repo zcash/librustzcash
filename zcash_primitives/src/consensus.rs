@@ -1,5 +1,6 @@
 //! Consensus logic and parameters.
 
+use memuse::DynamicUsage;
 use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
 use std::fmt;
@@ -13,6 +14,8 @@ use crate::constants;
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHeight(u32);
+
+memuse::impl_no_dynamic_usage!(BlockHeight);
 
 pub const H0: BlockHeight = BlockHeight(0);
 
@@ -187,8 +190,10 @@ pub trait Parameters: Clone {
 }
 
 /// Marker struct for the production network.
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct MainNetwork;
+
+memuse::impl_no_dynamic_usage!(MainNetwork);
 
 pub const MAIN_NETWORK: MainNetwork = MainNetwork;
 
@@ -236,8 +241,10 @@ impl Parameters for MainNetwork {
 }
 
 /// Marker struct for the test network.
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct TestNetwork;
+
+memuse::impl_no_dynamic_usage!(TestNetwork);
 
 pub const TEST_NETWORK: TestNetwork = TestNetwork;
 
@@ -284,11 +291,13 @@ impl Parameters for TestNetwork {
     }
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum Network {
     MainNetwork,
     TestNetwork,
 }
+
+memuse::impl_no_dynamic_usage!(Network);
 
 impl Parameters for Network {
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
@@ -387,6 +396,8 @@ pub enum NetworkUpgrade {
     ZFuture,
 }
 
+memuse::impl_no_dynamic_usage!(NetworkUpgrade);
+
 impl fmt::Display for NetworkUpgrade {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -445,7 +456,7 @@ pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 /// See [ZIP 200](https://zips.z.cash/zip-0200) for more details.
 ///
 /// [`signature_hash`]: crate::transaction::sighash::signature_hash
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BranchId {
     /// The consensus rules at the launch of Zcash.
     Sprout,
@@ -466,6 +477,8 @@ pub enum BranchId {
     #[cfg(feature = "zfuture")]
     ZFuture,
 }
+
+memuse::impl_no_dynamic_usage!(BranchId);
 
 impl TryFrom<u32> for BranchId {
     type Error = &'static str;

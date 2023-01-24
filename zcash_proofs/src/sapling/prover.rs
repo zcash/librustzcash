@@ -3,8 +3,7 @@ use bellman::{
     groth16::{create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof},
 };
 use bls12_381::Bls12;
-use ff::Field;
-use group::{Curve, GroupEncoding};
+use group::{ff::Field, Curve, GroupEncoding};
 use rand_core::OsRng;
 use std::ops::{AddAssign, Neg};
 use zcash_primitives::{
@@ -243,7 +242,7 @@ impl SaplingProvingContext {
         // Construct signature message
         let mut data_to_be_signed = [0u8; 64];
         data_to_be_signed[0..32].copy_from_slice(&bvk.0.to_bytes());
-        (&mut data_to_be_signed[32..64]).copy_from_slice(&sighash[..]);
+        data_to_be_signed[32..64].copy_from_slice(&sighash[..]);
 
         // Sign
         Ok(bsk.sign(

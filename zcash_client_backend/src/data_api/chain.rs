@@ -85,7 +85,8 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::CommitmentTree,
-    sapling::{keys::Scope, note_encryption::PreparedIncomingViewingKey, Nullifier},
+    sapling::{note_encryption::PreparedIncomingViewingKey, Nullifier},
+    zip32::Scope,
 };
 
 use crate::{
@@ -232,7 +233,7 @@ where
     // Get the nullifiers for the notes we are tracking
     let mut nullifiers = data.get_nullifiers()?;
 
-    let mut batch_runner = BatchRunner::new(
+    let mut batch_runner = BatchRunner::<_, _, _, ()>::new(
         100,
         dfvks
             .iter()

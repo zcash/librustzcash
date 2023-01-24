@@ -12,7 +12,7 @@ use crate::{error::SqliteClientError, BlockDb};
 #[cfg(feature = "unstable")]
 use {
     crate::{BlockHash, FsBlockDb},
-    rusqlite::{Connection, OptionalExtension, NO_PARAMS},
+    rusqlite::Connection,
     std::fs::File,
     std::io::BufReader,
     std::path::{Path, PathBuf},
@@ -107,7 +107,7 @@ pub(crate) fn blockmetadb_insert(
         VALUES (?, ?, ?, ?, ?)"
     )?;
 
-    conn.execute("BEGIN IMMEDIATE", NO_PARAMS)?;
+    conn.execute("BEGIN IMMEDIATE", [])?;
     let result = block_meta
         .iter()
         .map(|m| {
@@ -122,11 +122,11 @@ pub(crate) fn blockmetadb_insert(
         .collect::<Result<Vec<_>, _>>();
     match result {
         Ok(_) => {
-            conn.execute("COMMIT", NO_PARAMS)?;
+            conn.execute("COMMIT", [])?;
             Ok(())
         }
         Err(error) => {
-            match conn.execute("ROLLBACK", NO_PARAMS) {
+            match conn.execute("ROLLBACK", []) {
                 Ok(_) => Err(error),
                 Err(e) =>
                     // Panicking here is probably the right thing to do, because it
@@ -145,15 +145,12 @@ pub(crate) fn blockmetadb_insert(
 pub(crate) fn blockmetadb_get_max_cached_height(
     conn: &Connection,
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {
-    conn.query_row(
-        "SELECT MAX(height) FROM compactblocks_meta",
-        NO_PARAMS,
-        |row| {
-            let h: u32 = row.get(0)?;
-            Ok(BlockHeight::from(h))
-        },
-    )
-    .optional()
+    conn.query_row("SELECT MAX(height) FROM compactblocks_meta", [], |row| {
+        // `SELECT MAX(_)` will always return a row, but it will return `null` if the
+        // table is empty, which has no integer type. We handle the optionality here.
+        let h: Option<u32> = row.get(0)?;
+        Ok(h.map(BlockHeight::from))
+    })
 }
 
 /// Implements a traversal of `limit` blocks of the filesystem-backed
@@ -262,7 +259,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -279,7 +276,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -291,7 +288,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -308,7 +305,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -319,7 +316,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
     }
@@ -361,7 +358,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -385,7 +382,7 @@ mod tests {
         match validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         ) {
             Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
                 assert_eq!(lower_bound, sapling_activation_height() + 2)
@@ -431,7 +428,7 @@ mod tests {
         validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         )
         .unwrap();
 
@@ -455,7 +452,7 @@ mod tests {
         match validate_chain(
             &tests::network(),
             &db_cache,
-            (&db_data).get_max_height_hash().unwrap(),
+            db_data.get_max_height_hash().unwrap(),
         ) {
             Err(SqliteClientError::BackendError(Error::InvalidChain(lower_bound, _))) => {
                 assert_eq!(lower_bound, sapling_activation_height() + 3)

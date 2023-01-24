@@ -7,7 +7,7 @@
 //! - Build the statement in [`DataConnStmtCache::new`].
 //! - Add a crate-private helper method to `DataConnStmtCache` for running the statement.
 
-use rusqlite::{params, Statement, ToSql};
+use rusqlite::{named_params, params, Statement, ToSql};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -18,17 +18,67 @@ use zcash_primitives::{
     zip32::{AccountId, DiversifierIndex},
 };
 
-use zcash_client_backend::address::UnifiedAddress;
+use zcash_client_backend::{
+    address::UnifiedAddress,
+    data_api::{PoolType, Recipient},
+    encoding::AddressCodec,
+};
 
-use crate::{error::SqliteClientError, wallet::PoolType, NoteId, WalletDb};
+use crate::{error::SqliteClientError, wallet::pool_code, NoteId, WalletDb};
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::{encoding::AddressCodec, wallet::WalletTransparentOutput},
-    zcash_primitives::{
-        legacy::TransparentAddress, transaction::components::transparent::OutPoint,
-    },
+    crate::UtxoId, rusqlite::OptionalExtension,
+    zcash_client_backend::wallet::WalletTransparentOutput,
+    zcash_primitives::transaction::components::transparent::OutPoint,
 };
+
+pub(crate) struct InsertAddress<'a> {
+    stmt: Statement<'a>,
+}
+
+impl<'a> InsertAddress<'a> {
+    pub(crate) fn new(conn: &'a rusqlite::Connection) -> Result<Self, rusqlite::Error> {
+        Ok(InsertAddress {
+            stmt: conn.prepare(
+                "INSERT INTO addresses (
+                    account,
+                    diversifier_index_be,
+                    address,
+                    cached_transparent_receiver_address
+                )
+                VALUES (
+                    :account,
+                    :diversifier_index_be,
+                    :address,
+                    :cached_transparent_receiver_address
+                )",
+            )?,
+        })
+    }
+
+    /// Adds the given address and diversifier index to the addresses table.
+    ///
+    /// Returns the database row for the newly-inserted address.
+    pub(crate) fn execute<P: consensus::Parameters>(
+        &mut self,
+        params: &P,
+        account: AccountId,
+        mut diversifier_index: DiversifierIndex,
+        address: &UnifiedAddress,
+    ) -> Result<(), rusqlite::Error> {
+        // the diversifier index is stored in big-endian order to allow sorting
+        diversifier_index.0.reverse();
+        self.stmt.execute(named_params![
+            ":account": &u32::from(account),
+            ":diversifier_index_be": &&diversifier_index.0[..],
+            ":address": &address.encode(params),
+            ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
+        ])?;
+
+        Ok(())
+    }
+}
 
 /// The primary type used to implement [`WalletWrite`] for the SQLite database.
 ///
@@ -55,19 +105,19 @@ pub struct DataConnStmtCache<'a, P> {
     #[cfg(feature = "transparent-inputs")]
     stmt_insert_received_transparent_utxo: Statement<'a>,
     #[cfg(feature = "transparent-inputs")]
-    stmt_delete_utxos: Statement<'a>,
+    stmt_update_received_transparent_utxo: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,
 
-    stmt_insert_sent_note: Statement<'a>,
-    stmt_update_sent_note: Statement<'a>,
+    stmt_insert_sent_output: Statement<'a>,
+    stmt_update_sent_output: Statement<'a>,
 
     stmt_insert_witness: Statement<'a>,
     stmt_prune_witnesses: Statement<'a>,
     stmt_update_expired: Statement<'a>,
 
-    stmt_insert_address: Statement<'a>,
+    stmt_insert_address: InsertAddress<'a>,
 }
 
 impl<'a, P> DataConnStmtCache<'a, P> {
@@ -112,12 +162,31 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 )?,
                 #[cfg(feature = "transparent-inputs")]
                 stmt_insert_received_transparent_utxo: wallet_db.conn.prepare(
-                    "INSERT INTO utxos (address, prevout_txid, prevout_idx, script, value_zat, height)
-                    VALUES (:address, :prevout_txid, :prevout_idx, :script, :value_zat, :height)"
+                    "INSERT INTO utxos (
+                        received_by_account, address,
+                        prevout_txid, prevout_idx, script,
+                        value_zat, height)
+                    SELECT
+                        addresses.account, :address,
+                        :prevout_txid, :prevout_idx, :script,
+                        :value_zat, :height
+                    FROM addresses
+                    WHERE addresses.cached_transparent_receiver_address = :address
+                    RETURNING id_utxo"
                 )?,
                 #[cfg(feature = "transparent-inputs")]
-                stmt_delete_utxos: wallet_db.conn.prepare(
-                    "DELETE FROM utxos WHERE address = :address AND height > :above_height"
+                stmt_update_received_transparent_utxo: wallet_db.conn.prepare(
+                    "UPDATE utxos
+                    SET received_by_account = addresses.account,
+                        height = :height,
+                        address = :address,
+                        script = :script,
+                        value_zat = :value_zat
+                    FROM addresses
+                    WHERE prevout_txid = :prevout_txid
+                      AND prevout_idx = :prevout_idx
+                      AND addresses.cached_transparent_receiver_address = :address
+                    RETURNING id_utxo"
                 )?,
                 stmt_insert_received_note: wallet_db.conn.prepare(
                     "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
@@ -137,19 +206,24 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 stmt_select_received_note: wallet_db.conn.prepare(
                     "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
                 )?,
-                stmt_update_sent_note: wallet_db.conn.prepare(
+                stmt_update_sent_output: wallet_db.conn.prepare(
                     "UPDATE sent_notes
-                    SET from_account = :account,
-                        address = :address,
+                    SET from_account = :from_account,
+                        to_address = :to_address,
+                        to_account = :to_account,
                         value = :value,
                         memo = IFNULL(:memo, memo)
                     WHERE tx = :tx
                       AND output_pool = :output_pool
                       AND output_index = :output_index",
                 )?,
-                stmt_insert_sent_note: wallet_db.conn.prepare(
-                    "INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value, memo)
-                    VALUES (:tx, :output_pool, :output_index, :from_account, :address, :value, :memo)"
+                stmt_insert_sent_output: wallet_db.conn.prepare(
+                    "INSERT INTO sent_notes (
+                        tx, output_pool, output_index, from_account,
+                        to_address, to_account, value, memo)
+                    VALUES (
+                        :tx, :output_pool, :output_index, :from_account,
+                        :to_address, :to_account, :value, :memo)"
                 )?,
                 stmt_insert_witness: wallet_db.conn.prepare(
                     "INSERT INTO sapling_witnesses (note, block, witness)
@@ -164,10 +238,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                         WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
                 )?,
-                stmt_insert_address: wallet_db.conn.prepare(
-                    "INSERT INTO addresses (account, diversifier_index_be, address)
-                    VALUES (:account, :diversifier_index_be, :address)",
-                )?,
+                stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
             }
         )
     }
@@ -271,7 +342,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":fee", &fee.map(i64::from)),
             (":txid", &&txid.as_ref()[..]),
         ];
-        match self.stmt_update_tx_data.execute_named(sql_args)? {
+        match self.stmt_update_tx_data.execute(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("txid column is marked as UNIQUE"),
@@ -281,7 +352,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
     /// Finds the database row for the given `txid`, if the transaction is in the wallet.
     pub(crate) fn stmt_select_tx_ref(&mut self, txid: &TxId) -> Result<i64, SqliteClientError> {
         self.stmt_select_tx_ref
-            .query_row(&[&txid.as_ref()[..]], |row| row.get(0))
+            .query_row([&txid.as_ref()[..]], |row| row.get(0))
             .map_err(SqliteClientError::from)
     }
 
@@ -322,10 +393,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":prevout_idx", &outpoint.n()),
         ];
 
-        match self
-            .stmt_mark_transparent_utxo_spent
-            .execute_named(sql_args)?
-        {
+        match self.stmt_mark_transparent_utxo_spent.execute(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("tx_outpoint constraint is marked as UNIQUE"),
@@ -334,6 +402,105 @@ impl<'a, P> DataConnStmtCache<'a, P> {
 }
 
 impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
+    /// Inserts a sent note into the wallet database.
+    ///
+    /// `output_index` is the index within the transaction that contains the recipient output:
+    ///
+    /// - If `to` is a Unified address, this is an index into the outputs of the transaction
+    ///   within the bundle associated with the recipient's output pool.
+    /// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
+    ///   transaction.
+    /// - If `to` is a transparent address, this is an index into the transparent outputs of
+    ///   the transaction.
+    /// - If `to` is an internal account, this is an index into the Sapling outputs of the
+    ///   transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stmt_insert_sent_output(
+        &mut self,
+        tx_ref: i64,
+        output_index: usize,
+        from_account: AccountId,
+        to: &Recipient,
+        value: Amount,
+        memo: Option<&MemoBytes>,
+    ) -> Result<(), SqliteClientError> {
+        let (to_address, to_account, pool_type) = match to {
+            Recipient::Transparent(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Transparent,
+            ),
+            Recipient::Sapling(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Sapling,
+            ),
+            Recipient::Unified(addr, pool) => {
+                (Some(addr.encode(&self.wallet_db.params)), None, *pool)
+            }
+            Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
+        };
+
+        self.stmt_insert_sent_output.execute(named_params![
+            ":tx": &tx_ref,
+            ":output_pool": &pool_code(pool_type),
+            ":output_index": &i64::try_from(output_index).unwrap(),
+            ":from_account": &u32::from(from_account),
+            ":to_address": &to_address,
+            ":to_account": &to_account,
+            ":value": &i64::from(value),
+            ":memo": &memo.filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+        ])?;
+
+        Ok(())
+    }
+
+    /// Updates the data for the given sent note.
+    ///
+    /// Returns `false` if the transaction doesn't exist in the wallet.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn stmt_update_sent_output(
+        &mut self,
+        from_account: AccountId,
+        to: &Recipient,
+        value: Amount,
+        memo: Option<&MemoBytes>,
+        tx_ref: i64,
+        output_index: usize,
+    ) -> Result<bool, SqliteClientError> {
+        let (to_address, to_account, pool_type) = match to {
+            Recipient::Transparent(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Transparent,
+            ),
+            Recipient::Sapling(addr) => (
+                Some(addr.encode(&self.wallet_db.params)),
+                None,
+                PoolType::Sapling,
+            ),
+            Recipient::Unified(addr, pool) => {
+                (Some(addr.encode(&self.wallet_db.params)), None, *pool)
+            }
+            Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
+        };
+
+        match self.stmt_update_sent_output.execute(named_params![
+            ":from_account": &u32::from(from_account),
+            ":to_address": &to_address,
+            ":to_account": &to_account,
+            ":value": &i64::from(value),
+            ":memo": &memo.filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+            ":tx": &tx_ref,
+            ":output_pool": &pool_code(pool_type),
+            ":output_index": &i64::try_from(output_index).unwrap(),
+        ])? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => unreachable!("tx_output constraint is marked as UNIQUE"),
+        }
+    }
+
     /// Adds the given received UTXO to the datastore.
     ///
     /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
@@ -342,40 +509,51 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     pub(crate) fn stmt_insert_received_transparent_utxo(
         &mut self,
         output: &WalletTransparentOutput,
-    ) -> Result<i64, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":address", &output.address().encode(&self.wallet_db.params)),
-            (":prevout_txid", &output.outpoint.hash().to_vec()),
-            (":prevout_idx", &output.outpoint.n()),
-            (":script", &output.txout.script_pubkey.0),
-            (":value_zat", &i64::from(output.txout.value)),
-            (":height", &u32::from(output.height)),
-        ];
-
+    ) -> Result<UtxoId, SqliteClientError> {
         self.stmt_insert_received_transparent_utxo
-            .execute_named(sql_args)?;
-
-        Ok(self.wallet_db.conn.last_insert_rowid())
+            .query_row(
+                named_params![
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .map_err(SqliteClientError::from)
     }
 
-    /// Removes all records of UTXOs that were recorded as having been received at block
-    /// heights greater than the given height.
+    /// Adds the given received UTXO to the datastore.
     ///
-    /// Returns the number of UTXOs that were removed.
+    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
+    /// exists.
     #[cfg(feature = "transparent-inputs")]
-    pub(crate) fn stmt_delete_utxos(
+    pub(crate) fn stmt_update_received_transparent_utxo(
         &mut self,
-        taddr: &TransparentAddress,
-        height: BlockHeight,
-    ) -> Result<usize, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":address", &taddr.encode(&self.wallet_db.params)),
-            (":above_height", &u32::from(height)),
-        ];
-
-        let rows = self.stmt_delete_utxos.execute_named(sql_args)?;
-
-        Ok(rows)
+        output: &WalletTransparentOutput,
+    ) -> Result<Option<UtxoId>, SqliteClientError> {
+        self.stmt_update_received_transparent_utxo
+            .query_row(
+                named_params![
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .optional()
+            .map_err(SqliteClientError::from)
     }
 
     /// Adds the given address and diversifier index to the addresses table.
@@ -384,19 +562,17 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     pub(crate) fn stmt_insert_address(
         &mut self,
         account: AccountId,
-        mut diversifier_index: DiversifierIndex,
+        diversifier_index: DiversifierIndex,
         address: &UnifiedAddress,
-    ) -> Result<i64, SqliteClientError> {
-        diversifier_index.0.reverse();
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":account", &u32::from(account)),
-            (":diversifier_index_be", &&diversifier_index.0[..]),
-            (":address", &address.encode(&self.wallet_db.params)),
-        ];
+    ) -> Result<(), SqliteClientError> {
+        self.stmt_insert_address.execute(
+            &self.wallet_db.params,
+            account,
+            diversifier_index,
+            address,
+        )?;
 
-        self.stmt_insert_address.execute_named(sql_args)?;
-
-        Ok(self.wallet_db.conn.last_insert_rowid())
+        Ok(())
     }
 }
 
@@ -439,7 +615,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":is_change", &is_change),
         ];
 
-        self.stmt_insert_received_note.execute_named(sql_args)?;
+        self.stmt_insert_received_note.execute(sql_args)?;
 
         Ok(NoteId::ReceivedNoteId(
             self.wallet_db.conn.last_insert_rowid(),
@@ -483,7 +659,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":output_index", &(output_index as i64)),
         ];
 
-        match self.stmt_update_received_note.execute_named(sql_args)? {
+        match self.stmt_update_received_note.execute(sql_args)? {
             0 => Ok(false),
             1 => Ok(true),
             _ => unreachable!("tx_output constraint is marked as UNIQUE"),
@@ -501,78 +677,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 row.get(0).map(NoteId::ReceivedNoteId)
             })
             .map_err(SqliteClientError::from)
-    }
-
-    /// Inserts a sent note into the wallet database.
-    ///
-    /// `output_index` is the index within the transaction that contains the recipient output:
-    ///
-    /// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
-    ///   transaction.
-    /// - If `to` is a transparent address, this is an index into the transparent outputs of
-    ///   the transaction.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_insert_sent_note(
-        &mut self,
-        tx_ref: i64,
-        pool_type: PoolType,
-        output_index: usize,
-        account: AccountId,
-        to_str: &str,
-        value: Amount,
-        memo: Option<&MemoBytes>,
-    ) -> Result<(), SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":tx", &tx_ref),
-            (":output_pool", &pool_type.typecode()),
-            (":output_index", &i64::try_from(output_index).unwrap()),
-            (":from_account", &u32::from(account)),
-            (":address", &to_str),
-            (":value", &i64::from(value)),
-            (
-                ":memo",
-                &memo
-                    .filter(|m| *m != &MemoBytes::empty())
-                    .map(|m| m.as_slice()),
-            ),
-        ];
-        self.stmt_insert_sent_note.execute_named(sql_args)?;
-        Ok(())
-    }
-
-    /// Updates the data for the given sent note.
-    ///
-    /// Returns `false` if the transaction doesn't exist in the wallet.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_update_sent_note(
-        &mut self,
-        account: AccountId,
-        to_str: &str,
-        value: Amount,
-        memo: Option<&MemoBytes>,
-        tx_ref: i64,
-        pool_type: PoolType,
-        output_index: usize,
-    ) -> Result<bool, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":account", &u32::from(account)),
-            (":address", &to_str),
-            (":value", &i64::from(value)),
-            (
-                ":memo",
-                &memo
-                    .filter(|m| *m != &MemoBytes::empty())
-                    .map(|m| m.as_slice()),
-            ),
-            (":tx", &tx_ref),
-            (":output_pool", &pool_type.typecode()),
-            (":output_index", &i64::try_from(output_index).unwrap()),
-        ];
-        match self.stmt_update_sent_note.execute_named(sql_args)? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => unreachable!("tx_output constraint is marked as UNIQUE"),
-        }
     }
 
     /// Records the incremental witness for the specified note, as of the given block
@@ -605,14 +709,14 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         below_height: BlockHeight,
     ) -> Result<(), SqliteClientError> {
         self.stmt_prune_witnesses
-            .execute(&[u32::from(below_height)])?;
+            .execute([u32::from(below_height)])?;
         Ok(())
     }
 
     /// Marks notes that have not been mined in transactions as expired, up to the given
     /// block height.
     pub fn stmt_update_expired(&mut self, height: BlockHeight) -> Result<(), SqliteClientError> {
-        self.stmt_update_expired.execute(&[u32::from(height)])?;
+        self.stmt_update_expired.execute([u32::from(height)])?;
         Ok(())
     }
 }

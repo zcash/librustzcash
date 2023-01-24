@@ -91,8 +91,8 @@ impl super::Container for Address {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test_vectors;
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod test_vectors;
 
 #[cfg(test)]
 mod tests {

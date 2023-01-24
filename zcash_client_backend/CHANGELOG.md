@@ -13,13 +13,8 @@ and this library adheres to Rust's notion of
   - A new `data_api::wallet::shield_transparent_funds` method has been added
     to facilitate the automatic shielding of transparent funds received
     by the wallet.
-  - `zcash_client_backend::data_api::WalletReadTransparent` read-only operations
-    related to information the wallet maintains about transparent funds.
-  - `zcash_client_backend::data_api::WalletWriteTransparent` operations
-    related persisting information the wallet maintains about transparent funds.
   - A `zcash_client_backend::wallet::WalletTransparentOutput` type
-    has been added under the `transparent-inputs` feature flag in support
-    of autoshielding functionality.
+    in support of `transparent-inputs` functionality.
 - A new `data_api::wallet::spend` method has been added, which is
   intended to supersede the `data_api::wallet::create_spend_to_address`
   method. This new method now constructs transactions via interpretation
@@ -31,12 +26,21 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::address`:
   - `RecipientAddress::Unified`
 - `zcash_client_backend::data_api`:
+  - `PoolType`
+  - `Recipient`
+  - `SentTransactionOutput`
   - `WalletRead::get_unified_full_viewing_keys`
+  - `WalletRead::get_account_for_ufvk`
   - `WalletRead::get_current_address`
   - `WalletRead::get_all_nullifiers`
+  - `WalletRead::get_transparent_receivers`
+  - `WalletRead::get_unspent_transparent_outputs`
   - `WalletWrite::create_account`
   - `WalletWrite::remove_unmined_tx` (behind the `unstable` feature flag).
   - `WalletWrite::get_next_available_address`
+  - `WalletWrite::put_received_transparent_utxo`
+- `zcash_client_backend::decrypt`:
+  - `TransferType`
 - `zcash_client_backend::proto`:
   - `actions` field on `compact_formats::CompactTx`
   - `compact_formats::CompactOrchardAction`
@@ -44,7 +48,10 @@ and this library adheres to Rust's notion of
   - `TransactionRequest::new` for constructing a request from `Vec<Payment>`.
   - `TransactionRequest::payments` for accessing the `Payments` that make up a
     request.
-- `zcash_client_backend::encoding::KeyError` 
+- `zcash_client_backend::encoding`
+  - `KeyError`
+  - `AddressCodec` implementations for `sapling::PaymentAddress` and
+    `UnifiedAddress`
 - New experimental APIs that should be considered unstable, and are
   likely to be modified and/or moved to a different module in a future
   release:
@@ -57,7 +64,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.56.1.
 - Bumped dependencies to `ff 0.12`, `group 0.12`, `bls12_381 0.7`, `jubjub 0.9`,
-  `zcash_primitives 0.7`.
+  `zcash_primitives 0.8`, `orchard 0.3`.
 - `zcash_client_backend::proto`:
   - `compact_formats::CompactSpend` has been renamed to `CompactSaplingSpend`,
     and its `epk` field (and associated `set_epk` method) has been renamed to
@@ -124,6 +131,8 @@ and this library adheres to Rust's notion of
   - `decode_extended_spending_key`
   - `decode_extended_full_viewing_key`
   - `decode_payment_address`
+- `data_api::wallet::create_spend_to_address` has been modified to use a unified
+  spending key rather than a Sapling extended spending key.
 
 ### Removed
 - `zcash_client_backend::data_api`:

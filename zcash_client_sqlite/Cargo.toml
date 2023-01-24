@@ -16,28 +16,27 @@ rust-version = "1.56.1"
 [dependencies]
 bech32 = "0.8"
 bs58 = { version = "0.4", features = ["check"] }
-ff = "0.12"
 group = "0.12"
 hdwallet = { version = "0.3.1", optional = true }
 jubjub = "0.9"
 protobuf = "~2.27.1" # MSRV 1.52.1
 rand_core = "0.6"
-rusqlite = { version = "0.24", features = ["bundled", "time"] }
-secp256k1 = { version = "0.21" }
+rusqlite = { version = "0.25", features = ["bundled", "time"] }
 schemer = "0.2"
 schemer-rusqlite = "0.2"
 secrecy = "0.8"
 time = "0.2"
 uuid = "1.1"
 zcash_client_backend = { version = "0.5", path = "../zcash_client_backend" }
-zcash_primitives = { version = "0.7", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.8", path = "../zcash_primitives" }
 
 [dev-dependencies]
 proptest = "1.0.0"
 regex = "1.4"
 tempfile = "3"
-zcash_proofs = { version = "0.7", path = "../zcash_proofs" }
-zcash_primitives = { version = "0.7", path = "../zcash_primitives", features = ["test-dependencies"] }
+zcash_proofs = { version = "0.8", path = "../zcash_proofs" }
+zcash_primitives = { version = "0.8", path = "../zcash_primitives", features = ["test-dependencies"] }
+zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
 mainnet = []

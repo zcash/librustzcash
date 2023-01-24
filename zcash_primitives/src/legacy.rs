@@ -29,7 +29,7 @@ enum OpCode {
 }
 
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Script(pub Vec<u8>);
 
 impl Script {
@@ -43,7 +43,7 @@ impl Script {
     }
 
     /// Returns the address that this Script contains, if any.
-    pub fn address(&self) -> Option<TransparentAddress> {
+    pub(crate) fn address(&self) -> Option<TransparentAddress> {
         if self.0.len() == 25
             && self.0[0..3] == [OpCode::Dup as u8, OpCode::Hash160 as u8, 0x14]
             && self.0[23..25] == [OpCode::EqualVerify as u8, OpCode::CheckSig as u8]
@@ -84,10 +84,10 @@ impl Shl<&[u8]> for Script {
             self.0.push(data.len() as u8);
         } else if data.len() <= 0xffff {
             self.0.push(OpCode::PushData2 as u8);
-            self.0.extend(&(data.len() as u16).to_le_bytes());
+            self.0.extend((data.len() as u16).to_le_bytes());
         } else {
             self.0.push(OpCode::PushData4 as u8);
-            self.0.extend(&(data.len() as u32).to_le_bytes());
+            self.0.extend((data.len() as u32).to_le_bytes());
         }
         self.0.extend(data);
         self

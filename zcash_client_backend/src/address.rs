@@ -225,6 +225,7 @@ impl RecipientAddress {
 
 #[cfg(test)]
 mod tests {
+    use zcash_address::test_vectors;
     use zcash_primitives::{consensus::MAIN_NETWORK, zip32::ExtendedFullViewingKey};
 
     use super::{RecipientAddress, UnifiedAddress};
@@ -254,5 +255,33 @@ mod tests {
             RecipientAddress::decode(&MAIN_NETWORK, &addr_str),
             Some(addr)
         );
+    }
+
+    #[test]
+    fn ua_parsing() {
+        for tv in test_vectors::UNIFIED {
+            match RecipientAddress::decode(&MAIN_NETWORK, tv.unified_addr) {
+                Some(RecipientAddress::Unified(ua)) => {
+                    assert_eq!(
+                        ua.transparent().is_some(),
+                        tv.p2pkh_bytes.is_some() || tv.p2sh_bytes.is_some()
+                    );
+                    assert_eq!(ua.sapling().is_some(), tv.sapling_raw_addr.is_some());
+                    assert_eq!(ua.orchard().is_some(), tv.orchard_raw_addr.is_some());
+                }
+                Some(_) => {
+                    panic!(
+                        "{} did not decode to a unified address value.",
+                        tv.unified_addr
+                    );
+                }
+                None => {
+                    panic!(
+                        "Failed to decode unified address from test vector: {}",
+                        tv.unified_addr
+                    );
+                }
+            }
+        }
     }
 }
