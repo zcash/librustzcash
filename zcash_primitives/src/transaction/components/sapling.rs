@@ -273,9 +273,7 @@ impl<Proof: DynamicUsage> DynamicUsage for OutputDescription<Proof> {
     }
 }
 
-impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>>
-    for OutputDescription<A>
-{
+impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>> for OutputDescription<A> {
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
         self.ephemeral_key.clone()
     }
