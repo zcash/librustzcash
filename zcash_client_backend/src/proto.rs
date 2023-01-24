@@ -9,8 +9,8 @@ use zcash_primitives::{
     transaction::{components::sapling, TxId},
 };
 
-use zcash_note_encryption::{EphemeralKeyBytes};
 use orchard::note_encryption_v3::COMPACT_NOTE_SIZE_V3 as COMPACT_NOTE_SIZE;
+use zcash_note_encryption::EphemeralKeyBytes;
 
 pub mod compact_formats;
 
