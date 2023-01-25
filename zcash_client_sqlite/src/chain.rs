@@ -76,6 +76,7 @@ where
 
 /// Data structure representing a row in the block metadata database.
 #[cfg(feature = "unstable")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
     pub height: BlockHeight,
     pub block_hash: BlockHash,
@@ -159,6 +160,32 @@ pub(crate) fn blockmetadb_get_max_cached_height(
         let h: Option<u32> = row.get(0)?;
         Ok(h.map(BlockHeight::from))
     })
+}
+
+/// Returns the metadata for the block with the given height, if it exists in the database.
+#[cfg(feature = "unstable")]
+pub(crate) fn blockmetadb_find_block(
+    conn: &Connection,
+    height: BlockHeight,
+) -> Result<Option<BlockMeta>, rusqlite::Error> {
+    use rusqlite::OptionalExtension;
+
+    conn.query_row(
+        "SELECT blockhash, time, sapling_outputs_count, orchard_actions_count
+        FROM compactblocks_meta
+        WHERE height = ?",
+        [u32::from(height)],
+        |row| {
+            Ok(BlockMeta {
+                height,
+                block_hash: BlockHash::from_slice(&row.get::<_, Vec<_>>(0)?),
+                block_time: row.get(1)?,
+                sapling_outputs_count: row.get(2)?,
+                orchard_actions_count: row.get(3)?,
+            })
+        },
+    )
+    .optional()
 }
 
 /// Implements a traversal of `limit` blocks of the filesystem-backed
