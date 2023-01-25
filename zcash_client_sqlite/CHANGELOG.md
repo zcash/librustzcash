@@ -12,6 +12,8 @@ and this library adheres to Rust's notion of
  `WalletDb`. This function does not delete the files referenced by the rows
  that might be present and are deleted by this function call.
 - `zcash_client_sqlite::FsBlockDb::find_block`
+- `zcash_client_sqlite::chain`:
+  - `impl {Clone, Copy, Debug, PartialEq, Eq} for BlockMeta`
 
 ### Changed
 - MSRV is now 1.60.0.

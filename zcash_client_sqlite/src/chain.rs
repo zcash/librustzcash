@@ -76,6 +76,7 @@ where
 
 /// Data structure representing a row in the block metadata database.
 #[cfg(feature = "unstable")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
     pub height: BlockHeight,
     pub block_hash: BlockHash,
