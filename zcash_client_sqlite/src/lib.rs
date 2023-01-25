@@ -1029,6 +1029,9 @@ mod tests {
     use rusqlite::params;
     use std::collections::HashMap;
 
+    #[cfg(feature = "unstable")]
+    use std::{fs::File, path::Path};
+
     #[cfg(feature = "transparent-inputs")]
     use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
 
@@ -1062,6 +1065,12 @@ mod tests {
     };
 
     use super::BlockDb;
+
+    #[cfg(feature = "unstable")]
+    use super::{
+        chain::{init::init_blockmeta_db, BlockMeta},
+        FsBlockDb,
+    };
 
     #[cfg(feature = "mainnet")]
     pub(crate) fn network() -> Network {
@@ -1292,6 +1301,32 @@ mod tests {
             .unwrap();
     }
 
+    #[cfg(feature = "unstable")]
+    pub(crate) fn store_in_fsblockdb<P: AsRef<Path>>(
+        fsblockdb_root: P,
+        cb: &CompactBlock,
+    ) -> BlockMeta {
+        use std::io::Write;
+
+        let meta = BlockMeta {
+            height: cb.height(),
+            block_hash: cb.hash(),
+            block_time: cb.time,
+            sapling_outputs_count: cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum(),
+            orchard_actions_count: cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum(),
+        };
+
+        let blocks_dir = fsblockdb_root.as_ref().join("blocks");
+        let block_path = meta.block_file_path(&blocks_dir);
+
+        File::create(block_path)
+            .unwrap()
+            .write_all(&cb.encode_to_vec())
+            .unwrap();
+
+        meta
+    }
+
     #[test]
     pub(crate) fn get_next_available_address() {
         use tempfile::NamedTempFile;
@@ -1455,5 +1490,75 @@ mod tests {
             get_balance(&db_data, AccountId::from(0)).unwrap(),
             (value - value2).unwrap()
         );
+    }
+
+    #[cfg(feature = "unstable")]
+    #[test]
+    pub(crate) fn fsblockdb_api() {
+        // Initialise a BlockMeta DB in a new directory.
+        let fsblockdb_root = tempfile::tempdir().unwrap();
+        let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
+        init_blockmeta_db(&mut db_meta).unwrap();
+
+        // The BlockMeta DB starts off empty.
+        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+
+        // Generate some fake CompactBlocks.
+        let seed = [0u8; 32];
+        let account = AccountId::from(0);
+        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let (cb1, _) = fake_compact_block(
+            BlockHeight::from_u32(1),
+            BlockHash([1; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::from_u64(5).unwrap(),
+        );
+        let (cb2, _) = fake_compact_block(
+            BlockHeight::from_u32(2),
+            BlockHash([2; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::from_u64(10).unwrap(),
+        );
+
+        // Write the CompactBlocks to the BlockMeta DB's corresponding disk storage.
+        let meta1 = store_in_fsblockdb(&fsblockdb_root, &cb1);
+        let meta2 = store_in_fsblockdb(&fsblockdb_root, &cb2);
+
+        // The BlockMeta DB is not updated until we do so explicitly.
+        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+
+        // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
+        db_meta.write_block_metadata(&[meta1, meta2]).unwrap();
+
+        // The BlockMeta DB now sees blocks up to height 2.
+        assert_eq!(
+            db_meta.get_max_cached_height().unwrap(),
+            Some(BlockHeight::from_u32(2)),
+        );
+        assert_eq!(
+            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
+            Some(meta1),
+        );
+        assert_eq!(
+            db_meta.find_block(BlockHeight::from_u32(2)).unwrap(),
+            Some(meta2),
+        );
+        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+
+        // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
+        db_meta.rewind_to_height(BlockHeight::from_u32(1)).unwrap();
+        assert_eq!(
+            db_meta.get_max_cached_height().unwrap(),
+            Some(BlockHeight::from_u32(1)),
+        );
+        assert_eq!(
+            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
+            Some(meta1),
+        );
+        assert_eq!(db_meta.find_block(BlockHeight::from_u32(2)).unwrap(), None);
+        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
     }
 }
