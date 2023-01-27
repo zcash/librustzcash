@@ -627,7 +627,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 let nullifiers = self.wallet_db.get_all_nullifiers()?;
                 // If the transaction contains shielded spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
-                // create_spend_to_address. 
+                // create_spend_to_address.
                 if let Some((account_id, _)) = nullifiers.iter().find(
                     |(_, nf)|
                         d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
@@ -883,6 +883,11 @@ impl FsBlockDb {
     /// `<fsblockdb_root>/blockmeta.sqlite` and will ensure that a directory exists at
     /// `<fsblockdb_root>/blocks` where this block store will expect to find serialized block
     /// files as described for [`FsBlockDb`].
+    ///
+    /// An application using this constructor should ensure that they call
+    /// [`zcash_client_sqlite::chain::init::init_blockmetadb`] at application startup to ensure
+    /// that the resulting metadata database is properly initialized and has had all required
+    /// migrations applied before use.
     pub fn for_path<P: AsRef<Path>>(fsblockdb_root: P) -> Result<Self, FsBlockDbError> {
         let meta = fs::metadata(&fsblockdb_root).map_err(FsBlockDbError::Fs)?;
         if meta.is_dir() {
