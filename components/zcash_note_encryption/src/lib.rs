@@ -418,7 +418,7 @@ impl<D: Domain> NoteEncryption<D> {
         let output = input.as_mut();
 
         let tag = ChaCha20Poly1305::new(key.as_ref().into())
-            .encrypt_in_place_detached([0u8; 12][..].into(), &[], output.as_mut())
+            .encrypt_in_place_detached([0u8; 12][..].into(), &[], output)
             .unwrap();
         D::NoteCiphertextBytes::from(&[output, tag.as_ref()].concat())
     }
