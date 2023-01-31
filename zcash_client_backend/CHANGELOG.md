@@ -19,6 +19,10 @@ and this library adheres to Rust's notion of
   - The `cmu` field of `zcash_client_backend::wallet::WalletShieldedOutput`.
   - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput::cmu`.
 
+
+### Removed 
+- `zcash_client_backend::data_api`:
+  - `WalletWrite::remove_unmined_tx` (was behind the `unstable` feature flag).
 ## [0.6.1] - 2022-12-06
 ### Added
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` now generates
