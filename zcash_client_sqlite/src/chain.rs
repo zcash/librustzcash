@@ -28,7 +28,7 @@ pub mod migrations;
 /// blocks are traversed up to the maximum height.
 pub(crate) fn blockdb_with_blocks<F, DbErrT, NoteRef>(
     block_source: &BlockDb,
-    last_scanned_height: BlockHeight,
+    last_scanned_height: Option<BlockHeight>,
     limit: Option<u32>,
     mut with_row: F,
 ) -> Result<(), Error<DbErrT, SqliteClientError, NoteRef>>
@@ -51,7 +51,7 @@ where
 
     let mut rows = stmt_blocks
         .query(params![
-            u32::from(last_scanned_height),
+            last_scanned_height.map_or(0u32, u32::from),
             limit.unwrap_or(u32::max_value()),
         ])
         .map_err(to_chain_error)?;
@@ -197,7 +197,7 @@ pub(crate) fn blockmetadb_find_block(
 #[cfg(feature = "unstable")]
 pub(crate) fn fsblockdb_with_blocks<F, DbErrT, NoteRef>(
     cache: &FsBlockDb,
-    last_scanned_height: BlockHeight,
+    last_scanned_height: Option<BlockHeight>,
     limit: Option<u32>,
     mut with_block: F,
 ) -> Result<(), Error<DbErrT, FsBlockDbError, NoteRef>>
@@ -213,16 +213,16 @@ where
         .conn
         .prepare(
             "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
-         FROM compactblocks_meta
-         WHERE height > ?
-         ORDER BY height ASC LIMIT ?",
+             FROM compactblocks_meta
+             WHERE height > ?
+             ORDER BY height ASC LIMIT ?",
         )
         .map_err(to_chain_error)?;
 
     let rows = stmt_blocks
         .query_map(
             params![
-                u32::from(last_scanned_height),
+                last_scanned_height.map_or(0u32, u32::from),
                 limit.unwrap_or(u32::max_value()),
             ],
             |row| {
@@ -301,43 +301,38 @@ mod tests {
         // Add an account to the wallet
         let (dfvk, _taddr) = init_test_accounts_table(&db_data);
 
-        // Empty chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        // Empty chain should return None
+        assert_matches!(db_data.get_max_height_hash(), Ok(None));
 
         // Create a fake CompactBlock sending value to the address
+        let fake_block_hash = BlockHash([0; 32]);
+        let fake_block_height = sapling_activation_height();
+
         let (cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
+            fake_block_height,
+            fake_block_hash,
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
+
         insert_into_cache(&db_cache, &cb);
 
         // Cache-only chain should be valid
-        validate_chain(
-            &tests::network(),
+        let validate_chain_result = validate_chain(
             &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+            Some((fake_block_height, fake_block_hash)),
+            Some(1),
+        );
+
+        assert_matches!(validate_chain_result, Ok(()));
 
         // Scan the cache
         let mut db_write = db_data.get_update_ops().unwrap();
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
 
         // Create a second fake CompactBlock sending more value to the address
         let (cb2, _) = fake_compact_block(
@@ -350,23 +345,13 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Data+cache chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
 
         // Scan the cache again
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
     }
 
     #[test]
@@ -405,12 +390,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
 
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let (cb3, _) = fake_compact_block(
@@ -431,11 +411,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid at the data/cache boundary
-        let val_result = validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        );
+        let val_result = validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None);
 
         assert_matches!(val_result, Err(Error::Chain(e)) if e.at_height() == sapling_activation_height() + 2);
     }
@@ -476,12 +452,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
 
         // Data-only chain should be valid
-        validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        )
-        .unwrap();
+        validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
 
         // Create more fake CompactBlocks that contain a reorg
         let (cb3, _) = fake_compact_block(
@@ -502,11 +473,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb4);
 
         // Data+cache chain should be invalid inside the cache
-        let val_result = validate_chain(
-            &tests::network(),
-            &db_cache,
-            db_data.get_max_height_hash().unwrap(),
-        );
+        let val_result = validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None);
 
         assert_matches!(val_result, Err(Error::Chain(e)) if e.at_height() == sapling_activation_height() + 3);
     }
