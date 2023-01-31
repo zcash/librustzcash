@@ -143,7 +143,7 @@ impl SaplingOutput {
             cv,
             cmu,
             ephemeral_key: epk.to_bytes().into(),
-            enc_ciphertext,
+            enc_ciphertext: enc_ciphertext.0,
             out_ciphertext,
             zkproof,
         }
