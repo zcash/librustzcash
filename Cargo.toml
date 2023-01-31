@@ -126,4 +126,4 @@ codegen-units = 1
 [patch.crates-io]
 schemer = { git = "https://github.com/aschampion/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }
 schemer-rusqlite = { git = "https://github.com/aschampion/schemer.git", rev = "6726b60f43f72c6e24a18d31be0ec7d42829e5e1" }
-orchard = { version = "0.3", git = "https://github.com/QED-it/orchard", rev = "c6e048a4474f0bef5182ed56e5d2ecff6fea0389" }
+orchard = { version = "0.3", git = "https://github.com/QED-it/orchard", rev = "35da288c7867c5b0fb0ae84e444915689e49084c" }
