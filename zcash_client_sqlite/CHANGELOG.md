@@ -18,6 +18,8 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.60.0.
 
+### Removed
+- implementation of unstable function `WalletWrite::remove_unmined_tx`,
 ## [0.4.2] - 2022-12-13
 ### Fixed
 - `zcash_client_sqlite::WalletDb::get_transparent_balances` no longer returns an
