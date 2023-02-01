@@ -17,6 +17,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.60.0.
+- Bumped dependencies to `zcash_primitives 0.10`.
 - `zcash_client_backend::FsBlockDbError`:
   - Renamed `FsBlockDbError::{DbError, FsError}` to `FsBlockDbError::{Db, Fs}`.
   - Added `FsBlockDbError::MissingBlockPath`.

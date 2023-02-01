@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.60.0.
+- Bumped dependencies to `zcash_primitives 0.10`.
 - Note commitments now use
   `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
   `bls12_381::Scalar` in `zcash_proofs::sapling`:

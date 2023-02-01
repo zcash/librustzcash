@@ -16,6 +16,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.60.0.
+- Bumped dependencies to `zcash_primitives 0.10`.
 - `zcash_client_backend::data_api::chain`:
   - `BlockSource::with_blocks` now takes `from_height` as `Option<BlockHeight>`
     instead of `BlockHeight`. Trait implementors should return all available
