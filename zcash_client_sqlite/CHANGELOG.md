@@ -6,7 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Added 
+
+## [0.7.0] - 2023-02-01
+### Added
 - `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db
  to the specified height following the same logic as homonymous functions on 
  `WalletDb`. This function does not delete the files referenced by the rows
@@ -17,32 +19,11 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.60.0.
-
-- **breaking changes** to `validate_chain`. 
-  - `zcash_client_backend::data_api::chain::validate_chain` now requires a
-    non-optional `validate_from` parameter that indicates the starting point of
-    the `BlockSourceT` validation. An Optional `limit` can be specified as
-    well. This allows callers to validate smaller intervals of the given
-    `BlockSourceT` shortening processing times of the function call at the
-    expense of obtaining a partial result on a given section of interest of the
-    block source. 
-  - `params: &ParamsT` has been removed from the arguments since they were only needed 
-    to fall back to `sapling_activation_height` when `None` as passed as the
-    `validate_from` argument. Passing `None` as validation start point on a
-    pre-populated `block_source` would result in an error
-    `ChainError::block_height_discontinuity(sapling_activation_height - 1, current_height)` 
-  - With this new API callers must specify a concrete `validate_from` argument and
-    assume that `validate_chain` will not take any default fallbacks to chain
-    `ParamsT`.
-  - The addition of a `limit` to the chain validation function changes the
-    meaning of its successful output, being now a `BlockHeight, BlockHash)` tuple
-    indicating the block height and block has up to which the chain as been
-    validated on its continuity of heights and hashes. Callers providing a
-    `limit` aregumente are responsible of subsequent calls to `validate_chain()`
-    to complete validating the totality of the block_source. 
-
-### Removed
-- implementation of unstable function `WalletWrite::remove_unmined_tx`,
+- Bumped dependencies to `zcash_primitives 0.10`, `zcash_client_backend 0.7`.
+- `zcash_client_backend::FsBlockDbError`:
+  - Renamed `FsBlockDbError::{DbError, FsError}` to `FsBlockDbError::{Db, Fs}`.
+  - Added `FsBlockDbError::MissingBlockPath`.
+  - `impl fmt::Display for FsBlockDbError`
 
 ## [0.4.2] - 2022-12-13
 ### Fixed

@@ -7,45 +7,46 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.7.0] - 2023-02-01
 ### Added
 - `zcash_client_backend::data_api::wallet`:
+  - `input_selection::Proposal::{is_shielding, target_height}`
   - `propose_transfer`
   - `propose_shielding`
   - `create_proposed_transaction`
 
 ### Changed
 - MSRV is now 1.60.0.
-
-- `zcash_client_backend::data_api::wallet::shield_transparent_funds` now
-  takes a `shielding_threshold` argument that can be used to specify the 
-  minimum value allowed as input to a shielding transaction. Previously 
-  the shielding threshold was fixed at 100000 zatoshis.
-
+- Bumped dependencies to `zcash_primitives 0.10`.
+- `zcash_client_backend::data_api::chain`:
+  - `BlockSource::with_blocks` now takes `from_height` as `Option<BlockHeight>`
+    instead of `BlockHeight`. Trait implementors should return all available
+    blocks in the datastore when `from_height` is `None`.
+  - Various **breaking changes** to `validate_chain`:
+    - The `parameters: &ParamsT` argument has been removed. When `None` is given
+      as the `validate_from` argument, `validate_chain` will now pass `None` to
+      `BlockSource::with_blocks` (instead of the Sapling network upgrade's
+      activation height). 
+    - A `limit: Option<u32>` argument has been added. This enables callers to
+      validate smaller intervals of blocks already present on the provided
+      `BlockSource`, shortening processing times of the function call at the
+      expense of obtaining a partial result. When providing a `limit`, a result
+      of `Ok(())` means that the chain has been validated on its continuity of
+      heights and hashes in the range `[validate_from, validate_from + limit)`.
+      Callers are responsible for making subsequent calls to `validate_chain` in
+      order to complete validating the totality of `block_source`.
+- `zcash_client_backend::data_api::wallet`:
+  - `input_selection::Proposal` no longer has a `TransparentInput` generic
+    parameter, and `Proposal::transparent_inputs` now returns
+    `&[zcash_client_backend::wallet::WalletTransparentOutput]`.
+  - `shield_transparent_funds` now takes a `shielding_threshold` argument that
+    can be used to specify the minimum value allowed as input to a shielding
+    transaction. Previously the shielding threshold was fixed at 100000 zatoshis.
 - Note commitments now use
   `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
   `bls12_381::Scalar` in the following places:
   - The `cmu` field of `zcash_client_backend::wallet::WalletShieldedOutput`.
   - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput::cmu`.
-
-- **breaking changes** to `zcash_client_backend::data_api::chain::validate_chain`
-  - `validate_chain` now requires a non-optional `validate_from` parameter that
-    indicates the starting point of the `BlockSourceT` validation. An Optional
-    `limit` can be specified as well.  This allows callers to validate smaller
-    intervals of blocks already present on the provided `BlockSource` shortening
-    processing times of the function call at the expense of obtaining a partial
-    result. 
-
-  - `params: &ParamsT` has been removed from the arguments since they were only
-    needed to fall back to `sapling_activation_height` when `None` as passed as
-    the `validate_from` argument. Implementors of `BlockSource` are resposible
-    of definining how they will fall back to a suitable value when `validate_from`
-    is `None`. 
-
-  - When passing a `limit` to the chain validation function, a successful output,
-    indicates that the chain has been validated on its continuity of heights and hashes
-    within the limits of the range `[validate_from, validate_from + limit)`. 
-    Callers providing a `limit` argument are responsible for making subsequent calls to
-    `validate_chain()` in order to complete validating the totality of the block_source. 
 
 ### Removed 
 - `zcash_client_backend::data_api`:

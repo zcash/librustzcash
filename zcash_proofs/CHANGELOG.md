@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.10.0] - 2023-02-01
 ### Added
 - `zcash_proofs::circuit::sapling`:
   - `ValueCommitmentOpening`
@@ -13,6 +15,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.60.0.
+- Bumped dependencies to `zcash_primitives 0.10`.
 - Note commitments now use
   `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
   `bls12_381::Scalar` in `zcash_proofs::sapling`:
