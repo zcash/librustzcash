@@ -65,21 +65,23 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
 
 /// A data structure that describes the inputs to be consumed and outputs to
 /// be produced in a proposed transaction.
-pub struct Proposal<FeeRuleT, TransparentInput, NoteRef> {
+pub struct Proposal<FeeRuleT, NoteRef> {
     transaction_request: TransactionRequest,
-    transparent_inputs: Vec<TransparentInput>,
+    transparent_inputs: Vec<WalletTransparentOutput>,
     sapling_inputs: Vec<SpendableNote<NoteRef>>,
     balance: TransactionBalance,
     fee_rule: FeeRuleT,
+    target_height: BlockHeight,
+    is_shielding: bool,
 }
 
-impl<FeeRuleT, TransparentInput, NoteRef> Proposal<FeeRuleT, TransparentInput, NoteRef> {
+impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// Returns the transaction request that describes the payments to be made.
     pub fn transaction_request(&self) -> &TransactionRequest {
         &self.transaction_request
     }
     /// Returns the transparent inputs that have been selected to fund the transaction.
-    pub fn transparent_inputs(&self) -> &[TransparentInput] {
+    pub fn transparent_inputs(&self) -> &[WalletTransparentOutput] {
         &self.transparent_inputs
     }
     /// Returns the Sapling inputs that have been selected to fund the transaction.
@@ -93,6 +95,16 @@ impl<FeeRuleT, TransparentInput, NoteRef> Proposal<FeeRuleT, TransparentInput, N
     /// Returns the fee rule to be used by the transaction builder.
     pub fn fee_rule(&self) -> &FeeRuleT {
         &self.fee_rule
+    }
+    /// Returns the target height for which the proposal was prepared.
+    pub fn target_height(&self) -> BlockHeight {
+        self.target_height
+    }
+    /// Returns a flag indicating whether or not the proposed transaction
+    /// is exclusively wallet-internal (if it does not involve any external
+    /// recipients).
+    pub fn is_shielding(&self) -> bool {
+        self.is_shielding
     }
 }
 
@@ -138,11 +150,7 @@ pub trait InputSelector {
         target_height: BlockHeight,
         transaction_request: TransactionRequest,
     ) -> Result<
-        Proposal<
-            Self::FeeRule,
-            std::convert::Infallible,
-            <<Self as InputSelector>::DataSource as WalletRead>::NoteRef,
-        >,
+        Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
         InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
     >
     where
@@ -167,11 +175,7 @@ pub trait InputSelector {
         confirmed_height: BlockHeight,
         target_height: BlockHeight,
     ) -> Result<
-        Proposal<
-            Self::FeeRule,
-            WalletTransparentOutput,
-            <<Self as InputSelector>::DataSource as WalletRead>::NoteRef,
-        >,
+        Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
         InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
     >
     where
@@ -291,10 +295,7 @@ where
         anchor_height: BlockHeight,
         target_height: BlockHeight,
         transaction_request: TransactionRequest,
-    ) -> Result<
-        Proposal<Self::FeeRule, std::convert::Infallible, DbT::NoteRef>,
-        InputSelectorError<DbT::Error, Self::Error>,
-    >
+    ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
     where
         ParamsT: consensus::Parameters,
     {
@@ -361,6 +362,8 @@ where
                         sapling_inputs,
                         balance,
                         fee_rule: (*self.change_strategy.fee_rule()).clone(),
+                        target_height,
+                        is_shielding: false,
                     });
                 }
                 Err(ChangeError::DustInputs { mut sapling, .. }) => {
@@ -404,10 +407,7 @@ where
         source_addrs: &[TransparentAddress],
         confirmed_height: BlockHeight,
         target_height: BlockHeight,
-    ) -> Result<
-        Proposal<Self::FeeRule, WalletTransparentOutput, DbT::NoteRef>,
-        InputSelectorError<DbT::Error, Self::Error>,
-    >
+    ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
     where
         ParamsT: consensus::Parameters,
     {
@@ -461,6 +461,8 @@ where
                 sapling_inputs: vec![],
                 balance,
                 fee_rule: (*self.change_strategy.fee_rule()).clone(),
+                target_height,
+                is_shielding: true,
             })
         } else {
             Err(InputSelectorError::InsufficientFunds {
