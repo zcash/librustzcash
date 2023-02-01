@@ -16,10 +16,7 @@ jobs:
           override: true
 
       - name: Build latest rustdocs
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --no-deps --workspace --all-features
+        run: cargo doc --no-deps --workspace --all-features
         env:
           RUSTDOCFLAGS: -Z unstable-options --enable-index-page --cfg docsrs
 
