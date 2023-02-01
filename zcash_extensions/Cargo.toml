@@ -18,7 +18,7 @@ ff = "0.12"
 jubjub = "0.9"
 rand_core = "0.6"
 zcash_address = { version = "0.2", path = "../components/zcash_address" }
-zcash_proofs = { version = "0.9", path = "../zcash_proofs" }
+zcash_proofs = { version = "0.10", path = "../zcash_proofs" }
 
 [features]
 transparent-inputs = []
