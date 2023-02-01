@@ -14,7 +14,7 @@ edition = "2021"
 rust-version = "1.60"
 
 [dependencies]
-zcash_client_backend = { version = "0.6", path = "../zcash_client_backend" }
+zcash_client_backend = { version = "0.7", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.10", path = "../zcash_primitives" }
 
 # Dependencies exposed in a public API:

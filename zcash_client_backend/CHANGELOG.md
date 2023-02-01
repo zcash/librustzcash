@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.7.0] - 2023-02-01
 ### Added
 - `zcash_client_backend::data_api::wallet`:
   - `input_selection::Proposal::{is_shielding, target_height}`
