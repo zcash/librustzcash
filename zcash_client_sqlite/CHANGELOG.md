@@ -6,7 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Added 
+
+## [0.7.0] - 2023-02-01
+### Added
 - `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db
  to the specified height following the same logic as homonymous functions on 
  `WalletDb`. This function does not delete the files referenced by the rows
