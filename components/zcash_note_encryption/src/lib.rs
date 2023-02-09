@@ -223,8 +223,6 @@ pub trait Domain {
     /// such as rules like [ZIP 212] that become active at a specific block height.
     ///
     /// [ZIP 212]: https://zips.z.cash/zip-0212
-    ///
-    /// This function only takes in plaintext bytes with the memo removed, as in compact notes.
     fn parse_note_plaintext_without_memo_ivk(
         &self,
         ivk: &Self::IncomingViewingKey,
@@ -245,8 +243,6 @@ pub trait Domain {
     /// such as rules like [ZIP 212] that become active at a specific block height.
     ///
     /// [ZIP 212]: https://zips.z.cash/zip-0212
-    ///
-    /// This function only takes in plaintext bytes with the memo removed, as in compact notes.
     fn parse_note_plaintext_without_memo_ovk(
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
@@ -333,8 +329,7 @@ pub trait ShieldedOutput<D: Domain> {
     /// Exposes the note ciphertext of the output. Returns `None` if the output is compact.
     fn enc_ciphertext(&self) -> Option<D::NoteCiphertextBytes>;
 
-    /// Exposes the note ciphertext of the output in the compact note context.
-    /// This always returns a value, since a full note ciphertext can be truncated to a compact ciphertext.
+    /// Exposes the compact note ciphertext of the output.
     fn enc_ciphertext_compact(&self) -> D::CompactNoteCiphertextBytes;
 }
 
@@ -465,11 +460,6 @@ impl<D: Domain> NoteEncryption<D> {
 ///
 /// Implements section 4.19.2 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptivk).
-///
-/// This function is only meant to be used with full notes, not compact notes.
-/// If the note is a compact note, then this function returns `None`.
-///
-/// For compact notes, use `try_compact_note_decryption`.
 pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -484,10 +474,6 @@ pub fn try_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     try_note_decryption_inner(domain, ivk, &ephemeral_key, output, &key)
 }
 
-/// This function is only meant to be used with full notes, not compact notes.
-/// If the note is a compact note, then this function returns `None`.
-///
-/// For compact notes, use `try_compact_note_decryption_inner`.
 fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -515,7 +501,6 @@ fn try_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     Some((note, to, memo))
 }
 
-/// This function only takes in plaintext bytes with the memo removed, as in compact notes.
 fn parse_note_plaintext_without_memo_ivk<D: Domain>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -566,11 +551,6 @@ fn check_note_validity<D: Domain>(
 /// Implements the procedure specified in [`ZIP 307`].
 ///
 /// [`ZIP 307`]: https://zips.z.cash/zip-0307
-///
-/// This function is only meant to be used with compact notes, not full notes.
-/// If the note is a full note, then this function returns `None`.
-///
-/// For full notes, use 'try_note_decryption` and `try_note_decryption_inner`.
 pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -585,10 +565,6 @@ pub fn try_compact_note_decryption<D: Domain, Output: ShieldedOutput<D>>(
     try_compact_note_decryption_inner(domain, ivk, &ephemeral_key, output, &key)
 }
 
-/// This function is only meant to be used with compact notes, not full notes.
-/// If the note is a full note, then this function returns `None`.
-///
-/// For full notes, use 'try_note_decryption` and `try_note_decryption_inner`.
 fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ivk: &D::IncomingViewingKey,
@@ -622,9 +598,6 @@ fn try_compact_note_decryption_inner<D: Domain, Output: ShieldedOutput<D>>(
 /// Implements [Zcash Protocol Specification section 4.19.3][decryptovk].
 ///
 /// [decryptovk]: https://zips.z.cash/protocol/nu5.pdf#decryptovk
-///
-/// This function is only meant to be used with full notes, not compact notes.
-/// If the note is a compact note, then this function returns `None`.
 pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ovk: &D::OutgoingViewingKey,
@@ -645,9 +618,6 @@ pub fn try_output_recovery_with_ovk<D: Domain, Output: ShieldedOutput<D>>(
 /// Implements part of section 4.19.3 of the
 /// [Zcash Protocol Specification](https://zips.z.cash/protocol/nu5.pdf#decryptovk).
 /// For decryption using a Full Viewing Key see [`try_output_recovery_with_ovk`].
-///
-/// This function is only meant to be used with full notes, not compact notes.
-/// If the note is a compact note, then this function returns `None`.
 pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     domain: &D,
     ock: &OutgoingCipherKey,
@@ -706,7 +676,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
     }
 }
 
-// Splits the AEAD tag from the actual ciphertext .
+// Splits the AEAD tag from the ciphertext.
 fn extract_tag(enc_ciphertext: &mut Vec<u8>) -> (&mut [u8], [u8; AEAD_TAG_SIZE]) {
     let tag_loc = enc_ciphertext.len() - AEAD_TAG_SIZE;
 

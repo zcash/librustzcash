@@ -437,7 +437,6 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>> for CompactOutpu
     }
 
     fn enc_ciphertext(&self) -> Option<NoteCiphertextBytes> {
-        //Some(NoteCiphertextBytes(self.enc_ciphertext))
         None
     }
 
