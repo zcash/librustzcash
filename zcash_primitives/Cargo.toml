@@ -94,6 +94,7 @@ orchard = { version = "0.3", features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
+inferno = ">=0.11, <0.11.5" # MSRV 1.59
 
 [features]
 transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
