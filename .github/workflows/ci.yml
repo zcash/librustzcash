@@ -83,7 +83,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@beta
+      - uses: dtolnay/rust-toolchain@nightly
         id: toolchain
       - run: rustup override set ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)
