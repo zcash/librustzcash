@@ -7,6 +7,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.10.1] - 2023-03-08
+### Added
+- Sapling bundle component constructors, behind the `temporary-zcashd` feature
+  flag. These temporarily re-expose the ability to construct invalid Sapling
+  bundles (that was removed in 0.10.0), and will be removed in a future release:
+  - `zcash_primitives::transaction::components::sapling`:
+    - `Bundle::temporary_zcashd_from_parts`
+    - `SpendDescription::temporary_zcashd_from_parts`
+    - `OutputDescription::temporary_zcashd_from_parts`
+
 ## [0.10.0] - 2023-02-01
 ### Added
 - `zcash_primitives::sapling`:

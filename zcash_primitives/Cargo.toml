@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.10.0"
+version = "0.10.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -98,6 +98,7 @@ inferno = ">=0.11, <0.11.5" # MSRV 1.59
 
 [features]
 transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
+temporary-zcashd = []
 test-dependencies = ["proptest", "orchard/test-dependencies"]
 zfuture = []
 
