@@ -106,6 +106,22 @@ pub struct Bundle<A: Authorization> {
 
 impl<A: Authorization> Bundle<A> {
     /// Constructs a `Bundle` from its constituent parts.
+    #[cfg(feature = "temporary-zcashd")]
+    pub fn temporary_zcashd_from_parts(
+        shielded_spends: Vec<SpendDescription<A>>,
+        shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
+        value_balance: Amount,
+        authorization: A,
+    ) -> Self {
+        Self::from_parts(
+            shielded_spends,
+            shielded_outputs,
+            value_balance,
+            authorization,
+        )
+    }
+
+    /// Constructs a `Bundle` from its constituent parts.
     pub(crate) fn from_parts(
         shielded_spends: Vec<SpendDescription<A>>,
         shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
@@ -197,6 +213,25 @@ impl<A: Authorization> std::fmt::Debug for SpendDescription<A> {
 }
 
 impl<A: Authorization> SpendDescription<A> {
+    #[cfg(feature = "temporary-zcashd")]
+    pub fn temporary_zcashd_from_parts(
+        cv: ValueCommitment,
+        anchor: bls12_381::Scalar,
+        nullifier: Nullifier,
+        rk: PublicKey,
+        zkproof: A::SpendProof,
+        spend_auth_sig: A::AuthSig,
+    ) -> Self {
+        Self {
+            cv,
+            anchor,
+            nullifier,
+            rk,
+            zkproof,
+            spend_auth_sig,
+        }
+    }
+
     /// Returns the commitment to the value consumed by this spend.
     pub fn cv(&self) -> &ValueCommitment {
         &self.cv
@@ -410,10 +445,27 @@ impl<Proof> OutputDescription<Proof> {
     pub fn zkproof(&self) -> &Proof {
         &self.zkproof
     }
-}
 
-#[cfg(test)]
-impl<Proof> OutputDescription<Proof> {
+    #[cfg(feature = "temporary-zcashd")]
+    pub fn temporary_zcashd_from_parts(
+        cv: ValueCommitment,
+        cmu: ExtractedNoteCommitment,
+        ephemeral_key: EphemeralKeyBytes,
+        enc_ciphertext: [u8; 580],
+        out_ciphertext: [u8; 80],
+        zkproof: Proof,
+    ) -> Self {
+        Self::from_parts(
+            cv,
+            cmu,
+            ephemeral_key,
+            enc_ciphertext,
+            out_ciphertext,
+            zkproof,
+        )
+    }
+
+    #[cfg(any(test, feature = "temporary-zcashd"))]
     pub(crate) fn from_parts(
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,
@@ -431,6 +483,10 @@ impl<Proof> OutputDescription<Proof> {
             zkproof,
         }
     }
+}
+
+#[cfg(test)]
+impl<Proof> OutputDescription<Proof> {
     pub(crate) fn cv_mut(&mut self) -> &mut ValueCommitment {
         &mut self.cv
     }
