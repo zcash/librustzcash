@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `Domain::Note` type is now expected to contain information about the
+  recipient of the note, eliminating the need to pass this information in via
+  the encryption context.
+
 ## [0.2.0] - 2022-10-13
 ### Added
 - `zcash_note_encryption::Domain`:
