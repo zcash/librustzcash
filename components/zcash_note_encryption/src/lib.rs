@@ -180,11 +180,7 @@ pub trait Domain {
     /// future crate release, once [`zcash_primitives` has been refactored].
     ///
     /// [`zcash_primitives` has been refactored]: https://github.com/zcash/librustzcash/issues/454
-    fn note_plaintext_bytes(
-        note: &Self::Note,
-        recipient: &Self::Recipient,
-        memo: &Self::Memo,
-    ) -> NotePlaintextBytes;
+    fn note_plaintext_bytes(note: &Self::Note, memo: &Self::Memo) -> NotePlaintextBytes;
 
     /// Derives the [`OutgoingCipherKey`] for an encrypted note, given the note-specific
     /// public data and an `OutgoingViewingKey`.
@@ -349,7 +345,6 @@ pub struct NoteEncryption<D: Domain> {
     epk: D::EphemeralPublicKey,
     esk: D::EphemeralSecretKey,
     note: D::Note,
-    to: D::Recipient,
     memo: D::Memo,
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<D::OutgoingViewingKey>,
@@ -358,18 +353,12 @@ pub struct NoteEncryption<D: Domain> {
 impl<D: Domain> NoteEncryption<D> {
     /// Construct a new note encryption context for the specified note,
     /// recipient, and memo.
-    pub fn new(
-        ovk: Option<D::OutgoingViewingKey>,
-        note: D::Note,
-        to: D::Recipient,
-        memo: D::Memo,
-    ) -> Self {
+    pub fn new(ovk: Option<D::OutgoingViewingKey>, note: D::Note, memo: D::Memo) -> Self {
         let esk = D::derive_esk(&note).expect("ZIP 212 is active.");
         NoteEncryption {
             epk: D::ka_derive_public(&note, &esk),
             esk,
             note,
-            to,
             memo,
             ovk,
         }
@@ -384,14 +373,12 @@ impl<D: Domain> NoteEncryption<D> {
         esk: D::EphemeralSecretKey,
         ovk: Option<D::OutgoingViewingKey>,
         note: D::Note,
-        to: D::Recipient,
         memo: D::Memo,
     ) -> Self {
         NoteEncryption {
             epk: D::ka_derive_public(&note, &esk),
             esk,
             note,
-            to,
             memo,
             ovk,
         }
@@ -412,7 +399,7 @@ impl<D: Domain> NoteEncryption<D> {
         let pk_d = D::get_pk_d(&self.note);
         let shared_secret = D::ka_agree_enc(&self.esk, &pk_d);
         let key = D::kdf(shared_secret, &D::epk_bytes(&self.epk));
-        let input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
+        let input = D::note_plaintext_bytes(&self.note, &self.memo);
 
         let mut output = [0u8; ENC_CIPHERTEXT_SIZE];
         output[..NOTE_PLAINTEXT_SIZE].copy_from_slice(&input.0);
