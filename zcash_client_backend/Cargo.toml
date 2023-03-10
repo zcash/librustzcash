@@ -22,7 +22,7 @@ development = ["zcash_proofs"]
 [dependencies]
 zcash_address = { version = "0.2", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
-zcash_note_encryption = "0.2"
+zcash_note_encryption = "0.3"
 zcash_primitives = { version = "0.10", path = "../zcash_primitives", default-features = false }
 
 # Dependencies exposed in a public API:

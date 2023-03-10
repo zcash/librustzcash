@@ -1114,7 +1114,6 @@ mod tests {
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            to,
             MemoBytes::empty(),
             &mut rng,
         );
@@ -1176,7 +1175,6 @@ mod tests {
             let encryptor = sapling_note_encryption::<_, Network>(
                 Some(dfvk.fvk().ovk),
                 note.clone(),
-                to,
                 MemoBytes::empty(),
                 &mut rng,
             );
@@ -1205,7 +1203,6 @@ mod tests {
             let encryptor = sapling_note_encryption::<_, Network>(
                 Some(dfvk.fvk().ovk),
                 note.clone(),
-                change_addr,
                 MemoBytes::empty(),
                 &mut rng,
             );

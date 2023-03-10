@@ -88,7 +88,6 @@ impl fees::InputView<()> for SpendDescriptionInfo {
 struct SaplingOutputInfo {
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
-    to: PaymentAddress,
     note: Note,
     memo: MemoBytes,
 }
@@ -107,12 +106,7 @@ impl SaplingOutputInfo {
 
         let note = Note::from_parts(to, value, rseed);
 
-        SaplingOutputInfo {
-            ovk,
-            to,
-            note,
-            memo,
-        }
+        SaplingOutputInfo { ovk, note, memo }
     }
 
     fn build<P: consensus::Parameters, Pr: TxProver, R: RngCore>(
@@ -122,12 +116,12 @@ impl SaplingOutputInfo {
         rng: &mut R,
     ) -> OutputDescription<GrothProofBytes> {
         let encryptor =
-            sapling_note_encryption::<R, P>(self.ovk, self.note.clone(), self.to, self.memo, rng);
+            sapling_note_encryption::<R, P>(self.ovk, self.note.clone(), self.memo, rng);
 
         let (zkproof, cv) = prover.output_proof(
             ctx,
             encryptor.esk().0,
-            self.to,
+            self.note.recipient(),
             self.note.rcm(),
             self.note.value().inner(),
         );
