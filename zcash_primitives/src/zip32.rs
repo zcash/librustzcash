@@ -6,7 +6,7 @@ use memuse::{self, DynamicUsage};
 use subtle::{Choice, ConditionallySelectable};
 
 use crate::sapling::{Diversifier, NullifierDerivingKey, PaymentAddress, ViewingKey};
-
+pub mod fingerprint;
 pub mod sapling;
 
 #[deprecated(note = "Please use the types exported from the `zip32::sapling` module instead.")]
