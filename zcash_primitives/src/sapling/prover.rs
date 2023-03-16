@@ -66,6 +66,7 @@ pub trait TxProver {
 pub mod mock {
     use rand_core::OsRng;
 
+    use super::TxProver;
     use crate::{
         constants::SPENDING_KEY_GENERATOR,
         sapling::{
@@ -76,8 +77,6 @@ pub mod mock {
         },
         transaction::components::{Amount, GROTH_PROOF_SIZE},
     };
-
-    use super::TxProver;
 
     pub struct MockTxProver;
 

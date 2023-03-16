@@ -391,7 +391,8 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
                     let nullifier = spend.note.nf(
                         &proof_generation_key.to_viewing_key().nk,
-                        spend.merkle_path.position(),
+                        u64::try_from(spend.merkle_path.position())
+                            .expect("Sapling note commitment tree position must fit into a u64"),
                     );
 
                     let (zkproof, cv, rk) = prover
@@ -585,7 +586,6 @@ pub mod testing {
             testing::{arb_branch_id, arb_height},
             TEST_NETWORK,
         },
-        merkle_tree::{testing::arb_commitment_tree, IncrementalWitness},
         sapling::{
             prover::mock::MockTxProver,
             testing::{arb_node, arb_note},
@@ -597,6 +597,9 @@ pub mod testing {
             sapling::{Authorized, Bundle},
         },
         zip32::sapling::testing::arb_extended_spending_key,
+    };
+    use incrementalmerkletree::{
+        frontier::testing::arb_commitment_tree, witness::IncrementalWitness,
     };
 
     use super::SaplingBuilder;

@@ -89,7 +89,11 @@ impl ScanningKey for DiversifiableFullViewingKey {
         note: &Note,
         witness: &sapling::IncrementalWitness,
     ) -> Self::Nf {
-        note.nf(key, witness.position() as u64)
+        note.nf(
+            key,
+            u64::try_from(witness.position())
+                .expect("Sapling note commitment tree position must fit into a u64"),
+        )
     }
 }
 
@@ -391,12 +395,11 @@ mod tests {
         consensus::{BlockHeight, Network},
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
-        merkle_tree::CommitmentTree,
         sapling::{
             note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
             util::generate_random_rseed,
             value::NoteValue,
-            Note, Nullifier, SaplingIvk,
+            CommitmentTree, Note, Nullifier, SaplingIvk,
         },
         transaction::components::Amount,
         zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},

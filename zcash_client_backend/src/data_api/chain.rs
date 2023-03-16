@@ -89,8 +89,7 @@ use std::convert::Infallible;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    merkle_tree::CommitmentTree,
-    sapling::{note_encryption::PreparedIncomingViewingKey, Nullifier},
+    sapling::{self, note_encryption::PreparedIncomingViewingKey, Nullifier},
     zip32::Scope,
 };
 
@@ -237,11 +236,11 @@ where
 
     // Get the most recent CommitmentTree
     let mut tree = last_height.map_or_else(
-        || Ok(CommitmentTree::empty()),
+        || Ok(sapling::CommitmentTree::empty()),
         |h| {
             data_db
                 .get_commitment_tree(h)
-                .map(|t| t.unwrap_or_else(CommitmentTree::empty))
+                .map(|t| t.unwrap_or_else(sapling::CommitmentTree::empty))
                 .map_err(Error::Wallet)
         },
     )?;

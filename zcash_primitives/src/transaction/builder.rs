@@ -541,13 +541,13 @@ mod testing {
 #[cfg(test)]
 mod tests {
     use ff::Field;
+    use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     use rand_core::OsRng;
 
     use crate::{
         consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
         legacy::TransparentAddress,
         memo::MemoBytes,
-        merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Rseed},
         transaction::components::{
             amount::{Amount, DEFAULT_FEE},

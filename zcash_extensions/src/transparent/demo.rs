@@ -478,16 +478,14 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
 mod tests {
     use blake2b_simd::Params;
     use ff::Field;
+    use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     use rand_core::OsRng;
-
-    use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
         consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
         constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
-        merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Rseed},
         transaction::{
             builder::Builder,
@@ -500,6 +498,7 @@ mod tests {
         },
         zip32::ExtendedSpendingKey,
     };
+    use zcash_proofs::prover::LocalTxProver;
 
     use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
 

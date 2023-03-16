@@ -229,7 +229,6 @@ pub fn read_bridge_v1<H: HashSer + Ord + Clone, R: Read>(
     })?;
 
     let frontier = read_nonempty_frontier_v1(&mut reader)?;
-
     let mut tracking = BTreeSet::new();
     let mut ommers = BTreeMap::new();
     for (pos, levels_observed, values) in fragments.into_iter() {
@@ -311,12 +310,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        merkle_tree::{
-            testing::{arb_commitment_tree, TestNode},
-            write_commitment_tree,
-        },
+        merkle_tree::write_commitment_tree,
         sapling::{testing as sapling, Node},
     };
+    use incrementalmerkletree::frontier::testing::{arb_commitment_tree, TestNode};
 
     proptest! {
         #[test]

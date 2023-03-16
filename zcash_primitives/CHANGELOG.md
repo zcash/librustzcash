@@ -8,32 +8,36 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Removed
-- `merkle_tree::Hashable` has been removed and its uses have been replaced by 
+- `merkle_tree::Hashable` has been removed and its uses have been replaced by
   `incrementalmerkletree::Hashable` and `merkle_tree::HashSer`.
 - The `Hashable` bound on the `Node` parameter to the `IncrementalWitness`
   type has been removed.
 - `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
   have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
-- `merkle_tree:` removals:
-  - `incremental::write_auth_fragment_v1`
-  - `CommitmentTree::write` and `CommitmentTree::read` have been replaced by
-    `write_commitment_tree` and `read_commitment_tree` respectively.
-  - `IncrementalWitness::write` and `IncrementalWitness::read` have been
-    replaced by `write_incremental_witness` and `read_incremental_witness` 
-    respectively.
-  - `MerklePath::from_slice` has been replaced by `merkle_path_from_slice`
+- `merkle_tree::incremental::write_auth_fragment_v1`
+- `merkle_tree::{CommitmentTree, IncrementalWitness, MerklePath}` have been removed in
+  favor of versions of these types that are now provided by the
+  `incrementalmerkletree` crate. The replacement types now use const generic
+  parameters for enforcing the note commitment tree depth. Serialization
+  methods for these types that do not exist for the `incrementalmerkletree`
+  replacement types have been replaced by new methods in the `merkle_tree` module.
 
 ### Added
-- `merkle_tree::incremental::{read_address, write_address, read_bridge_v2}`
-- `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
+- `merkle_tree::incremental::{read_address, write_address}`
+- `merkle_tree::incremental::read_bridge_v2`
+- `merkle_tree::write_commitment_tree` replaces `merkle_tree::CommitmentTree::write`
+- `merkle_tree::read_commitment_tree` replaces `merkle_tree::CommitmentTree::read`
+- `merkle_tree::write_incremental_witness` replaces `merkle_tree::IncrementalWitness::write`
+- `merkle_tree::read_incremental_witness` replaces `merkle_tree::IncrementalWitness::read`
+- `merkle_tree::merkle_path_from_slice` replaces `merkle_tree::MerklePath::from_slice`
+- `sapling::{CommitmentTree, IncrementalWitness, MerklePath}`
 
 ### Changed
 - The bounds on the `H` parameter to the following methods have changed:
   - `merkle_tree::incremental::read_frontier_v0`
   - `merkle_tree::incremental::read_auth_fragment_v1`
-- The depth of the `merkle_tree::CommitmentTree`, `merkle_tree::IncrementalWitness` 
-  and `merkle_tree::incremental::MerklePath` data types are now statically constrained 
-  using const generic type parameters.
+- The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}` 
+  data types are now statically constrained using const generic type parameters.
 
 ## [0.11.0] - 2023-04-15
 ### Added
