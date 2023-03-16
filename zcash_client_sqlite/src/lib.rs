@@ -43,8 +43,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier},
+    sapling::{self, Nullifier},
     transaction::{
         components::{amount::Amount, OutPoint},
         Transaction, TxId,
@@ -201,7 +200,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
         wallet::get_sapling_commitment_tree(self, block_height)
     }
 
@@ -209,7 +208,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
         wallet::get_sapling_witnesses(self, block_height)
     }
 
@@ -357,7 +356,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
         self.wallet_db.get_commitment_tree(block_height)
     }
 
@@ -365,7 +364,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
         self.wallet_db.get_witnesses(block_height)
     }
 
@@ -515,8 +514,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn advance_by_block(
         &mut self,
         block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
         // database updates for each block are transactional
         self.transactionally(|up| {
             // Insert the block into the database.

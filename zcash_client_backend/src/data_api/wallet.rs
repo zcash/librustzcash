@@ -4,7 +4,6 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    merkle_tree::MerklePath,
     sapling::{
         self,
         note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
@@ -701,11 +700,7 @@ fn select_key_for_note<N>(
     selected: &SpendableNote<N>,
     extsk: &ExtendedSpendingKey,
     dfvk: &DiversifiableFullViewingKey,
-) -> Option<(
-    sapling::Note,
-    ExtendedSpendingKey,
-    MerklePath<sapling::Node>,
-)> {
+) -> Option<(sapling::Note, ExtendedSpendingKey, sapling::MerklePath)> {
     let merkle_path = selected.witness.path().expect("the tree is not empty");
 
     // Attempt to reconstruct the note being spent using both the internal and external dfvks

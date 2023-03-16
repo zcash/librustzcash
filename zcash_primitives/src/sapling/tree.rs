@@ -8,16 +8,18 @@ use super::{
     note::ExtractedNoteCommitment,
     pedersen_hash::{pedersen_hash, Personalization},
 };
-use crate::merkle_tree::HashSer;
+use crate::merkle_tree::{self, HashSer};
 
-pub const SAPLING_COMMITMENT_TREE_DEPTH: usize = 32;
-pub const SAPLING_COMMITMENT_TREE_DEPTH_U8: u8 = 32;
+pub const NOTE_COMMITMENT_TREE_DEPTH: u8 = 32;
+pub type CommitmentTree = merkle_tree::CommitmentTree<Node, NOTE_COMMITMENT_TREE_DEPTH>;
+pub type IncrementalWitness = merkle_tree::IncrementalWitness<Node, NOTE_COMMITMENT_TREE_DEPTH>;
+pub type MerklePath = merkle_tree::MerklePath<Node, NOTE_COMMITMENT_TREE_DEPTH>;
 
 lazy_static! {
     static ref UNCOMMITTED_SAPLING: bls12_381::Scalar = bls12_381::Scalar::one();
     static ref EMPTY_ROOTS: Vec<Node> = {
         let mut v = vec![Node::empty_leaf()];
-        for d in 0..SAPLING_COMMITMENT_TREE_DEPTH_U8 {
+        for d in 0..NOTE_COMMITMENT_TREE_DEPTH {
             let next = Node::combine(d.into(), &v[usize::from(d)], &v[usize::from(d)]);
             v.push(next);
         }

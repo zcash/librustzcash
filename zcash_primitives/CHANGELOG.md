@@ -12,17 +12,22 @@ and this library adheres to Rust's notion of
   `incrementalmerkletree::Hashable` and `merkle_tree::HashSer`.
 - The `Hashable` bound on the `Node` parameter to the `IncrementalWitness`
   type has been removed.
+- `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
+  have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
 - `merkle_tree::incremental::write_auth_fragment_v1`
 
 ### Added
 - `merkle_tree::incremental::{read_address, write_address}`
 - `merkle_tree::incremental::read_bridge_v2`
+- `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
 
 ### Changed
 - The bounds on the `H` parameter to the following methods have changed:
   - `merkle_tree::incremental::read_frontier_v0`
   - `merkle_tree::incremental::read_auth_fragment_v1`
-
+- The depth of the `merkle_tree::CommitmentTree`, `merkle_tree::IncrementalWitness` 
+  and `merkle_tree::incremental::MerklePath` data types are now statically constrained 
+  using const generic type parameters.
 
 ## [0.11.0] - 2023-04-15
 ### Added

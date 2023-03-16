@@ -6,7 +6,6 @@ use zcash_primitives::{
     consensus::BlockHeight,
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
-    merkle_tree::IncrementalWitness,
     sapling,
     transaction::{
         components::{
@@ -118,7 +117,7 @@ pub struct WalletSaplingOutput<N> {
     account: AccountId,
     note: sapling::Note,
     is_change: bool,
-    witness: IncrementalWitness<sapling::Node>,
+    witness: sapling::IncrementalWitness,
     nf: N,
 }
 
@@ -132,7 +131,7 @@ impl<N> WalletSaplingOutput<N> {
         account: AccountId,
         note: sapling::Note,
         is_change: bool,
-        witness: IncrementalWitness<sapling::Node>,
+        witness: sapling::IncrementalWitness,
         nf: N,
     ) -> Self {
         Self {
@@ -165,10 +164,10 @@ impl<N> WalletSaplingOutput<N> {
     pub fn is_change(&self) -> bool {
         self.is_change
     }
-    pub fn witness(&self) -> &IncrementalWitness<sapling::Node> {
+    pub fn witness(&self) -> &sapling::IncrementalWitness {
         &self.witness
     }
-    pub fn witness_mut(&mut self) -> &mut IncrementalWitness<sapling::Node> {
+    pub fn witness_mut(&mut self) -> &mut sapling::IncrementalWitness {
         &mut self.witness
     }
     pub fn nf(&self) -> &N {
@@ -183,7 +182,7 @@ pub struct SpendableNote<NoteRef> {
     pub diversifier: sapling::Diversifier,
     pub note_value: Amount,
     pub rseed: sapling::Rseed,
-    pub witness: IncrementalWitness<sapling::Node>,
+    pub witness: sapling::IncrementalWitness,
 }
 
 impl<NoteRef> sapling_fees::InputView<NoteRef> for SpendableNote<NoteRef> {

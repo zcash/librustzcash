@@ -10,7 +10,6 @@ use crate::{
     consensus::{self, BlockHeight},
     keys::OutgoingViewingKey,
     memo::MemoBytes,
-    merkle_tree::MerklePath,
     sapling::{
         keys::SaplingIvk,
         note_encryption::sapling_note_encryption,
@@ -19,7 +18,7 @@ use crate::{
         spend_sig_internal,
         util::generate_random_rseed_internal,
         value::{NoteValue, ValueSum},
-        Diversifier, Node, Note, PaymentAddress,
+        Diversifier, MerklePath, Node, Note, PaymentAddress,
     },
     transaction::{
         builder::Progress,
@@ -67,7 +66,7 @@ pub struct SpendDescriptionInfo {
     diversifier: Diversifier,
     note: Note,
     alpha: jubjub::Fr,
-    merkle_path: MerklePath<Node>,
+    merkle_path: MerklePath,
 }
 
 impl fees::InputView<()> for SpendDescriptionInfo {
@@ -280,7 +279,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         extsk: ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note,
-        merkle_path: MerklePath<Node>,
+        merkle_path: MerklePath,
     ) -> Result<(), Error> {
         // Consistency check: all anchors must equal the first one
         let node = Node::from_cmu(&note.cmu());
@@ -392,7 +391,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
 
                     let nullifier = spend.note.nf(
                         &proof_generation_key.to_viewing_key().nk,
-                        spend.merkle_path.position,
+                        spend.merkle_path.position(),
                     );
 
                     let (zkproof, cv, rk) = prover
@@ -610,8 +609,8 @@ pub mod testing {
                 n_notes
             ),
             commitment_trees in vec(
-                arb_commitment_tree(n_notes, arb_node(), 32).prop_map(
-                    |t| IncrementalWitness::from_tree(&t).path().unwrap()
+                arb_commitment_tree::<_, _, 32>(n_notes, arb_node()).prop_map(
+                    |t| IncrementalWitness::from_tree(t).path().unwrap()
                 ),
                 n_notes
             ),

@@ -5,9 +5,6 @@ use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
 
-#[cfg(not(feature = "zfuture"))]
-use std::marker::PhantomData;
-
 use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
@@ -15,14 +12,13 @@ use crate::{
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
-    merkle_tree::MerklePath,
-    sapling::{prover::TxProver, value::NoteValue, Diversifier, Node, Note, PaymentAddress},
+    sapling::{self, prover::TxProver, value::NoteValue, Diversifier, Note, PaymentAddress},
     transaction::{
         components::{
             amount::{Amount, BalanceError},
             sapling::{
-                self,
-                builder::{SaplingBuilder, SaplingMetadata},
+                builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
+                fees as sapling_fees,
             },
             transparent::{self, builder::TransparentBuilder},
         },
@@ -67,7 +63,7 @@ pub enum Error<FeeError> {
     /// An error occurred in constructing the transparent parts of a transaction.
     TransparentBuild(transparent::builder::Error),
     /// An error occurred in constructing the Sapling parts of a transaction.
-    SaplingBuild(sapling::builder::Error),
+    SaplingBuild(sapling_builder::Error),
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(feature = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -144,7 +140,7 @@ pub struct Builder<'a, P, R> {
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(feature = "zfuture"))]
-    tze_builder: PhantomData<&'a ()>,
+    tze_builder: std::marker::PhantomData<&'a ()>,
     progress_notifier: Option<Sender<Progress>>,
 }
 
@@ -173,13 +169,13 @@ impl<'a, P, R> Builder<'a, P, R> {
 
     /// Returns the set of Sapling inputs currently committed to be consumed
     /// by the transaction.
-    pub fn sapling_inputs(&self) -> &[impl sapling::fees::InputView<()>] {
+    pub fn sapling_inputs(&self) -> &[impl sapling_fees::InputView<()>] {
         self.sapling_builder.inputs()
     }
 
     /// Returns the set of Sapling outputs currently set to be produced by
     /// the transaction.
-    pub fn sapling_outputs(&self) -> &[impl sapling::fees::OutputView] {
+    pub fn sapling_outputs(&self) -> &[impl sapling_fees::OutputView] {
         self.sapling_builder.outputs()
     }
 }
@@ -226,7 +222,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
-            tze_builder: PhantomData,
+            tze_builder: std::marker::PhantomData,
             progress_notifier: None,
         }
     }
@@ -240,8 +236,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         extsk: ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note,
-        merkle_path: MerklePath<Node>,
-    ) -> Result<(), sapling::builder::Error> {
+        merkle_path: sapling::MerklePath,
+    ) -> Result<(), sapling_builder::Error> {
         self.sapling_builder
             .add_spend(&mut self.rng, extsk, diversifier, note, merkle_path)
     }
@@ -253,9 +249,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         to: PaymentAddress,
         value: Amount,
         memo: MemoBytes,
-    ) -> Result<(), sapling::builder::Error> {
+    ) -> Result<(), sapling_builder::Error> {
         if value.is_negative() {
-            return Err(sapling::builder::Error::InvalidAmount);
+            return Err(sapling_builder::Error::InvalidAmount);
         }
         self.sapling_builder.add_output(
             &mut self.rng,
@@ -555,8 +551,8 @@ mod tests {
         sapling::{Node, Rseed},
         transaction::components::{
             amount::{Amount, DEFAULT_FEE},
-            sapling::builder::{self as build_s},
-            transparent::builder::{self as build_t},
+            sapling::builder::{self as sapling_builder},
+            transparent::builder::{self as transparent_builder},
         },
         zip32::ExtendedSpendingKey,
     };
@@ -566,9 +562,6 @@ mod tests {
     #[cfg(feature = "zfuture")]
     #[cfg(feature = "transparent-inputs")]
     use super::TzeBuilder;
-
-    #[cfg(not(feature = "zfuture"))]
-    use std::marker::PhantomData;
 
     #[cfg(feature = "transparent-inputs")]
     use crate::{
@@ -599,7 +592,7 @@ mod tests {
                 Amount::from_i64(-1).unwrap(),
                 MemoBytes::empty()
             ),
-            Err(build_s::Error::InvalidAmount)
+            Err(sapling_builder::Error::InvalidAmount)
         );
     }
 
@@ -626,7 +619,7 @@ mod tests {
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
-            tze_builder: PhantomData,
+            tze_builder: std::marker::PhantomData,
             progress_notifier: None,
         };
 
@@ -672,9 +665,9 @@ mod tests {
 
         let note1 = to.create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu1 = Node::from_cmu(&note1.cmu());
-        let mut tree = CommitmentTree::empty();
+        let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let witness1 = IncrementalWitness::from_tree(&tree);
+        let witness1 = IncrementalWitness::from_tree(tree);
 
         let tx_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -697,7 +690,7 @@ mod tests {
         // that a binding signature was attempted
         assert_eq!(
             builder.mock_build(),
-            Err(Error::SaplingBuild(build_s::Error::BindingSig))
+            Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
         );
     }
 
@@ -712,7 +705,7 @@ mod tests {
                 &TransparentAddress::PublicKey([0; 20]),
                 Amount::from_i64(-1).unwrap(),
             ),
-            Err(build_t::Error::InvalidAmount)
+            Err(transparent_builder::Error::InvalidAmount)
         );
     }
 
@@ -780,9 +773,9 @@ mod tests {
 
         let note1 = to.create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu1 = Node::from_cmu(&note1.cmu());
-        let mut tree = CommitmentTree::empty();
+        let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let mut witness1 = IncrementalWitness::from_tree(&tree);
+        let mut witness1 = IncrementalWitness::from_tree(tree.clone());
 
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.00001 t-ZEC fee, 0.00050999 z-ZEC in
@@ -820,7 +813,7 @@ mod tests {
         let cmu2 = Node::from_cmu(&note2.cmu());
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();
-        let witness2 = IncrementalWitness::from_tree(&tree);
+        let witness2 = IncrementalWitness::from_tree(tree);
 
         // Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
@@ -856,7 +849,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 builder.mock_build(),
-                Err(Error::SaplingBuild(build_s::Error::BindingSig))
+                Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
             )
         }
     }

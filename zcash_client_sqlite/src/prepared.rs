@@ -12,8 +12,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Diversifier, Node, Nullifier},
+    sapling::{self, Diversifier, Nullifier},
     transaction::{components::Amount, TxId},
     zip32::{AccountId, DiversifierIndex},
 };
@@ -277,7 +276,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
-        commitment_tree: &CommitmentTree<Node>,
+        commitment_tree: &sapling::CommitmentTree,
     ) -> Result<(), SqliteClientError> {
         let mut encoded_tree = Vec::new();
         commitment_tree.write(&mut encoded_tree).unwrap();
@@ -777,7 +776,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         &mut self,
         note_id: NoteId,
         height: BlockHeight,
-        witness: &IncrementalWitness<Node>,
+        witness: &sapling::IncrementalWitness,
     ) -> Result<(), SqliteClientError> {
         let note_id = match note_id {
             NoteId::ReceivedNoteId(note_id) => Ok(note_id),
