@@ -14,11 +14,17 @@ and this library adheres to Rust's notion of
   type has been removed.
 - `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
   have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
-- `merkle_tree::incremental::write_auth_fragment_v1`
+- `merkle_tree:` removals:
+  - `incremental::write_auth_fragment_v1`
+  - `CommitmentTree::write` and `CommitmentTree::read` have been replaced by
+    `write_commitment_tree` and `read_commitment_tree` respectively.
+  - `IncrementalWitness::write` and `IncrementalWitness::read` have been
+    replaced by `write_incremental_witness` and `read_incremental_witness` 
+    respectively.
+  - `MerklePath::from_slice` has been replaced by `merkle_path_from_slice`
 
 ### Added
-- `merkle_tree::incremental::{read_address, write_address}`
-- `merkle_tree::incremental::read_bridge_v2`
+- `merkle_tree::incremental::{read_address, write_address, read_bridge_v2}`
 - `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
 
 ### Changed

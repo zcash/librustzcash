@@ -73,6 +73,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
+    merkle_tree::{read_commitment_tree, read_incremental_witness},
     sapling::{self, Note, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{
@@ -693,7 +694,7 @@ pub(crate) fn get_sapling_commitment_tree<P>(
             [u32::from(block_height)],
             |row| {
                 let row_data: Vec<u8> = row.get(0)?;
-                sapling::CommitmentTree::read(&row_data[..]).map_err(|e| {
+                read_commitment_tree(&row_data[..]).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
                         row_data.len(),
                         rusqlite::types::Type::Blob,
@@ -719,7 +720,7 @@ pub(crate) fn get_sapling_witnesses<P>(
         .query_map([u32::from(block_height)], |row| {
             let id_note = NoteId::ReceivedNoteId(row.get(0)?);
             let wdb: Vec<u8> = row.get(1)?;
-            Ok(sapling::IncrementalWitness::read(&wdb[..]).map(|witness| (id_note, witness)))
+            Ok(read_incremental_witness(&wdb[..]).map(|witness| (id_note, witness)))
         })
         .map_err(SqliteClientError::from)?;
 

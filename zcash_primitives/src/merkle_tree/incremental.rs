@@ -9,7 +9,7 @@ use incrementalmerkletree::{Address, Hashable, Level, Position};
 use orchard::tree::MerkleHashOrchard;
 use zcash_encoding::{Optional, Vector};
 
-use super::{CommitmentTree, HashSer};
+use super::{read_commitment_tree, HashSer};
 use crate::sapling;
 
 pub const SER_V1: u8 = 1;
@@ -80,8 +80,7 @@ pub fn read_address<R: Read>(mut reader: R) -> io::Result<Address> {
 pub fn read_frontier_v0<H: Hashable + HashSer + Clone, R: Read>(
     mut reader: R,
 ) -> io::Result<Frontier<H, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>> {
-    let tree = CommitmentTree::<H, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>::read(&mut reader)?;
-
+    let tree = read_commitment_tree(&mut reader)?;
     Ok(tree.to_frontier())
 }
 
@@ -312,7 +311,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        merkle_tree::testing::{arb_commitment_tree, TestNode},
+        merkle_tree::{
+            testing::{arb_commitment_tree, TestNode},
+            write_commitment_tree,
+        },
         sapling::{testing as sapling, Node},
     };
 
@@ -321,7 +323,7 @@ mod tests {
         fn frontier_serialization_v0(t in arb_commitment_tree::<_, _, 32>(0, sapling::arb_node()))
         {
             let mut buffer = vec![];
-            t.write(&mut buffer).unwrap();
+            write_commitment_tree(&t, &mut buffer).unwrap();
             let frontier: Frontier<Node, 32> = read_frontier_v0(&buffer[..]).unwrap();
 
             let expected: Frontier<Node, 32> = t.to_frontier();

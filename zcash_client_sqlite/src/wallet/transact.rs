@@ -7,7 +7,7 @@ use group::ff::PrimeField;
 
 use zcash_primitives::{
     consensus::BlockHeight,
-    merkle_tree::IncrementalWitness,
+    merkle_tree::read_incremental_witness,
     sapling::{Diversifier, Rseed},
     transaction::components::Amount,
     zip32::AccountId,
@@ -50,7 +50,7 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientErr
 
     let witness = {
         let d: Vec<_> = row.get(4)?;
-        IncrementalWitness::read(&d[..])?
+        read_incremental_witness(&d[..])?
     };
 
     Ok(SpendableNote {
