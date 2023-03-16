@@ -150,33 +150,6 @@ impl<Node, const DEPTH: u8> CommitmentTree<Node, DEPTH> {
     }
 }
 
-/// Reads a `CommitmentTree` from its serialized form.
-pub fn read_commitment_tree<Node: HashSer, R: Read, const DEPTH: u8>(
-    mut reader: R,
-) -> io::Result<CommitmentTree<Node, DEPTH>> {
-    let left = Optional::read(&mut reader, Node::read)?;
-    let right = Optional::read(&mut reader, Node::read)?;
-    let parents = Vector::read(&mut reader, |r| Optional::read(r, Node::read))?;
-
-    Ok(CommitmentTree {
-        left,
-        right,
-        parents,
-    })
-}
-
-/// Serializes this tree as an array of bytes.
-pub fn write_commitment_tree<Node: HashSer, W: Write, const DEPTH: u8>(
-    tree: &CommitmentTree<Node, DEPTH>,
-    mut writer: W,
-) -> io::Result<()> {
-    Optional::write(&mut writer, tree.left.as_ref(), |w, n| n.write(w))?;
-    Optional::write(&mut writer, tree.right.as_ref(), |w, n| n.write(w))?;
-    Vector::write(&mut writer, &tree.parents, |w, e| {
-        Optional::write(w, e.as_ref(), |w, n| n.write(w))
-    })
-}
-
 impl<Node: Hashable + Clone, const DEPTH: u8> CommitmentTree<Node, DEPTH> {
     /// Adds a leaf node to the tree.
     ///
@@ -257,6 +230,33 @@ impl<Node: Hashable + Clone, const DEPTH: u8> CommitmentTree<Node, DEPTH> {
     }
 }
 
+/// Reads a `CommitmentTree` from its serialized form.
+pub fn read_commitment_tree<Node: HashSer, R: Read, const DEPTH: u8>(
+    mut reader: R,
+) -> io::Result<CommitmentTree<Node, DEPTH>> {
+    let left = Optional::read(&mut reader, Node::read)?;
+    let right = Optional::read(&mut reader, Node::read)?;
+    let parents = Vector::read(&mut reader, |r| Optional::read(r, Node::read))?;
+
+    Ok(CommitmentTree {
+        left,
+        right,
+        parents,
+    })
+}
+
+/// Serializes this tree as an array of bytes.
+pub fn write_commitment_tree<Node: HashSer, W: Write, const DEPTH: u8>(
+    tree: &CommitmentTree<Node, DEPTH>,
+    mut writer: W,
+) -> io::Result<()> {
+    Optional::write(&mut writer, tree.left.as_ref(), |w, n| n.write(w))?;
+    Optional::write(&mut writer, tree.right.as_ref(), |w, n| n.write(w))?;
+    Vector::write(&mut writer, &tree.parents, |w, e| {
+        Optional::write(w, e.as_ref(), |w, n| n.write(w))
+    })
+}
+
 /// An updatable witness to a path from a position in a particular [`CommitmentTree`].
 ///
 /// Appending the same commitments in the same order to both the original
@@ -304,62 +304,12 @@ impl<Node, const DEPTH: u8> IncrementalWitness<Node, DEPTH> {
             cursor: None,
         }
     }
-}
 
-/// Reads an `IncrementalWitness` from its serialized form.
-#[allow(clippy::redundant_closure)]
-pub fn read_incremental_witness<Node: HashSer, R: Read, const DEPTH: u8>(
-    mut reader: R,
-) -> io::Result<IncrementalWitness<Node, DEPTH>> {
-    let tree = read_commitment_tree(&mut reader)?;
-    let filled = Vector::read(&mut reader, |r| Node::read(r))?;
-    let cursor = Optional::read(&mut reader, read_commitment_tree)?;
-
-    let mut witness = IncrementalWitness {
-        tree,
-        filled,
-        cursor_depth: 0,
-        cursor,
-    };
-
-    witness.cursor_depth = witness.next_depth();
-
-    Ok(witness)
-}
-
-/// Serializes this `IncrementalWitness` as an array of bytes.
-pub fn write_incremental_witness<Node: HashSer, W: Write, const DEPTH: u8>(
-    witness: &IncrementalWitness<Node, DEPTH>,
-    mut writer: W,
-) -> io::Result<()> {
-    write_commitment_tree(&witness.tree, &mut writer)?;
-    Vector::write(&mut writer, &witness.filled, |w, n| n.write(w))?;
-    Optional::write(&mut writer, witness.cursor.as_ref(), |w, t| {
-        write_commitment_tree(t, w)
-    })
-}
-
-impl<Node, const DEPTH: u8> IncrementalWitness<Node, DEPTH> {
     /// Returns the position of the witnessed leaf node in the commitment tree.
     pub fn position(&self) -> usize {
         self.tree.size() - 1
     }
-}
 
-impl<Node: Hashable + Clone, const DEPTH: u8> IncrementalWitness<Node, DEPTH> {
-    fn filler(&self) -> PathFiller<Node> {
-        let cursor_root = self
-            .cursor
-            .as_ref()
-            .map(|c| c.root_inner(self.cursor_depth, PathFiller::empty()));
-
-        PathFiller {
-            queue: self.filled.iter().cloned().chain(cursor_root).collect(),
-        }
-    }
-}
-
-impl<Node, const DEPTH: u8> IncrementalWitness<Node, DEPTH> {
     /// Finds the next "depth" of an unfilled subtree.
     fn next_depth(&self) -> u8 {
         let mut skip: u8 = self
@@ -401,6 +351,17 @@ impl<Node, const DEPTH: u8> IncrementalWitness<Node, DEPTH> {
 }
 
 impl<Node: Hashable + Clone, const DEPTH: u8> IncrementalWitness<Node, DEPTH> {
+    fn filler(&self) -> PathFiller<Node> {
+        let cursor_root = self
+            .cursor
+            .as_ref()
+            .map(|c| c.root_inner(self.cursor_depth, PathFiller::empty()));
+
+        PathFiller {
+            queue: self.filled.iter().cloned().chain(cursor_root).collect(),
+        }
+    }
+
     /// Tracks a leaf node that has been added to the underlying tree.
     ///
     /// Returns an error if the tree is full.
@@ -480,6 +441,39 @@ impl<Node: Hashable + Clone, const DEPTH: u8> IncrementalWitness<Node, DEPTH> {
 
         MerklePath::from_path(auth_path, self.position() as u64).ok()
     }
+}
+
+/// Reads an `IncrementalWitness` from its serialized form.
+#[allow(clippy::redundant_closure)]
+pub fn read_incremental_witness<Node: HashSer, R: Read, const DEPTH: u8>(
+    mut reader: R,
+) -> io::Result<IncrementalWitness<Node, DEPTH>> {
+    let tree = read_commitment_tree(&mut reader)?;
+    let filled = Vector::read(&mut reader, |r| Node::read(r))?;
+    let cursor = Optional::read(&mut reader, read_commitment_tree)?;
+
+    let mut witness = IncrementalWitness {
+        tree,
+        filled,
+        cursor_depth: 0,
+        cursor,
+    };
+
+    witness.cursor_depth = witness.next_depth();
+
+    Ok(witness)
+}
+
+/// Serializes this `IncrementalWitness` as an array of bytes.
+pub fn write_incremental_witness<Node: HashSer, W: Write, const DEPTH: u8>(
+    witness: &IncrementalWitness<Node, DEPTH>,
+    mut writer: W,
+) -> io::Result<()> {
+    write_commitment_tree(&witness.tree, &mut writer)?;
+    Vector::write(&mut writer, &witness.filled, |w, n| n.write(w))?;
+    Optional::write(&mut writer, witness.cursor.as_ref(), |w, t| {
+        write_commitment_tree(t, w)
+    })
 }
 
 /// A path from a position in a particular commitment tree to the root of that tree.
