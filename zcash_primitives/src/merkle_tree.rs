@@ -184,12 +184,7 @@ impl<Node: Hashable + Clone, const DEPTH: u8> CommitmentTree<Node, DEPTH> {
     /// Returns an error if the tree is full.
     #[allow(clippy::result_unit_err)]
     pub fn append(&mut self, node: Node) -> Result<(), ()> {
-        self.append_inner(node, DEPTH)
-    }
-
-    #[allow(clippy::result_unit_err)]
-    fn append_inner(&mut self, node: Node, depth: u8) -> Result<(), ()> {
-        if self.is_complete(depth) {
+        if self.is_complete(DEPTH) {
             // Tree is full
             return Err(());
         }
@@ -202,7 +197,7 @@ impl<Node: Hashable + Clone, const DEPTH: u8> CommitmentTree<Node, DEPTH> {
                 self.left = Some(node);
                 self.right = None;
 
-                for i in 0..depth {
+                for i in 0..DEPTH {
                     let i_usize = usize::from(i);
                     if i_usize < self.parents.len() {
                         if let Some(p) = &self.parents[i_usize] {
@@ -399,15 +394,8 @@ impl<Node: Hashable + HashSer + Clone, const DEPTH: u8> IncrementalWitness<Node,
     /// Returns an error if the tree is full.
     #[allow(clippy::result_unit_err)]
     pub fn append(&mut self, node: Node) -> Result<(), ()> {
-        self.append_inner(node, DEPTH)
-    }
-
-    #[allow(clippy::result_unit_err)]
-    fn append_inner(&mut self, node: Node, depth: u8) -> Result<(), ()> {
         if let Some(mut cursor) = self.cursor.take() {
-            cursor
-                .append_inner(node, depth)
-                .expect("cursor should not be full");
+            cursor.append(node).expect("cursor should not be full");
             if cursor.is_complete(self.cursor_depth) {
                 self.filled
                     .push(cursor.root_inner(self.cursor_depth, PathFiller::empty()));
@@ -416,7 +404,7 @@ impl<Node: Hashable + HashSer + Clone, const DEPTH: u8> IncrementalWitness<Node,
             }
         } else {
             self.cursor_depth = self.next_depth();
-            if self.cursor_depth >= depth {
+            if self.cursor_depth >= DEPTH {
                 // Tree is full
                 return Err(());
             }
@@ -425,9 +413,7 @@ impl<Node: Hashable + HashSer + Clone, const DEPTH: u8> IncrementalWitness<Node,
                 self.filled.push(node);
             } else {
                 let mut cursor = CommitmentTree::empty();
-                cursor
-                    .append_inner(node, depth)
-                    .expect("cursor should not be full");
+                cursor.append(node).expect("cursor should not be full");
                 self.cursor = Some(cursor);
             }
         }
