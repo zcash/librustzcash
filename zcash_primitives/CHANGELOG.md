@@ -14,13 +14,26 @@ and this library adheres to Rust's notion of
   type has been removed.
 - `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
   have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
-- `merkle_tree::incremental::write_auth_fragment_v1`
 - `merkle_tree::{CommitmentTree, IncrementalWitness, MerklePath}` have been removed in
   favor of versions of these types that are now provided by the
   `incrementalmerkletree` crate. The replacement types now use const generic
   parameters for enforcing the note commitment tree depth. Serialization
   methods for these types that do not exist for the `incrementalmerkletree`
   replacement types have been replaced by new methods in the `merkle_tree` module.
+- `merkle_tree::incremental::write_auth_fragment_v1` has been removed without replacement.
+- The following have been removed from `merkle_tree::incremental`; these were
+  `zcashd`-specific serialization methods which have been moved into the
+  [zcashd](https://github.com/zcash/zcash) repository.
+  - `read_auth_fragment_v1`
+  - `read_bridge_v1`
+  - `read_bridge_v2`
+  - `write_bridge_v2`
+  - `write_bridge`
+  - `read_checkpoint_v1`
+  - `read_checkpoint_v2`
+  - `write_checkpoint_v2`
+  - `read_tree`
+  - `write_tree`
 
 ### Added
 - `merkle_tree::incremental::{read_address, write_address}`
