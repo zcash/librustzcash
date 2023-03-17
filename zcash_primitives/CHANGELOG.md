@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.10.2] - 2023-03-16
+### Added
+- `zcash_primitives::sapling::note`:
+  - `NoteCommitment::temporary_zcashd_derive`
+
 ## [0.10.1] - 2023-03-08
 ### Added
 - Sapling bundle component constructors, behind the `temporary-zcashd` feature

@@ -25,6 +25,17 @@ impl NoteCommitment {
 }
 
 impl NoteCommitment {
+    /// Derives a Sapling note commitment.
+    #[cfg(feature = "temporary-zcashd")]
+    pub fn temporary_zcashd_derive(
+        g_d: [u8; 32],
+        pk_d: [u8; 32],
+        v: NoteValue,
+        rcm: jubjub::Fr,
+    ) -> Self {
+        Self::derive(g_d, pk_d, v, NoteCommitTrapdoor(rcm))
+    }
+
     /// $NoteCommit^Sapling$.
     ///
     /// Defined in [Zcash Protocol Spec § 5.4.8.2: Windowed Pedersen commitments][concretewindowedcommit].
