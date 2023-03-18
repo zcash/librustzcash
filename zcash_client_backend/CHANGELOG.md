@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Bumped dependencies to `bls12_381 0.8`, `group 0.13`, 
+- Bumped dev dependency to `jubjub 0.10`
+
 ## [0.7.0] - 2023-02-01
 ### Added
 - `zcash_client_backend::data_api::wallet`:

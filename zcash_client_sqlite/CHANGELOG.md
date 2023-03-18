@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Bumped dependencies to `group 0.13`, `jubjub 0.10`
+
 ## [0.7.0] - 2023-02-01
 ### Added
 - `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db

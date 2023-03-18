@@ -7,6 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Bumped dependencies to `bls12_381 0.8`, `ff 0.13`, `group 0.13`, `jubjub 0.10`
+
 ## [0.10.2] - 2023-03-16
 ### Added
 - `zcash_primitives::sapling::note`:

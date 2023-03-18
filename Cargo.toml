@@ -21,3 +21,7 @@ codegen-units = 1
 [patch.crates-io]
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
+bellman = { git = "https://github.com/zkcrypto/bellman.git", rev = "29c82c7e432c1b32a50ef58e42790c3963ef2b4b" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "61a67f018f456da980de7f93a5ea2a1dc5a61e63" }
+halo2_gadgets = { git = "https://github.com/zcash/halo2.git", rev = "35eb268e202d76721abde3d6e50e719ae9140605" }
+halo2_proofs = { git = "https://github.com/zcash/halo2.git", rev = "35eb268e202d76721abde3d6e50e719ae9140605" }

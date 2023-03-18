@@ -22,9 +22,9 @@ zcash_primitives = { version = "0.10", path = "../zcash_primitives" }
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 bellman = { version = "0.13.1", default-features = false, features = ["groth16"] }
-bls12_381 = "0.7"
-group = "0.12"
-jubjub = "0.9"
+bls12_381 = "0.8"
+group = "0.13"
+jubjub = "0.10"
 lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
 rand_core = "0.6"
