@@ -11,11 +11,11 @@ rust-version = "1.60"
 
 [dependencies]
 blake2b_simd = "1"
-zcash_primitives = { version = "0.10", path = "../zcash_primitives", features = ["zfuture" ] }
+zcash_primitives = { version = "0.10", path = "../zcash_primitives", default-features = false, features = ["zfuture" ] }
 
 [dev-dependencies]
-ff = "0.12"
-jubjub = "0.9"
+ff = "0.13"
+jubjub = "0.10"
 rand_core = "0.6"
 zcash_address = { version = "0.2", path = "../components/zcash_address" }
 zcash_proofs = { version = "0.10", path = "../zcash_proofs" }

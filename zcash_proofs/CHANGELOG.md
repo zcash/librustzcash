@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `jubjub 0.10`,
+  `bellman 0.14`
+
 ## [0.10.0] - 2023-02-01
 ### Added
 - `zcash_proofs::circuit::sapling`:

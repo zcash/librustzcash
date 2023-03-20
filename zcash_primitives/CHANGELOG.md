@@ -7,10 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- Bumped dependencies to `bls12_381 0.8`, `ff 0.13`, `group 0.13`, `jubjub 0.10`
+
 ## [0.10.2] - 2023-03-16
 ### Added
 - `zcash_primitives::sapling::note`:
   - `NoteCommitment::temporary_zcashd_derive`
+- A new feature flag, `multicore`, has been added and is enabled by default.
+  This allows users to selectively disable multicore support for Orchard proof
+  creation by setting `default_features = false` on their `zcash_primitives`
+  dependency, such as is needed to enable `wasm32-wasi` compilation.
 
 ## [0.10.1] - 2023-03-08
 ### Added

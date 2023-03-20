@@ -17,14 +17,14 @@ categories = ["cryptography::cryptocurrencies"]
 all-features = true
 
 [dependencies]
-zcash_primitives = { version = "0.10", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.10", path = "../zcash_primitives", default-features = false }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
-bellman = { version = "0.13.1", default-features = false, features = ["groth16"] }
-bls12_381 = "0.7"
-group = "0.12"
-jubjub = "0.9"
+bellman = { version = "0.14", default-features = false, features = ["groth16"] }
+bls12_381 = "0.8"
+group = "0.13"
+jubjub = "0.10"
 lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }
 rand_core = "0.6"
@@ -51,7 +51,7 @@ default = ["local-prover", "multicore"]
 bundled-prover = ["wagyu-zcash-parameters"]
 download-params = ["minreq", "directories"]
 local-prover = ["directories"]
-multicore = ["bellman/multicore"]
+multicore = ["bellman/multicore", "zcash_primitives/multicore"]
 
 [lib]
 bench = false
