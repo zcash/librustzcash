@@ -45,7 +45,7 @@ group = { version = "0.13", features = ["wnaf-memuse"] }
 incrementalmerkletree = "0.3"
 jubjub = "0.10"
 nonempty = "0.7"
-orchard = "0.3"
+orchard = { version = "0.3", default-features = false }
 
 # - Static constants
 lazy_static = "1"
@@ -90,13 +90,16 @@ criterion = "0.4"
 proptest = "1.0.0"
 assert_matches = "1.3.0"
 rand_xorshift = "0.3"
-orchard = { version = "0.3", features = ["test-dependencies"] }
+orchard = { version = "0.3", default-features = false, features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
 inferno = ">=0.11, <0.11.5" # MSRV 1.59
 
 [features]
+default = ["halo2-batch", "halo2-multicore"]
+halo2-batch = ["orchard/halo2-batch"] 
+halo2-multicore = ["orchard/halo2-multicore"]
 transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
 temporary-zcashd = []
 test-dependencies = ["proptest", "orchard/test-dependencies"]

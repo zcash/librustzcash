@@ -15,7 +15,7 @@ rust-version = "1.60"
 
 [dependencies]
 zcash_client_backend = { version = "0.7", path = "../zcash_client_backend" }
-zcash_primitives = { version = "0.10", path = "../zcash_primitives" }
+zcash_primitives = { version = "0.10", path = "../zcash_primitives", default-features = false }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
