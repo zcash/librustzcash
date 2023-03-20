@@ -8,7 +8,13 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
-- Bumped dependencies to `bls12_381 0.8`, `group 0.13`, 
+- Bumped dependencies to `bls12_381 0.8`, `group 0.13`,
+- The dependency on `zcash_primitives` no longer enables the `multicore` feature
+  by default in order to support compilation under `wasm32-wasi`. Users of other
+  platforms may need to include an explicit dependency on `zcash_primitives`
+  without `default-features = false` or otherwise explicitly enable the
+  `zcash_primitives/multicore` feature if they did not already depend
+  upon `zcash_primitives` with default features enabled.
 
 ## [0.7.0] - 2023-02-01
 ### Added
@@ -29,7 +35,7 @@ and this library adheres to Rust's notion of
     - The `parameters: &ParamsT` argument has been removed. When `None` is given
       as the `validate_from` argument, `validate_chain` will now pass `None` to
       `BlockSource::with_blocks` (instead of the Sapling network upgrade's
-      activation height). 
+      activation height).
     - A `limit: Option<u32>` argument has been added. This enables callers to
       validate smaller intervals of blocks already present on the provided
       `BlockSource`, shortening processing times of the function call at the
@@ -51,7 +57,7 @@ and this library adheres to Rust's notion of
   - The `cmu` field of `zcash_client_backend::wallet::WalletShieldedOutput`.
   - `zcash_client_backend::proto::compact_formats::CompactSaplingOutput::cmu`.
 
-### Removed 
+### Removed
 - `zcash_client_backend::data_api`:
   - `WalletWrite::remove_unmined_tx` (was behind the `unstable` feature flag).
 

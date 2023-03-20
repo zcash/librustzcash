@@ -9,11 +9,17 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Bumped dependencies to `group 0.13`, `jubjub 0.10`
+- The dependency on `zcash_primitives` no longer enables the `multicore` feature
+  by default in order to support compilation under `wasm32-wasi`. Users of other
+  platforms may need to include an explicit dependency on `zcash_primitives`
+  without `default-features = false` or otherwise explicitly enable the
+  `zcash_primitives/multicore` feature if they did not already depend
+  upon `zcash_primitives` with default features enabled.
 
 ## [0.7.0] - 2023-02-01
 ### Added
 - `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db
- to the specified height following the same logic as homonymous functions on 
+ to the specified height following the same logic as homonymous functions on
  `WalletDb`. This function does not delete the files referenced by the rows
  that might be present and are deleted by this function call.
 - `zcash_client_sqlite::FsBlockDb::find_block`
