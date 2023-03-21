@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `recipient` parameter has been removed from `Domain::note_plaintext_bytes`.
+- The `recipient` parameter has been removed from `NoteEncryption::new`. Since 
+  the `Domain::Note` type is now expected to contain information about the
+  recipient of the note, there is no longer any need to pass this information
+  in via the encryption context.
+
 ## [0.2.0] - 2022-10-13
 ### Added
 - `zcash_note_encryption::Domain`:
