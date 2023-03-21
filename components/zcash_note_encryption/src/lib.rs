@@ -171,15 +171,6 @@ pub trait Domain {
     fn kdf(secret: Self::SharedSecret, ephemeral_key: &EphemeralKeyBytes) -> Self::SymmetricKey;
 
     /// Encodes the given `Note` and `Memo` as a note plaintext.
-    ///
-    /// # Future breaking changes
-    ///
-    /// The `recipient` argument is present as a secondary way to obtain the diversifier;
-    /// this is due to a historical quirk of how the Sapling `Note` struct was implemented
-    /// in the `zcash_primitives` crate. `recipient` will be removed from this method in a
-    /// future crate release, once [`zcash_primitives` has been refactored].
-    ///
-    /// [`zcash_primitives` has been refactored]: https://github.com/zcash/librustzcash/issues/454
     fn note_plaintext_bytes(note: &Self::Note, memo: &Self::Memo) -> NotePlaintextBytes;
 
     /// Derives the [`OutgoingCipherKey`] for an encrypted note, given the note-specific

@@ -80,7 +80,7 @@ aes = "0.7"
 fpe = "0.5"
 
 [dependencies.zcash_note_encryption]
-version = "0.2"
+version = "0.3"
 features = ["pre-zip-212"]
 
 [dev-dependencies]

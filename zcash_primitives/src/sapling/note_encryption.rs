@@ -183,11 +183,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
         dhsecret.kdf_sapling(epk)
     }
 
-    fn note_plaintext_bytes(
-        note: &Self::Note,
-        to: &Self::Recipient,
-        memo: &Self::Memo,
-    ) -> NotePlaintextBytes {
+    fn note_plaintext_bytes(note: &Self::Note, memo: &Self::Memo) -> NotePlaintextBytes {
         // Note plaintext encoding is defined in section 5.5 of the Zcash Protocol
         // Specification.
         let mut input = [0; NOTE_PLAINTEXT_SIZE];
@@ -195,7 +191,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
             Rseed::BeforeZip212(_) => 1,
             Rseed::AfterZip212(_) => 2,
         };
-        input[1..12].copy_from_slice(&to.diversifier().0);
+        input[1..12].copy_from_slice(&note.recipient().diversifier().0);
         (&mut input[12..20])
             .write_u64::<LittleEndian>(note.value().inner())
             .unwrap();
@@ -368,19 +364,18 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
 /// let note = to.create_note(value.inner(), rseed);
 /// let cmu = note.cmu();
 ///
-/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, to, MemoBytes::empty(), &mut rng);
+/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, MemoBytes::empty(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
 /// ```
 pub fn sapling_note_encryption<R: RngCore, P: consensus::Parameters>(
     ovk: Option<OutgoingViewingKey>,
     note: Note,
-    to: PaymentAddress,
     memo: MemoBytes,
     rng: &mut R,
 ) -> NoteEncryption<SaplingDomain<P>> {
     let esk = note.generate_or_derive_esk_internal(rng);
-    NoteEncryption::new_with_esk(esk, ovk, note, to, memo)
+    NoteEncryption::new_with_esk(esk, ovk, note, memo)
 }
 
 #[allow(clippy::if_same_then_else)]
@@ -593,7 +588,6 @@ mod tests {
         let ne = sapling_note_encryption::<_, TestNetwork>(
             Some(ovk),
             note,
-            pa,
             MemoBytes::empty(),
             &mut rng,
         );
@@ -1508,7 +1502,6 @@ mod tests {
                 esk,
                 Some(ovk),
                 note,
-                to,
                 MemoBytes::from_bytes(&tv.memo).unwrap(),
             );
 
