@@ -472,6 +472,11 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
                 self.progress_notifier.as_ref(),
             )
             .map_err(Error::SaplingBuild)?;
+        let orchard_bundle: Option<orchard::Bundle<_, Amount>> = self
+            .orchard_builder
+            .build(&mut rng)
+            .transpose()
+            .map_err(Error::OrchardBuild)?;
 
         #[cfg(feature = "zfuture")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
@@ -488,7 +493,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
             // for both a `Bundle<InProgress<Unproven, Unauthorized>` and a `Bundle<Authorized, V>`
             // As such, it's created and authorized at the same time, right before being added to the
             // authorized bundle
-            orchard_bundle: None,
+            orchard_bundle,
             #[cfg(feature = "zfuture")]
             tze_bundle,
         };
@@ -535,11 +540,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
 
         let orchard_saks = self.orchard_saks.clone();
 
-        let orchard_bundle: Option<orchard::Bundle<_, Amount>> = self
-            .orchard_builder
-            .build(&mut rng)
-            .transpose()
-            .map_err(Error::OrchardBuild)?
+        let orchard_bundle = unauthed_tx
+            .orchard_bundle
             .map(|b| {
                 b.create_proof(&orchard::circuit::ProvingKey::build(), &mut rng)
                     .and_then(|b| {
