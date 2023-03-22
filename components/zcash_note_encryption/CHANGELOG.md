@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.3.0] - 2023-03-22
 ### Changed
 - The `recipient` parameter has been removed from `Domain::note_plaintext_bytes`.
 - The `recipient` parameter has been removed from `NoteEncryption::new`. Since 
