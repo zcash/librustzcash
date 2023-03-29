@@ -38,13 +38,12 @@ and this library adheres to Rust's notion of
   - `write_checkpoint_v2`
   - `read_tree`
   - `write_tree`
+- `merkle_tree::{SER_V1, SER_V2}` have been removed as they are now unused.
 
 ### Moved
 - The following constants and methods have been moved from the
   `merkle_tree::incremental` module into the `merkle_tree` module to
   consolidate the serialization code for commitment tree frontiers:
-  - `SER_V1`
-  - `SER_V2`
   - `write_usize_leu64`
   - `read_leu64_usize`
   - `write_position`
