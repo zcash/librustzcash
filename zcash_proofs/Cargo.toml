@@ -34,7 +34,7 @@ tracing = "0.1"
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 blake2b_simd = "1"
 directories = { version = "4", optional = true }
-redjubjub = "0.5"
+redjubjub = "0.7"
 wagyu-zcash-parameters = { version = "0.2", optional = true }
 
 [dev-dependencies]
