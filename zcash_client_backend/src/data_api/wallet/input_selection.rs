@@ -22,7 +22,7 @@ use crate::{
     address::{RecipientAddress, UnifiedAddress},
     data_api::WalletRead,
     fees::{ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
-    wallet::{SpendableNote, WalletTransparentOutput},
+    wallet::{ReceivedSaplingNote, WalletTransparentOutput},
     zip321::TransactionRequest,
 };
 
@@ -68,7 +68,7 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
 pub struct Proposal<FeeRuleT, NoteRef> {
     transaction_request: TransactionRequest,
     transparent_inputs: Vec<WalletTransparentOutput>,
-    sapling_inputs: Vec<SpendableNote<NoteRef>>,
+    sapling_inputs: Vec<ReceivedSaplingNote<NoteRef>>,
     balance: TransactionBalance,
     fee_rule: FeeRuleT,
     target_height: BlockHeight,
@@ -85,7 +85,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         &self.transparent_inputs
     }
     /// Returns the Sapling inputs that have been selected to fund the transaction.
-    pub fn sapling_inputs(&self) -> &[SpendableNote<NoteRef>] {
+    pub fn sapling_inputs(&self) -> &[ReceivedSaplingNote<NoteRef>] {
         &self.sapling_inputs
     }
     /// Returns the change outputs to be added to the transaction and the fee to be paid.
@@ -336,7 +336,7 @@ where
             }
         }
 
-        let mut sapling_inputs: Vec<SpendableNote<DbT::NoteRef>> = vec![];
+        let mut sapling_inputs: Vec<ReceivedSaplingNote<DbT::NoteRef>> = vec![];
         let mut prior_available = Amount::zero();
         let mut amount_required = Amount::zero();
         let mut exclude: Vec<DbT::NoteRef> = vec![];
@@ -425,7 +425,7 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &Vec::<SpendableNote<DbT::NoteRef>>::new(),
+            &Vec::<ReceivedSaplingNote<DbT::NoteRef>>::new(),
             &Vec::<SaplingPayment>::new(),
             &self.dust_output_policy,
         );
@@ -441,7 +441,7 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &Vec::<SpendableNote<DbT::NoteRef>>::new(),
+                    &Vec::<ReceivedSaplingNote<DbT::NoteRef>>::new(),
                     &Vec::<SaplingPayment>::new(),
                     &self.dust_output_policy,
                 )?

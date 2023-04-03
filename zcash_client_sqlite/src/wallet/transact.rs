@@ -13,11 +13,11 @@ use zcash_primitives::{
     zip32::AccountId,
 };
 
-use zcash_client_backend::wallet::SpendableNote;
+use zcash_client_backend::wallet::ReceivedSaplingNote;
 
 use crate::{error::SqliteClientError, NoteId, WalletDb};
 
-fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientError> {
+fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<NoteId>, SqliteClientError> {
     let note_id = NoteId::ReceivedNoteId(row.get(0)?);
     let diversifier = {
         let d: Vec<_> = row.get(1)?;
@@ -53,7 +53,7 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientErr
         read_incremental_witness(&d[..])?
     };
 
-    Ok(SpendableNote {
+    Ok(ReceivedSaplingNote {
         note_id,
         diversifier,
         note_value,
@@ -67,7 +67,7 @@ pub(crate) fn get_spendable_sapling_notes<P>(
     account: AccountId,
     anchor_height: BlockHeight,
     exclude: &[NoteId],
-) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
+) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
     let mut stmt_select_notes = wdb.conn.prepare(
         "SELECT id_note, diversifier, value, rcm, witness
             FROM sapling_received_notes
@@ -107,7 +107,7 @@ pub(crate) fn select_spendable_sapling_notes<P>(
     target_value: Amount,
     anchor_height: BlockHeight,
     exclude: &[NoteId],
-) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
+) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the
     // selected notes. This is achieved in several steps:

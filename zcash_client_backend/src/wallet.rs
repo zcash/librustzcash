@@ -177,7 +177,7 @@ impl<N> WalletSaplingOutput<N> {
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
-pub struct SpendableNote<NoteRef> {
+pub struct ReceivedSaplingNote<NoteRef> {
     pub note_id: NoteRef,
     pub diversifier: sapling::Diversifier,
     pub note_value: Amount,
@@ -185,7 +185,7 @@ pub struct SpendableNote<NoteRef> {
     pub witness: sapling::IncrementalWitness,
 }
 
-impl<NoteRef> sapling_fees::InputView<NoteRef> for SpendableNote<NoteRef> {
+impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedSaplingNote<NoteRef> {
     fn note_id(&self) -> &NoteRef {
         &self.note_id
     }

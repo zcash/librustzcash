@@ -104,6 +104,8 @@ use crate::{
 pub mod error;
 use error::{ChainError, Error};
 
+use super::NullifierQuery;
+
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
 /// API.
 pub trait BlockSource {
@@ -252,7 +254,9 @@ where
     )?;
 
     // Get the nullifiers for the notes we are tracking
-    let mut nullifiers = data_db.get_nullifiers().map_err(Error::Wallet)?;
+    let mut nullifiers = data_db
+        .get_sapling_nullifiers(NullifierQuery::Unspent)
+        .map_err(Error::Wallet)?;
 
     let mut batch_runner = BatchRunner::<_, _, _, ()>::new(
         100,

@@ -90,7 +90,7 @@ impl Node {
     }
 }
 
-impl incrementalmerkletree::Hashable for Node {
+impl Hashable for Node {
     fn empty_leaf() -> Self {
         Node {
             repr: UNCOMMITTED_SAPLING.to_repr(),

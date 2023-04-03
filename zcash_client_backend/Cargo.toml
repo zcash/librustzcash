@@ -20,6 +20,7 @@ exclude = ["*.proto"]
 development = ["zcash_proofs"]
 
 [dependencies]
+incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }
 zcash_address = { version = "0.2", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_note_encryption = "0.3"
@@ -94,6 +95,7 @@ test-dependencies = [
     "proptest",
     "orchard/test-dependencies",
     "zcash_primitives/test-dependencies",
+    "incrementalmerkletree/test-dependencies"
 ]
 unstable = ["byteorder"]
 
