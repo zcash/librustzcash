@@ -26,6 +26,12 @@ pub struct CompactBlock {
     /// zero or more compact transactions from this block
     #[prost(message, repeated, tag = "7")]
     pub vtx: ::prost::alloc::vec::Vec<CompactTx>,
+    /// the size of the Sapling note commitment tree as of the end of this block
+    #[prost(uint32, tag = "8")]
+    pub sapling_commitment_tree_size: u32,
+    /// the size of the Orchard note commitment tree as of the end of this block
+    #[prost(uint32, tag = "9")]
+    pub orchard_commitment_tree_size: u32,
 }
 /// CompactTx contains the minimum information for a wallet to know if this transaction
 /// is relevant to it (either pays to it or spends from it) via shielded elements

@@ -22,6 +22,8 @@ message CompactBlock {
     uint32 time = 5;            // Unix epoch time when the block was mined
     bytes header = 6;           // (hash, prevHash, and time) OR (full header)
     repeated CompactTx vtx = 7; // zero or more compact transactions from this block
+    uint32 saplingCommitmentTreeSize = 8; // the size of the Sapling note commitment tree as of the end of this block
+    uint32 orchardCommitmentTreeSize = 9; // the size of the Orchard note commitment tree as of the end of this block
 }
 
 // CompactTx contains the minimum information for a wallet to know if this transaction
