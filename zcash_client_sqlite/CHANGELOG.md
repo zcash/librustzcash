@@ -7,6 +7,37 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Removed
+- The following deprecated types and methods have been removed from the public API:
+  - `wallet::ShieldedOutput`
+  - `wallet::block_height_extrema`
+  - `wallet::get_address`
+  - `wallet::get_all_nullifiers`
+  - `wallet::get_balance`
+  - `wallet::get_balance_at`
+  - `wallet::get_block_hash`
+  - `wallet::get_commitment_tree`
+  - `wallet::get_nullifiers`
+  - `wallet::get_received_memo`
+  - `wallet::get_rewind_height`
+  - `wallet::get_sent_memo`
+  - `wallet::get_spendable_sapling_notes`
+  - `wallet::get_transaction`
+  - `wallet::get_tx_height`
+  - `wallet::get_unified_full_viewing_keys`
+  - `wallet::get_witnesses`
+  - `wallet::insert_block`
+  - `wallet::insert_witnesses`
+  - `wallet::is_valid_account_extfvk`
+  - `wallet::mark_sapling_note_spent`
+  - `wallet::put_tx_data`
+  - `wallet::put_tx_meta`
+  - `wallet::prune_witnesses`
+  - `wallet::select_spendable_sapling_notes`
+  - `wallet::update_expired_notes`
+  - `wallet::transact::get_spendable_sapling_notes`
+  - `wallet::transact::select_spendable_sapling_notes`
+
 ## [0.6.0] - 2023-04-15
 ### Added
 - SQLite view `v_tx_outputs`, exposing the history of transaction outputs sent

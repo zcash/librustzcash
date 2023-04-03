@@ -7,6 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Renamed
+- The following types and fields have been renamed in preparation for supporting
+  `orchard` in wallet APIs:
+  - `WalletTx::shielded_spends`  -> `WalletTx::sapling_spends`
+  - `WalletTx::shielded_outputs` -> `WalletTx::sapling_outputs`
+  - `WalletShieldedSpend` -> `WalletSaplingSpend`
+  - `WalletShieldedOutput` -> `WalletSaplingOutput`
+
+### Removed
+  - `wallet::WalletTx::num_spends`
+  - `wallet::WalletTx::num_outputs`
 ## [0.8.0] - 2023-04-15
 ### Changed
 - Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `orchard 0.4`,

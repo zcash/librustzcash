@@ -158,11 +158,11 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 /// [`WalletWrite::create_account`]: zcash_client_backend::data_api::WalletWrite::create_account
 ///
 /// The [`UnifiedFullViewingKey`]s are stored internally and used by other APIs such as
-/// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. Account identifiers
-/// in `keys` **MUST** form a consecutive sequence beginning at account 0, and the
-/// [`UnifiedFullViewingKey`] corresponding to a given account identifier **MUST** be derived from
-/// the wallet's mnemonic seed at the BIP-44 `account` path level as described by
-/// [ZIP 316](https://zips.z.cash/zip-0316)
+/// [`scan_cached_blocks`], and [`create_spend_to_address`]. Account identifiers in `keys` **MUST**
+/// form a consecutive sequence beginning at account 0, and the [`UnifiedFullViewingKey`]
+/// corresponding to a given account identifier **MUST** be derived from the wallet's mnemonic seed
+/// at the BIP-44 `account` path level as described by [ZIP
+/// 316](https://zips.z.cash/zip-0316)
 ///
 /// # Examples
 ///
@@ -301,6 +301,7 @@ mod tests {
 
     use zcash_client_backend::{
         address::RecipientAddress,
+        data_api::WalletRead,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
@@ -315,7 +316,6 @@ mod tests {
     use crate::{
         error::SqliteClientError,
         tests::{self, network},
-        wallet::get_address,
         AccountId, WalletDb,
     };
 
@@ -1142,8 +1142,8 @@ mod tests {
         init_accounts_table(&db_data, &ufvks).unwrap();
 
         // The account's address should be in the data DB
-        let pa = get_address(&db_data, AccountId::from(0)).unwrap();
-        assert_eq!(pa.unwrap(), expected_address);
+        let ua = db_data.get_current_address(AccountId::from(0)).unwrap();
+        assert_eq!(ua.unwrap().sapling().unwrap(), &expected_address);
     }
 
     #[test]

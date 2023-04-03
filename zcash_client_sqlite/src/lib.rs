@@ -136,24 +136,20 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     type TxRef = i64;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        #[allow(deprecated)]
         wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_unified_full_viewing_keys(self)
     }
 
@@ -176,7 +172,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
-        #[allow(deprecated)]
         wallet::is_valid_account_extfvk(self, account, extfvk)
     }
 
@@ -185,17 +180,14 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_balance_at(self, account, anchor_height)
     }
 
     fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_transaction(self, id_tx)
     }
 
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
-        #[allow(deprecated)]
         match id_note {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
             NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
@@ -206,8 +198,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_commitment_tree(self, block_height)
+        wallet::get_sapling_commitment_tree(self, block_height)
     }
 
     #[allow(clippy::type_complexity)]
@@ -215,18 +206,15 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_witnesses(self, block_height)
+        wallet::get_sapling_witnesses(self, block_height)
     }
 
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_nullifiers(self)
+        wallet::get_sapling_nullifiers(self)
     }
 
     fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_all_nullifiers(self)
+        wallet::get_all_sapling_nullifiers(self)
     }
 
     fn get_spendable_sapling_notes(
@@ -235,7 +223,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
-        #[allow(deprecated)]
         wallet::transact::get_spendable_sapling_notes(self, account, anchor_height, exclude)
     }
 
@@ -246,7 +233,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
-        #[allow(deprecated)]
         wallet::transact::select_spendable_sapling_notes(
             self,
             account,
@@ -458,7 +444,6 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     }
 }
 
-#[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     type UtxoRef = UtxoId;
 
@@ -540,11 +525,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 let tx_row = wallet::put_tx_meta(up, tx, block.block_height)?;
 
                 // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.shielded_spends {
+                for spend in &tx.sapling_spends {
                     wallet::mark_sapling_note_spent(up, tx_row, &spend.nf)?;
                 }
 
-                for output in &tx.shielded_outputs {
+                for output in &tx.sapling_outputs {
                     let received_note_id = wallet::put_received_note(up, output, tx_row)?;
 
                     // Save witness for note.
@@ -968,7 +953,6 @@ impl std::fmt::Display for FsBlockDbError {
 extern crate assert_matches;
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use prost::Message;
     use rand_core::{OsRng, RngCore};

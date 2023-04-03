@@ -323,7 +323,7 @@ where
                     }
                 }
                 for tx in &txs {
-                    for output in tx.shielded_outputs.iter() {
+                    for output in tx.sapling_outputs.iter() {
                         if output.witness.root() != cur_root {
                             return Err(ChainError::invalid_new_witness_anchor(
                                 current_height,
@@ -352,12 +352,12 @@ where
 
             let spent_nf: Vec<Nullifier> = txs
                 .iter()
-                .flat_map(|tx| tx.shielded_spends.iter().map(|spend| spend.nf))
+                .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf))
                 .collect();
             nullifiers.retain(|(_, nf)| !spent_nf.contains(nf));
             nullifiers.extend(
                 txs.iter()
-                    .flat_map(|tx| tx.shielded_outputs.iter().map(|out| (out.account, out.nf))),
+                    .flat_map(|tx| tx.sapling_outputs.iter().map(|out| (out.account, out.nf))),
             );
 
             witnesses.extend(new_witnesses);
