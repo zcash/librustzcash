@@ -32,9 +32,10 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+use either::Either;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, ops::Range, path::Path};
+use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, io, ops::Range, path::Path};
 
 use incrementalmerkletree::Position;
 use shardtree::{ShardTree, ShardTreeError};
@@ -72,13 +73,13 @@ use crate::{
 #[cfg(feature = "unstable")]
 use {
     crate::chain::{fsblockdb_with_blocks, BlockMeta},
+    std::fs,
     std::path::PathBuf,
-    std::{fs, io},
 };
 
 pub mod chain;
 pub mod error;
-mod serialization;
+pub mod serialization;
 pub mod wallet;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
@@ -614,7 +615,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 }
 
 impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Connection, P> {
-    type Error = rusqlite::Error;
+    type Error = Either<io::Error, rusqlite::Error>;
     type SaplingShardStore<'a> = WalletDbSaplingShardStore<'a, 'a>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
@@ -626,22 +627,26 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
                 SAPLING_SHARD_HEIGHT,
             >,
         ) -> Result<A, E>,
-        E: From<ShardTreeError<rusqlite::Error>>,
+        E: From<ShardTreeError<Either<io::Error, rusqlite::Error>>>,
     {
-        let tx = self.conn.transaction().map_err(ShardTreeError::Storage)?;
-        let shard_store =
-            WalletDbSaplingShardStore::from_connection(&tx).map_err(ShardTreeError::Storage)?;
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
+        let shard_store = WalletDbSaplingShardStore::from_connection(&tx)
+            .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
         let result = {
             let mut shardtree = ShardTree::new(shard_store, 100);
             callback(&mut shardtree)?
         };
-        tx.commit().map_err(ShardTreeError::Storage)?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
         Ok(result)
     }
 }
 
 impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
-    type Error = rusqlite::Error;
+    type Error = Either<io::Error, rusqlite::Error>;
     type SaplingShardStore<'a> = WalletDbSaplingShardStore<'a, 'a>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
@@ -653,11 +658,11 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
                 SAPLING_SHARD_HEIGHT,
             >,
         ) -> Result<A, E>,
-        E: From<ShardTreeError<rusqlite::Error>>,
+        E: From<ShardTreeError<Either<io::Error, rusqlite::Error>>>,
     {
         let mut shardtree = ShardTree::new(
             WalletDbSaplingShardStore::from_connection(&self.conn.0)
-                .map_err(ShardTreeError::Storage)?,
+                .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?,
             100,
         );
         let result = callback(&mut shardtree)?;

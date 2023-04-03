@@ -1,6 +1,6 @@
 //! Functions for initializing the various databases.
-use std::collections::HashMap;
-use std::fmt;
+use either::Either;
+use std::{collections::HashMap, fmt, io};
 
 use rusqlite::{self, types::ToSql};
 use schemer::{Migrator, MigratorError};
@@ -37,7 +37,7 @@ pub enum WalletMigrationError {
     BalanceError(BalanceError),
 
     /// Wrapper for commitment tree invariant violations
-    CommitmentTree(ShardTreeError<rusqlite::Error>),
+    CommitmentTree(ShardTreeError<Either<io::Error, rusqlite::Error>>),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -52,8 +52,8 @@ impl From<BalanceError> for WalletMigrationError {
     }
 }
 
-impl From<ShardTreeError<rusqlite::Error>> for WalletMigrationError {
-    fn from(e: ShardTreeError<rusqlite::Error>) -> Self {
+impl From<ShardTreeError<Either<io::Error, rusqlite::Error>>> for WalletMigrationError {
+    fn from(e: ShardTreeError<Either<io::Error, rusqlite::Error>>) -> Self {
         WalletMigrationError::CommitmentTree(e)
     }
 }
@@ -392,6 +392,26 @@ mod tests {
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
+            )",
+            "CREATE TABLE sapling_tree_cap (
+                cap_data BLOB NOT NULL
+            )",
+            "CREATE TABLE sapling_tree_checkpoint_marks_removed (
+                checkpoint_id INTEGER NOT NULL,
+                mark_removed_position INTEGER NOT NULL,
+                FOREIGN KEY (checkpoint_id) REFERENCES sapling_tree_checkpoints(checkpoint_id)
+            )",
+            "CREATE TABLE sapling_tree_checkpoints (
+                checkpoint_id INTEGER PRIMARY KEY,
+                position INTEGER
+            )",
+            "CREATE TABLE sapling_tree_shards (
+                shard_index INTEGER PRIMARY KEY,
+                subtree_end_height INTEGER,
+                root_hash BLOB,
+                shard_data BLOB,
+                contains_marked INTEGER,
+                CONSTRAINT root_unique UNIQUE (root_hash)
             )",
             "CREATE TABLE sapling_witnesses (
                 id_witness INTEGER PRIMARY KEY,

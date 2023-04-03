@@ -1,7 +1,9 @@
 //! Error types for problems that may arise when reading or storing wallet data to SQLite.
 
+use either::Either;
 use std::error;
 use std::fmt;
+use std::io;
 
 use shardtree::ShardTreeError;
 use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
@@ -77,7 +79,7 @@ pub enum SqliteClientError {
     AddressNotRecognized(TransparentAddress),
 
     /// An error occurred in inserting data into one of the wallet's note commitment trees.
-    CommitmentTree(ShardTreeError<rusqlite::Error>),
+    CommitmentTree(ShardTreeError<Either<io::Error, rusqlite::Error>>),
 }
 
 impl error::Error for SqliteClientError {
@@ -166,8 +168,8 @@ impl From<zcash_primitives::memo::Error> for SqliteClientError {
     }
 }
 
-impl From<ShardTreeError<rusqlite::Error>> for SqliteClientError {
-    fn from(e: ShardTreeError<rusqlite::Error>) -> Self {
+impl From<ShardTreeError<Either<io::Error, rusqlite::Error>>> for SqliteClientError {
+    fn from(e: ShardTreeError<Either<io::Error, rusqlite::Error>>) -> Self {
         SqliteClientError::CommitmentTree(e)
     }
 }

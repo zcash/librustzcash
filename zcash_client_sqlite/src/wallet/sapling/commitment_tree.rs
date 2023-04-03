@@ -1,8 +1,12 @@
+use either::Either;
 use incrementalmerkletree::Address;
-use rusqlite;
+use rusqlite::{self, named_params, OptionalExtension};
 use shardtree::{Checkpoint, LocatedPrunableTree, PrunableTree, ShardStore};
+use std::io::{self, Cursor};
 
 use zcash_primitives::{consensus::BlockHeight, sapling};
+
+use crate::serialization::read_shard;
 
 pub struct WalletDbSaplingShardStore<'conn, 'a> {
     pub(crate) conn: &'a rusqlite::Transaction<'conn>,
@@ -19,14 +23,13 @@ impl<'conn, 'a> WalletDbSaplingShardStore<'conn, 'a> {
 impl<'conn, 'a: 'conn> ShardStore for WalletDbSaplingShardStore<'conn, 'a> {
     type H = sapling::Node;
     type CheckpointId = BlockHeight;
-    type Error = rusqlite::Error;
+    type Error = Either<io::Error, rusqlite::Error>;
 
     fn get_shard(
         &self,
-        _shard_root: Address,
+        shard_root: Address,
     ) -> Result<Option<LocatedPrunableTree<Self::H>>, Self::Error> {
-        // SELECT shard_data FROM sapling_tree WHERE shard_index = shard_root.index
-        todo!()
+        get_shard(self.conn, shard_root)
     }
 
     fn last_shard(&self) -> Result<Option<LocatedPrunableTree<Self::H>>, Self::Error> {
@@ -120,4 +123,24 @@ impl<'conn, 'a: 'conn> ShardStore for WalletDbSaplingShardStore<'conn, 'a> {
     ) -> Result<(), Self::Error> {
         todo!()
     }
+}
+
+pub(crate) fn get_shard(
+    conn: &rusqlite::Connection,
+    shard_root: Address,
+) -> Result<Option<LocatedPrunableTree<sapling::Node>>, Either<io::Error, rusqlite::Error>> {
+    conn.query_row(
+        "SELECT shard_data 
+         FROM sapling_tree_shards
+         WHERE shard_index = :shard_index",
+        named_params![":shard_index": shard_root.index()],
+        |row| row.get::<_, Vec<u8>>(0),
+    )
+    .optional()
+    .map_err(Either::Right)?
+    .map(|shard_data| {
+        let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Either::Left)?;
+        Ok(LocatedPrunableTree::from_parts(shard_root, shard_tree))
+    })
+    .transpose()
 }
