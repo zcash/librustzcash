@@ -1,10 +1,12 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
-use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::{cmp, ops::Range};
 
+use incrementalmerkletree::Retention;
 use secrecy::SecretVec;
+use shardtree::{ShardStore, ShardTree, ShardTreeError};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -28,6 +30,8 @@ use crate::{
 pub mod chain;
 pub mod error;
 pub mod wallet;
+
+pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 
 pub enum NullifierQuery {
     Unspent,
@@ -60,6 +64,30 @@ pub trait WalletRead {
     ///
     /// This will return `Ok(None)` if no block data is present in the database.
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
+
+    /// Returns the height to which the wallet has been fully scanned.
+    ///
+    /// This is the height for which the wallet has fully trial-decrypted this and all preceding
+    /// blocks above the wallet's birthday height. Along with this height, this method returns
+    /// metadata describing the state of the wallet's note commitment trees as of the end of that
+    /// block.
+    fn fully_scanned_height(
+        &self,
+    ) -> Result<Option<(BlockHeight, chain::CommitmentTreeMeta)>, Self::Error>;
+
+    /// Returns a vector of suggested scan ranges based upon the current wallet state.
+    ///
+    /// This method should only be used in cases where the [`CompactBlock`] data that will be made
+    /// available to `scan_cached_blocks` for the requested block ranges includes note commitment
+    /// tree size information for each block; or else the scan is likely to fail if notes belonging
+    /// to the wallet are detected.
+    ///
+    /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
+    fn suggest_scan_ranges(
+        &self,
+        batch_size: usize,
+        limit: usize,
+    ) -> Result<Vec<Range<BlockHeight>>, Self::Error>;
 
     /// Returns the default target height (for the block in which a new
     /// transaction would be mined) and anchor height (to use for a new
@@ -165,19 +193,6 @@ pub trait WalletRead {
     /// Returns a transaction.
     fn get_transaction(&self, id_tx: Self::TxRef) -> Result<Transaction, Self::Error>;
 
-    /// Returns the note commitment tree at the specified block height.
-    fn get_commitment_tree(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Option<sapling::CommitmentTree>, Self::Error>;
-
-    /// Returns the incremental witnesses as of the specified block height.
-    #[allow(clippy::type_complexity)]
-    fn get_witnesses(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error>;
-
     /// Returns the nullifiers for notes that the wallet is tracking, along with their associated
     /// account IDs, that are either unspent or have not yet been confirmed as spent (in that a
     /// spending transaction known to the wallet has not yet been included in a block).
@@ -236,12 +251,13 @@ pub trait WalletRead {
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct PrunedBlock<'a> {
+pub struct PrunedBlock<Nf> {
     pub block_height: BlockHeight,
     pub block_hash: BlockHash,
     pub block_time: u32,
-    pub commitment_tree: &'a sapling::CommitmentTree,
-    pub transactions: &'a Vec<WalletTx<sapling::Nullifier>>,
+    pub transactions: Vec<WalletTx<Nf>>,
+    pub sapling_commitment_tree_size: Option<u32>,
+    pub sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
 }
 
 /// A transaction that was detected during scanning of the blockchain,
@@ -381,16 +397,14 @@ pub trait WalletWrite: WalletRead {
         account: AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
-    /// Updates the state of the wallet database by persisting the provided
-    /// block information, along with the updated witness data that was
-    /// produced when scanning the block for transactions pertaining to
-    /// this wallet.
+    /// Updates the state of the wallet database by persisting the provided block information,
+    /// along with the note commitments that were detected when scanning the block for transactions
+    /// pertaining to this wallet.
     #[allow(clippy::type_complexity)]
     fn advance_by_block(
         &mut self,
-        block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error>;
+        block: PrunedBlock<sapling::Nullifier>,
+    ) -> Result<Vec<Self::NoteRef>, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
@@ -424,10 +438,31 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<Self::UtxoRef, Self::Error>;
 }
 
+pub trait WalletCommitmentTrees {
+    type Error;
+    type SaplingShardStore<'a>: ShardStore<
+        H = sapling::Node,
+        CheckpointId = BlockHeight,
+        Error = Self::Error,
+    >;
+
+    fn with_sapling_tree_mut<F, A, E>(&mut self, callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::SaplingShardStore<'a>,
+                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>;
+}
+
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
-    use std::collections::HashMap;
+    use shardtree::{MemoryShardStore, ShardTree, ShardTreeError};
+    use std::{collections::HashMap, convert::Infallible, ops::Range};
 
     use zcash_primitives::{
         block::BlockHash,
@@ -449,11 +484,26 @@ pub mod testing {
     };
 
     use super::{
-        DecryptedTransaction, NullifierQuery, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
+        chain, DecryptedTransaction, NullifierQuery, PrunedBlock, SentTransaction,
+        WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
         pub network: Network,
+        pub sapling_tree: ShardTree<
+            MemoryShardStore<sapling::Node, BlockHeight>,
+            { SAPLING_SHARD_HEIGHT * 2 },
+            SAPLING_SHARD_HEIGHT,
+        >,
+    }
+
+    impl MockWalletDb {
+        pub fn new(network: Network) -> Self {
+            Self {
+                network,
+                sapling_tree: ShardTree::new(MemoryShardStore::empty(), 100),
+            }
+        }
     }
 
     impl WalletRead for MockWalletDb {
@@ -463,6 +513,20 @@ pub mod testing {
 
         fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
             Ok(None)
+        }
+
+        fn fully_scanned_height(
+            &self,
+        ) -> Result<Option<(BlockHeight, chain::CommitmentTreeMeta)>, Self::Error> {
+            Ok(None)
+        }
+
+        fn suggest_scan_ranges(
+            &self,
+            _batch_size: usize,
+            _limit: usize,
+        ) -> Result<Vec<Range<BlockHeight>>, Self::Error> {
+            Ok(vec![])
         }
 
         fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
@@ -522,21 +586,6 @@ pub mod testing {
 
         fn get_transaction(&self, _id_tx: Self::TxRef) -> Result<Transaction, Self::Error> {
             Err(())
-        }
-
-        fn get_commitment_tree(
-            &self,
-            _block_height: BlockHeight,
-        ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
-            Ok(None)
-        }
-
-        #[allow(clippy::type_complexity)]
-        fn get_witnesses(
-            &self,
-            _block_height: BlockHeight,
-        ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-            Ok(Vec::new())
         }
 
         fn get_sapling_nullifiers(
@@ -613,9 +662,8 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn advance_by_block(
             &mut self,
-            _block: &PrunedBlock,
-            _updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
-        ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
+            _block: PrunedBlock<sapling::Nullifier>,
+        ) -> Result<Vec<Self::NoteRef>, Self::Error> {
             Ok(vec![])
         }
 
@@ -643,6 +691,25 @@ pub mod testing {
             _output: &WalletTransparentOutput,
         ) -> Result<Self::UtxoRef, Self::Error> {
             Ok(0)
+        }
+    }
+
+    impl WalletCommitmentTrees for MockWalletDb {
+        type Error = Infallible;
+        type SaplingShardStore<'a> = MemoryShardStore<sapling::Node, BlockHeight>;
+
+        fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+        where
+            for<'a> F: FnMut(
+                &'a mut ShardTree<
+                    Self::SaplingShardStore<'a>,
+                    { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                    SAPLING_SHARD_HEIGHT,
+                >,
+            ) -> Result<A, E>,
+            E: From<ShardTreeError<Infallible>>,
+        {
+            callback(&mut self.sapling_tree)
         }
     }
 }

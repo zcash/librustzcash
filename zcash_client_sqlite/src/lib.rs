@@ -34,8 +34,10 @@
 
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, path::Path};
+use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, ops::Range, path::Path};
 
+use incrementalmerkletree::Position;
+use shardtree::{ShardTree, ShardTreeError};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -52,8 +54,10 @@ use zcash_primitives::{
 use zcash_client_backend::{
     address::{AddressMetadata, UnifiedAddress},
     data_api::{
-        self, chain::BlockSource, DecryptedTransaction, NullifierQuery, PoolType, PrunedBlock,
-        Recipient, SentTransaction, WalletRead, WalletWrite,
+        self,
+        chain::{BlockSource, CommitmentTreeMeta},
+        DecryptedTransaction, NullifierQuery, PoolType, PrunedBlock, Recipient, SentTransaction,
+        WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -61,7 +65,9 @@ use zcash_client_backend::{
     DecryptedOutput, TransferType,
 };
 
-use crate::error::SqliteClientError;
+use crate::{
+    error::SqliteClientError, wallet::sapling::commitment_tree::WalletDbSaplingShardStore,
+};
 
 #[cfg(feature = "unstable")]
 use {
@@ -125,15 +131,15 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
         })
     }
 
-    pub fn transactionally<F, A>(&mut self, f: F) -> Result<A, SqliteClientError>
+    pub fn transactionally<F, A, E: From<rusqlite::Error>>(&mut self, f: F) -> Result<A, E>
     where
-        F: FnOnce(&WalletDb<SqlTransaction<'_>, P>) -> Result<A, SqliteClientError>,
+        F: FnOnce(&mut WalletDb<SqlTransaction<'_>, P>) -> Result<A, E>,
     {
-        let wdb = WalletDb {
+        let mut wdb = WalletDb {
             conn: SqlTransaction(self.conn.transaction()?),
             params: self.params.clone(),
         };
-        let result = f(&wdb)?;
+        let result = f(&mut wdb)?;
         wdb.conn.0.commit()?;
         Ok(result)
     }
@@ -146,6 +152,20 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         wallet::block_height_extrema(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn fully_scanned_height(
+        &self,
+    ) -> Result<Option<(BlockHeight, CommitmentTreeMeta)>, Self::Error> {
+        wallet::fully_scanned_height(self.conn.borrow())
+    }
+
+    fn suggest_scan_ranges(
+        &self,
+        _batch_size: usize,
+        _limit: usize,
+    ) -> Result<Vec<Range<BlockHeight>>, Self::Error> {
+        todo!()
     }
 
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
@@ -210,24 +230,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
-    fn get_commitment_tree(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
-        wallet::sapling::get_sapling_commitment_tree(self.conn.borrow(), block_height)
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn get_witnesses(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        wallet::sapling::get_sapling_witnesses(self.conn.borrow(), block_height)
-    }
-
     fn get_sapling_nullifiers(
         &self,
-        query: data_api::NullifierQuery,
+        query: NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
         match query {
             NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self.conn.borrow()),
@@ -386,21 +391,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     #[allow(clippy::type_complexity)]
     fn advance_by_block(
         &mut self,
-        block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
+        block: PrunedBlock<sapling::Nullifier>,
+    ) -> Result<Vec<Self::NoteRef>, Self::Error> {
         self.transactionally(|wdb| {
             // Insert the block into the database.
+            let block_height = block.block_height;
             wallet::insert_block(
                 &wdb.conn.0,
-                block.block_height,
+                block_height,
                 block.block_hash,
                 block.block_time,
-                block.commitment_tree,
+                block.sapling_commitment_tree_size.map(|s| s.into()),
             )?;
 
-            let mut new_witnesses = vec![];
-            for tx in block.transactions {
+            let mut wallet_note_ids = vec![];
+            for tx in &block.transactions {
                 let tx_row = wallet::put_tx_meta(&wdb.conn.0, tx, block.block_height)?;
 
                 // Mark notes as spent and remove them from the scanning cache
@@ -413,32 +418,24 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         wallet::sapling::put_received_note(&wdb.conn.0, output, tx_row)?;
 
                     // Save witness for note.
-                    new_witnesses.push((received_note_id, output.witness().clone()));
+                    wallet_note_ids.push(received_note_id);
                 }
             }
 
-            // Insert current new_witnesses into the database.
-            for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter())
-            {
-                if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
-                    wallet::sapling::insert_witness(
-                        &wdb.conn.0,
-                        rnid,
-                        witness,
-                        block.block_height,
-                    )?;
-                } else {
-                    return Err(SqliteClientError::InvalidNoteId);
+            let mut sapling_commitments = block.sapling_commitments.into_iter();
+            wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
+                if let Some(sapling_tree_size) = block.sapling_commitment_tree_size {
+                    let start_position = Position::from(u64::from(sapling_tree_size))
+                        - u64::try_from(sapling_commitments.len()).unwrap();
+                    sapling_tree.batch_insert(start_position, &mut sapling_commitments)?;
                 }
-            }
-
-            // Prune the stored witnesses (we only expect rollbacks of at most PRUNING_HEIGHT blocks).
-            wallet::prune_witnesses(&wdb.conn.0, block.block_height - PRUNING_HEIGHT)?;
+                Ok(())
+            })?;
 
             // Update now-expired transactions that didn't get mined.
-            wallet::update_expired_notes(&wdb.conn.0, block.block_height)?;
+            wallet::update_expired_notes(&wdb.conn.0, block_height)?;
 
-            Ok(new_witnesses)
+            Ok(wallet_note_ids)
         })
     }
 
@@ -493,55 +490,37 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     wallet::sapling::put_received_note(&wdb.conn.0, output, tx_ref)?;
                 }
             }
-        }
 
-        // If any of the utxos spent in the transaction are ours, mark them as spent.
-        #[cfg(feature = "transparent-inputs")]
-        for txin in d_tx
-            .tx
-            .transparent_bundle()
-            .iter()
-            .flat_map(|b| b.vin.iter())
-        {
-            wallet::mark_transparent_utxo_spent(&wdb.conn.0, tx_ref, &txin.prevout)?;
-        }
+            // If any of the utxos spent in the transaction are ours, mark them as spent.
+            #[cfg(feature = "transparent-inputs")]
+            for txin in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
+                wallet::mark_transparent_utxo_spent(&wdb.conn.0, tx_ref, &txin.prevout)?;
+            }
 
-        // If we have some transparent outputs:
-        if !d_tx
-            .tx
-            .transparent_bundle()
-            .iter()
-            .any(|b| b.vout.is_empty())
-        {
-            let nullifiers = wdb.get_sapling_nullifiers(data_api::NullifierQuery::All)?;
-            // If the transaction contains shielded spends from our wallet, we will store z->t
-            // transactions we observe in the same way they would be stored by
-            // create_spend_to_address.
-            if let Some((account_id, _)) = nullifiers.iter().find(|(_, nf)| {
-                d_tx.tx
-                    .sapling_bundle()
-                    .iter()
-                    .flat_map(|b| b.shielded_spends().iter())
-                    .any(|input| nf == input.nullifier())
-            }) {
-                for (output_index, txout) in d_tx
-                    .tx
-                    .transparent_bundle()
-                    .iter()
-                    .flat_map(|b| b.vout.iter())
-                    .enumerate()
-                {
-                    if let Some(address) = txout.recipient_address() {
-                        wallet::put_sent_output(
-                            &wdb.conn.0,
-                            &wdb.params,
-                            *account_id,
-                            tx_ref,
-                            output_index,
-                            &Recipient::Transparent(address),
-                            txout.value,
-                            None,
-                        )?;
+            // If we have some transparent outputs:
+            if d_tx.tx.transparent_bundle().iter().any(|b| !b.vout.is_empty()) {
+                let nullifiers = wdb.get_sapling_nullifiers(NullifierQuery::All)?;
+                // If the transaction contains shielded spends from our wallet, we will store z->t
+                // transactions we observe in the same way they would be stored by
+                // create_spend_to_address.
+                if let Some((account_id, _)) = nullifiers.iter().find(
+                    |(_, nf)|
+                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
+                        .any(|input| nf == input.nullifier())
+                ) {
+                    for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
+                        if let Some(address) = txout.recipient_address() {
+                            wallet::put_sent_output(
+                                &wdb.conn.0,
+                                &wdb.params,
+                                *account_id,
+                                tx_ref,
+                                output_index,
+                                &Recipient::Transparent(address),
+                                txout.value,
+                                None
+                            )?;
+                        }
                     }
                 }
             }
@@ -630,6 +609,59 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         panic!(
             "The wallet must be compiled with the transparent-inputs feature to use this method."
         );
+    }
+}
+
+impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Connection, P> {
+    type Error = rusqlite::Error;
+    type SaplingShardStore<'a> = WalletDbSaplingShardStore<'a, 'a>;
+
+    fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::SaplingShardStore<'a>,
+                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<rusqlite::Error>>,
+    {
+        let tx = self.conn.transaction().map_err(ShardTreeError::Storage)?;
+        let shard_store =
+            WalletDbSaplingShardStore::from_connection(&tx).map_err(ShardTreeError::Storage)?;
+        let result = {
+            let mut shardtree = ShardTree::new(shard_store, 100);
+            callback(&mut shardtree)?
+        };
+        tx.commit().map_err(ShardTreeError::Storage)?;
+        Ok(result)
+    }
+}
+
+impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
+    type Error = rusqlite::Error;
+    type SaplingShardStore<'a> = WalletDbSaplingShardStore<'a, 'a>;
+
+    fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::SaplingShardStore<'a>,
+                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<rusqlite::Error>>,
+    {
+        let mut shardtree = ShardTree::new(
+            WalletDbSaplingShardStore::from_connection(&self.conn.0)
+                .map_err(ShardTreeError::Storage)?,
+            100,
+        );
+        let result = callback(&mut shardtree)?;
+
+        Ok(result)
     }
 }
 
@@ -1024,6 +1056,7 @@ mod tests {
         dfvk: &DiversifiableFullViewingKey,
         req: AddressType,
         value: Amount,
+        initial_sapling_tree_size: u32,
     ) -> (CompactBlock, Nullifier) {
         let to = match req {
             AddressType::DefaultExternal => dfvk.default_address().1,
@@ -1069,6 +1102,8 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
+        cb.sapling_commitment_tree_size = initial_sapling_tree_size
+            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>();
         (cb, note.nf(&dfvk.fvk().vk.nk, 0))
     }
 
@@ -1081,6 +1116,7 @@ mod tests {
         dfvk: &DiversifiableFullViewingKey,
         to: PaymentAddress,
         value: Amount,
+        initial_sapling_tree_size: u32,
     ) -> CompactBlock {
         let mut rng = OsRng;
         let rseed = generate_random_rseed(&network(), height, &mut rng);
@@ -1154,6 +1190,8 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
+        cb.sapling_commitment_tree_size = initial_sapling_tree_size
+            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>();
         cb
     }
 
@@ -1267,6 +1305,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
+            0,
         );
         let (cb2, _) = fake_compact_block(
             BlockHeight::from_u32(2),
@@ -1274,6 +1313,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(10).unwrap(),
+            1,
         );
 
         // Write the CompactBlocks to the BlockMeta DB's corresponding disk storage.

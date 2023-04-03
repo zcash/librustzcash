@@ -1,12 +1,13 @@
 //! Functions for Sapling support in the wallet.
+
 use group::ff::PrimeField;
-use rusqlite::{named_params, params, types::Value, Connection, OptionalExtension, Row};
+use incrementalmerkletree::Position;
+use rusqlite::{named_params, params, types::Value, Connection, Row};
 use std::rc::Rc;
 
 use zcash_primitives::{
     consensus::BlockHeight,
     memo::MemoBytes,
-    merkle_tree::{read_commitment_tree, read_incremental_witness, write_incremental_witness},
     sapling::{self, Diversifier, Note, Nullifier, Rseed},
     transaction::components::Amount,
     zip32::AccountId,
@@ -21,6 +22,8 @@ use crate::{error::SqliteClientError, NoteId};
 
 use super::memo_repr;
 
+pub(crate) mod commitment_tree;
+
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;
@@ -28,10 +31,11 @@ pub(crate) trait ReceivedSaplingOutput {
     fn note(&self) -> &Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> bool;
-    fn nullifier(&self) -> Option<&Nullifier>;
+    fn nullifier(&self) -> Option<&sapling::Nullifier>;
+    fn note_commitment_tree_position(&self) -> Option<Position>;
 }
 
-impl ReceivedSaplingOutput for WalletSaplingOutput<Nullifier> {
+impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier> {
     fn index(&self) -> usize {
         self.index()
     }
@@ -47,9 +51,11 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<Nullifier> {
     fn is_change(&self) -> bool {
         WalletSaplingOutput::is_change(self)
     }
-
-    fn nullifier(&self) -> Option<&Nullifier> {
+    fn nullifier(&self) -> Option<&sapling::Nullifier> {
         Some(self.nf())
+    }
+    fn note_commitment_tree_position(&self) -> Option<Position> {
+        Some(WalletSaplingOutput::note_commitment_tree_position(self))
     }
 }
 
@@ -69,7 +75,10 @@ impl ReceivedSaplingOutput for DecryptedOutput<Note> {
     fn is_change(&self) -> bool {
         self.transfer_type == TransferType::WalletInternal
     }
-    fn nullifier(&self) -> Option<&Nullifier> {
+    fn nullifier(&self) -> Option<&sapling::Nullifier> {
+        None
+    }
+    fn note_commitment_tree_position(&self) -> Option<Position> {
         None
     }
 }
@@ -105,17 +114,17 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<NoteId>, SqliteCli
         Rseed::BeforeZip212(rcm)
     };
 
-    let witness = {
-        let d: Vec<_> = row.get(4)?;
-        read_incremental_witness(&d[..])?
-    };
+    let note_commitment_tree_position =
+        Position::from(u64::try_from(row.get::<_, i64>(4)?).map_err(|_| {
+            SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
+        })?);
 
     Ok(ReceivedSaplingNote {
         note_id,
         diversifier,
         note_value,
         rseed,
-        witness,
+        note_commitment_tree_position,
     })
 }
 
@@ -126,15 +135,13 @@ pub(crate) fn get_spendable_sapling_notes(
     exclude: &[NoteId],
 ) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
     let mut stmt_select_notes = conn.prepare_cached(
-        "SELECT id_note, diversifier, value, rcm, witness
-            FROM sapling_received_notes
-            INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-            INNER JOIN sapling_witnesses ON sapling_witnesses.note = sapling_received_notes.id_note
-            WHERE account = :account
-            AND spent IS NULL
-            AND transactions.block <= :anchor_height
-            AND sapling_witnesses.block = :anchor_height
-            AND id_note NOT IN rarray(:exclude)",
+        "SELECT id_note, diversifier, value, rcm, commitment_tree_position
+         FROM sapling_received_notes
+         INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
+         WHERE account = :account
+         AND spent IS NULL
+         AND transactions.block <= :anchor_height
+         AND id_note NOT IN rarray(:exclude)",
     )?;
 
     let excluded: Vec<Value> = exclude
@@ -184,28 +191,22 @@ pub(crate) fn select_spendable_sapling_notes(
     //
     // 4) Match the selected notes against the witnesses at the desired height.
     let mut stmt_select_notes = conn.prepare_cached(
-        "WITH selected AS (
-            WITH eligible AS (
-                SELECT id_note, diversifier, value, rcm,
-                    SUM(value) OVER
-                        (PARTITION BY account, spent ORDER BY id_note) AS so_far
-                FROM sapling_received_notes
-                INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-                WHERE account = :account
-                AND spent IS NULL
-                AND transactions.block <= :anchor_height
-                AND id_note NOT IN rarray(:exclude)
-            )
-            SELECT * FROM eligible WHERE so_far < :target_value
-            UNION
-            SELECT * FROM (SELECT * FROM eligible WHERE so_far >= :target_value LIMIT 1)
-        ), witnesses AS (
-            SELECT note, witness FROM sapling_witnesses
-            WHERE block = :anchor_height
-        )
-        SELECT selected.id_note, selected.diversifier, selected.value, selected.rcm, witnesses.witness
-        FROM selected
-        INNER JOIN witnesses ON selected.id_note = witnesses.note",
+        "WITH eligible AS (
+             SELECT id_note, diversifier, value, rcm, commitment_tree_position,
+                 SUM(value)
+                    OVER (PARTITION BY account, spent ORDER BY id_note) AS so_far
+             FROM sapling_received_notes
+             INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
+             WHERE account = :account
+             AND spent IS NULL
+             AND transactions.block <= :anchor_height
+             AND id_note NOT IN rarray(:exclude)
+         )
+         SELECT id_note, diversifier, value, rcm, commitment_tree_position
+         FROM eligible WHERE so_far < :target_value
+         UNION
+         SELECT id_note, diversifier, value, rcm, commitment_tree_position
+         FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
     let excluded: Vec<Value> = exclude
@@ -228,73 +229,6 @@ pub(crate) fn select_spendable_sapling_notes(
     )?;
 
     notes.collect::<Result<_, _>>()
-}
-
-/// Returns the commitment tree for the block at the specified height,
-/// if any.
-pub(crate) fn get_sapling_commitment_tree(
-    conn: &Connection,
-    block_height: BlockHeight,
-) -> Result<Option<sapling::CommitmentTree>, SqliteClientError> {
-    conn.query_row_and_then(
-        "SELECT sapling_tree FROM blocks WHERE height = ?",
-        [u32::from(block_height)],
-        |row| {
-            let row_data: Vec<u8> = row.get(0)?;
-            read_commitment_tree(&row_data[..]).map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    row_data.len(),
-                    rusqlite::types::Type::Blob,
-                    Box::new(e),
-                )
-            })
-        },
-    )
-    .optional()
-    .map_err(SqliteClientError::from)
-}
-
-/// Returns the incremental witnesses for the block at the specified height,
-/// if any.
-pub(crate) fn get_sapling_witnesses(
-    conn: &Connection,
-    block_height: BlockHeight,
-) -> Result<Vec<(NoteId, sapling::IncrementalWitness)>, SqliteClientError> {
-    let mut stmt_fetch_witnesses =
-        conn.prepare_cached("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
-
-    let witnesses = stmt_fetch_witnesses
-        .query_map([u32::from(block_height)], |row| {
-            let id_note = NoteId::ReceivedNoteId(row.get(0)?);
-            let witness_data: Vec<u8> = row.get(1)?;
-            Ok(read_incremental_witness(&witness_data[..]).map(|witness| (id_note, witness)))
-        })
-        .map_err(SqliteClientError::from)?;
-
-    // unwrap database error & IO error from IncrementalWitness::read
-    let res: Vec<_> = witnesses.collect::<Result<Result<_, _>, _>>()??;
-    Ok(res)
-}
-
-/// Records the incremental witness for the specified note,
-/// as of the given block height.
-pub(crate) fn insert_witness(
-    conn: &Connection,
-    note_id: i64,
-    witness: &sapling::IncrementalWitness,
-    height: BlockHeight,
-) -> Result<(), SqliteClientError> {
-    let mut stmt_insert_witness = conn.prepare_cached(
-        "INSERT INTO sapling_witnesses (note, block, witness)
-                    VALUES (?, ?, ?)",
-    )?;
-
-    let mut encoded = Vec::new();
-    write_incremental_witness(witness, &mut encoded).unwrap();
-
-    stmt_insert_witness.execute(params![note_id, u32::from(height), encoded])?;
-
-    Ok(())
 }
 
 /// Retrieves the set of nullifiers for "potentially spendable" Sapling notes that the
@@ -320,7 +254,7 @@ pub(crate) fn get_sapling_nullifiers(
         let nf_bytes: Vec<u8> = row.get(2)?;
         Ok((
             AccountId::from(account),
-            Nullifier::from_slice(&nf_bytes).unwrap(),
+            sapling::Nullifier::from_slice(&nf_bytes).unwrap(),
         ))
     })?;
 
@@ -343,7 +277,7 @@ pub(crate) fn get_all_sapling_nullifiers(
         let nf_bytes: Vec<u8> = row.get(2)?;
         Ok((
             AccountId::from(account),
-            Nullifier::from_slice(&nf_bytes).unwrap(),
+            sapling::Nullifier::from_slice(&nf_bytes).unwrap(),
         ))
     })?;
 
@@ -359,7 +293,7 @@ pub(crate) fn get_all_sapling_nullifiers(
 pub(crate) fn mark_sapling_note_spent(
     conn: &Connection,
     tx_ref: i64,
-    nf: &Nullifier,
+    nf: &sapling::Nullifier,
 ) -> Result<bool, SqliteClientError> {
     let mut stmt_mark_sapling_note_spent =
         conn.prepare_cached("UPDATE sapling_received_notes SET spent = ? WHERE nf = ?")?;
@@ -383,9 +317,19 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 ) -> Result<NoteId, SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
-        (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
-        VALUES
-        (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)
+        (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change, commitment_tree_position)
+        VALUES (
+            :tx,
+            :output_index,
+            :account,
+            :diversifier,
+            :value,
+            :rcm,
+            :memo,
+            :nf,
+            :is_change,
+            :commitment_tree_position
+        )
         ON CONFLICT (tx, output_index) DO UPDATE
         SET account = :account,
             diversifier = :diversifier,
@@ -393,7 +337,8 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             rcm = :rcm,
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
-            is_change = IFNULL(:is_change, is_change)
+            is_change = IFNULL(:is_change, is_change),
+            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position)
         RETURNING id_note",
     )?;
 
@@ -410,7 +355,8 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":rcm": &rcm.as_ref(),
         ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
         ":memo": memo_repr(output.memo()),
-        ":is_change": output.is_change()
+        ":is_change": output.is_change(),
+        ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
     ];
 
     stmt_upsert_received_note
@@ -622,9 +568,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
         let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
@@ -644,9 +591,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            1,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance does not include the second note
         let (_, anchor_height2) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
@@ -691,10 +639,11 @@ mod tests {
                 &dfvk,
                 AddressType::DefaultExternal,
                 value,
+                i,
             );
             insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Second spend still fails
         assert_matches!(
@@ -724,9 +673,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            11,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Second spend should now succeed
         assert_matches!(
@@ -768,9 +718,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -823,10 +774,11 @@ mod tests {
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
                 value,
+                i,
             );
             insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Second spend still fails
         assert_matches!(
@@ -855,9 +807,10 @@ mod tests {
             &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
             value,
+            42,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Second spend should now succeed
         create_spend_to_address(
@@ -898,9 +851,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -968,10 +922,11 @@ mod tests {
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
                 value,
+                i,
             );
             insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&network, &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&network, &db_cache, &mut db_data, None, None).unwrap();
 
         // Send the funds again, discarding history.
         // Neither transaction output is decryptable by the sender.
@@ -1001,9 +956,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
         let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
@@ -1056,9 +1012,10 @@ mod tests {
             &dfvk,
             AddressType::Internal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
         let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
@@ -1110,6 +1067,7 @@ mod tests {
             &dfvk,
             AddressType::Internal,
             Amount::from_u64(50000).unwrap(),
+            0,
         );
         insert_into_cache(&db_cache, &cb);
 
@@ -1121,11 +1079,12 @@ mod tests {
                 &dfvk,
                 AddressType::DefaultExternal,
                 Amount::from_u64(1000).unwrap(),
+                i,
             );
             insert_into_cache(&db_cache, &cb);
         }
 
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
         let total = Amount::from_u64(60000).unwrap();
@@ -1241,9 +1200,10 @@ mod tests {
             &dfvk,
             AddressType::Internal,
             Amount::from_u64(50000).unwrap(),
+            0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         assert_matches!(
             shield_transparent_funds(

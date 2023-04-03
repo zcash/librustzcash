@@ -3,6 +3,7 @@
 use std::error;
 use std::fmt;
 
+use shardtree::ShardTreeError;
 use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
 use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
@@ -74,6 +75,9 @@ pub enum SqliteClientError {
     /// belonging to the wallet
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
+
+    /// An error occurred in inserting data into one of the wallet's note commitment trees.
+    CommitmentTree(ShardTreeError<rusqlite::Error>),
 }
 
 impl error::Error for SqliteClientError {
@@ -114,6 +118,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
+            SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
         }
     }
 }
@@ -158,5 +163,11 @@ impl From<TransparentCodecError> for SqliteClientError {
 impl From<zcash_primitives::memo::Error> for SqliteClientError {
     fn from(e: zcash_primitives::memo::Error) -> Self {
         SqliteClientError::InvalidMemo(e)
+    }
+}
+
+impl From<ShardTreeError<rusqlite::Error>> for SqliteClientError {
+    fn from(e: ShardTreeError<rusqlite::Error>) -> Self {
+        SqliteClientError::CommitmentTree(e)
     }
 }

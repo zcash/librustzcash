@@ -98,7 +98,7 @@ pub fn write_nonempty_frontier_v1<H: HashSer, W: Write>(
     frontier: &NonEmptyFrontier<H>,
 ) -> io::Result<()> {
     write_position(&mut writer, frontier.position())?;
-    if frontier.position().is_odd() {
+    if frontier.position().is_right_child() {
         // The v1 serialization wrote the sibling of a right-hand leaf as an optional value, rather
         // than as part of the ommers vector.
         frontier

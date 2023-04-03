@@ -6,6 +6,7 @@ use rusqlite::{self, types::ToSql};
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
+use shardtree::ShardTreeError;
 use uuid::Uuid;
 
 use zcash_primitives::{
@@ -34,6 +35,9 @@ pub enum WalletMigrationError {
 
     /// Wrapper for amount balance violations
     BalanceError(BalanceError),
+
+    /// Wrapper for commitment tree invariant violations
+    CommitmentTree(ShardTreeError<rusqlite::Error>),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -45,6 +49,12 @@ impl From<rusqlite::Error> for WalletMigrationError {
 impl From<BalanceError> for WalletMigrationError {
     fn from(e: BalanceError) -> Self {
         WalletMigrationError::BalanceError(e)
+    }
+}
+
+impl From<ShardTreeError<rusqlite::Error>> for WalletMigrationError {
+    fn from(e: ShardTreeError<rusqlite::Error>) -> Self {
+        WalletMigrationError::CommitmentTree(e)
     }
 }
 
@@ -62,6 +72,7 @@ impl fmt::Display for WalletMigrationError {
             }
             WalletMigrationError::DbError(e) => write!(f, "{}", e),
             WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
+            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {:?}", e),
         }
     }
 }
@@ -361,8 +372,9 @@ mod tests {
                 height INTEGER PRIMARY KEY,
                 hash BLOB NOT NULL,
                 time INTEGER NOT NULL,
-                sapling_tree BLOB NOT NULL
-            )",
+                sapling_tree BLOB NOT NULL ,
+                sapling_commitment_tree_size INTEGER,
+                orchard_commitment_tree_size INTEGER)",
             "CREATE TABLE sapling_received_notes (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -375,6 +387,7 @@ mod tests {
                 is_change INTEGER NOT NULL,
                 memo BLOB,
                 spent INTEGER,
+                commitment_tree_position INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),

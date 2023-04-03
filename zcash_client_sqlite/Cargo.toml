@@ -15,6 +15,7 @@ rust-version = "1.65"
 
 [dependencies]
 incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
+shardtree = { version = "0.0", features = ["legacy-api"] }
 zcash_client_backend = { version = "0.9", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
 

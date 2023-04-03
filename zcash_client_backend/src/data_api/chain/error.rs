@@ -5,6 +5,8 @@ use std::fmt::{self, Debug, Display};
 
 use zcash_primitives::{consensus::BlockHeight, sapling, transaction::TxId};
 
+use crate::welding_rig::SyncError;
+
 /// The underlying cause of a [`ChainError`].
 #[derive(Copy, Clone, Debug)]
 pub enum Cause<NoteRef> {
@@ -142,6 +144,9 @@ pub enum Error<WalletError, BlockSourceError, NoteRef> {
     /// commitments that could not be reconciled with the note commitment tree(s) maintained by the
     /// wallet.
     Chain(ChainError<NoteRef>),
+
+    /// An error occorred in block scanning.
+    Sync(SyncError),
 }
 
 impl<WE: fmt::Display, BE: fmt::Display, N: Display> fmt::Display for Error<WE, BE, N> {
@@ -163,6 +168,13 @@ impl<WE: fmt::Display, BE: fmt::Display, N: Display> fmt::Display for Error<WE, 
             }
             Error::Chain(err) => {
                 write!(f, "{}", err)
+            }
+            Error::Sync(SyncError::SaplingTreeSizeUnknown(h)) => {
+                write!(
+                    f,
+                    "Sync failed due to missing Sapling note commitment tree size at height {}",
+                    h
+                )
             }
         }
     }

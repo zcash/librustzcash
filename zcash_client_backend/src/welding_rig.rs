@@ -1,21 +1,27 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
+//!
+//! TODO: rename this module to `block_scanner`
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 
+use incrementalmerkletree::{Position, Retention};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
+use zcash_primitives::consensus::BlockHeight;
 use zcash_primitives::{
     consensus,
     sapling::{
         self,
         note_encryption::{PreparedIncomingViewingKey, SaplingDomain},
-        Node, Note, Nullifier, NullifierDerivingKey, SaplingIvk,
+        SaplingIvk,
     },
     transaction::components::sapling::CompactOutputDescription,
     zip32::{sapling::DiversifiableFullViewingKey, AccountId, Scope},
 };
 
+use crate::data_api::chain::CommitmentTreeMeta;
+use crate::data_api::PrunedBlock;
 use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, Tasks},
@@ -56,16 +62,13 @@ pub trait ScanningKey {
     /// IVK-based implementations of this trait cannot successfully derive
     /// nullifiers, in which case `Self::Nf` should be set to the unit type
     /// and this function is a no-op.
-    fn sapling_nf(
-        key: &Self::SaplingNk,
-        note: &Note,
-        witness: &sapling::IncrementalWitness,
-    ) -> Self::Nf;
+    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, note_position: Position)
+        -> Self::Nf;
 }
 
 impl ScanningKey for DiversifiableFullViewingKey {
     type Scope = Scope;
-    type SaplingNk = NullifierDerivingKey;
+    type SaplingNk = sapling::NullifierDerivingKey;
     type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 2];
     type Nf = sapling::Nullifier;
 
@@ -84,16 +87,8 @@ impl ScanningKey for DiversifiableFullViewingKey {
         ]
     }
 
-    fn sapling_nf(
-        key: &Self::SaplingNk,
-        note: &Note,
-        witness: &sapling::IncrementalWitness,
-    ) -> Self::Nf {
-        note.nf(
-            key,
-            u64::try_from(witness.position())
-                .expect("Sapling note commitment tree position must fit into a u64"),
-        )
+    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
+        note.nf(key, position.into())
     }
 }
 
@@ -111,7 +106,15 @@ impl ScanningKey for SaplingIvk {
         [((), self.clone(), ())]
     }
 
-    fn sapling_nf(_key: &Self::SaplingNk, _note: &Note, _witness: &sapling::IncrementalWitness) {}
+    fn sapling_nf(_key: &Self::SaplingNk, _note: &sapling::Note, _position: Position) {}
+}
+
+/// Errors that can occur in block scanning.
+#[derive(Debug)]
+pub enum SyncError {
+    /// The size of the Sapling note commitment tree was not provided as part of a [`CompactBlock`]
+    /// being scanned, making it impossible to construct the nullifier for a detected note.
+    SaplingTreeSizeUnknown(BlockHeight),
 }
 
 /// Scans a [`CompactBlock`] with a set of [`ScanningKey`]s.
@@ -141,17 +144,15 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     params: &P,
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
-    nullifiers: &[(AccountId, Nullifier)],
-    tree: &mut sapling::CommitmentTree,
-    existing_witnesses: &mut [&mut sapling::IncrementalWitness],
-) -> Vec<WalletTx<K::Nf>> {
+    sapling_nullifiers: &[(AccountId, sapling::Nullifier)],
+    initial_commitment_tree_meta: Option<&CommitmentTreeMeta>,
+) -> Result<PrunedBlock<K::Nf>, SyncError> {
     scan_block_with_runner::<_, _, ()>(
         params,
         block,
         vks,
-        nullifiers,
-        tree,
-        existing_witnesses,
+        sapling_nullifiers,
+        initial_commitment_tree_meta,
         None,
     )
 }
@@ -202,21 +203,41 @@ pub(crate) fn scan_block_with_runner<
     params: &P,
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
-    nullifiers: &[(AccountId, Nullifier)],
-    tree: &mut sapling::CommitmentTree,
-    existing_witnesses: &mut [&mut sapling::IncrementalWitness],
+    nullifiers: &[(AccountId, sapling::Nullifier)],
+    initial_commitment_tree_meta: Option<&CommitmentTreeMeta>,
     mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,
-) -> Vec<WalletTx<K::Nf>> {
+) -> Result<PrunedBlock<K::Nf>, SyncError> {
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
+    let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     let block_height = block.height();
     let block_hash = block.hash();
+
+    // It's possible to make progress without a Sapling tree position if we don't have any Sapling
+    // notes in the block, since we only use the position for constructing nullifiers for our own
+    // received notes. Thus, we allow it to be optional here, and only produce an error if we try
+    // to use it. `block.sapling_commitment_tree_size` is expected to be correct as of the end of
+    // the block, and we can't have a note of ours in a block with no outputs so treating the zero
+    // default value from the protobuf as `None` is always correct.
+    let mut sapling_tree_position = if block.sapling_commitment_tree_size == 0 {
+        initial_commitment_tree_meta.map(|m| (m.sapling_tree_size() + 1).into())
+    } else {
+        let end_position_exclusive = Position::from(u64::from(block.sapling_commitment_tree_size));
+        let output_count = block
+            .vtx
+            .iter()
+            .map(|tx| u64::try_from(tx.outputs.len()).unwrap())
+            .sum();
+        Some(end_position_exclusive - output_count)
+    };
 
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
         let index = tx.index as usize;
 
-        // Check for spent notes
-        // The only step that is not constant-time is the filter() at the end.
+        // Check for spent notes.  The only step that is not constant-time is
+        // the filter() at the end.
+        // TODO: However, this is O(|nullifiers| * |notes|); does using
+        // constant-time operations here really make sense?
         let shielded_spends: Vec<_> = tx
             .spends
             .into_iter()
@@ -248,19 +269,8 @@ pub(crate) fn scan_block_with_runner<
 
         // Check for incoming notes while incrementing tree and witnesses
         let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf>> = vec![];
+        let tx_outputs_len = u64::try_from(tx.outputs.len()).unwrap();
         {
-            // Grab mutable references to new witnesses from previous transactions
-            // in this block so that we can update them. Scoped so we don't hold
-            // mutable references to wtxs for too long.
-            let mut block_witnesses: Vec<_> = wtxs
-                .iter_mut()
-                .flat_map(|tx| {
-                    tx.sapling_outputs
-                        .iter_mut()
-                        .map(|output| output.witness_mut())
-                })
-                .collect();
-
             let decoded = &tx
                 .outputs
                 .into_iter()
@@ -292,7 +302,7 @@ pub(crate) fn scan_block_with_runner<
                                 "The batch runner and scan_block must use the same set of IVKs.",
                             );
 
-                            ((d_note.note, d_note.recipient), a, (*nk).clone())
+                            (d_note.note, a, (*nk).clone())
                         })
                     })
                     .collect()
@@ -312,40 +322,21 @@ pub(crate) fn scan_block_with_runner<
                     .map(PreparedIncomingViewingKey::new)
                     .collect::<Vec<_>>();
 
-                batch::try_compact_note_decryption(&ivks, decoded)
+                batch::try_compact_note_decryption(&ivks, &decoded[..])
                     .into_iter()
                     .map(|v| {
-                        v.map(|(note_data, ivk_idx)| {
+                        v.map(|((note, _), ivk_idx)| {
                             let (account, _, nk) = &vks[ivk_idx];
-                            (note_data, *account, (*nk).clone())
+                            (note, *account, (*nk).clone())
                         })
                     })
                     .collect()
             };
 
             for (index, ((_, output), dec_output)) in decoded.iter().zip(decrypted).enumerate() {
-                // Grab mutable references to new witnesses from previous outputs
-                // in this transaction so that we can update them. Scoped so we
-                // don't hold mutable references to shielded_outputs for too long.
-                let new_witnesses: Vec<_> = shielded_outputs
-                    .iter_mut()
-                    .map(|out| out.witness_mut())
-                    .collect();
-
-                // Increment tree and witnesses
-                let node = Node::from_cmu(&output.cmu);
-                for witness in &mut *existing_witnesses {
-                    witness.append(node).unwrap();
-                }
-                for witness in &mut block_witnesses {
-                    witness.append(node).unwrap();
-                }
-                for witness in new_witnesses {
-                    witness.append(node).unwrap();
-                }
-                tree.append(node).unwrap();
-
-                if let Some(((note, _), account, nk)) = dec_output {
+                // Collect block note commitments
+                let node = sapling::Node::from_cmu(&output.cmu);
+                if let Some((note, account, nk)) = dec_output {
                     // A note is marked as "change" if the account that received it
                     // also spent notes in the same transaction. This will catch,
                     // for instance:
@@ -353,8 +344,10 @@ pub(crate) fn scan_block_with_runner<
                     // - Notes created by consolidation transactions.
                     // - Notes sent from one account to itself.
                     let is_change = spent_from_accounts.contains(&account);
-                    let witness = sapling::IncrementalWitness::from_tree(tree.clone());
-                    let nf = K::sapling_nf(&nk, &note, &witness);
+                    let note_commitment_tree_position = sapling_tree_position
+                        .ok_or(SyncError::SaplingTreeSizeUnknown(block_height))?
+                        + index.try_into().unwrap();
+                    let nf = K::sapling_nf(&nk, &note, note_commitment_tree_position);
 
                     shielded_outputs.push(WalletSaplingOutput::from_parts(
                         index,
@@ -363,9 +356,33 @@ pub(crate) fn scan_block_with_runner<
                         account,
                         note,
                         is_change,
-                        witness,
+                        note_commitment_tree_position,
                         nf,
-                    ))
+                    ));
+
+                    sapling_note_commitments.push((
+                        node,
+                        if index == decoded.len() - 1 {
+                            Retention::Checkpoint {
+                                id: block_height,
+                                is_marked: true,
+                            }
+                        } else {
+                            Retention::Marked
+                        },
+                    ));
+                } else {
+                    sapling_note_commitments.push((
+                        node,
+                        if index == decoded.len() - 1 {
+                            Retention::Checkpoint {
+                                id: block_height,
+                                is_marked: false,
+                            }
+                        } else {
+                            Retention::Ephemeral
+                        },
+                    ));
                 }
             }
         }
@@ -378,9 +395,22 @@ pub(crate) fn scan_block_with_runner<
                 sapling_outputs: shielded_outputs,
             });
         }
+
+        sapling_tree_position = sapling_tree_position.map(|pos| pos + tx_outputs_len);
     }
 
-    wtxs
+    Ok(PrunedBlock {
+        block_height,
+        block_hash,
+        block_time: block.time,
+        transactions: wtxs,
+        sapling_commitment_tree_size: if block.sapling_commitment_tree_size == 0 {
+            None
+        } else {
+            Some(block.sapling_commitment_tree_size)
+        },
+        sapling_commitments: sapling_note_commitments,
+    })
 }
 
 #[cfg(test)]
@@ -396,16 +426,18 @@ mod tests {
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
         sapling::{
+            self,
             note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
             util::generate_random_rseed,
             value::NoteValue,
-            CommitmentTree, Note, Nullifier, SaplingIvk,
+            Nullifier, SaplingIvk,
         },
         transaction::components::Amount,
         zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},
     };
 
     use crate::{
+        data_api::chain::CommitmentTreeMeta,
         proto::compact_formats::{
             CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
@@ -455,13 +487,14 @@ mod tests {
         dfvk: &DiversifiableFullViewingKey,
         value: Amount,
         tx_after: bool,
+        initial_sapling_tree_size: u32,
     ) -> CompactBlock {
         let to = dfvk.default_address().1;
 
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
-        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
+        let note = sapling::Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -514,6 +547,9 @@ mod tests {
             cb.vtx.push(tx);
         }
 
+        cb.sapling_commitment_tree_size = initial_sapling_tree_size
+            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>();
+
         cb
     }
 
@@ -530,10 +566,10 @@ mod tests {
                 &dfvk,
                 Amount::from_u64(5).unwrap(),
                 false,
+                0,
             );
             assert_eq!(cb.vtx.len(), 2);
 
-            let mut tree = CommitmentTree::empty();
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, ()>::new(
                     10,
@@ -551,15 +587,16 @@ mod tests {
                 None
             };
 
-            let txs = scan_block_with_runner(
+            let pruned_block = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
                 &[(&account, &dfvk)],
                 &[],
-                &mut tree,
-                &mut [],
+                Some(&CommitmentTreeMeta::from_parts(0)),
                 batch_runner.as_mut(),
-            );
+            )
+            .unwrap();
+            let txs = pruned_block.transactions;
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
@@ -569,9 +606,6 @@ mod tests {
             assert_eq!(tx.sapling_outputs[0].index(), 0);
             assert_eq!(tx.sapling_outputs[0].account(), account);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
-
-            // Check that the witness root matches
-            assert_eq!(tx.sapling_outputs[0].witness().root(), tree.root());
         }
 
         go(false);
@@ -591,10 +625,10 @@ mod tests {
                 &dfvk,
                 Amount::from_u64(5).unwrap(),
                 true,
+                0,
             );
             assert_eq!(cb.vtx.len(), 3);
 
-            let mut tree = CommitmentTree::empty();
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, ()>::new(
                     10,
@@ -612,15 +646,16 @@ mod tests {
                 None
             };
 
-            let txs = scan_block_with_runner(
+            let pruned_block = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
                 &[(&AccountId::from(0), &dfvk)],
                 &[],
-                &mut tree,
-                &mut [],
+                Some(&CommitmentTreeMeta::from_parts(0)),
                 batch_runner.as_mut(),
-            );
+            )
+            .unwrap();
+            let txs = pruned_block.transactions;
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
@@ -630,9 +665,6 @@ mod tests {
             assert_eq!(tx.sapling_outputs[0].index(), 0);
             assert_eq!(tx.sapling_outputs[0].account(), AccountId::from(0));
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
-
-            // Check that the witness root matches
-            assert_eq!(tx.sapling_outputs[0].witness().root(), tree.root());
         }
 
         go(false);
@@ -646,19 +678,26 @@ mod tests {
         let nf = Nullifier([7; 32]);
         let account = AccountId::from(12);
 
-        let cb = fake_compact_block(1u32.into(), nf, &dfvk, Amount::from_u64(5).unwrap(), false);
+        let cb = fake_compact_block(
+            1u32.into(),
+            nf,
+            &dfvk,
+            Amount::from_u64(5).unwrap(),
+            false,
+            0,
+        );
         assert_eq!(cb.vtx.len(), 2);
         let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
 
-        let mut tree = CommitmentTree::empty();
-        let txs = scan_block(
+        let pruned_block = scan_block(
             &Network::TestNetwork,
             cb,
             &vks[..],
             &[(account, nf)],
-            &mut tree,
-            &mut [],
-        );
+            Some(&CommitmentTreeMeta::from_parts(0)),
+        )
+        .unwrap();
+        let txs = pruned_block.transactions;
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];

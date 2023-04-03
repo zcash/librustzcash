@@ -21,6 +21,7 @@ development = ["zcash_proofs"]
 
 [dependencies]
 incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
+shardtree = "0.0"
 zcash_address = { version = "0.3", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_note_encryption = "0.4"

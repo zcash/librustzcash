@@ -4,6 +4,7 @@ mod addresses_table;
 mod initial_setup;
 mod received_notes_nullable_nf;
 mod sent_notes_to_internal;
+mod shardtree_support;
 mod ufvk_support;
 mod utxos_table;
 mod v_transactions_net;
@@ -46,5 +47,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(add_transaction_views::Migration),
         Box::new(v_transactions_net::Migration),
         Box::new(received_notes_nullable_nf::Migration),
+        Box::new(shardtree_support::Migration),
     ]
 }

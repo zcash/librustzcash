@@ -35,6 +35,9 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     /// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
     InsufficientFunds { available: Amount, required: Amount },
+    /// The data source does not have enough information to choose an expiry height
+    /// for the transaction.
+    SyncRequired,
 }
 
 impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE, SE> {
@@ -59,6 +62,7 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
                 i64::from(*available),
                 i64::from(*required)
             ),
+            InputSelectorError::SyncRequired => write!(f, "No chain data is available."),
         }
     }
 }
@@ -71,7 +75,8 @@ pub struct Proposal<FeeRuleT, NoteRef> {
     sapling_inputs: Vec<ReceivedSaplingNote<NoteRef>>,
     balance: TransactionBalance,
     fee_rule: FeeRuleT,
-    target_height: BlockHeight,
+    min_target_height: BlockHeight,
+    min_anchor_height: BlockHeight,
     is_shielding: bool,
 }
 
@@ -97,8 +102,19 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         &self.fee_rule
     }
     /// Returns the target height for which the proposal was prepared.
-    pub fn target_height(&self) -> BlockHeight {
-        self.target_height
+    ///
+    /// The chain must contain at least this many blocks in order for the proposal to
+    /// be executed.
+    pub fn min_target_height(&self) -> BlockHeight {
+        self.min_target_height
+    }
+    /// Returns the anchor height used in preparing the proposal.
+    ///
+    /// If, at the time that the proposal is executed, the anchor height required to satisfy
+    /// the minimum confirmation depth is less than this height, the proposal execution
+    /// API should return an error.
+    pub fn min_anchor_height(&self) -> BlockHeight {
+        self.min_anchor_height
     }
     /// Returns a flag indicating whether or not the proposed transaction
     /// is exclusively wallet-internal (if it does not involve any external
@@ -146,9 +162,8 @@ pub trait InputSelector {
         params: &ParamsT,
         wallet_db: &Self::DataSource,
         account: AccountId,
-        anchor_height: BlockHeight,
-        target_height: BlockHeight,
         transaction_request: TransactionRequest,
+        min_confirmations: u32,
     ) -> Result<
         Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
         InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
@@ -172,8 +187,7 @@ pub trait InputSelector {
         wallet_db: &Self::DataSource,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
-        confirmed_height: BlockHeight,
-        target_height: BlockHeight,
+        min_confirmations: u32,
     ) -> Result<
         Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
         InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
@@ -292,13 +306,18 @@ where
         params: &ParamsT,
         wallet_db: &Self::DataSource,
         account: AccountId,
-        anchor_height: BlockHeight,
-        target_height: BlockHeight,
         transaction_request: TransactionRequest,
+        min_confirmations: u32,
     ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
     where
         ParamsT: consensus::Parameters,
     {
+        // Target the next block, assuming we are up-to-date.
+        let (target_height, anchor_height) = wallet_db
+            .get_target_and_anchor_heights(min_confirmations)
+            .map_err(InputSelectorError::DataSource)
+            .and_then(|x| x.ok_or(InputSelectorError::SyncRequired))?;
+
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
         let mut output_total = Amount::zero();
@@ -362,7 +381,8 @@ where
                         sapling_inputs,
                         balance,
                         fee_rule: (*self.change_strategy.fee_rule()).clone(),
-                        target_height,
+                        min_target_height: target_height,
+                        min_anchor_height: anchor_height,
                         is_shielding: false,
                     });
                 }
@@ -405,15 +425,19 @@ where
         wallet_db: &Self::DataSource,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
-        confirmed_height: BlockHeight,
-        target_height: BlockHeight,
+        min_confirmations: u32,
     ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
     where
         ParamsT: consensus::Parameters,
     {
+        let (target_height, latest_anchor) = wallet_db
+            .get_target_and_anchor_heights(min_confirmations)
+            .map_err(InputSelectorError::DataSource)
+            .and_then(|x| x.ok_or(InputSelectorError::SyncRequired))?;
+
         let mut transparent_inputs: Vec<WalletTransparentOutput> = source_addrs
             .iter()
-            .map(|taddr| wallet_db.get_unspent_transparent_outputs(taddr, confirmed_height, &[]))
+            .map(|taddr| wallet_db.get_unspent_transparent_outputs(taddr, latest_anchor, &[]))
             .collect::<Result<Vec<Vec<_>>, _>>()
             .map_err(InputSelectorError::DataSource)?
             .into_iter()
@@ -458,7 +482,8 @@ where
                 sapling_inputs: vec![],
                 balance,
                 fee_rule: (*self.change_strategy.fee_rule()).clone(),
-                target_height,
+                min_target_height: target_height,
+                min_anchor_height: latest_anchor,
                 is_shielding: true,
             })
         } else {

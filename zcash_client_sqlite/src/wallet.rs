@@ -67,13 +67,13 @@
 use rusqlite::{self, named_params, params, OptionalExtension, ToSql};
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::io::Cursor;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    merkle_tree::write_commitment_tree,
-    sapling::CommitmentTree,
+    merkle_tree::read_commitment_tree,
     transaction::{components::Amount, Transaction, TxId},
     zip32::{
         sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
@@ -83,7 +83,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
-    data_api::{PoolType, Recipient, SentTransactionOutput},
+    data_api::{chain::CommitmentTreeMeta, PoolType, Recipient, SentTransactionOutput},
     encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
     wallet::WalletTx,
@@ -536,6 +536,51 @@ pub(crate) fn block_height_extrema(
     })
 }
 
+pub(crate) fn fully_scanned_height(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(BlockHeight, CommitmentTreeMeta)>, SqliteClientError> {
+    let res_opt = conn
+        .query_row(
+            "SELECT height, sapling_commitment_tree_size, sapling_tree
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1",
+            [],
+            |row| {
+                let max_height: u32 = row.get(0)?;
+                let sapling_tree_size: Option<u64> = row.get(1)?;
+                let sapling_tree: Vec<u8> = row.get(0)?;
+                Ok((
+                    BlockHeight::from(max_height),
+                    sapling_tree_size,
+                    sapling_tree,
+                ))
+            },
+        )
+        .optional()?;
+
+    res_opt
+        .map(|(max_height, sapling_tree_size, sapling_tree)| {
+            let commitment_tree_meta =
+                CommitmentTreeMeta::from_parts(if let Some(known_size) = sapling_tree_size {
+                    known_size
+                } else {
+                    // parse the legacy commitment tree data
+                    read_commitment_tree::<
+                        zcash_primitives::sapling::Node,
+                        _,
+                        { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                    >(Cursor::new(sapling_tree))?
+                    .size()
+                    .try_into()
+                    .expect("usize values are convertible to u64 on all supported platforms.")
+                });
+
+            Ok((max_height, commitment_tree_meta))
+        })
+        .transpose()
+}
+
 /// Returns the block height at which the specified transaction was mined,
 /// if any.
 pub(crate) fn get_tx_height(
@@ -765,21 +810,24 @@ pub(crate) fn insert_block(
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
-    commitment_tree: &CommitmentTree,
+    sapling_commitment_tree_size: Option<u64>,
 ) -> Result<(), SqliteClientError> {
-    let mut encoded_tree = Vec::new();
-    write_commitment_tree(commitment_tree, &mut encoded_tree).unwrap();
-
     let mut stmt_insert_block = conn.prepare_cached(
-        "INSERT INTO blocks (height, hash, time, sapling_tree)
-            VALUES (?, ?, ?, ?)",
+        "INSERT INTO blocks (
+            height,
+            hash,
+            time,
+            sapling_commitment_tree_size,
+            sapling_tree
+        )
+        VALUES (?, ?, ?, ?, x'00')",
     )?;
 
     stmt_insert_block.execute(params![
         u32::from(block_height),
         &block_hash.0[..],
         block_time,
-        encoded_tree
+        sapling_commitment_tree_size
     ])?;
 
     Ok(())
@@ -949,17 +997,6 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
     ];
 
     stmt_upsert_legacy_transparent_utxo.query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))
-}
-
-/// Removes old incremental witnesses up to the given block height.
-pub(crate) fn prune_witnesses(
-    conn: &rusqlite::Connection,
-    below_height: BlockHeight,
-) -> Result<(), SqliteClientError> {
-    let mut stmt_prune_witnesses =
-        conn.prepare_cached("DELETE FROM sapling_witnesses WHERE block < ?")?;
-    stmt_prune_witnesses.execute([u32::from(below_height)])?;
-    Ok(())
 }
 
 /// Marks notes that have not been mined in transactions

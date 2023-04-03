@@ -314,6 +314,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
+            0,
         );
 
         insert_into_cache(&db_cache, &cb);
@@ -328,7 +329,7 @@ mod tests {
         assert_matches!(validate_chain_result, Ok(()));
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -340,6 +341,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
+            1,
         );
         insert_into_cache(&db_cache, &cb2);
 
@@ -347,7 +349,7 @@ mod tests {
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -373,6 +375,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
+            0,
         );
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
@@ -380,12 +383,13 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
+            1,
         );
         insert_into_cache(&db_cache, &cb);
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -397,6 +401,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(8).unwrap(),
+            2,
         );
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
@@ -404,6 +409,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(3).unwrap(),
+            3,
         );
         insert_into_cache(&db_cache, &cb3);
         insert_into_cache(&db_cache, &cb4);
@@ -434,6 +440,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
+            0,
         );
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
@@ -441,12 +448,13 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
+            1,
         );
         insert_into_cache(&db_cache, &cb);
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -458,6 +466,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(8).unwrap(),
+            2,
         );
         let (cb4, _) = fake_compact_block(
             sapling_activation_height() + 3,
@@ -465,6 +474,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(3).unwrap(),
+            3,
         );
         insert_into_cache(&db_cache, &cb3);
         insert_into_cache(&db_cache, &cb4);
@@ -503,6 +513,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
 
         let (cb2, _) = fake_compact_block(
@@ -511,12 +522,13 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value2,
+            1,
         );
         insert_into_cache(&db_cache, &cb);
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(
@@ -551,7 +563,7 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Account balance should again reflect both received notes
         assert_eq!(
@@ -581,9 +593,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb1);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -596,6 +609,7 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            1,
         );
         let (cb3, _) = fake_compact_block(
             sapling_activation_height() + 2,
@@ -603,9 +617,10 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            2,
         );
         insert_into_cache(&db_cache, &cb3);
-        match scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None) {
+        match scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None) {
             Err(Error::Chain(e)) => {
                 assert_matches!(
                     e.cause(),
@@ -618,7 +633,7 @@ mod tests {
 
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
         insert_into_cache(&db_cache, &cb2);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             Amount::from_u64(150_000).unwrap()
@@ -652,11 +667,12 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(
@@ -672,11 +688,12 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value2,
+            1,
         );
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(
@@ -712,11 +729,12 @@ mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
+            0,
         );
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(
@@ -737,11 +755,12 @@ mod tests {
                 &dfvk,
                 to2,
                 value2,
+                1,
             ),
         );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Account balance should equal the change
         assert_eq!(

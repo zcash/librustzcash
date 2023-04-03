@@ -1,5 +1,6 @@
 //! Types for wallet error handling.
 
+use shardtree::ShardTreeError;
 use std::error;
 use std::fmt::{self, Debug, Display};
 use zcash_primitives::{
@@ -20,9 +21,12 @@ use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
-pub enum Error<DataSourceError, SelectionError, FeeError, NoteRef> {
+pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, NoteRef> {
     /// An error occurred retrieving data from the underlying data source
     DataSource(DataSourceError),
+
+    /// An error in computations involving the note commitment trees.
+    CommitmentTree(ShardTreeError<CommitmentTreeError>),
 
     /// An error in note selection
     NoteSelection(SelectionError),
@@ -60,9 +64,10 @@ pub enum Error<DataSourceError, SelectionError, FeeError, NoteRef> {
     ChildIndexOutOfRange(DiversifierIndex),
 }
 
-impl<DE, SE, FE, N> fmt::Display for Error<DE, SE, FE, N>
+impl<DE, CE, SE, FE, N> fmt::Display for Error<DE, CE, SE, FE, N>
 where
     DE: fmt::Display,
+    CE: fmt::Display,
     SE: fmt::Display,
     FE: fmt::Display,
     N: fmt::Display,
@@ -75,6 +80,9 @@ where
                     "The underlying datasource produced the following error: {}",
                     e
                 )
+            }
+            Error::CommitmentTree(e) => {
+                write!(f, "An error occurred in querying or updating a note commitment tree: {}", e)
             }
             Error::NoteSelection(e) => {
                 write!(f, "Note selection encountered the following error: {}", e)
@@ -120,9 +128,10 @@ where
     }
 }
 
-impl<DE, SE, FE, N> error::Error for Error<DE, SE, FE, N>
+impl<DE, CE, SE, FE, N> error::Error for Error<DE, CE, SE, FE, N>
 where
     DE: Debug + Display + error::Error + 'static,
+    CE: Debug + Display + error::Error + 'static,
     SE: Debug + Display + error::Error + 'static,
     FE: Debug + Display + 'static,
     N: Debug + Display,
@@ -130,6 +139,7 @@ where
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             Error::DataSource(e) => Some(e),
+            Error::CommitmentTree(e) => Some(e),
             Error::NoteSelection(e) => Some(e),
             Error::Builder(e) => Some(e),
             _ => None,
@@ -137,19 +147,19 @@ where
     }
 }
 
-impl<DE, SE, FE, N> From<builder::Error<FE>> for Error<DE, SE, FE, N> {
+impl<DE, CE, SE, FE, N> From<builder::Error<FE>> for Error<DE, CE, SE, FE, N> {
     fn from(e: builder::Error<FE>) -> Self {
         Error::Builder(e)
     }
 }
 
-impl<DE, SE, FE, N> From<BalanceError> for Error<DE, SE, FE, N> {
+impl<DE, CE, SE, FE, N> From<BalanceError> for Error<DE, CE, SE, FE, N> {
     fn from(e: BalanceError) -> Self {
         Error::BalanceError(e)
     }
 }
 
-impl<DE, SE, FE, N> From<InputSelectorError<DE, SE>> for Error<DE, SE, FE, N> {
+impl<DE, CE, SE, FE, N> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE, N> {
     fn from(e: InputSelectorError<DE, SE>) -> Self {
         match e {
             InputSelectorError::DataSource(e) => Error::DataSource(e),
@@ -161,18 +171,25 @@ impl<DE, SE, FE, N> From<InputSelectorError<DE, SE>> for Error<DE, SE, FE, N> {
                 available,
                 required,
             },
+            InputSelectorError::SyncRequired => Error::ScanRequired,
         }
     }
 }
 
-impl<DE, SE, FE, N> From<sapling::builder::Error> for Error<DE, SE, FE, N> {
+impl<DE, CE, SE, FE, N> From<sapling::builder::Error> for Error<DE, CE, SE, FE, N> {
     fn from(e: sapling::builder::Error) -> Self {
         Error::Builder(builder::Error::SaplingBuild(e))
     }
 }
 
-impl<DE, SE, FE, N> From<transparent::builder::Error> for Error<DE, SE, FE, N> {
+impl<DE, CE, SE, FE, N> From<transparent::builder::Error> for Error<DE, CE, SE, FE, N> {
     fn from(e: transparent::builder::Error) -> Self {
         Error::Builder(builder::Error::TransparentBuild(e))
+    }
+}
+
+impl<DE, CE, SE, FE, N> From<ShardTreeError<CE>> for Error<DE, CE, SE, FE, N> {
+    fn from(e: ShardTreeError<CE>) -> Self {
+        Error::CommitmentTree(e)
     }
 }

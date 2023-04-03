@@ -33,9 +33,7 @@
 //! # fn test() -> Result<(), Error<(), Infallible, u32>> {
 //! let network = Network::TestNetwork;
 //! let block_source = chain_testing::MockBlockSource;
-//! let mut db_data = testing::MockWalletDb {
-//!     network: Network::TestNetwork
-//! };
+//! let mut db_data = testing::MockWalletDb::new(Network::TestNetwork);
 //!
 //! // 1) Download new CompactBlocks into block_source.
 //!
@@ -79,7 +77,7 @@
 //! // At this point, the cache and scanned data are locally consistent (though not
 //! // necessarily consistent with the latest chain tip - this would be discovered the
 //! // next time this codepath is executed after new blocks are received).
-//! scan_cached_blocks(&network, &block_source, &mut db_data, None)
+//! scan_cached_blocks(&network, &block_source, &mut db_data, None, None)
 //! # }
 //! # }
 //! ```
@@ -89,22 +87,34 @@ use std::convert::Infallible;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    sapling::{self, note_encryption::PreparedIncomingViewingKey, Nullifier},
+    sapling::{self, note_encryption::PreparedIncomingViewingKey},
     zip32::Scope,
 };
 
 use crate::{
-    data_api::{PrunedBlock, WalletWrite},
+    data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
-    wallet::WalletTx,
     welding_rig::{add_block_to_runner, scan_block_with_runner},
 };
 
 pub mod error;
 use error::{ChainError, Error};
 
-use super::NullifierQuery;
+pub struct CommitmentTreeMeta {
+    sapling_tree_size: u64,
+    //TODO: orchard_tree_size: u64
+}
+
+impl CommitmentTreeMeta {
+    pub fn from_parts(sapling_tree_size: u64) -> Self {
+        Self { sapling_tree_size }
+    }
+
+    pub fn sapling_tree_size(&self) -> u64 {
+        self.sapling_tree_size
+    }
+}
 
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
 /// API.
@@ -212,6 +222,7 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,
     block_source: &BlockSourceT,
     data_db: &mut DbT,
+    from_height: Option<BlockHeight>,
     limit: Option<u32>,
 ) -> Result<(), Error<DbT::Error, BlockSourceT::Error, DbT::NoteRef>>
 where
@@ -219,12 +230,6 @@ where
     BlockSourceT: BlockSource,
     DbT: WalletWrite,
 {
-    // Recall where we synced up to previously.
-    let mut last_height = data_db
-        .block_height_extrema()
-        .map_err(Error::Wallet)?
-        .map(|(_, max)| max);
-
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data_db
         .get_unified_full_viewing_keys()
@@ -236,25 +241,8 @@ where
         .filter_map(|(account, ufvk)| ufvk.sapling().map(move |k| (account, k)))
         .collect();
 
-    // Get the most recent CommitmentTree
-    let mut tree = last_height.map_or_else(
-        || Ok(sapling::CommitmentTree::empty()),
-        |h| {
-            data_db
-                .get_commitment_tree(h)
-                .map(|t| t.unwrap_or_else(sapling::CommitmentTree::empty))
-                .map_err(Error::Wallet)
-        },
-    )?;
-
-    // Get most recent incremental witnesses for the notes we are tracking
-    let mut witnesses = last_height.map_or_else(
-        || Ok(vec![]),
-        |h| data_db.get_witnesses(h).map_err(Error::Wallet),
-    )?;
-
-    // Get the nullifiers for the notes we are tracking
-    let mut nullifiers = data_db
+    // Get the nullifiers for the unspent notes we are tracking
+    let mut sapling_nullifiers = data_db
         .get_sapling_nullifiers(NullifierQuery::Unspent)
         .map_err(Error::Wallet)?;
 
@@ -271,8 +259,19 @@ where
             .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(&ivk))),
     );
 
+    // Start at either the provided height, or where we synced up to previously.
+    let (last_scanned_height, commitment_tree_meta) = from_height.map_or_else(
+        || {
+            data_db.fully_scanned_height().map_or_else(
+                |e| Err(Error::Wallet(e)),
+                |next| Ok(next.map_or_else(|| (None, None), |(h, m)| (Some(h), Some(m)))),
+            )
+        },
+        |h| Ok((Some(h), None)),
+    )?;
+
     block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        last_height,
+        last_scanned_height,
         limit,
         |block: CompactBlock| {
             add_block_to_runner(params, block, &mut batch_runner);
@@ -283,90 +282,35 @@ where
     batch_runner.flush();
 
     block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        last_height,
+        last_scanned_height,
         limit,
         |block: CompactBlock| {
-            let current_height = block.height();
+            let pruned_block = scan_block_with_runner(
+                params,
+                block,
+                &dfvks,
+                &sapling_nullifiers,
+                commitment_tree_meta.as_ref(),
+                Some(&mut batch_runner),
+            )
+            .map_err(Error::Sync)?;
 
-            // Scanned blocks MUST be height-sequential.
-            if let Some(h) = last_height {
-                if current_height != (h + 1) {
-                    return Err(
-                        ChainError::block_height_discontinuity(h + 1, current_height).into(),
-                    );
-                }
-            }
-
-            let block_hash = BlockHash::from_slice(&block.hash);
-            let block_time = block.time;
-
-            let txs: Vec<WalletTx<Nullifier>> = {
-                let mut witness_refs: Vec<_> = witnesses.iter_mut().map(|w| &mut w.1).collect();
-
-                scan_block_with_runner(
-                    params,
-                    block,
-                    &dfvks,
-                    &nullifiers,
-                    &mut tree,
-                    &mut witness_refs[..],
-                    Some(&mut batch_runner),
-                )
-            };
-
-            // Enforce that all roots match. This is slow, so only include in debug builds.
-            #[cfg(debug_assertions)]
-            {
-                let cur_root = tree.root();
-                for row in &witnesses {
-                    if row.1.root() != cur_root {
-                        return Err(
-                            ChainError::invalid_witness_anchor(current_height, row.0).into()
-                        );
-                    }
-                }
-                for tx in &txs {
-                    for output in tx.sapling_outputs.iter() {
-                        if output.witness().root() != cur_root {
-                            return Err(ChainError::invalid_new_witness_anchor(
-                                current_height,
-                                tx.txid,
-                                output.index(),
-                                output.witness().root(),
-                            )
-                            .into());
-                        }
-                    }
-                }
-            }
-
-            let new_witnesses = data_db
-                .advance_by_block(
-                    &(PrunedBlock {
-                        block_height: current_height,
-                        block_hash,
-                        block_time,
-                        commitment_tree: &tree,
-                        transactions: &txs,
-                    }),
-                    &witnesses,
-                )
-                .map_err(Error::Wallet)?;
-
-            let spent_nf: Vec<&Nullifier> = txs
+            let spent_nf: Vec<&sapling::Nullifier> = pruned_block
+                .transactions
                 .iter()
                 .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf()))
                 .collect();
-            nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
-            nullifiers.extend(txs.iter().flat_map(|tx| {
+
+            sapling_nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
+            sapling_nullifiers.extend(pruned_block.transactions.iter().flat_map(|tx| {
                 tx.sapling_outputs
                     .iter()
                     .map(|out| (out.account(), *out.nf()))
             }));
 
-            witnesses.extend(new_witnesses);
-
-            last_height = Some(current_height);
+            data_db
+                .advance_by_block(pruned_block)
+                .map_err(Error::Wallet)?;
 
             Ok(())
         },
