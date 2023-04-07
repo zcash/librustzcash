@@ -287,7 +287,7 @@ mod tests {
 
     use crate::{
         tests,
-        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
+        wallet::init::{init_wallet_db_internal, migrations::addresses_table},
         WalletDb,
     };
 
@@ -345,7 +345,7 @@ mod tests {
             VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');",
         ).unwrap();
 
-        init_wallet_db(&mut db_data, None).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
 
         let mut q = db_data
             .conn
@@ -476,7 +476,7 @@ mod tests {
             )
             .unwrap();
 
-        init_wallet_db(&mut db_data, None).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
 
         let fee = db_data
             .conn
