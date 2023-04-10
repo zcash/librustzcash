@@ -164,7 +164,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 transparent_inputs,
                 transparent_outputs,
                 sapling_inputs.len(),
-                sapling_outputs.len() + 1,
+                // add one for Sapling change, then account for Sapling output padding performed by
+                // the transaction builder
+                std::cmp::max(sapling_outputs.len() + 1, 2),
             )
             .map_err(ChangeError::StrategyError)?;
 
@@ -222,6 +224,7 @@ mod tests {
 
     use zcash_primitives::{
         consensus::{Network, NetworkUpgrade, Parameters},
+        legacy::Script,
         transaction::{
             components::{amount::Amount, transparent::TxOut},
             fees::zip317::FeeRule as Zip317FeeRule,
@@ -261,6 +264,36 @@ mod tests {
             result,
             Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(Amount::from_u64(5000).unwrap())]
                 && balance.fee_required() == Amount::from_u64(10000).unwrap()
+        );
+    }
+
+    #[test]
+    fn change_with_transparent_payments() {
+        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard());
+
+        // spend a single Sapling note that is sufficient to pay the fee
+        let result = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &Vec::<TestTransparentInput>::new(),
+            &[TxOut {
+                value: Amount::from_u64(40000).unwrap(),
+                script_pubkey: Script(vec![]),
+            }],
+            &[TestSaplingInput {
+                note_id: 0,
+                value: Amount::from_u64(55000).unwrap(),
+            }],
+            &Vec::<SaplingPayment>::new(),
+            &DustOutputPolicy::default(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if balance.proposed_change().is_empty()
+                && balance.fee_required() == Amount::from_u64(15000).unwrap()
         );
     }
 
