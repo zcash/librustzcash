@@ -30,7 +30,7 @@ rand_core = "0.6"
 
 # - Digests (output types exposed)
 blake2b_simd = "1"
-sha2 = "0.9"
+sha2 = "0.10"
 
 # - Metrics
 memuse = "0.2.1"
@@ -60,7 +60,7 @@ hdwallet = { version = "0.3.1", optional = true }
 secp256k1 = { version = "0.21", optional = true }
 
 # - ZIP 339
-bip0039 = { version = "0.9", features = ["std", "all-languages"] }
+bip0039 = { version = "0.11", features = ["std", "all-languages"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)

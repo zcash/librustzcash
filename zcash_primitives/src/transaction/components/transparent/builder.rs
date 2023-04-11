@@ -22,7 +22,7 @@ use {
         TransactionData, TxDigests,
     },
     blake2b_simd::Hash as Blake2bHash,
-    ripemd::Digest,
+    sha2::Digest,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -144,7 +144,7 @@ impl TransparentBuilder {
         match coin.script_pubkey.address() {
             Some(TransparentAddress::PublicKey(hash)) => {
                 use ripemd::Ripemd160;
-                use sha2::{Digest, Sha256};
+                use sha2::Sha256;
 
                 if hash[..] != Ripemd160::digest(Sha256::digest(&pubkey))[..] {
                     return Err(Error::InvalidAddress);
