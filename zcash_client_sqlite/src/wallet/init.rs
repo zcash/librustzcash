@@ -482,9 +482,9 @@ mod tests {
                 WHERE  received_notes.spent IS NOT NULL
             ),
             sent_note_counts AS (
-                SELECT from_account AS account_id,
-                       tx AS id_tx,
-                       COUNT(DISTINCT id_note) as sent_notes,
+                SELECT sent_notes.from_account AS account_id,
+                       sent_notes.tx AS id_tx,
+                       COUNT(DISTINCT sent_notes.id_note) as sent_notes,
                        SUM(
                          CASE
                              WHEN sent_notes.memo IS NULL THEN 0
@@ -492,10 +492,11 @@ mod tests {
                          END
                        ) AS memo_count
                 FROM sent_notes
-                WHERE (sent_notes.tx, sent_notes.output_index) NOT IN (
-                    SELECT received_notes.tx, received_notes.output_index FROM received_notes
-                    WHERE received_notes.is_change = 1
-                )
+                LEFT JOIN received_notes
+                          ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                             (received_notes.tx, 2, received_notes.output_index)
+                WHERE  received_notes.is_change IS NULL
+                   OR  received_notes.is_change = 0
                 GROUP BY account_id, id_tx
             ),
             blocks_max_height AS (
@@ -516,9 +517,9 @@ mod tests {
                    SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
                    blocks.time                       AS block_time,
                    (
-                        blocks.height IS NULL 
+                        blocks.height IS NULL
                         AND transactions.expiry_height <= blocks_max_height.max_height
-                    ) AS expired_unmined
+                   ) AS expired_unmined
             FROM transactions
             JOIN notes ON notes.id_tx = transactions.id_tx
             JOIN blocks_max_height
@@ -530,6 +531,7 @@ mod tests {
             // v_tx_events
             "CREATE VIEW v_tx_events AS
             SELECT received_notes.tx           AS id_tx,
+                   2                           AS output_pool,
                    received_notes.output_index AS output_index,
                    sent_notes.from_account     AS from_account,
                    received_notes.account      AS to_account,
@@ -539,10 +541,11 @@ mod tests {
                    received_notes.memo         AS memo
             FROM received_notes
             LEFT JOIN sent_notes
-                      ON sent_notes.tx = received_notes.tx
-                      AND sent_notes.output_index = received_notes.output_index
-            UNION 
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (received_notes.tx, 2, sent_notes.output_index)
+            UNION
             SELECT sent_notes.tx               AS id_tx,
+                   sent_notes.output_pool      AS output_pool,
                    sent_notes.output_index     AS output_index,
                    sent_notes.from_account     AS from_account,
                    received_notes.account      AS to_account,
@@ -552,8 +555,8 @@ mod tests {
                    sent_notes.memo             AS memo
             FROM sent_notes
             LEFT JOIN received_notes
-                      ON received_notes.tx = sent_notes.tx
-                      AND received_notes.output_index = sent_notes.output_index
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (received_notes.tx, 2, received_notes.output_index)
             WHERE  received_notes.is_change IS NULL
                OR  received_notes.is_change = 0",
         ];

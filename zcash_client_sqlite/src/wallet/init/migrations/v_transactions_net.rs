@@ -60,6 +60,7 @@ impl RusqliteMigration for Migration {
         transaction.execute_batch(
             "CREATE VIEW v_tx_events AS
             SELECT received_notes.tx           AS id_tx,
+                   2                           AS output_pool,
                    received_notes.output_index AS output_index,
                    sent_notes.from_account     AS from_account,
                    received_notes.account      AS to_account,
@@ -69,10 +70,11 @@ impl RusqliteMigration for Migration {
                    received_notes.memo         AS memo
             FROM received_notes
             LEFT JOIN sent_notes
-                      ON sent_notes.tx = received_notes.tx
-                      AND sent_notes.output_index = received_notes.output_index
-            UNION 
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (received_notes.tx, 2, sent_notes.output_index)
+            UNION
             SELECT sent_notes.tx               AS id_tx,
+                   sent_notes.output_pool      AS output_pool,
                    sent_notes.output_index     AS output_index,
                    sent_notes.from_account     AS from_account,
                    received_notes.account      AS to_account,
@@ -82,8 +84,8 @@ impl RusqliteMigration for Migration {
                    sent_notes.memo             AS memo
             FROM sent_notes
             LEFT JOIN received_notes
-                      ON received_notes.tx = sent_notes.tx
-                      AND received_notes.output_index = sent_notes.output_index
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (received_notes.tx, 2, received_notes.output_index)
             WHERE  received_notes.is_change IS NULL
                OR  received_notes.is_change = 0",
         )?;
@@ -120,9 +122,9 @@ impl RusqliteMigration for Migration {
                 WHERE  received_notes.spent IS NOT NULL
             ),
             sent_note_counts AS (
-                SELECT from_account AS account_id,
-                       tx AS id_tx,
-                       COUNT(DISTINCT id_note) as sent_notes,
+                SELECT sent_notes.from_account AS account_id,
+                       sent_notes.tx AS id_tx,
+                       COUNT(DISTINCT sent_notes.id_note) as sent_notes,
                        SUM(
                          CASE
                              WHEN sent_notes.memo IS NULL THEN 0
@@ -130,10 +132,11 @@ impl RusqliteMigration for Migration {
                          END
                        ) AS memo_count
                 FROM sent_notes
-                WHERE (sent_notes.tx, sent_notes.output_index) NOT IN (
-                    SELECT received_notes.tx, received_notes.output_index FROM received_notes
-                    WHERE received_notes.is_change = 1
-                )
+                LEFT JOIN received_notes
+                          ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                             (received_notes.tx, 2, received_notes.output_index)
+                WHERE  received_notes.is_change IS NULL
+                   OR  received_notes.is_change = 0
                 GROUP BY account_id, id_tx
             ),
             blocks_max_height AS (
@@ -154,9 +157,9 @@ impl RusqliteMigration for Migration {
                    SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
                    blocks.time                       AS block_time,
                    (
-                        blocks.height IS NULL 
+                        blocks.height IS NULL
                         AND transactions.expiry_height <= blocks_max_height.max_height
-                    ) AS expired_unmined
+                   ) AS expired_unmined
             FROM transactions
             JOIN notes ON notes.id_tx = transactions.id_tx
             JOIN blocks_max_height
@@ -411,15 +414,17 @@ mod tests {
             while let Some(row) = rows.next().unwrap() {
                 row_count += 1;
                 let tx: i64 = row.get(0).unwrap();
-                let output_index: i64 = row.get(1).unwrap();
-                let from_account: Option<i64> = row.get(2).unwrap();
-                let to_account: Option<i64> = row.get(3).unwrap();
-                let to_address: Option<String> = row.get(4).unwrap();
-                let value: i64 = row.get(5).unwrap();
-                let is_change: bool = row.get(6).unwrap();
+                let output_pool: i64 = row.get(1).unwrap();
+                let output_index: i64 = row.get(2).unwrap();
+                let from_account: Option<i64> = row.get(3).unwrap();
+                let to_account: Option<i64> = row.get(4).unwrap();
+                let to_address: Option<String> = row.get(5).unwrap();
+                let value: i64 = row.get(6).unwrap();
+                let is_change: bool = row.get(7).unwrap();
                 //let memo: Option<String> = row.get(7).unwrap();
                 match output_index {
                     0 => {
+                        assert_eq!(output_pool, 2);
                         assert_eq!(from_account, Some(0));
                         assert_eq!(to_account, None);
                         assert_eq!(to_address, Some("addra".to_string()));
@@ -427,6 +432,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     1 => {
+                        assert_eq!(output_pool, 2);
                         assert_eq!(from_account, Some(0));
                         assert_eq!(to_account, None);
                         assert_eq!(to_address, Some("addrb".to_string()));
@@ -434,6 +440,7 @@ mod tests {
                         assert!(!is_change);
                     }
                     2 => {
+                        assert_eq!(output_pool, 2);
                         assert_eq!(from_account, Some(0));
                         assert_eq!(to_account, Some(0));
                         assert_eq!(to_address, None);
@@ -456,14 +463,16 @@ mod tests {
             while let Some(row) = rows.next().unwrap() {
                 row_count += 1;
                 let tx: i64 = row.get(0).unwrap();
-                let output_index: i64 = row.get(1).unwrap();
-                let from_account: Option<i64> = row.get(2).unwrap();
-                let to_account: Option<i64> = row.get(3).unwrap();
-                let to_address: Option<String> = row.get(4).unwrap();
-                let value: i64 = row.get(5).unwrap();
-                let is_change: bool = row.get(6).unwrap();
+                let output_pool: i64 = row.get(1).unwrap();
+                let output_index: i64 = row.get(2).unwrap();
+                let from_account: Option<i64> = row.get(3).unwrap();
+                let to_account: Option<i64> = row.get(4).unwrap();
+                let to_address: Option<String> = row.get(5).unwrap();
+                let value: i64 = row.get(6).unwrap();
+                let is_change: bool = row.get(7).unwrap();
                 match output_index {
                     0 => {
+                        assert_eq!(output_pool, 2);
                         assert_eq!(from_account, Some(0));
                         assert_eq!(to_account, Some(0));
                         assert_eq!(to_address, None);
@@ -471,6 +480,7 @@ mod tests {
                         assert!(is_change);
                     }
                     1 => {
+                        assert_eq!(output_pool, 2);
                         assert_eq!(from_account, Some(0));
                         assert_eq!(to_account, Some(1));
                         assert_eq!(to_address, None);
