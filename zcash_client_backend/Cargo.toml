@@ -31,7 +31,7 @@ zcash_primitives = { version = "0.10", path = "../zcash_primitives", default-fea
 time = "0.2"
 
 # - Encodings
-base64 = "0.13"
+base64 = "0.21"
 bech32 = "0.8"
 bs58 = { version = "0.4", features = ["check"] }
 
