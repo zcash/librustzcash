@@ -48,6 +48,15 @@ use crate::{
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
 
+/// Network Upgrade that could be inactive, causing a transaction creation error.
+/// Note that currently NU5 (Orchard) is the only upgrade we check for the presence
+/// of during transaction construction.
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NetworkUpgrade {
+    Orchard,
+}
+
 /// Errors that can occur during transaction construction.
 #[derive(Debug)]
 pub enum Error<FeeError> {
@@ -73,7 +82,7 @@ pub enum Error<FeeError> {
     OrchardRecipient(orchard::builder::OutputError),
     /// Orchard is not yet active on the network, and the user attempted to add
     /// Orchard parts to a transaction.
-    NU5Inactive,
+    NetworkUpgradeNotActive(NetworkUpgrade),
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(feature = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -99,7 +108,7 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::OrchardBuild(err) => write!(f, "{:?}", err),
             Error::OrchardSpend(err) => write!(f, "Could not add orchard spend: {}", err),
             Error::OrchardRecipient(err) => write!(f, "Could not add orchard recipient: {}", err),
-            Error::NU5Inactive => write!(
+            Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard) => write!(
                 f,
                 "Cannot create orchard transactions before NU5 activation"
             ),
@@ -125,7 +134,10 @@ impl<FE: PartialEq> PartialEq for Error<FE> {
             }
             (Error::OrchardSpend(e), Error::OrchardSpend(f)) => e == f,
             (Error::OrchardRecipient(e), Error::OrchardRecipient(f)) => e == f,
-            (Error::NU5Inactive, Error::NU5Inactive) => true,
+            (
+                Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard),
+                Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard),
+            ) => true,
             #[cfg(feature = "zfuture")]
             (Error::TzeBuild(e), Error::TzeBuild(f)) => e == f,
             _ => false,
@@ -181,8 +193,6 @@ pub struct Builder<'a, P, R, O: MaybeOrchard = WithoutOrchard> {
     orchard_builder: O,
     // TODO: These should be calculated by the orchard builder and not cached here
     // This requires publicizing methods or fields of the orchard builder
-    num_orchard_spends: usize,
-    num_orchard_outputs: usize,
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
@@ -290,8 +300,6 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
             #[cfg(not(feature = "zfuture"))]
             tze_builder: std::marker::PhantomData,
             progress_notifier: None,
-            num_orchard_spends: 0,
-            num_orchard_outputs: 0,
         }
     }
 
@@ -396,7 +404,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, O: MaybeOrchard> Buil
                 self.transparent_builder.outputs(),
                 self.sapling_builder.inputs().len(),
                 self.sapling_builder.bundle_output_count(),
-                match std::cmp::max(self.num_orchard_spends, self.num_orchard_outputs) {
+                match std::cmp::max(
+                    self.orchard_builder.output_count(),
+                    self.orchard_builder.input_count(),
+                ) {
                     1 => 2,
                     n => n,
                 },
@@ -589,11 +600,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, Wit
     ) -> Result<(), Error<FR::Error>> {
         self.orchard_saks
             .push(orchard::keys::SpendAuthorizingKey::from(&sk));
-        self.num_orchard_spends += 1;
         self.orchard_builder
             .0
             .as_mut()
-            .ok_or(Error::NU5Inactive)?
+            .ok_or(Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard))?
             .add_spend(orchard::keys::FullViewingKey::from(&sk), note, merkle_path)
             .map_err(Error::OrchardSpend)
     }
@@ -606,11 +616,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, Wit
         value: u64,
         memo: MemoBytes,
     ) -> Result<(), Error<FR::Error>> {
-        self.num_orchard_outputs += 1;
         self.orchard_builder
             .0
             .as_mut()
-            .ok_or(Error::NU5Inactive)?
+            .ok_or(Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard))?
             .add_recipient(
                 ovk,
                 recipient,

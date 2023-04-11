@@ -18,6 +18,8 @@ pub trait MaybeOrchard {
         rng: impl rand::RngCore,
     ) -> Option<Result<Bundle<InProgress<Unproven, Unauthorized>, V>, BuildError>>;
     fn value_balance(&self) -> Result<Amount, OverflowError>;
+    fn input_count(&self) -> usize;
+    fn output_count(&self) -> usize;
 }
 
 impl MaybeOrchard for WithOrchard {
@@ -34,6 +36,22 @@ impl MaybeOrchard for WithOrchard {
             None => Ok(Amount::zero()),
         }
     }
+
+    fn input_count(&self) -> usize {
+        if let Some(ref builder) = self.0 {
+            builder.spends().len()
+        } else {
+            0
+        }
+    }
+
+    fn output_count(&self) -> usize {
+        if let Some(ref builder) = self.0 {
+            builder.outputs().len()
+        } else {
+            0
+        }
+    }
 }
 
 impl MaybeOrchard for WithoutOrchard {
@@ -46,6 +64,14 @@ impl MaybeOrchard for WithoutOrchard {
 
     fn value_balance(&self) -> Result<Amount, OverflowError> {
         Ok(Amount::zero())
+    }
+
+    fn input_count(&self) -> usize {
+        0
+    }
+
+    fn output_count(&self) -> usize {
+        0
     }
 }
 

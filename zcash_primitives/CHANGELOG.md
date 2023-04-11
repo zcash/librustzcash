@@ -87,6 +87,27 @@ and this library adheres to Rust's notion of
   `jubjub 0.10`, `orchard 0.4`, `sha2 0.10`, `bip0039 0.10`,
   `zcash_note_encryption 0.3`.
 
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `NetworkUpgrade`
+  - `Builder::with_orchard_anchor`
+  - `Builder::add_orchard_spend`
+  - `Builder::add_orchard_output`
+- `zcash_primitives::transaction::components::orchard::builder` module
+
+### Changed
+- `zcash_primitives::transaction:`
+  - `builder::Builder::test_only_new_with_rng`
+    now returns an existential type: `Builder<'a, P, impl RngCore + CryptoRng>` 
+    instead of `Builder<'a, P, R>`
+  - `fees::FeeRule::fee_required` now takes an addition argument, `orchard_action_count`
+  - `Unauthorized`'s associated type `OrchardAuth` is now 
+    `orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>`
+    instead of `zcash_primitives::transaction::components::orchard::Unauthorized`
+
+### Removed
+- `zcash_primitives::transaction::components::orchard::Unauthorized`
+
 ## [0.10.2] - 2023-03-16
 ### Added
 - `zcash_primitives::sapling::note`:
