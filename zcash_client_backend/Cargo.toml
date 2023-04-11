@@ -53,7 +53,7 @@ subtle = "2.2.3"
 # - Shielded protocols
 bls12_381 = "0.8"
 group = "0.13"
-orchard = { version = "0.3", default-features = false }
+orchard = { version = "0.4", default-features = false }
 
 # - Test dependencies
 proptest = { version = "1.0.0", optional = true }

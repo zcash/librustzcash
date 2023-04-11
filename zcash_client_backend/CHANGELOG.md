@@ -8,7 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
-- Bumped dependencies to `bls12_381 0.8`, `group 0.13`,
+- Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `orchard 0.4`.
 - The dependency on `zcash_primitives` no longer enables the `multicore` feature
   by default in order to support compilation under `wasm32-wasi`. Users of other
   platforms may need to include an explicit dependency on `zcash_primitives`
