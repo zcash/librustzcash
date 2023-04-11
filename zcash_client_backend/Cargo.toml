@@ -44,7 +44,7 @@ tracing = "0.1"
 
 # - Protobuf interfaces and gRPC bindings
 prost = "0.11"
-tonic = { version = "0.8", optional = true }
+tonic = { version = "0.9", optional = true }
 
 # - Secret management
 secrecy = "0.8"
@@ -72,7 +72,7 @@ crossbeam-channel = "0.5"
 rayon = "1.5"
 
 [build-dependencies]
-tonic-build = "0.8"
+tonic-build = "0.9"
 which = "4"
 
 [dev-dependencies]
