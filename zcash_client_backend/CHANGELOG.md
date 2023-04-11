@@ -9,7 +9,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `orchard 0.4`,
-  `tonic 0.9`, `base64 0.21`.
+  `tonic 0.9`, `base64 0.21`, `bech32 0.9`.
 - The dependency on `zcash_primitives` no longer enables the `multicore` feature
   by default in order to support compilation under `wasm32-wasi`. Users of other
   platforms may need to include an explicit dependency on `zcash_primitives`
