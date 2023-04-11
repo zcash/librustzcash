@@ -76,8 +76,8 @@ blake2s_simd = "1"
 ripemd = { version = "0.1", optional = true }
 
 # - ZIP 32
-aes = "0.7"
-fpe = "0.5"
+aes = "0.8"
+fpe = "0.6"
 
 [dependencies.zcash_note_encryption]
 version = "0.3"
