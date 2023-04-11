@@ -235,7 +235,7 @@ pub mod compact_tx_streamer_client {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
-            D: std::convert::TryInto<tonic::transport::Endpoint>,
+            D: TryInto<tonic::transport::Endpoint>,
             D::Error: Into<StdError>,
         {
             let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
@@ -291,11 +291,27 @@ pub mod compact_tx_streamer_client {
             self.inner = self.inner.accept_compressed(encoding);
             self
         }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_decoding_message_size(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_encoding_message_size(limit);
+            self
+        }
         /// Return the height of the tip of the best chain
         pub async fn get_latest_block(
             &mut self,
             request: impl tonic::IntoRequest<super::ChainSpec>,
-        ) -> Result<tonic::Response<super::BlockId>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::BlockId>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -309,13 +325,21 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetLatestBlock",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetLatestBlock",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         /// Return the compact block corresponding to the given block identifier
         pub async fn get_block(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockId>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<crate::proto::compact_formats::CompactBlock>,
             tonic::Status,
         > {
@@ -332,13 +356,21 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetBlock",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetBlock",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         /// Return a list of consecutive compact blocks
         pub async fn get_block_range(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockRange>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<crate::proto::compact_formats::CompactBlock>,
             >,
@@ -357,13 +389,21 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetBlockRange",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetBlockRange",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
         }
         /// Return the requested full (not compact) transaction (as from zcashd)
         pub async fn get_transaction(
             &mut self,
             request: impl tonic::IntoRequest<super::TxFilter>,
-        ) -> Result<tonic::Response<super::RawTransaction>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::RawTransaction>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -377,13 +417,21 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTransaction",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetTransaction",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         /// Submit the given transaction to the Zcash network
         pub async fn send_transaction(
             &mut self,
             request: impl tonic::IntoRequest<super::RawTransaction>,
-        ) -> Result<tonic::Response<super::SendResponse>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::SendResponse>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -397,13 +445,21 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/SendTransaction",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "SendTransaction",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         /// Return the txids corresponding to the given t-address within the given block range
         pub async fn get_taddress_txids(
             &mut self,
             request: impl tonic::IntoRequest<super::TransparentAddressBlockFilter>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::RawTransaction>>,
             tonic::Status,
         > {
@@ -420,12 +476,20 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTaddressTxids",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetTaddressTxids",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
         }
         pub async fn get_taddress_balance(
             &mut self,
             request: impl tonic::IntoRequest<super::AddressList>,
-        ) -> Result<tonic::Response<super::Balance>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::Balance>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -439,12 +503,20 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTaddressBalance",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetTaddressBalance",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         pub async fn get_taddress_balance_stream(
             &mut self,
             request: impl tonic::IntoStreamingRequest<Message = super::Address>,
-        ) -> Result<tonic::Response<super::Balance>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::Balance>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -458,9 +530,15 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTaddressBalanceStream",
             );
-            self.inner
-                .client_streaming(request.into_streaming_request(), path, codec)
-                .await
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetTaddressBalanceStream",
+                    ),
+                );
+            self.inner.client_streaming(req, path, codec).await
         }
         /// Return the compact transactions currently in the mempool; the results
         /// can be a few seconds out of date. If the Exclude list is empty, return
@@ -474,7 +552,7 @@ pub mod compact_tx_streamer_client {
         pub async fn get_mempool_tx(
             &mut self,
             request: impl tonic::IntoRequest<super::Exclude>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<
                 tonic::codec::Streaming<crate::proto::compact_formats::CompactTx>,
             >,
@@ -493,14 +571,22 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetMempoolTx",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetMempoolTx",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
         }
         /// Return a stream of current Mempool transactions. This will keep the output stream open while
         /// there are mempool transactions. It will close the returned stream when a new block is mined.
         pub async fn get_mempool_stream(
             &mut self,
             request: impl tonic::IntoRequest<super::Empty>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::RawTransaction>>,
             tonic::Status,
         > {
@@ -517,7 +603,15 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetMempoolStream",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetMempoolStream",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
         }
         /// GetTreeState returns the note commitment tree state corresponding to the given block.
         /// See section 3.7 of the Zcash protocol specification. It returns several other useful
@@ -526,7 +620,7 @@ pub mod compact_tx_streamer_client {
         pub async fn get_tree_state(
             &mut self,
             request: impl tonic::IntoRequest<super::BlockId>,
-        ) -> Result<tonic::Response<super::TreeState>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::TreeState>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -540,12 +634,20 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetTreeState",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetTreeState",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         pub async fn get_latest_tree_state(
             &mut self,
             request: impl tonic::IntoRequest<super::Empty>,
-        ) -> Result<tonic::Response<super::TreeState>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::TreeState>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -559,12 +661,23 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetLatestTreeState",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetLatestTreeState",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         pub async fn get_address_utxos(
             &mut self,
             request: impl tonic::IntoRequest<super::GetAddressUtxosArg>,
-        ) -> Result<tonic::Response<super::GetAddressUtxosReplyList>, tonic::Status> {
+        ) -> std::result::Result<
+            tonic::Response<super::GetAddressUtxosReplyList>,
+            tonic::Status,
+        > {
             self.inner
                 .ready()
                 .await
@@ -578,12 +691,20 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetAddressUtxos",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetAddressUtxos",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         pub async fn get_address_utxos_stream(
             &mut self,
             request: impl tonic::IntoRequest<super::GetAddressUtxosArg>,
-        ) -> Result<
+        ) -> std::result::Result<
             tonic::Response<tonic::codec::Streaming<super::GetAddressUtxosReply>>,
             tonic::Status,
         > {
@@ -600,13 +721,21 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetAddressUtxosStream",
             );
-            self.inner.server_streaming(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetAddressUtxosStream",
+                    ),
+                );
+            self.inner.server_streaming(req, path, codec).await
         }
         /// Return information about this lightwalletd instance and the blockchain
         pub async fn get_lightd_info(
             &mut self,
             request: impl tonic::IntoRequest<super::Empty>,
-        ) -> Result<tonic::Response<super::LightdInfo>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::LightdInfo>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -620,13 +749,21 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/GetLightdInfo",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "cash.z.wallet.sdk.rpc.CompactTxStreamer",
+                        "GetLightdInfo",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
         }
         /// Testing-only, requires lightwalletd --ping-very-insecure (do not enable in production)
         pub async fn ping(
             &mut self,
             request: impl tonic::IntoRequest<super::Duration>,
-        ) -> Result<tonic::Response<super::PingResponse>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::PingResponse>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -640,7 +777,12 @@ pub mod compact_tx_streamer_client {
             let path = http::uri::PathAndQuery::from_static(
                 "/cash.z.wallet.sdk.rpc.CompactTxStreamer/Ping",
             );
-            self.inner.unary(request.into_request(), path, codec).await
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("cash.z.wallet.sdk.rpc.CompactTxStreamer", "Ping"),
+                );
+            self.inner.unary(req, path, codec).await
         }
     }
 }

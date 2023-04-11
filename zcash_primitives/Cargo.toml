@@ -30,7 +30,7 @@ rand_core = "0.6"
 
 # - Digests (output types exposed)
 blake2b_simd = "1"
-sha2 = "0.9"
+sha2 = "0.10"
 
 # - Metrics
 memuse = "0.2.1"
@@ -45,7 +45,7 @@ group = { version = "0.13", features = ["wnaf-memuse"] }
 incrementalmerkletree = "0.3"
 jubjub = "0.10"
 nonempty = "0.7"
-orchard = { version = "0.3", default-features = false }
+orchard = { version = "0.4", default-features = false }
 
 # - Static constants
 lazy_static = "1"
@@ -60,7 +60,7 @@ hdwallet = { version = "0.3.1", optional = true }
 secp256k1 = { version = "0.21", optional = true }
 
 # - ZIP 339
-bip0039 = { version = "0.9", features = ["std", "all-languages"] }
+bip0039 = { version = "0.11", features = ["std", "all-languages"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -76,8 +76,8 @@ blake2s_simd = "1"
 ripemd = { version = "0.1", optional = true }
 
 # - ZIP 32
-aes = "0.7"
-fpe = "0.5"
+aes = "0.8"
+fpe = "0.6"
 
 [dependencies.zcash_note_encryption]
 version = "0.3"
@@ -89,7 +89,7 @@ criterion = "0.4"
 proptest = "1.0.0"
 assert_matches = "1.3.0"
 rand_xorshift = "0.3"
-orchard = { version = "0.3", default-features = false, features = ["test-dependencies"] }
+orchard = { version = "0.4", default-features = false, features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56

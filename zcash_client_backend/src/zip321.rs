@@ -7,6 +7,7 @@
 use core::fmt::Debug;
 use std::collections::HashMap;
 
+use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use nom::{
     character::complete::char, combinator::all_consuming, multi::separated_list0,
     sequence::preceded,
@@ -38,14 +39,15 @@ pub enum Zip321Error {
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
 pub fn memo_to_base64(memo: &MemoBytes) -> String {
-    base64::encode_config(memo.as_slice(), base64::URL_SAFE_NO_PAD)
+    BASE64_URL_SAFE_NO_PAD.encode(memo.as_slice())
 }
 
 /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
 pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
-    base64::decode_config(s, base64::URL_SAFE_NO_PAD)
+    BASE64_URL_SAFE_NO_PAD
+        .decode(s)
         .map_err(Zip321Error::InvalidBase64)
         .and_then(|b| MemoBytes::from_bytes(&b).map_err(Zip321Error::MemoBytesError))
 }

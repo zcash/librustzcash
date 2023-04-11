@@ -31,8 +31,8 @@ zcash_primitives = { version = "0.10", path = "../zcash_primitives", default-fea
 time = "0.2"
 
 # - Encodings
-base64 = "0.13"
-bech32 = "0.8"
+base64 = "0.21"
+bech32 = "0.9"
 bs58 = { version = "0.4", features = ["check"] }
 
 # - Errors
@@ -44,7 +44,7 @@ tracing = "0.1"
 
 # - Protobuf interfaces and gRPC bindings
 prost = "0.11"
-tonic = { version = "0.8", optional = true }
+tonic = { version = "0.9", optional = true }
 
 # - Secret management
 secrecy = "0.8"
@@ -53,7 +53,7 @@ subtle = "2.2.3"
 # - Shielded protocols
 bls12_381 = "0.8"
 group = "0.13"
-orchard = { version = "0.3", default-features = false }
+orchard = { version = "0.4", default-features = false }
 
 # - Test dependencies
 proptest = { version = "1.0.0", optional = true }
@@ -72,7 +72,7 @@ crossbeam-channel = "0.5"
 rayon = "1.5"
 
 [build-dependencies]
-tonic-build = "0.8"
+tonic-build = "0.9"
 which = "4"
 
 [dev-dependencies]
