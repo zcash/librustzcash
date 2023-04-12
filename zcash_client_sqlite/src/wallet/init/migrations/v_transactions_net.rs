@@ -58,7 +58,7 @@ impl RusqliteMigration for Migration {
         )?;
 
         transaction.execute_batch(
-            "CREATE VIEW v_tx_events AS
+            "CREATE VIEW v_tx_outputs AS
             SELECT received_notes.tx           AS id_tx,
                    2                           AS output_pool,
                    received_notes.output_index AS output_index,
@@ -72,6 +72,19 @@ impl RusqliteMigration for Migration {
             LEFT JOIN sent_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (received_notes.tx, 2, sent_notes.output_index)
+            UNION
+            SELECT transactions.id_tx          AS id_tx,
+                   0                           AS output_pool,
+                   utxos.prevout_idx           AS output_index,
+                   NULL                        AS from_account,
+                   utxos.received_by_account   AS to_account,
+                   utxos.address               AS to_address,
+                   utxos.value_zat             AS value,
+                   false                       AS is_change,
+                   NULL                        AS memo
+            FROM utxos
+            JOIN transactions
+                 ON transactions.txid = utxos.prevout_txid
             UNION
             SELECT sent_notes.tx               AS id_tx,
                    sent_notes.output_pool      AS output_pool,
@@ -97,6 +110,7 @@ impl RusqliteMigration for Migration {
             notes AS (
                 SELECT received_notes.account        AS account_id,
                        received_notes.tx             AS id_tx,
+                       2                             AS pool,
                        received_notes.value          AS value,
                        CASE
                             WHEN received_notes.is_change THEN 1
@@ -112,8 +126,20 @@ impl RusqliteMigration for Migration {
                        END AS memo_present
                 FROM   received_notes
                 UNION
+                SELECT utxos.received_by_account     AS account_id,
+                       transactions.id_tx            AS id_tx,
+                       0                             AS pool,
+                       utxos.value_zat               AS value,
+                       0                             AS is_change,
+                       1                             AS received_count,
+                       0                             AS memo_present
+                FROM utxos
+                JOIN transactions
+                     ON transactions.txid = utxos.prevout_txid
+                UNION
                 SELECT received_notes.account        AS account_id,
                        received_notes.spent          AS id_tx,
+                       2                             AS pool,
                        -received_notes.value         AS value,
                        0                             AS is_change,
                        0                             AS received_count,
@@ -250,11 +276,14 @@ mod tests {
             VALUES (1,    2, 0, '', 2, '', 'nf_c', true);").unwrap();
 
         // - Tx 2 sends the half of the wallet value from account 0 to account 1 and returns the
-        //   other half to the sending account as change.
+        //   other half to the sending account as change. Also there's a random transparent utxo,
+        //   received, who knows where it came from but it's for account 0.
         db_data.conn.execute_batch(
             "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (2, 2, 2, '');
             INSERT INTO transactions (block, id_tx, txid) VALUES (2, 2, 'tx2');
             UPDATE received_notes SET spent = 2 WHERE tx = 1;
+            INSERT INTO utxos (received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height)
+            VALUES (0, 'taddr_tx2', 'tx2', 0, '', 1, 2);
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, to_account, to_address, value)
             VALUES (2, 2, 0, 0, 0, NULL, 1);
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, to_account, to_address, value)
@@ -264,6 +293,15 @@ mod tests {
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
             VALUES (2, 1, 1, '', 1, '', 'nf_e', false);",
         ).unwrap();
+
+        // - Tx 3 just receives transparent funds and does nothing else. For this to work, the
+        //   transaction must be retrieved by the wallet.
+        db_data.conn.execute_batch(
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (3, 3, 3, '');
+            INSERT INTO transactions (block, id_tx, txid) VALUES (3, 3, 'tx3');
+
+            INSERT INTO utxos (received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height)
+            VALUES (0, 'taddr_tx3', 'tx3', 0, '', 1, 3);").unwrap();
 
         // Behavior prior to change:
         {
@@ -296,7 +334,8 @@ mod tests {
                         assert_eq!(memo_count, 0);
                     }
                     (0, 2) => {
-                        // ERROR: transaction 2 was counted twice: as a received transfer, and as change
+                        // ERROR: transaction 2 was counted twice: as a received transfer, and as change.
+                        // Also, received transparent funds didn't appear in `v_transactions`.
                         assert_eq!(total, 1);
                         assert_eq!(count, 1);
                         assert_eq!(memo_count, 0);
@@ -382,13 +421,20 @@ mod tests {
                         assert_eq!(memo_count, 1);
                     }
                     (0, 2) => {
-                        assert_eq!(net_transfer, -1);
+                        assert_eq!(net_transfer, 0);
                         assert!(has_change);
                         assert_eq!(memo_count, 0);
                         assert_eq!(sent_note_count, 1);
-                        assert_eq!(received_note_count, 0);
+                        assert_eq!(received_note_count, 1);
                     }
                     (1, 2) => {
+                        assert_eq!(net_transfer, 1);
+                        assert!(!has_change);
+                        assert_eq!(memo_count, 0);
+                        assert_eq!(sent_note_count, 0);
+                        assert_eq!(received_note_count, 1);
+                    }
+                    (0, 3) => {
                         assert_eq!(net_transfer, 1);
                         assert!(!has_change);
                         assert_eq!(memo_count, 0);
@@ -400,14 +446,14 @@ mod tests {
                     }
                 }
             }
-            assert_eq!(row_count, 4);
+            assert_eq!(row_count, 5);
         }
 
-        // tests for v_tx_events
+        // tests for v_tx_outputs
         {
             let mut q = db_data
                 .conn
-                .prepare("SELECT * FROM v_tx_events WHERE id_tx = 1")
+                .prepare("SELECT * FROM v_tx_outputs WHERE id_tx = 1")
                 .unwrap();
             let mut rows = q.query([]).unwrap();
             let mut row_count = 0;
@@ -456,7 +502,7 @@ mod tests {
 
             let mut q = db_data
                 .conn
-                .prepare("SELECT * FROM v_tx_events WHERE id_tx = 2")
+                .prepare("SELECT * FROM v_tx_outputs WHERE id_tx = 2")
                 .unwrap();
             let mut rows = q.query([]).unwrap();
             let mut row_count = 0;
@@ -470,17 +516,22 @@ mod tests {
                 let to_address: Option<String> = row.get(5).unwrap();
                 let value: i64 = row.get(6).unwrap();
                 let is_change: bool = row.get(7).unwrap();
-                match output_index {
-                    0 => {
-                        assert_eq!(output_pool, 2);
+                match (output_pool, output_index) {
+                    (0, 0) => {
+                        assert_eq!(from_account, None);
+                        assert_eq!(to_account, Some(0));
+                        assert_eq!(to_address, Some("taddr_tx2".to_string()));
+                        assert_eq!(value, 1);
+                        assert!(!is_change);
+                    }
+                    (2, 0) => {
                         assert_eq!(from_account, Some(0));
                         assert_eq!(to_account, Some(0));
                         assert_eq!(to_address, None);
                         assert_eq!(value, 1);
                         assert!(is_change);
                     }
-                    1 => {
-                        assert_eq!(output_pool, 2);
+                    (2, 1) => {
                         assert_eq!(from_account, Some(0));
                         assert_eq!(to_account, Some(1));
                         assert_eq!(to_address, None);
@@ -488,11 +539,42 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!("Unexpected output index for tx {}: {}.", tx, other);
+                        panic!("Unexpected output pool and index for tx {}: {:?}.", tx, other);
                     }
                 }
             }
-            assert_eq!(row_count, 2);
+            assert_eq!(row_count, 3);
+
+            let mut q = db_data
+                .conn
+                .prepare("SELECT * FROM v_tx_outputs WHERE id_tx = 3")
+                .unwrap();
+            let mut rows = q.query([]).unwrap();
+            let mut row_count = 0;
+            while let Some(row) = rows.next().unwrap() {
+                row_count += 1;
+                let tx: i64 = row.get(0).unwrap();
+                let output_pool: i64 = row.get(1).unwrap();
+                let output_index: i64 = row.get(2).unwrap();
+                let from_account: Option<i64> = row.get(3).unwrap();
+                let to_account: Option<i64> = row.get(4).unwrap();
+                let to_address: Option<String> = row.get(5).unwrap();
+                let value: i64 = row.get(6).unwrap();
+                let is_change: bool = row.get(7).unwrap();
+                match (output_pool, output_index) {
+                    (0, 0) => {
+                        assert_eq!(from_account, None);
+                        assert_eq!(to_account, Some(0));
+                        assert_eq!(to_address, Some("taddr_tx3".to_string()));
+                        assert_eq!(value, 1);
+                        assert!(!is_change);
+                    }
+                    other => {
+                        panic!("Unexpected output pool and index for tx {}: {:?}.", tx, other);
+                    }
+                }
+            }
+            assert_eq!(row_count, 1);
         }
     }
 }

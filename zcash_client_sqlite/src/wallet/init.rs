@@ -457,6 +457,7 @@ mod tests {
             notes AS (
                 SELECT received_notes.account        AS account_id,
                        received_notes.tx             AS id_tx,
+                       2                             AS pool,
                        received_notes.value          AS value,
                        CASE
                             WHEN received_notes.is_change THEN 1
@@ -472,8 +473,20 @@ mod tests {
                        END AS memo_present
                 FROM   received_notes
                 UNION
+                SELECT utxos.received_by_account     AS account_id,
+                       transactions.id_tx            AS id_tx,
+                       0                             AS pool,
+                       utxos.value_zat               AS value,
+                       0                             AS is_change,
+                       1                             AS received_count,
+                       0                             AS memo_present
+                FROM utxos
+                JOIN transactions
+                     ON transactions.txid = utxos.prevout_txid
+                UNION
                 SELECT received_notes.account        AS account_id,
                        received_notes.spent          AS id_tx,
+                       2                             AS pool,
                        -received_notes.value         AS value,
                        0                             AS is_change,
                        0                             AS received_count,
@@ -528,8 +541,8 @@ mod tests {
                       ON sent_note_counts.account_id = notes.account_id
                       AND sent_note_counts.id_tx = notes.id_tx
             GROUP BY notes.account_id, transactions.id_tx",
-            // v_tx_events
-            "CREATE VIEW v_tx_events AS
+            // v_tx_outputs
+            "CREATE VIEW v_tx_outputs AS
             SELECT received_notes.tx           AS id_tx,
                    2                           AS output_pool,
                    received_notes.output_index AS output_index,
@@ -543,6 +556,19 @@ mod tests {
             LEFT JOIN sent_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (received_notes.tx, 2, sent_notes.output_index)
+            UNION
+            SELECT transactions.id_tx          AS id_tx,
+                   0                           AS output_pool,
+                   utxos.prevout_idx           AS output_index,
+                   NULL                        AS from_account,
+                   utxos.received_by_account   AS to_account,
+                   utxos.address               AS to_address,
+                   utxos.value_zat             AS value,
+                   false                       AS is_change,
+                   NULL                        AS memo
+            FROM utxos
+            JOIN transactions
+                 ON transactions.txid = utxos.prevout_txid
             UNION
             SELECT sent_notes.tx               AS id_tx,
                    sent_notes.output_pool      AS output_pool,
