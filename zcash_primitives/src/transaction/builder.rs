@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
-    consensus::{self, BlockHeight, BranchId},
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade},
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
@@ -47,15 +47,6 @@ use crate::{
 };
 
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
-
-/// Network Upgrade that could be inactive, causing a transaction creation error.
-/// Note that currently NU5 (Orchard) is the only upgrade we check for the presence
-/// of during transaction construction.
-#[derive(Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NetworkUpgrade {
-    Orchard,
-}
 
 /// Errors that can occur during transaction construction.
 #[derive(Debug)]
@@ -108,10 +99,11 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::OrchardBuild(err) => write!(f, "{:?}", err),
             Error::OrchardSpend(err) => write!(f, "Could not add orchard spend: {}", err),
             Error::OrchardRecipient(err) => write!(f, "Could not add orchard recipient: {}", err),
-            Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard) => write!(
+            Error::NetworkUpgradeNotActive(NetworkUpgrade::Nu5) => write!(
                 f,
                 "Cannot create orchard transactions before NU5 activation"
             ),
+            Error::NetworkUpgradeNotActive(other_nu) => write!(f, "{other_nu} not active."),
             #[cfg(feature = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
         }
@@ -134,10 +126,9 @@ impl<FE: PartialEq> PartialEq for Error<FE> {
             }
             (Error::OrchardSpend(e), Error::OrchardSpend(f)) => e == f,
             (Error::OrchardRecipient(e), Error::OrchardRecipient(f)) => e == f,
-            (
-                Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard),
-                Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard),
-            ) => true,
+            (Error::NetworkUpgradeNotActive(nu1), Error::NetworkUpgradeNotActive(nu2)) => {
+                nu1 == nu2
+            }
             #[cfg(feature = "zfuture")]
             (Error::TzeBuild(e), Error::TzeBuild(f)) => e == f,
             _ => false,
@@ -603,7 +594,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, Wit
         self.orchard_builder
             .0
             .as_mut()
-            .ok_or(Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard))?
+            .ok_or(Error::NetworkUpgradeNotActive(NetworkUpgrade::Nu5))?
             .add_spend(orchard::keys::FullViewingKey::from(&sk), note, merkle_path)
             .map_err(Error::OrchardSpend)
     }
@@ -619,7 +610,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, Wit
         self.orchard_builder
             .0
             .as_mut()
-            .ok_or(Error::NetworkUpgradeNotActive(NetworkUpgrade::Orchard))?
+            .ok_or(Error::NetworkUpgradeNotActive(NetworkUpgrade::Nu5))?
             .add_recipient(
                 ovk,
                 recipient,

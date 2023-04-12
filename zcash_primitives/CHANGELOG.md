@@ -89,7 +89,6 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_primitives::transaction::builder`:
-  - `NetworkUpgrade`
   - `Builder::with_orchard_anchor`
   - `Builder::add_orchard_spend`
   - `Builder::add_orchard_output`
@@ -104,6 +103,7 @@ and this library adheres to Rust's notion of
   - `Unauthorized`'s associated type `OrchardAuth` is now 
     `orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>`
     instead of `zcash_primitives::transaction::components::orchard::Unauthorized`
+- `zcash_primitives::consensus::NetworkUpgrade` now implements `PartialEq`, `Eq`
 
 ### Removed
 - `zcash_primitives::transaction::components::orchard::Unauthorized`
