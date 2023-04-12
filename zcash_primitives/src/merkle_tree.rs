@@ -1223,13 +1223,14 @@ mod tests {
 pub mod testing {
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
     use core::fmt::Debug;
+    use incrementalmerkletree::{self, Altitude};
     use proptest::collection::vec;
     use proptest::prelude::*;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::Hasher;
     use std::io::{self, Read, Write};
 
-    use super::{CommitmentTree, Hashable};
+    use super::{CommitmentTree, HashSer, Hashable};
 
     pub fn arb_commitment_tree<Node: Hashable + Debug, T: Strategy<Value = Node>>(
         min_size: usize,
@@ -1250,28 +1251,27 @@ pub mod testing {
     #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     pub(crate) struct TestNode(pub(crate) u64);
 
-    impl Hashable for TestNode {
+    impl incrementalmerkletree::Hashable for TestNode {
+        fn combine(alt: Altitude, a: &TestNode, b: &TestNode) -> TestNode {
+            let mut hasher = DefaultHasher::new();
+            hasher.write_u8(alt.into());
+            hasher.write_u64(a.0);
+            hasher.write_u64(b.0);
+            TestNode(hasher.finish())
+        }
+
+        fn empty_leaf() -> TestNode {
+            TestNode(0)
+        }
+    }
+
+    impl HashSer for TestNode {
         fn read<R: Read>(mut reader: R) -> io::Result<TestNode> {
             reader.read_u64::<LittleEndian>().map(TestNode)
         }
 
         fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
             writer.write_u64::<LittleEndian>(self.0)
-        }
-
-        fn combine(_: usize, a: &TestNode, b: &TestNode) -> TestNode {
-            let mut hasher = DefaultHasher::new();
-            hasher.write_u64(a.0);
-            hasher.write_u64(b.0);
-            TestNode(hasher.finish())
-        }
-
-        fn blank() -> TestNode {
-            TestNode(0)
-        }
-
-        fn empty_root(alt: usize) -> TestNode {
-            (0..alt).fold(Self::blank(), |v, lvl| Self::combine(lvl, &v, &v))
         }
     }
 }
