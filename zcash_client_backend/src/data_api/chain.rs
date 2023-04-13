@@ -392,7 +392,7 @@ where
     ))
 }
 
-#[cfg(feature = "test-dependencies")]
+#[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use std::convert::Infallible;
     use zcash_primitives::consensus::BlockHeight;
