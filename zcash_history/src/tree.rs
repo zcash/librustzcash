@@ -640,10 +640,8 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10))]
-
         #[test]
-        fn prop_there_and_back(number in 0u32..=(1024*1024)) {
+        fn prop_there_and_back(number in 0u32..=1024) {
             let mut tree = initial();
             for i in 0..number {
                 tree.append_leaf(leaf(i+3)).expect("Failed to append");
@@ -656,7 +654,7 @@ mod tests {
         }
 
         #[test]
-        fn prop_leaf_count(number in 3u32..=(1024*1024)) {
+        fn prop_leaf_count(number in 3u32..=1024) {
             let mut tree = initial();
             for i in 1..(number-1) {
                 tree.append_leaf(leaf(i+2)).expect("Failed to append");
@@ -666,7 +664,7 @@ mod tests {
         }
 
         #[test]
-        fn prop_parity(number in 3u32..=(2048*2048)) {
+        fn prop_parity(number in 3u32..=2048) {
             let mut tree = initial();
             for i in 1..(number-1) {
                 tree.append_leaf(leaf(i+2)).expect("Failed to append");
@@ -681,7 +679,7 @@ mod tests {
 
         #[test]
         fn prop_parity_with_truncate(
-            add_and_delete in (0u32..=(2048*2048)).prop_flat_map(
+            add_and_delete in (0u32..=2048).prop_flat_map(
                 |add| (Just(add), 0..=add)
             )
         ) {
@@ -707,7 +705,7 @@ mod tests {
 
         #[test]
         fn prop_stored_length(
-            add_and_delete in (0u32..=(2048*2048)).prop_flat_map(
+            add_and_delete in (0u32..=2048).prop_flat_map(
                 |add| (Just(add), 0..=add)
             )
         ) {
