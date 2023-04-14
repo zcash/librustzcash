@@ -453,33 +453,12 @@ mod tests {
         let expected_views = vec![
             // v_transactions
             "CREATE VIEW v_transactions AS
-            SELECT notes.id_tx,
-                   notes.mined_height,
-                   notes.tx_index,
-                   notes.txid,
-                   notes.expiry_height,
-                   notes.raw,
-                   SUM(notes.value) + MAX(notes.fee) AS net_value,
-                   MAX(notes.fee)                    AS fee_paid,
-                   SUM(notes.sent_count) == 0        AS is_wallet_internal,
-                   SUM(notes.is_change) > 0          AS has_change,
-                   SUM(notes.sent_count)             AS sent_note_count,
-                   SUM(notes.received_count)         AS received_note_count,
-                   SUM(notes.memo_present)           AS memo_count,
-                   blocks.time                       AS block_time
-            FROM (
-                SELECT transactions.id_tx            AS id_tx,
-                       transactions.block            AS mined_height,
-                       transactions.tx_index         AS tx_index,
-                       transactions.txid             AS txid,
-                       transactions.expiry_height    AS expiry_height,
-                       transactions.raw              AS raw,
-                       0                             AS fee,
-                       CASE
-                            WHEN received_notes.is_change THEN 0
-                            ELSE value
-                       END AS value,
-                       0                             AS sent_count,
+            WITH
+            notes AS (
+                SELECT received_notes.account        AS account_id,
+                       received_notes.tx             AS id_tx,
+                       2                             AS pool,
+                       received_notes.value          AS value,
                        CASE
                             WHEN received_notes.is_change THEN 1
                             ELSE 0
@@ -492,80 +471,120 @@ mod tests {
                            WHEN received_notes.memo IS NULL THEN 0
                            ELSE 1
                        END AS memo_present
-                FROM   transactions
-                       JOIN received_notes ON transactions.id_tx = received_notes.tx
+                FROM   received_notes
                 UNION
-                SELECT transactions.id_tx            AS id_tx,
-                       transactions.block            AS mined_height,
-                       transactions.tx_index         AS tx_index,
-                       transactions.txid             AS txid,
-                       transactions.expiry_height    AS expiry_height,
-                       transactions.raw              AS raw,
-                       transactions.fee              AS fee,
-                       -sent_notes.value             AS value,
-                       CASE
-                           WHEN sent_notes.from_account = sent_notes.to_account THEN 0
-                           ELSE 1
-                       END AS sent_count,
+                SELECT utxos.received_by_account     AS account_id,
+                       transactions.id_tx            AS id_tx,
+                       0                             AS pool,
+                       utxos.value_zat               AS value,
+                       0                             AS is_change,
+                       1                             AS received_count,
+                       0                             AS memo_present
+                FROM utxos
+                JOIN transactions
+                     ON transactions.txid = utxos.prevout_txid
+                UNION
+                SELECT received_notes.account        AS account_id,
+                       received_notes.spent          AS id_tx,
+                       2                             AS pool,
+                       -received_notes.value         AS value,
                        0                             AS is_change,
                        0                             AS received_count,
-                       CASE
-                           WHEN sent_notes.memo IS NULL THEN 0
-                           ELSE 1
-                       END AS memo_present
-                FROM   transactions
-                       JOIN sent_notes ON transactions.id_tx = sent_notes.tx
-            ) AS notes
-            LEFT JOIN blocks ON notes.mined_height = blocks.height
-            GROUP BY notes.id_tx",
-            // v_tx_received
-            "CREATE VIEW v_tx_received AS
-            SELECT transactions.id_tx            AS id_tx,
-                   transactions.block            AS mined_height,
-                   transactions.tx_index         AS tx_index,
-                   transactions.txid             AS txid,
-                   transactions.expiry_height    AS expiry_height,
-                   transactions.raw              AS raw,
-                   MAX(received_notes.account)   AS received_by_account,
-                   SUM(received_notes.value)     AS received_total,
-                   COUNT(received_notes.id_note) AS received_note_count,
-                   SUM(
-                       CASE
-                           WHEN received_notes.memo IS NULL THEN 0
-                           ELSE 1
-                       END
-                   ) AS memo_count,
-                   blocks.time                   AS block_time
-            FROM   transactions
-                   JOIN received_notes
-                          ON transactions.id_tx = received_notes.tx
-                   LEFT JOIN blocks
-                          ON transactions.block = blocks.height
-            GROUP BY received_notes.tx, received_notes.account",
-            // v_tx_received
-            "CREATE VIEW v_tx_sent AS
-            SELECT transactions.id_tx           AS id_tx,
-                   transactions.block           AS mined_height,
-                   transactions.tx_index        AS tx_index,
-                   transactions.txid            AS txid,
-                   transactions.expiry_height   AS expiry_height,
-                   transactions.raw             AS raw,
-                   MAX(sent_notes.from_account) AS sent_from_account,
-                   SUM(sent_notes.value)        AS sent_total,
-                   COUNT(sent_notes.id_note)    AS sent_note_count,
-                   SUM(
-                       CASE
-                           WHEN sent_notes.memo IS NULL THEN 0
-                           ELSE 1
-                       END
-                   ) AS memo_count,
-                   blocks.time                  AS block_time
-            FROM   transactions
-                   JOIN sent_notes
-                          ON transactions.id_tx = sent_notes.tx
-                   LEFT JOIN blocks
-                          ON transactions.block = blocks.height
-            GROUP BY sent_notes.tx, sent_notes.from_account",
+                       0                             AS memo_present
+                FROM   received_notes
+                WHERE  received_notes.spent IS NOT NULL
+            ),
+            sent_note_counts AS (
+                SELECT sent_notes.from_account AS account_id,
+                       sent_notes.tx AS id_tx,
+                       COUNT(DISTINCT sent_notes.id_note) as sent_notes,
+                       SUM(
+                         CASE
+                             WHEN sent_notes.memo IS NULL THEN 0
+                             ELSE 1
+                         END
+                       ) AS memo_count
+                FROM sent_notes
+                LEFT JOIN received_notes
+                          ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                             (received_notes.tx, 2, received_notes.output_index)
+                WHERE  received_notes.is_change IS NULL
+                   OR  received_notes.is_change = 0
+                GROUP BY account_id, id_tx
+            ),
+            blocks_max_height AS (
+                SELECT MAX(blocks.height) as max_height FROM blocks
+            )
+            SELECT notes.account_id                  AS account_id,
+                   transactions.id_tx                AS id_tx,
+                   transactions.block                AS mined_height,
+                   transactions.tx_index             AS tx_index,
+                   transactions.txid                 AS txid,
+                   transactions.expiry_height        AS expiry_height,
+                   transactions.raw                  AS raw,
+                   SUM(notes.value)                  AS account_balance_delta,
+                   transactions.fee                  AS fee_paid,
+                   SUM(notes.is_change) > 0          AS has_change,
+                   MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+                   SUM(notes.received_count)         AS received_note_count,
+                   SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+                   blocks.time                       AS block_time,
+                   (
+                        blocks.height IS NULL
+                        AND transactions.expiry_height <= blocks_max_height.max_height
+                   ) AS expired_unmined
+            FROM transactions
+            JOIN notes ON notes.id_tx = transactions.id_tx
+            JOIN blocks_max_height
+            LEFT JOIN blocks ON blocks.height = transactions.block
+            LEFT JOIN sent_note_counts
+                      ON sent_note_counts.account_id = notes.account_id
+                      AND sent_note_counts.id_tx = notes.id_tx
+            GROUP BY notes.account_id, transactions.id_tx",
+            // v_tx_outputs
+            "CREATE VIEW v_tx_outputs AS
+            SELECT received_notes.tx           AS id_tx,
+                   2                           AS output_pool,
+                   received_notes.output_index AS output_index,
+                   sent_notes.from_account     AS from_account,
+                   received_notes.account      AS to_account,
+                   NULL                        AS to_address,
+                   received_notes.value        AS value,
+                   received_notes.is_change    AS is_change,
+                   received_notes.memo         AS memo
+            FROM received_notes
+            LEFT JOIN sent_notes
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (received_notes.tx, 2, sent_notes.output_index)
+            UNION
+            SELECT transactions.id_tx          AS id_tx,
+                   0                           AS output_pool,
+                   utxos.prevout_idx           AS output_index,
+                   NULL                        AS from_account,
+                   utxos.received_by_account   AS to_account,
+                   utxos.address               AS to_address,
+                   utxos.value_zat             AS value,
+                   false                       AS is_change,
+                   NULL                        AS memo
+            FROM utxos
+            JOIN transactions
+                 ON transactions.txid = utxos.prevout_txid
+            UNION
+            SELECT sent_notes.tx               AS id_tx,
+                   sent_notes.output_pool      AS output_pool,
+                   sent_notes.output_index     AS output_index,
+                   sent_notes.from_account     AS from_account,
+                   received_notes.account      AS to_account,
+                   sent_notes.to_address       AS to_address,
+                   sent_notes.value            AS value,
+                   false                       AS is_change,
+                   sent_notes.memo             AS memo
+            FROM sent_notes
+            LEFT JOIN received_notes
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (received_notes.tx, 2, received_notes.output_index)
+            WHERE  received_notes.is_change IS NULL
+               OR  received_notes.is_change = 0",
         ];
 
         let mut views_query = db_data

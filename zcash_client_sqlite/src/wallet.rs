@@ -6,6 +6,63 @@
 //!
 //! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
+//!
+//! # Views
+//!
+//! The wallet database exposes the following views as part of its public API:
+//!
+//! ## `v_transactions`
+//!
+//! This view exposes the history of transactions that affect the balance of each account in the
+//! wallet. A transaction may be represented by multiple rows in this view, one for each account in
+//! the wallet that contributes funds to or receives funds from the transaction in question. Each
+//! row of the view contains:
+//! - `account_balance_delta`: the net effect of the transaction on the associated account's
+//!   balance. This value is positive when funds are received by the account, and negative when the
+//!   balance of the account decreases due to a spend.
+//! - `fee_paid`: the total fee paid to send the transaction, as a positive value. This fee is
+//!   associated with the transaction (similar to e.g. `txid` or `mined_height`), and not with any
+//!   specific account involved with that transaction. ` If multiple rows exist for a single
+//!   transaction, this fee amount will be repeated for each such row. Therefore, if more than one
+//!   of the wallet's accounts is involved with the transaction, this fee should be considered only
+//!   once in determining the total value sent from the wallet as a whole.
+//!
+//! ### Seed Phrase with Single Account
+//!
+//! In the case that the seed phrase for in this wallet has only been used to create a single
+//! account, this view will contain one row per transaction, in the case that
+//! `account_balance_delta` is negative, it is usually safe to add `fee_paid` back to the
+//! `account_balance_delta` value to determine the amount sent to addresses outside the wallet.
+//!
+//! ### Seed Phrase with Multiple Accounts
+//!
+//! In the case that the seed phrase for in this wallet has been used to create multiple accounts,
+//! this view may contain multiple rows per transaction, one for each account involved. In this
+//! case, the total amount sent to addresses outside the wallet can usually be calculated by
+//! grouping rows by `id_tx` and then using `SUM(account_balance_delta) + MAX(fee_paid)`.
+//!
+//! ### Imported Seed Phrases
+//!
+//! If a seed phrase is imported, and not every account associated with it is loaded into the
+//! wallet, this view may show partial information about some transactions. In particular, any
+//! computation that involves both `account_balance_delta` and `fee_paid` is likely to be
+//! inaccurate.
+//!
+//! ## `v_tx_outputs`
+//!
+//! This view exposes the history of transaction outputs received by and sent from the wallet,
+//! keyed by transaction ID, pool type, and output index. The contents of this view are useful for
+//! producing a detailed report of the effects of a transaction. Each row of this view contains:
+//! - `from_account` for sent outputs, the account from which the value was sent.
+//! - `to_account` in the case that the output was received by an account in the wallet, the
+//!   identifier for the account receiving the funds.
+//! - `to_address` the address to which an output was sent, or the address at which value was
+//!   received in the case of received transparent funds.
+//! - `value` the value of the output. This is always a positive number, for both sent and received
+//!   outputs.
+//! - `is_change` a boolean flag indicating whether this is a change output belonging to the
+//!   wallet.
+//! - `memo` the shielded memo associated with the output, if any.
 
 use group::ff::PrimeField;
 use rusqlite::{named_params, OptionalExtension, ToSql};
