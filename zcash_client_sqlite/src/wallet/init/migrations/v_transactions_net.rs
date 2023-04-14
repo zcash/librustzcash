@@ -539,7 +539,10 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!("Unexpected output pool and index for tx {}: {:?}.", tx, other);
+                        panic!(
+                            "Unexpected output pool and index for tx {}: {:?}.",
+                            tx, other
+                        );
                     }
                 }
             }
@@ -570,7 +573,10 @@ mod tests {
                         assert!(!is_change);
                     }
                     other => {
-                        panic!("Unexpected output pool and index for tx {}: {:?}.", tx, other);
+                        panic!(
+                            "Unexpected output pool and index for tx {}: {:?}.",
+                            tx, other
+                        );
                     }
                 }
             }
