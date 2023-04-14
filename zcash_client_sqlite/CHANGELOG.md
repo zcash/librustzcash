@@ -23,7 +23,7 @@ and this library adheres to Rust's notion of
   documentation.
 
 ### Changed
-- Bumped dependencies to `group 0.13`, `jubjub 0.10`
+- Bumped dependencies to `group 0.13`, `jubjub 0.10`, `zcash_primitives 0.11`.
 - The dependency on `zcash_primitives` no longer enables the `multicore` feature
   by default in order to support compilation under `wasm32-wasi`. Users of other
   platforms may need to include an explicit dependency on `zcash_primitives`

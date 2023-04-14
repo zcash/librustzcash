@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.11.0] - 2023-04-15
 ### Added
 - `zcash_primitives::zip32::fingerprint` module, containing types for deriving
   ZIP 32 Seed Fingerprints.
