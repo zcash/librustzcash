@@ -17,6 +17,11 @@ and this library adheres to Rust's notion of
   `zcash_primitives/multicore` feature if they did not already depend
   upon `zcash_primitives` with default features enabled.
 
+### Fixed
+- `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy` now takes
+  into account the Sapling output padding behaviour of
+  `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder`.
+
 ## [0.7.0] - 2023-02-01
 ### Added
 - `zcash_client_backend::data_api::wallet`:
