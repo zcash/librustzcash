@@ -1,0 +1,14 @@
+name: cargo audit
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+
+jobs:
+  cargo-audit:
+    name: cargo-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: cargo install cargo-audit
+      - run: cargo audit
