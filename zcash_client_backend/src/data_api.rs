@@ -1155,7 +1155,7 @@ pub trait WalletCommitmentTrees {
     ) -> Result<(), ShardTreeError<Self::Error>>;
 }
 
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(any(test, doctest, feature = "test-dependencies"))]
 pub mod testing {
     use incrementalmerkletree::Address;
     use secrecy::{ExposeSecret, SecretVec};
