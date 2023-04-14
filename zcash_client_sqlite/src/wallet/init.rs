@@ -522,7 +522,7 @@ mod tests {
                    transactions.txid                 AS txid,
                    transactions.expiry_height        AS expiry_height,
                    transactions.raw                  AS raw,
-                   SUM(notes.value)                  AS net_transfer,
+                   SUM(notes.value)                  AS account_balance_delta,
                    transactions.fee                  AS fee_paid,
                    SUM(notes.is_change) > 0          AS has_change,
                    MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,

@@ -175,7 +175,7 @@ impl RusqliteMigration for Migration {
                    transactions.txid                 AS txid,
                    transactions.expiry_height        AS expiry_height,
                    transactions.raw                  AS raw,
-                   SUM(notes.value)                  AS net_transfer,
+                   SUM(notes.value)                  AS account_balance_delta,
                    transactions.fee                  AS fee_paid,
                    SUM(notes.is_change) > 0          AS has_change,
                    MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
@@ -394,7 +394,7 @@ mod tests {
             let mut q = db_data
                 .conn
                 .prepare(
-                    "SELECT account_id, id_tx, net_transfer, has_change, memo_count, sent_note_count, received_note_count
+                    "SELECT account_id, id_tx, account_balance_delta, has_change, memo_count, sent_note_count, received_note_count
                     FROM v_transactions",
                 )
                 .unwrap();
@@ -404,38 +404,38 @@ mod tests {
                 row_count += 1;
                 let account: i64 = row.get(0).unwrap();
                 let tx: i64 = row.get(1).unwrap();
-                let net_transfer: i64 = row.get(2).unwrap();
+                let account_balance_delta: i64 = row.get(2).unwrap();
                 let has_change: bool = row.get(3).unwrap();
                 let memo_count: i64 = row.get(4).unwrap();
                 let sent_note_count: i64 = row.get(5).unwrap();
                 let received_note_count: i64 = row.get(6).unwrap();
                 match (account, tx) {
                     (0, 0) => {
-                        assert_eq!(net_transfer, 7);
+                        assert_eq!(account_balance_delta, 7);
                         assert!(!has_change);
                         assert_eq!(memo_count, 0);
                     }
                     (0, 1) => {
-                        assert_eq!(net_transfer, -5);
+                        assert_eq!(account_balance_delta, -5);
                         assert!(has_change);
                         assert_eq!(memo_count, 1);
                     }
                     (0, 2) => {
-                        assert_eq!(net_transfer, 0);
+                        assert_eq!(account_balance_delta, 0);
                         assert!(has_change);
                         assert_eq!(memo_count, 0);
                         assert_eq!(sent_note_count, 1);
                         assert_eq!(received_note_count, 1);
                     }
                     (1, 2) => {
-                        assert_eq!(net_transfer, 1);
+                        assert_eq!(account_balance_delta, 1);
                         assert!(!has_change);
                         assert_eq!(memo_count, 0);
                         assert_eq!(sent_note_count, 0);
                         assert_eq!(received_note_count, 1);
                     }
                     (0, 3) => {
-                        assert_eq!(net_transfer, 1);
+                        assert_eq!(account_balance_delta, 1);
                         assert!(!has_change);
                         assert_eq!(memo_count, 0);
                         assert_eq!(sent_note_count, 0);
