@@ -7,15 +7,21 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.8.0] - 2023-04-15
 ### Changed
 - Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `orchard 0.4`,
-  `tonic 0.9`, `base64 0.21`, `bech32 0.9`.
+  `tonic 0.9`, `base64 0.21`, `bech32 0.9`, `zcash_primitives 0.11`.
 - The dependency on `zcash_primitives` no longer enables the `multicore` feature
   by default in order to support compilation under `wasm32-wasi`. Users of other
   platforms may need to include an explicit dependency on `zcash_primitives`
   without `default-features = false` or otherwise explicitly enable the
   `zcash_primitives/multicore` feature if they did not already depend
   upon `zcash_primitives` with default features enabled.
+
+### Fixed
+- `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy` now takes
+  into account the Sapling output padding behaviour of
+  `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder`.
 
 ## [0.7.0] - 2023-02-01
 ### Added

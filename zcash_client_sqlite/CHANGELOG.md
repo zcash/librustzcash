@@ -7,8 +7,26 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.6.0] - 2023-04-15
+### Added
+- SQLite view `v_tx_outputs`, exposing the history of transaction outputs sent
+  from and received by the wallet. See `zcash_client_sqlite::wallet` for view
+  documentation.
+
+### Fixed
+- In a previous crate release, `WalletDb` was modified to start tracking Sapling
+  change notes in both the `sent_notes` and `received_notes` tables, as a form
+  of double-entry accounting. This broke assumptions in the `v_transactions`
+  SQLite view, and also left the `sent_notes` table in an inconsistent state. A
+  migration has been added to this release which fixes the `sent_notes` table to
+  consistently store Sapling change notes.
+- The SQLite view `v_transactions` had several bugs independently from the above
+  issue, and has been rewritten. See `zcash_client_sqlite::wallet` for view
+  documentation.
+
 ### Changed
-- Bumped dependencies to `group 0.13`, `jubjub 0.10`
+- Bumped dependencies to `group 0.13`, `jubjub 0.10`, `zcash_primitives 0.11`,
+  `zcash_client_backend 0.8`.
 - The dependency on `zcash_primitives` no longer enables the `multicore` feature
   by default in order to support compilation under `wasm32-wasi`. Users of other
   platforms may need to include an explicit dependency on `zcash_primitives`
@@ -16,7 +34,10 @@ and this library adheres to Rust's notion of
   `zcash_primitives/multicore` feature if they did not already depend
   upon `zcash_primitives` with default features enabled.
 
-## [0.7.0] - 2023-02-01
+### Removed
+- SQLite views `v_tx_received` and `v_tx_sent` (use `v_tx_outputs` instead).
+
+## [0.5.0] - 2023-02-01
 ### Added
 - `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db
  to the specified height following the same logic as homonymous functions on
