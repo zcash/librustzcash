@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.6.0] - 2023-04-15
 ### Added
 - SQLite view `v_tx_outputs`, exposing the history of transaction outputs sent
   from and received by the wallet. See `zcash_client_sqlite::wallet` for view
@@ -35,7 +37,7 @@ and this library adheres to Rust's notion of
 ### Removed
 - SQLite views `v_tx_received` and `v_tx_sent` (use `v_tx_outputs` instead).
 
-## [0.7.0] - 2023-02-01
+## [0.5.0] - 2023-02-01
 ### Added
 - `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db
  to the specified height following the same logic as homonymous functions on
