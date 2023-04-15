@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.8.0] - 2023-04-15
 ### Changed
 - Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `orchard 0.4`,
   `tonic 0.9`, `base64 0.21`, `bech32 0.9`, `zcash_primitives 0.11`.
