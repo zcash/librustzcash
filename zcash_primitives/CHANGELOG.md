@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`.
 
 ## [0.11.0] - 2023-04-15
 ### Added
