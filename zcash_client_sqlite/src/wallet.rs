@@ -123,7 +123,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
 }
 
 /// This trait provides a generalization over shielded output representations.
-pub(crate) trait SaplingOutput {
+pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;
     fn account(&self) -> AccountId;
     fn note(&self) -> &Note;
@@ -132,7 +132,7 @@ pub(crate) trait SaplingOutput {
     fn nullifier(&self) -> Option<&Nullifier>;
 }
 
-impl SaplingOutput for WalletSaplingOutput<Nullifier> {
+impl ReceivedSaplingOutput for WalletSaplingOutput<Nullifier> {
     fn index(&self) -> usize {
         self.index()
     }
@@ -154,7 +154,7 @@ impl SaplingOutput for WalletSaplingOutput<Nullifier> {
     }
 }
 
-impl SaplingOutput for DecryptedOutput<Note> {
+impl ReceivedSaplingOutput for DecryptedOutput<Note> {
     fn index(&self) -> usize {
         self.index
     }
@@ -994,7 +994,7 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
 /// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
-pub(crate) fn put_received_note<'a, P, T: SaplingOutput>(
+pub(crate) fn put_received_note<'a, P, T: ReceivedSaplingOutput>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &T,
     tx_ref: i64,

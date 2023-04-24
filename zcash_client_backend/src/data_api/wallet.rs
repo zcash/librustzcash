@@ -5,7 +5,12 @@ use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     merkle_tree::MerklePath,
-    sapling::{self, prover::TxProver as SaplingProver, Node},
+    sapling::{
+        self,
+        note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
+        prover::TxProver as SaplingProver,
+        Node,
+    },
     transaction::{
         builder::Builder,
         components::amount::{Amount, BalanceError},
@@ -554,6 +559,7 @@ where
     // Build the transaction with the specified fee rule
     let (tx, sapling_build_meta) = builder.build(&prover, proposal.fee_rule())?;
 
+    let internal_ivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
     let sapling_outputs =
         sapling_output_meta
             .into_iter()
@@ -563,12 +569,22 @@ where
                     .output_index(i)
                     .expect("An output should exist in the transaction for each shielded payment.");
 
-                SentTransactionOutput {
-                    output_index,
-                    recipient,
-                    value,
-                    memo,
-                }
+                let received_as =
+                    if let Recipient::InternalAccount(account, PoolType::Sapling) = recipient {
+                        tx.sapling_bundle().and_then(|bundle| {
+                            try_sapling_note_decryption(
+                                params,
+                                proposal.target_height(),
+                                &internal_ivk,
+                                &bundle.shielded_outputs()[output_index],
+                            )
+                            .map(|(note, _, _)| (account, note))
+                        })
+                    } else {
+                        None
+                    };
+
+                SentTransactionOutput::from_parts(output_index, recipient, value, memo, received_as)
             });
 
     let transparent_outputs = transparent_output_meta.into_iter().map(|(addr, value)| {
@@ -584,12 +600,13 @@ where
             .map(|(index, _)| index)
             .expect("An output should exist in the transaction for each transparent payment.");
 
-        SentTransactionOutput {
+        SentTransactionOutput::from_parts(
             output_index,
-            recipient: Recipient::Transparent(addr),
+            Recipient::Transparent(addr),
             value,
-            memo: None,
-        }
+            None,
+            None,
+        )
     });
 
     wallet_db
