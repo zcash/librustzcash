@@ -7,7 +7,7 @@ use zcash_primitives::{
         note_encryption::{
             try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
         },
-        Note, PaymentAddress,
+        Note,
     },
     transaction::Transaction,
     zip32::{AccountId, Scope},
@@ -39,8 +39,6 @@ pub struct DecryptedOutput {
     pub note: Note,
     /// The account that decrypted the note.
     pub account: AccountId,
-    /// The address the note was sent to.
-    pub to: PaymentAddress,
     /// The memo bytes included with the note.
     pub memo: MemoBytes,
     /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
@@ -94,11 +92,10 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                                         .map(|ret| (ret, TransferType::Outgoing))
                                 })
                                 .into_iter()
-                                .map(move |((note, to, memo), transfer_type)| DecryptedOutput {
+                                .map(move |((note, _, memo), transfer_type)| DecryptedOutput {
                                     index,
                                     note,
                                     account,
-                                    to,
                                     memo,
                                     transfer_type,
                                 })

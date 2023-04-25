@@ -101,7 +101,6 @@ pub struct WalletSaplingOutput<N> {
     pub ephemeral_key: EphemeralKeyBytes,
     pub account: AccountId,
     pub note: sapling::Note,
-    pub to: sapling::PaymentAddress,
     pub is_change: bool,
     pub witness: IncrementalWitness<sapling::Node>,
     pub nf: N,

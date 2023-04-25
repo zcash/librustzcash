@@ -18,6 +18,11 @@ and this library adheres to Rust's notion of
 ### Removed
   - `wallet::WalletTx::num_spends`
   - `wallet::WalletTx::num_outputs`
+  - `wallet::WalletSaplingOutput::to` is redundant and has been removed; the
+    recipient address can be obtained from the note.
+  - `decrypt::DecryptedOutput::to` is redundant and has been removed; the
+    recipient address can be obtained from the note.
+
 ## [0.8.0] - 2023-04-15
 ### Changed
 - Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `orchard 0.4`,

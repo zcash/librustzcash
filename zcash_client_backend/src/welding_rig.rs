@@ -344,7 +344,7 @@ pub(crate) fn scan_block_with_runner<
                 }
                 tree.append(node).unwrap();
 
-                if let Some(((note, to), account, nk)) = dec_output {
+                if let Some(((note, _), account, nk)) = dec_output {
                     // A note is marked as "change" if the account that received it
                     // also spent notes in the same transaction. This will catch,
                     // for instance:
@@ -361,7 +361,6 @@ pub(crate) fn scan_block_with_runner<
                         ephemeral_key: output.ephemeral_key.clone(),
                         account,
                         note,
-                        to,
                         is_change,
                         witness,
                         nf,

@@ -74,7 +74,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Note, Nullifier, PaymentAddress},
+    sapling::{Node, Note, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{
         sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
@@ -126,7 +126,6 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
 pub(crate) trait SaplingOutput {
     fn index(&self) -> usize;
     fn account(&self) -> AccountId;
-    fn to(&self) -> &PaymentAddress;
     fn note(&self) -> &Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> Option<bool>;
@@ -139,9 +138,6 @@ impl SaplingOutput for WalletSaplingOutput<Nullifier> {
     }
     fn account(&self) -> AccountId {
         self.account
-    }
-    fn to(&self) -> &PaymentAddress {
-        &self.to
     }
     fn note(&self) -> &Note {
         &self.note
@@ -164,9 +160,6 @@ impl SaplingOutput for DecryptedOutput {
     }
     fn account(&self) -> AccountId {
         self.account
-    }
-    fn to(&self) -> &PaymentAddress {
-        &self.to
     }
     fn note(&self) -> &Note {
         &self.note
@@ -1008,7 +1001,8 @@ pub(crate) fn put_received_note<'a, P, T: SaplingOutput>(
 ) -> Result<NoteId, SqliteClientError> {
     let rcm = output.note().rcm().to_repr();
     let account = output.account();
-    let diversifier = output.to().diversifier();
+    let to = output.note().recipient();
+    let diversifier = to.diversifier();
     let value = output.note().value();
     let memo = output.memo();
     let is_change = output.is_change();

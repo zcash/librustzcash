@@ -569,7 +569,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.to)
+                            Recipient::Sapling(output.note.recipient())
                         } else {
                             Recipient::InternalAccount(output.account, PoolType::Sapling)
                         };
