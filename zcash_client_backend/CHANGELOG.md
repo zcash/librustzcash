@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- `decrypt::DecryptedOutput` is now parameterized by a `Note` type parameter,
+  to allow reuse of the data structure for non-Sapling contexts.
 
 ### Renamed
 - The following types and fields have been renamed in preparation for supporting

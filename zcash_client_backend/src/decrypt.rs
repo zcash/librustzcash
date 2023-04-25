@@ -4,10 +4,10 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     sapling::{
+        self,
         note_encryption::{
             try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
         },
-        Note,
     },
     transaction::Transaction,
     zip32::{AccountId, Scope},
@@ -30,7 +30,7 @@ pub enum TransferType {
 }
 
 /// A decrypted shielded output.
-pub struct DecryptedOutput {
+pub struct DecryptedOutput<Note> {
     /// The index of the output within [`shielded_outputs`].
     ///
     /// [`shielded_outputs`]: zcash_primitives::transaction::TransactionData
@@ -55,7 +55,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     height: BlockHeight,
     tx: &Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
-) -> Vec<DecryptedOutput> {
+) -> Vec<DecryptedOutput<sapling::Note>> {
     tx.sapling_bundle()
         .iter()
         .flat_map(|bundle| {

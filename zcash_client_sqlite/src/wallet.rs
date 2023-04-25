@@ -154,7 +154,7 @@ impl SaplingOutput for WalletSaplingOutput<Nullifier> {
     }
 }
 
-impl SaplingOutput for DecryptedOutput {
+impl SaplingOutput for DecryptedOutput<Note> {
     fn index(&self) -> usize {
         self.index
     }

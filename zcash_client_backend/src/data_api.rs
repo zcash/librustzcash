@@ -11,7 +11,7 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier, PaymentAddress},
+    sapling::{self, Node, Nullifier, PaymentAddress},
     transaction::{
         components::{amount::Amount, OutPoint},
         Transaction, TxId,
@@ -247,7 +247,7 @@ pub struct PrunedBlock<'a> {
 /// wallet database when transactions are successfully decrypted.
 pub struct DecryptedTransaction<'a> {
     pub tx: &'a Transaction,
-    pub sapling_outputs: &'a Vec<DecryptedOutput>,
+    pub sapling_outputs: &'a Vec<DecryptedOutput<sapling::Note>>,
 }
 
 /// A transaction that was constructed and sent by the wallet.
