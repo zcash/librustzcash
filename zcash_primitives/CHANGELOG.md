@@ -6,6 +6,11 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::transaction`:
+  - `Transaction::temporary_zcashd_read_v5_sapling`
+  - `Transaction::temporary_zcashd_write_v5_sapling`
+
 ### Changed
 - Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`.
 - `zcash_primitives::transactions::component::amount::DEFAULT_FEE` increased zip317 
