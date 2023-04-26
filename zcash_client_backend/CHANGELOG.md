@@ -9,11 +9,12 @@ and this library adheres to Rust's notion of
 ### Added
 - `data_api::SentTransactionOutput::from_parts`
 - `data_api::SentTransactionOutput::sapling_change_to`
+- `data_api::WalletRead::get_min_unspent_height`
 
 ### Changed
 - `decrypt::DecryptedOutput` is now parameterized by a `Note` type parameter,
   to allow reuse of the data structure for non-Sapling contexts.
-- `data_api::SentTransactionOutput` must now be constructed using 
+- `data_api::SentTransactionOutput` must now be constructed using
   `SentTransactionOutput::from_parts`
 
 ### Renamed
@@ -25,6 +26,8 @@ and this library adheres to Rust's notion of
     data structure have been made private.
   - `WalletShieldedOutput` -> `WalletSaplingOutput`. Also, the internals of this
     data structure have been made private.
+- The `data_api::WalletWrite::rewind_to_height` method has been renamed to
+  `truncate_to_height` to better reflect its semantics.
 
 ### Removed
   - `wallet::WalletTx::num_spends`

@@ -55,7 +55,7 @@
 //!             let rewind_height = e.at_height() - 10;
 //!
 //!             // b) Rewind scanned block information.
-//!             db_data.rewind_to_height(rewind_height);
+//!             db_data.truncate_to_height(rewind_height);
 //!
 //!             // c) Delete cached blocks from rewind_height onwards.
 //!             //

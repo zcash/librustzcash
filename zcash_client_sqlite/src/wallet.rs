@@ -583,9 +583,9 @@ pub(crate) fn get_block_hash<P>(
         .optional()
 }
 
-/// Gets the height to which the database must be rewound if any rewind greater than the pruning
-/// height is attempted.
-pub(crate) fn get_rewind_height<P>(
+/// Gets the height to which the database must be truncated if any truncation that would remove a
+/// number of blocks greater than the pruning height is attempted.
+pub(crate) fn get_min_unspent_height<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     wdb.conn
@@ -603,13 +603,13 @@ pub(crate) fn get_rewind_height<P>(
         .map_err(SqliteClientError::from)
 }
 
-/// Rewinds the database to the given height.
+/// Truncates the database to the given height.
 ///
 /// If the requested height is greater than or equal to the height of the last scanned
 /// block, this function does nothing.
 ///
 /// This should only be executed inside a transactional context.
-pub(crate) fn rewind_to_height<P: consensus::Parameters>(
+pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     wdb: &WalletDb<P>,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
@@ -628,7 +628,7 @@ pub(crate) fn rewind_to_height<P: consensus::Parameters>(
         })?;
 
     if block_height < last_scanned_height - PRUNING_HEIGHT {
-        if let Some(h) = get_rewind_height(wdb)? {
+        if let Some(h) = get_min_unspent_height(wdb)? {
             if block_height > h {
                 return Err(SqliteClientError::RequestedRewindInvalid(h, block_height));
             }

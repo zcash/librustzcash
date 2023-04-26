@@ -139,6 +139,10 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::get_min_unspent_height(self).map_err(SqliteClientError::from)
+    }
+
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
         wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
@@ -292,6 +296,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         self.wallet_db.block_height_extrema()
+    }
+
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        self.wallet_db.get_min_unspent_height()
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
@@ -675,8 +683,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         })
     }
 
-    fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::rewind_to_height(self.wallet_db, block_height)
+    fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
+        wallet::truncate_to_height(self.wallet_db, block_height)
     }
 
     fn put_received_transparent_utxo(
@@ -875,8 +883,8 @@ impl FsBlockDb {
     /// If the requested height is greater than or equal to the height
     /// of the last scanned block, or if the DB is empty, this function
     /// does nothing.
-    pub fn rewind_to_height(&self, block_height: BlockHeight) -> Result<(), FsBlockDbError> {
-        Ok(chain::blockmetadb_rewind_to_height(
+    pub fn truncate_to_height(&self, block_height: BlockHeight) -> Result<(), FsBlockDbError> {
+        Ok(chain::blockmetadb_truncate_to_height(
             &self.conn,
             block_height,
         )?)
@@ -1363,7 +1371,9 @@ mod tests {
         assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        db_meta.rewind_to_height(BlockHeight::from_u32(1)).unwrap();
+        db_meta
+            .truncate_to_height(BlockHeight::from_u32(1))
+            .unwrap();
         assert_eq!(
             db_meta.get_max_cached_height().unwrap(),
             Some(BlockHeight::from_u32(1)),
