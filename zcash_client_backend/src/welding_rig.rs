@@ -231,19 +231,17 @@ pub(crate) fn scan_block_with_runner<
                         CtOption::new(AccountId::from(0), 0.into()),
                         |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
                     )
-                    .map(|account| WalletSaplingSpend {
-                        index,
-                        nf: spend_nf,
-                        account,
-                    })
+                    .map(|account| WalletSaplingSpend::from_parts(index, spend_nf, account))
             })
             .filter(|spend| spend.is_some().into())
             .map(|spend| spend.unwrap())
             .collect();
 
         // Collect the set of accounts that were spent from in this transaction
-        let spent_from_accounts: HashSet<_> =
-            shielded_spends.iter().map(|spend| spend.account).collect();
+        let spent_from_accounts: HashSet<_> = shielded_spends
+            .iter()
+            .map(|spend| spend.account())
+            .collect();
 
         // Check for incoming notes while incrementing tree and witnesses
         let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf>> = vec![];
@@ -256,7 +254,7 @@ pub(crate) fn scan_block_with_runner<
                 .flat_map(|tx| {
                     tx.sapling_outputs
                         .iter_mut()
-                        .map(|output| &mut output.witness)
+                        .map(|output| output.witness_mut())
                 })
                 .collect();
 
@@ -328,7 +326,7 @@ pub(crate) fn scan_block_with_runner<
                 // don't hold mutable references to shielded_outputs for too long.
                 let new_witnesses: Vec<_> = shielded_outputs
                     .iter_mut()
-                    .map(|out| &mut out.witness)
+                    .map(|out| out.witness_mut())
                     .collect();
 
                 // Increment tree and witnesses
@@ -355,16 +353,16 @@ pub(crate) fn scan_block_with_runner<
                     let witness = IncrementalWitness::from_tree(tree);
                     let nf = K::sapling_nf(&nk, &note, &witness);
 
-                    shielded_outputs.push(WalletSaplingOutput {
+                    shielded_outputs.push(WalletSaplingOutput::from_parts(
                         index,
-                        cmu: output.cmu,
-                        ephemeral_key: output.ephemeral_key.clone(),
+                        output.cmu,
+                        output.ephemeral_key.clone(),
                         account,
                         note,
                         is_change,
                         witness,
                         nf,
-                    })
+                    ))
                 }
             }
         }
@@ -566,12 +564,12 @@ mod tests {
             assert_eq!(tx.index, 1);
             assert_eq!(tx.sapling_spends.len(), 0);
             assert_eq!(tx.sapling_outputs.len(), 1);
-            assert_eq!(tx.sapling_outputs[0].index, 0);
-            assert_eq!(tx.sapling_outputs[0].account, account);
-            assert_eq!(tx.sapling_outputs[0].note.value().inner(), 5);
+            assert_eq!(tx.sapling_outputs[0].index(), 0);
+            assert_eq!(tx.sapling_outputs[0].account(), account);
+            assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
 
             // Check that the witness root matches
-            assert_eq!(tx.sapling_outputs[0].witness.root(), tree.root());
+            assert_eq!(tx.sapling_outputs[0].witness().root(), tree.root());
         }
 
         go(false);
@@ -627,12 +625,12 @@ mod tests {
             assert_eq!(tx.index, 1);
             assert_eq!(tx.sapling_spends.len(), 0);
             assert_eq!(tx.sapling_outputs.len(), 1);
-            assert_eq!(tx.sapling_outputs[0].index, 0);
-            assert_eq!(tx.sapling_outputs[0].account, AccountId::from(0));
-            assert_eq!(tx.sapling_outputs[0].note.value().inner(), 5);
+            assert_eq!(tx.sapling_outputs[0].index(), 0);
+            assert_eq!(tx.sapling_outputs[0].account(), AccountId::from(0));
+            assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
 
             // Check that the witness root matches
-            assert_eq!(tx.sapling_outputs[0].witness.root(), tree.root());
+            assert_eq!(tx.sapling_outputs[0].witness().root(), tree.root());
         }
 
         go(false);
@@ -665,8 +663,8 @@ mod tests {
         assert_eq!(tx.index, 1);
         assert_eq!(tx.sapling_spends.len(), 1);
         assert_eq!(tx.sapling_outputs.len(), 0);
-        assert_eq!(tx.sapling_spends[0].index, 0);
-        assert_eq!(tx.sapling_spends[0].nf, nf);
-        assert_eq!(tx.sapling_spends[0].account, account);
+        assert_eq!(tx.sapling_spends[0].index(), 0);
+        assert_eq!(tx.sapling_spends[0].nf(), &nf);
+        assert_eq!(tx.sapling_spends[0].account(), account);
     }
 }

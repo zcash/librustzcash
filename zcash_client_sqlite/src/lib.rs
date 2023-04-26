@@ -526,14 +526,14 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
                 // Mark notes as spent and remove them from the scanning cache
                 for spend in &tx.sapling_spends {
-                    wallet::mark_sapling_note_spent(up, tx_row, &spend.nf)?;
+                    wallet::mark_sapling_note_spent(up, tx_row, spend.nf())?;
                 }
 
                 for output in &tx.sapling_outputs {
                     let received_note_id = wallet::put_received_note(up, output, tx_row)?;
 
                     // Save witness for note.
-                    new_witnesses.push((received_note_id, output.witness.clone()));
+                    new_witnesses.push((received_note_id, output.witness().clone()));
                 }
             }
 

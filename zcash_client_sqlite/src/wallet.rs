@@ -129,28 +129,28 @@ pub(crate) trait SaplingOutput {
     fn note(&self) -> &Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> Option<bool>;
-    fn nullifier(&self) -> Option<Nullifier>;
+    fn nullifier(&self) -> Option<&Nullifier>;
 }
 
 impl SaplingOutput for WalletSaplingOutput<Nullifier> {
     fn index(&self) -> usize {
-        self.index
+        self.index()
     }
     fn account(&self) -> AccountId {
-        self.account
+        WalletSaplingOutput::account(self)
     }
     fn note(&self) -> &Note {
-        &self.note
+        WalletSaplingOutput::note(self)
     }
     fn memo(&self) -> Option<&MemoBytes> {
         None
     }
     fn is_change(&self) -> Option<bool> {
-        Some(self.is_change)
+        Some(WalletSaplingOutput::is_change(self))
     }
 
-    fn nullifier(&self) -> Option<Nullifier> {
-        Some(self.nf)
+    fn nullifier(&self) -> Option<&Nullifier> {
+        Some(self.nf())
     }
 }
 
@@ -170,7 +170,7 @@ impl SaplingOutput for DecryptedOutput<Note> {
     fn is_change(&self) -> Option<bool> {
         None
     }
-    fn nullifier(&self) -> Option<Nullifier> {
+    fn nullifier(&self) -> Option<&Nullifier> {
         None
     }
 }
@@ -1015,7 +1015,7 @@ pub(crate) fn put_received_note<'a, P, T: SaplingOutput>(
         diversifier,
         value.inner(),
         rcm,
-        &nf,
+        nf,
         memo,
         is_change,
         tx_ref,
@@ -1029,7 +1029,7 @@ pub(crate) fn put_received_note<'a, P, T: SaplingOutput>(
             diversifier,
             value.inner(),
             rcm,
-            &nf,
+            nf,
             memo,
             is_change,
         )

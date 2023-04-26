@@ -6,17 +6,25 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `data_api::SentTransactionOutput::from_parts`
+- `data_api::SentTransactionOutput::sapling_change_to`
+
 ### Changed
 - `decrypt::DecryptedOutput` is now parameterized by a `Note` type parameter,
   to allow reuse of the data structure for non-Sapling contexts.
+- `data_api::SentTransactionOutput` must now be constructed using 
+  `SentTransactionOutput::from_parts`
 
 ### Renamed
 - The following types and fields have been renamed in preparation for supporting
   `orchard` in wallet APIs:
   - `WalletTx::shielded_spends`  -> `WalletTx::sapling_spends`
   - `WalletTx::shielded_outputs` -> `WalletTx::sapling_outputs`
-  - `WalletShieldedSpend` -> `WalletSaplingSpend`
-  - `WalletShieldedOutput` -> `WalletSaplingOutput`
+  - `WalletShieldedSpend` -> `WalletSaplingSpend`. Also, the internals of this
+    data structure have been made private.
+  - `WalletShieldedOutput` -> `WalletSaplingOutput`. Also, the internals of this
+    data structure have been made private.
 
 ### Removed
   - `wallet::WalletTx::num_spends`

@@ -87,23 +87,93 @@ impl transparent::fees::InputView for WalletTransparentOutput {
 ///
 /// [`SpendDescription`]: zcash_primitives::transaction::components::SpendDescription
 pub struct WalletSaplingSpend {
-    pub index: usize,
-    pub nf: sapling::Nullifier,
-    pub account: AccountId,
+    index: usize,
+    nf: sapling::Nullifier,
+    account: AccountId,
+}
+
+impl WalletSaplingSpend {
+    pub fn from_parts(index: usize, nf: sapling::Nullifier, account: AccountId) -> Self {
+        Self { index, nf, account }
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+    pub fn nf(&self) -> &sapling::Nullifier {
+        &self.nf
+    }
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
 }
 
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.
 ///
 /// [`OutputDescription`]: zcash_primitives::transaction::components::OutputDescription
 pub struct WalletSaplingOutput<N> {
-    pub index: usize,
-    pub cmu: sapling::note::ExtractedNoteCommitment,
-    pub ephemeral_key: EphemeralKeyBytes,
-    pub account: AccountId,
-    pub note: sapling::Note,
-    pub is_change: bool,
-    pub witness: IncrementalWitness<sapling::Node>,
-    pub nf: N,
+    index: usize,
+    cmu: sapling::note::ExtractedNoteCommitment,
+    ephemeral_key: EphemeralKeyBytes,
+    account: AccountId,
+    note: sapling::Note,
+    is_change: bool,
+    witness: IncrementalWitness<sapling::Node>,
+    nf: N,
+}
+
+impl<N> WalletSaplingOutput<N> {
+    /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        index: usize,
+        cmu: sapling::note::ExtractedNoteCommitment,
+        ephemeral_key: EphemeralKeyBytes,
+        account: AccountId,
+        note: sapling::Note,
+        is_change: bool,
+        witness: IncrementalWitness<sapling::Node>,
+        nf: N,
+    ) -> Self {
+        Self {
+            index,
+            cmu,
+            ephemeral_key,
+            account,
+            note,
+            is_change,
+            witness,
+            nf,
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+    pub fn cmu(&self) -> &sapling::note::ExtractedNoteCommitment {
+        &self.cmu
+    }
+    pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
+        &self.ephemeral_key
+    }
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
+    pub fn note(&self) -> &sapling::Note {
+        &self.note
+    }
+    pub fn is_change(&self) -> bool {
+        self.is_change
+    }
+    pub fn witness(&self) -> &IncrementalWitness<sapling::Node> {
+        &self.witness
+    }
+    pub fn witness_mut(&mut self) -> &mut IncrementalWitness<sapling::Node> {
+        &mut self.witness
+    }
+    pub fn nf(&self) -> &N {
+        &self.nf
+    }
 }
 
 /// Information about a note that is tracked by the wallet that is available for spending,
