@@ -291,20 +291,49 @@ pub enum Recipient {
 }
 
 pub struct SentTransactionOutput {
-    /// The index within the transaction that contains the recipient output.
+    output_index: usize,
+    recipient: Recipient,
+    value: Amount,
+    memo: Option<MemoBytes>,
+}
+
+impl SentTransactionOutput {
+    pub fn from_parts(
+        output_index: usize,
+        recipient: Recipient,
+        value: Amount,
+        memo: Option<MemoBytes>,
+    ) -> Self {
+        Self {
+            output_index,
+            recipient,
+            value,
+            memo,
+        }
+    }
+
+    /// Returns the index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
     ///   outputs of the transaction.
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
-    pub output_index: usize,
-    /// The recipient address of the transaction, or the account
-    /// id for wallet-internal transactions.
-    pub recipient: Recipient,
-    /// The value of the newly created output
-    pub value: Amount,
-    /// The memo that was attached to the output, if any
-    pub memo: Option<MemoBytes>,
+    pub fn output_index(&self) -> usize {
+        self.output_index
+    }
+    /// Returns the recipient address of the transaction, or the account id for wallet-internal
+    /// transactions.
+    pub fn recipient(&self) -> &Recipient {
+        &self.recipient
+    }
+    /// Returns the value of the newly created output.
+    pub fn value(&self) -> Amount {
+        self.value
+    }
+    /// Returns the memo that was attached to the output, if any.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
+    }
 }
 
 /// This trait encapsulates the write capabilities required to update stored

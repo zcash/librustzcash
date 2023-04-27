@@ -1078,11 +1078,11 @@ pub(crate) fn insert_sent_output<'a, P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     stmts.stmt_insert_sent_output(
         tx_ref,
-        output.output_index,
+        output.output_index(),
         from_account,
-        &output.recipient,
-        output.value,
-        output.memo.as_ref(),
+        output.recipient(),
+        output.value(),
+        output.memo(),
     )
 }
 

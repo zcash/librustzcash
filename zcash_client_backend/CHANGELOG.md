@@ -8,14 +8,15 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - `data_api::SentTransactionOutput::from_parts`
-- `data_api::SentTransactionOutput::sapling_change_to`
 - `data_api::WalletRead::get_min_unspent_height`
 
 ### Changed
 - `decrypt::DecryptedOutput` is now parameterized by a `Note` type parameter,
   to allow reuse of the data structure for non-Sapling contexts.
 - `data_api::SentTransactionOutput` must now be constructed using
-  `SentTransactionOutput::from_parts`
+  `SentTransactionOutput::from_parts`. The internal state of `SentTransactionOutput`
+  is now private, and accessible via methods that have the same names as the 
+  previously exposed fields.
 
 ### Renamed
 - The following types and fields have been renamed in preparation for supporting
