@@ -62,10 +62,7 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientErr
     })
 }
 
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletRead::get_spendable_sapling_notes instead."
-)]
-pub fn get_spendable_sapling_notes<P>(
+pub(crate) fn get_spendable_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
     anchor_height: BlockHeight,
@@ -104,10 +101,7 @@ pub fn get_spendable_sapling_notes<P>(
     notes.collect::<Result<_, _>>()
 }
 
-#[deprecated(
-    note = "This method will be removed in a future update. Use zcash_client_backend::data_api::WalletRead::select_spendable_sapling_notes instead."
-)]
-pub fn select_spendable_sapling_notes<P>(
+pub(crate) fn select_spendable_sapling_notes<P>(
     wdb: &WalletDb<P>,
     account: AccountId,
     target_value: Amount,

@@ -6,6 +6,37 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `data_api::SentTransactionOutput::from_parts`
+- `data_api::WalletRead::get_min_unspent_height`
+
+### Changed
+- `decrypt::DecryptedOutput` is now parameterized by a `Note` type parameter,
+  to allow reuse of the data structure for non-Sapling contexts.
+- `data_api::SentTransactionOutput` must now be constructed using
+  `SentTransactionOutput::from_parts`. The internal state of `SentTransactionOutput`
+  is now private, and accessible via methods that have the same names as the 
+  previously exposed fields.
+
+### Renamed
+- The following types and fields have been renamed in preparation for supporting
+  `orchard` in wallet APIs:
+  - `WalletTx::shielded_spends`  -> `WalletTx::sapling_spends`
+  - `WalletTx::shielded_outputs` -> `WalletTx::sapling_outputs`
+  - `WalletShieldedSpend` -> `WalletSaplingSpend`. Also, the internals of this
+    data structure have been made private.
+  - `WalletShieldedOutput` -> `WalletSaplingOutput`. Also, the internals of this
+    data structure have been made private.
+- The `data_api::WalletWrite::rewind_to_height` method has been renamed to
+  `truncate_to_height` to better reflect its semantics.
+
+### Removed
+  - `wallet::WalletTx::num_spends`
+  - `wallet::WalletTx::num_outputs`
+  - `wallet::WalletSaplingOutput::to` is redundant and has been removed; the
+    recipient address can be obtained from the note.
+  - `decrypt::DecryptedOutput::to` is redundant and has been removed; the
+    recipient address can be obtained from the note.
 
 ## [0.8.0] - 2023-04-15
 ### Changed

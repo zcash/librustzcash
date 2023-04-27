@@ -684,7 +684,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         diversifier: &Diversifier,
         value: u64,
         rcm: [u8; 32],
-        nf: &Option<Nullifier>,
+        nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
         is_change: Option<bool>,
     ) -> Result<NoteId, SqliteClientError> {
@@ -695,7 +695,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":diversifier", &diversifier.0.as_ref()),
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
-            (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
+            (":nf", &nf.map(|nf| nf.0.as_ref())),
             (
                 ":memo",
                 &memo
@@ -726,7 +726,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         diversifier: &Diversifier,
         value: u64,
         rcm: [u8; 32],
-        nf: &Option<Nullifier>,
+        nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
         is_change: Option<bool>,
         tx_ref: i64,
@@ -737,7 +737,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":diversifier", &diversifier.0.as_ref()),
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
-            (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
+            (":nf", &nf.map(|nf| nf.0.as_ref())),
             (
                 ":memo",
                 &memo
