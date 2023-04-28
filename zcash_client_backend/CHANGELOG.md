@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.9.0] - 2023-04-28
 ### Added
 - `data_api::SentTransactionOutput::from_parts`
 - `data_api::WalletRead::get_min_unspent_height`

@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.7.0] - 2023-04-28
+### Changed
+- Bumped dependencies to `zcash_client_backend 0.9`.
+
 ### Removed
 - The following deprecated types and methods have been removed from the public API:
   - `wallet::ShieldedOutput`
