@@ -361,7 +361,7 @@ mod tests {
                 time INTEGER NOT NULL,
                 sapling_tree BLOB NOT NULL
             )",
-            "CREATE TABLE received_notes (
+            "CREATE TABLE sapling_received_notes (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
@@ -369,7 +369,7 @@ mod tests {
                 diversifier BLOB NOT NULL,
                 value INTEGER NOT NULL,
                 rcm BLOB NOT NULL,
-                nf BLOB NOT NULL UNIQUE,
+                nf BLOB UNIQUE,
                 is_change INTEGER NOT NULL,
                 memo BLOB,
                 spent INTEGER,
@@ -383,7 +383,7 @@ mod tests {
                 note INTEGER NOT NULL,
                 block INTEGER NOT NULL,
                 witness BLOB NOT NULL,
-                FOREIGN KEY (note) REFERENCES received_notes(id_note),
+                FOREIGN KEY (note) REFERENCES sapling_received_notes(id_note),
                 FOREIGN KEY (block) REFERENCES blocks(height),
                 CONSTRAINT witness_height UNIQUE (note, block)
             )",
@@ -455,23 +455,23 @@ mod tests {
             "CREATE VIEW v_transactions AS
             WITH
             notes AS (
-                SELECT received_notes.account        AS account_id,
-                       received_notes.tx             AS id_tx,
+                SELECT sapling_received_notes.account        AS account_id,
+                       sapling_received_notes.tx             AS id_tx,
                        2                             AS pool,
-                       received_notes.value          AS value,
+                       sapling_received_notes.value          AS value,
                        CASE
-                            WHEN received_notes.is_change THEN 1
+                            WHEN sapling_received_notes.is_change THEN 1
                             ELSE 0
                        END AS is_change,
                        CASE
-                            WHEN received_notes.is_change THEN 0
+                            WHEN sapling_received_notes.is_change THEN 0
                             ELSE 1
                        END AS received_count,
                        CASE
-                           WHEN received_notes.memo IS NULL THEN 0
+                           WHEN sapling_received_notes.memo IS NULL THEN 0
                            ELSE 1
                        END AS memo_present
-                FROM   received_notes
+                FROM   sapling_received_notes
                 UNION
                 SELECT utxos.received_by_account     AS account_id,
                        transactions.id_tx            AS id_tx,
@@ -484,15 +484,15 @@ mod tests {
                 JOIN transactions
                      ON transactions.txid = utxos.prevout_txid
                 UNION
-                SELECT received_notes.account        AS account_id,
-                       received_notes.spent          AS id_tx,
+                SELECT sapling_received_notes.account        AS account_id,
+                       sapling_received_notes.spent          AS id_tx,
                        2                             AS pool,
-                       -received_notes.value         AS value,
+                       -sapling_received_notes.value         AS value,
                        0                             AS is_change,
                        0                             AS received_count,
                        0                             AS memo_present
-                FROM   received_notes
-                WHERE  received_notes.spent IS NOT NULL
+                FROM   sapling_received_notes
+                WHERE  sapling_received_notes.spent IS NOT NULL
             ),
             sent_note_counts AS (
                 SELECT sent_notes.from_account AS account_id,
@@ -505,11 +505,11 @@ mod tests {
                          END
                        ) AS memo_count
                 FROM sent_notes
-                LEFT JOIN received_notes
+                LEFT JOIN sapling_received_notes
                           ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-                             (received_notes.tx, 2, received_notes.output_index)
-                WHERE  received_notes.is_change IS NULL
-                   OR  received_notes.is_change = 0
+                             (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+                WHERE  sapling_received_notes.is_change IS NULL
+                   OR  sapling_received_notes.is_change = 0
                 GROUP BY account_id, id_tx
             ),
             blocks_max_height AS (
@@ -543,19 +543,19 @@ mod tests {
             GROUP BY notes.account_id, transactions.id_tx",
             // v_tx_outputs
             "CREATE VIEW v_tx_outputs AS
-            SELECT received_notes.tx           AS id_tx,
-                   2                           AS output_pool,
-                   received_notes.output_index AS output_index,
-                   sent_notes.from_account     AS from_account,
-                   received_notes.account      AS to_account,
-                   NULL                        AS to_address,
-                   received_notes.value        AS value,
-                   received_notes.is_change    AS is_change,
-                   received_notes.memo         AS memo
-            FROM received_notes
+            SELECT sapling_received_notes.tx           AS id_tx,
+                   2                                   AS output_pool,
+                   sapling_received_notes.output_index AS output_index,
+                   sent_notes.from_account             AS from_account,
+                   sapling_received_notes.account      AS to_account,
+                   NULL                                AS to_address,
+                   sapling_received_notes.value        AS value,
+                   sapling_received_notes.is_change    AS is_change,
+                   sapling_received_notes.memo         AS memo
+            FROM sapling_received_notes
             LEFT JOIN sent_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-                         (received_notes.tx, 2, sent_notes.output_index)
+                         (sapling_received_notes.tx, 2, sent_notes.output_index)
             UNION
             SELECT transactions.id_tx          AS id_tx,
                    0                           AS output_pool,
@@ -570,21 +570,21 @@ mod tests {
             JOIN transactions
                  ON transactions.txid = utxos.prevout_txid
             UNION
-            SELECT sent_notes.tx               AS id_tx,
-                   sent_notes.output_pool      AS output_pool,
-                   sent_notes.output_index     AS output_index,
-                   sent_notes.from_account     AS from_account,
-                   received_notes.account      AS to_account,
-                   sent_notes.to_address       AS to_address,
-                   sent_notes.value            AS value,
-                   false                       AS is_change,
-                   sent_notes.memo             AS memo
+            SELECT sent_notes.tx                  AS id_tx,
+                   sent_notes.output_pool         AS output_pool,
+                   sent_notes.output_index        AS output_index,
+                   sent_notes.from_account        AS from_account,
+                   sapling_received_notes.account AS to_account,
+                   sent_notes.to_address          AS to_address,
+                   sent_notes.value               AS value,
+                   false                          AS is_change,
+                   sent_notes.memo                AS memo
             FROM sent_notes
-            LEFT JOIN received_notes
+            LEFT JOIN sapling_received_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
-                         (received_notes.tx, 2, received_notes.output_index)
-            WHERE  received_notes.is_change IS NULL
-               OR  received_notes.is_change = 0",
+                         (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+            WHERE  sapling_received_notes.is_change IS NULL
+               OR  sapling_received_notes.is_change = 0"
         ];
 
         let mut views_query = db_data

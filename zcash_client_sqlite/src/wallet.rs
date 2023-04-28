@@ -87,7 +87,7 @@ use zcash_client_backend::{
     data_api::{PoolType, Recipient, SentTransactionOutput},
     keys::UnifiedFullViewingKey,
     wallet::{WalletSaplingOutput, WalletTx},
-    DecryptedOutput,
+    DecryptedOutput, TransferType,
 };
 
 use crate::{
@@ -123,16 +123,16 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
 }
 
 /// This trait provides a generalization over shielded output representations.
-pub(crate) trait SaplingOutput {
+pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;
     fn account(&self) -> AccountId;
     fn note(&self) -> &Note;
     fn memo(&self) -> Option<&MemoBytes>;
-    fn is_change(&self) -> Option<bool>;
+    fn is_change(&self) -> bool;
     fn nullifier(&self) -> Option<&Nullifier>;
 }
 
-impl SaplingOutput for WalletSaplingOutput<Nullifier> {
+impl ReceivedSaplingOutput for WalletSaplingOutput<Nullifier> {
     fn index(&self) -> usize {
         self.index()
     }
@@ -145,8 +145,8 @@ impl SaplingOutput for WalletSaplingOutput<Nullifier> {
     fn memo(&self) -> Option<&MemoBytes> {
         None
     }
-    fn is_change(&self) -> Option<bool> {
-        Some(WalletSaplingOutput::is_change(self))
+    fn is_change(&self) -> bool {
+        WalletSaplingOutput::is_change(self)
     }
 
     fn nullifier(&self) -> Option<&Nullifier> {
@@ -154,7 +154,7 @@ impl SaplingOutput for WalletSaplingOutput<Nullifier> {
     }
 }
 
-impl SaplingOutput for DecryptedOutput<Note> {
+impl ReceivedSaplingOutput for DecryptedOutput<Note> {
     fn index(&self) -> usize {
         self.index
     }
@@ -167,8 +167,8 @@ impl SaplingOutput for DecryptedOutput<Note> {
     fn memo(&self) -> Option<&MemoBytes> {
         Some(&self.memo)
     }
-    fn is_change(&self) -> Option<bool> {
-        None
+    fn is_change(&self) -> bool {
+        self.transfer_type == TransferType::WalletInternal
     }
     fn nullifier(&self) -> Option<&Nullifier> {
         None
@@ -434,8 +434,8 @@ pub(crate) fn get_balance<P>(
     account: AccountId,
 ) -> Result<Amount, SqliteClientError> {
     let balance = wdb.conn.query_row(
-        "SELECT SUM(value) FROM received_notes
-        INNER JOIN transactions ON transactions.id_tx = received_notes.tx
+        "SELECT SUM(value) FROM sapling_received_notes
+        INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block IS NOT NULL",
         [u32::from(account)],
         |row| row.get(0).or(Ok(0)),
@@ -444,7 +444,7 @@ pub(crate) fn get_balance<P>(
     match Amount::from_i64(balance) {
         Ok(amount) if !amount.is_negative() => Ok(amount),
         _ => Err(SqliteClientError::CorruptedData(
-            "Sum of values in received_notes is out of range".to_string(),
+            "Sum of values in sapling_received_notes is out of range".to_string(),
         )),
     }
 }
@@ -458,8 +458,8 @@ pub(crate) fn get_balance_at<P>(
     anchor_height: BlockHeight,
 ) -> Result<Amount, SqliteClientError> {
     let balance = wdb.conn.query_row(
-        "SELECT SUM(value) FROM received_notes
-        INNER JOIN transactions ON transactions.id_tx = received_notes.tx
+        "SELECT SUM(value) FROM sapling_received_notes
+        INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
         WHERE account = ? AND spent IS NULL AND transactions.block <= ?",
         [u32::from(account), u32::from(anchor_height)],
         |row| row.get(0).or(Ok(0)),
@@ -468,21 +468,21 @@ pub(crate) fn get_balance_at<P>(
     match Amount::from_i64(balance) {
         Ok(amount) if !amount.is_negative() => Ok(amount),
         _ => Err(SqliteClientError::CorruptedData(
-            "Sum of values in received_notes is out of range".to_string(),
+            "Sum of values in sapling_received_notes is out of range".to_string(),
         )),
     }
 }
 
 /// Returns the memo for a received note.
 ///
-/// The note is identified by its row index in the `received_notes` table within the wdb
+/// The note is identified by its row index in the `sapling_received_notes` table within the wdb
 /// database.
 pub(crate) fn get_received_memo<P>(
     wdb: &WalletDb<P>,
     id_note: i64,
 ) -> Result<Memo, SqliteClientError> {
     let memo_bytes: Vec<_> = wdb.conn.query_row(
-        "SELECT memo FROM received_notes
+        "SELECT memo FROM sapling_received_notes
         WHERE id_note = ?",
         [id_note],
         |row| row.get(0),
@@ -591,7 +591,7 @@ pub(crate) fn get_min_unspent_height<P>(
     wdb.conn
         .query_row(
             "SELECT MIN(tx.block)
-             FROM received_notes n
+             FROM sapling_received_notes n
              JOIN transactions tx ON tx.id_tx = n.tx
              WHERE n.spent IS NULL",
             [],
@@ -645,10 +645,10 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 
         // Rewind received notes
         wdb.conn.execute(
-            "DELETE FROM received_notes
+            "DELETE FROM sapling_received_notes
                 WHERE id_note IN (
                     SELECT rn.id_note
-                    FROM received_notes rn
+                    FROM sapling_received_notes rn
                     LEFT OUTER JOIN transactions tx
                     ON tx.id_tx = rn.tx
                     WHERE tx.block IS NOT NULL AND tx.block > ?
@@ -729,19 +729,23 @@ pub(crate) fn get_sapling_witnesses<P>(
     Ok(res)
 }
 
-/// Retrieve the nullifiers for notes that the wallet is tracking
-/// that have not yet been confirmed as a consequence of the spending
-/// transaction being included in a block.
+/// Retrieves the set of nullifiers for "potentially spendable" Sapling notes that the
+/// wallet is tracking.
+///
+/// "Potentially spendable" means:
+/// - The transaction in which the note was created has been observed as mined.
+/// - No transaction in which the note's nullifier appears has been observed as mined.
 pub(crate) fn get_sapling_nullifiers<P>(
     wdb: &WalletDb<P>,
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = wdb.conn.prepare(
         "SELECT rn.id_note, rn.account, rn.nf, tx.block as block
-            FROM received_notes rn
-            LEFT OUTER JOIN transactions tx
-            ON tx.id_tx = rn.spent
-            WHERE block IS NULL",
+         FROM sapling_received_notes rn
+         LEFT OUTER JOIN transactions tx
+         ON tx.id_tx = rn.spent
+         WHERE block IS NULL
+         AND nf IS NOT NULL",
     )?;
     let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
         let account: u32 = row.get(1)?;
@@ -763,7 +767,8 @@ pub(crate) fn get_all_sapling_nullifiers<P>(
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = wdb.conn.prepare(
         "SELECT rn.id_note, rn.account, rn.nf
-            FROM received_notes rn",
+         FROM sapling_received_notes rn
+         WHERE nf IS NOT NULL",
     )?;
     let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
         let account: u32 = row.get(1)?;
@@ -994,7 +999,7 @@ pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
 /// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
-pub(crate) fn put_received_note<'a, P, T: SaplingOutput>(
+pub(crate) fn put_received_note<'a, P, T: ReceivedSaplingOutput>(
     stmts: &mut DataConnStmtCache<'a, P>,
     output: &T,
     tx_ref: i64,

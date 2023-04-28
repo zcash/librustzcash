@@ -42,7 +42,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
-    memo::Memo,
+    memo::{Memo, MemoBytes},
     merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{Node, Nullifier},
     transaction::{
@@ -61,7 +61,7 @@ use zcash_client_backend::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::{SpendableNote, WalletTransparentOutput},
-    TransferType,
+    DecryptedOutput, TransferType,
 };
 
 use crate::error::SqliteClientError;
@@ -592,6 +592,10 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                                 SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
                             Some(&output.memo),
                         )?;
+
+                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            wallet::put_received_note(up, output, tx_ref)?;
+                        }
                     }
                     TransferType::Incoming => {
                         match spending_account_id {
@@ -676,6 +680,22 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             for output in &sent_tx.outputs {
                 wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
+
+                if let Some((account, note)) = output.sapling_change_to() {
+                    wallet::put_received_note(
+                        up,
+                        &DecryptedOutput {
+                            index: output.output_index(),
+                            note: note.clone(),
+                            account: *account,
+                            memo: output
+                                .memo()
+                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                            transfer_type: TransferType::WalletInternal,
+                        },
+                        tx_ref,
+                    )?;
+                }
             }
 
             // Return the row number of the transaction, so the caller can fetch it for sending.

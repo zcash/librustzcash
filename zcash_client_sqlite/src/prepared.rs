@@ -156,7 +156,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     "SELECT id_tx FROM transactions WHERE txid = ?",
                 )?,
                 stmt_mark_sapling_note_spent: wallet_db.conn.prepare(
-                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
+                    "UPDATE sapling_received_notes SET spent = ? WHERE nf = ?"
                 )?,
                 #[cfg(feature = "transparent-inputs")]
                 stmt_mark_transparent_utxo_spent: wallet_db.conn.prepare(
@@ -217,11 +217,11 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     RETURNING id_utxo"
                 )?,
                 stmt_insert_received_note: wallet_db.conn.prepare(
-                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
+                    "INSERT INTO sapling_received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
                     VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
                 )?,
                 stmt_update_received_note: wallet_db.conn.prepare(
-                    "UPDATE received_notes
+                    "UPDATE sapling_received_notes
                     SET account = :account,
                         diversifier = :diversifier,
                         value = :value,
@@ -232,7 +232,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     WHERE tx = :tx AND output_index = :output_index",
                 )?,
                 stmt_select_received_note: wallet_db.conn.prepare(
-                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
+                    "SELECT id_note FROM sapling_received_notes WHERE tx = ? AND output_index = ?"
                 )?,
                 stmt_update_sent_output: wallet_db.conn.prepare(
                     "UPDATE sent_notes
@@ -261,9 +261,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     "DELETE FROM sapling_witnesses WHERE block < ?"
                 )?,
                 stmt_update_expired: wallet_db.conn.prepare(
-                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
+                    "UPDATE sapling_received_notes SET spent = NULL WHERE EXISTS (
                         SELECT id_tx FROM transactions
-                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
+                        WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
                 )?,
                 stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
@@ -686,7 +686,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         rcm: [u8; 32],
         nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
-        is_change: Option<bool>,
+        is_change: bool,
     ) -> Result<NoteId, SqliteClientError> {
         let sql_args: &[(&str, &dyn ToSql)] = &[
             (":tx", &tx_ref),
@@ -728,7 +728,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         rcm: [u8; 32],
         nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
-        is_change: Option<bool>,
+        is_change: bool,
         tx_ref: i64,
         output_index: usize,
     ) -> Result<bool, SqliteClientError> {

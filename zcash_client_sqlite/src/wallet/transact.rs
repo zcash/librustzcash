@@ -70,9 +70,9 @@ pub(crate) fn get_spendable_sapling_notes<P>(
 ) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
     let mut stmt_select_notes = wdb.conn.prepare(
         "SELECT id_note, diversifier, value, rcm, witness
-            FROM received_notes
-            INNER JOIN transactions ON transactions.id_tx = received_notes.tx
-            INNER JOIN sapling_witnesses ON sapling_witnesses.note = received_notes.id_note
+            FROM sapling_received_notes
+            INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
+            INNER JOIN sapling_witnesses ON sapling_witnesses.note = sapling_received_notes.id_note
             WHERE account = :account
             AND spent IS NULL
             AND transactions.block <= :anchor_height
@@ -132,8 +132,8 @@ pub(crate) fn select_spendable_sapling_notes<P>(
                 SELECT id_note, diversifier, value, rcm,
                     SUM(value) OVER
                         (PARTITION BY account, spent ORDER BY id_note) AS so_far
-                FROM received_notes
-                INNER JOIN transactions ON transactions.id_tx = received_notes.tx
+                FROM sapling_received_notes
+                INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
                 WHERE account = :account 
                 AND spent IS NULL 
                 AND transactions.block <= :anchor_height

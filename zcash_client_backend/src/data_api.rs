@@ -290,11 +290,13 @@ pub enum Recipient {
     InternalAccount(AccountId, PoolType),
 }
 
+/// A type that represents an output (either Sapling or transparent) that was sent by the wallet.
 pub struct SentTransactionOutput {
     output_index: usize,
     recipient: Recipient,
     value: Amount,
     memo: Option<MemoBytes>,
+    sapling_change_to: Option<(AccountId, sapling::Note)>,
 }
 
 impl SentTransactionOutput {
@@ -303,15 +305,16 @@ impl SentTransactionOutput {
         recipient: Recipient,
         value: Amount,
         memo: Option<MemoBytes>,
+        sapling_change_to: Option<(AccountId, sapling::Note)>,
     ) -> Self {
         Self {
             output_index,
             recipient,
             value,
             memo,
+            sapling_change_to,
         }
     }
-
     /// Returns the index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
@@ -333,6 +336,11 @@ impl SentTransactionOutput {
     /// Returns the memo that was attached to the output, if any.
     pub fn memo(&self) -> Option<&MemoBytes> {
         self.memo.as_ref()
+    }
+
+    /// Returns t decrypted note, if the sent output belongs to this wallet
+    pub fn sapling_change_to(&self) -> Option<&(AccountId, sapling::Note)> {
+        self.sapling_change_to.as_ref()
     }
 }
 
