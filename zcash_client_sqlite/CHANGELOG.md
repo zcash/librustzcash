@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Bumped dependencies to `zcash_client_backend 0.9`.
 
 ### Removed
 - The following deprecated types and methods have been removed from the public API:
