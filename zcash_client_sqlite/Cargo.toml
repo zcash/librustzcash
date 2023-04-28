@@ -19,6 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
 zcash_encoding.workspace = true
 zcash_primitives.workspace = true

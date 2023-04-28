@@ -26,7 +26,7 @@ use zcash_primitives::{
 use crate::{
     address::{AddressMetadata, UnifiedAddress},
     decrypt::DecryptedOutput,
-    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
     ShieldedProtocol,
@@ -1004,6 +1004,7 @@ pub trait WalletWrite: WalletRead {
     fn get_next_available_address(
         &mut self,
         account: AccountId,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Updates the state of the wallet database by persisting the provided block information,
@@ -1104,7 +1105,7 @@ pub mod testing {
 
     use crate::{
         address::{AddressMetadata, UnifiedAddress},
-        keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+        keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
         wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
         ShieldedProtocol,
     };
@@ -1301,6 +1302,7 @@ pub mod testing {
         fn get_next_available_address(
             &mut self,
             _account: AccountId,
+            _request: UnifiedAddressRequest,
         ) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
         }

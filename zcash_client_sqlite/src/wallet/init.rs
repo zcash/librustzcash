@@ -1060,7 +1060,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::data_api::AccountBirthday;
+        use zcash_client_backend::{data_api::AccountBirthday, keys::UnifiedAddressRequest};
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1090,7 +1090,7 @@ mod tests {
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 db_data
-                    .get_next_available_address(account)
+                    .get_next_available_address(account, UnifiedAddressRequest::DEFAULT)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

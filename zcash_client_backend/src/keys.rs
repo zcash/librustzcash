@@ -1,5 +1,5 @@
 //! Helper functions for managing light client key material.
-use zcash_address::unified::{self, Container, Encoding};
+use zcash_address::unified::{self, Container, Encoding, Typecode};
 use zcash_primitives::{
     consensus,
     zip32::{AccountId, DiversifierIndex},
@@ -21,16 +21,18 @@ use {
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
     std::convert::TryFrom,
     std::io::{Read, Write},
-    zcash_address::unified::Typecode,
     zcash_encoding::CompactSize,
     zcash_primitives::consensus::BranchId,
 };
+
+#[cfg(feature = "orchard")]
+use orchard::{self, keys::Scope};
 
 pub mod sapling {
     pub use sapling::zip32::{
         DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,
     };
-    use zcash_primitives::zip32::{AccountId, ChildIndex};
+    use zip32::{AccountId, ChildIndex};
 
     /// Derives the ZIP 32 [`ExtendedSpendingKey`] for a given coin type and account from the
     /// given seed.
@@ -44,11 +46,11 @@ pub mod sapling {
     /// ```
     /// use zcash_primitives::{
     ///     constants::testnet::COIN_TYPE,
-    ///     zip32::AccountId,
     /// };
     /// use zcash_client_backend::{
     ///     keys::sapling,
     /// };
+    /// use zip32::AccountId;
     ///
     /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
     /// ```
@@ -160,8 +162,7 @@ impl Era {
     }
 }
 
-/// A set of spending keys that are all associated with a single
-/// ZIP-0032 account identifier.
+/// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
 #[derive(Clone, Debug)]
 #[doc(hidden)]
 pub struct UnifiedSpendingKey {
@@ -397,6 +398,65 @@ impl UnifiedSpendingKey {
     }
 }
 
+/// Errors that can occur in the generation of unified addresses.
+#[derive(Clone, Debug)]
+pub enum AddressGenerationError {
+    /// The requested diversifier index was outside the range of valid transparent
+    /// child address indices.
+    InvalidTransparentChildIndex(DiversifierIndex),
+    /// The diversifier index could not be mapped to a valid Sapling diversifier.
+    InvalidSaplingDiversifierIndex(DiversifierIndex),
+    /// A requested address typecode was not recognized, so we are unable to generate the address
+    /// as requested.
+    ReceiverTypeNotSupported(Typecode),
+    /// A Unified address cannot be generated without at least one shielded receiver being
+    /// included.
+    ShieldedReceiverRequired,
+}
+
+/// Specification for how a unified address should be generated from a unified viewing key.
+#[derive(Clone, Copy, Debug)]
+pub struct UnifiedAddressRequest {
+    #[cfg(feature = "orchard")]
+    has_orchard: bool,
+    has_sapling: bool,
+    #[cfg(feature = "transparent-inputs")]
+    has_p2pkh: bool,
+}
+
+impl UnifiedAddressRequest {
+    pub const DEFAULT: UnifiedAddressRequest = Self {
+        #[cfg(feature = "orchard")]
+        has_orchard: false, // FIXME: Always request Orchard receivers once we can receive Orchard funds
+        has_sapling: true,
+        #[cfg(feature = "transparent-inputs")]
+        has_p2pkh: true,
+    };
+
+    pub fn new(
+        #[cfg(feature = "orchard")] has_orchard: bool,
+        has_sapling: bool,
+        #[cfg(feature = "transparent-inputs")] has_p2pkh: bool,
+    ) -> Option<Self> {
+        #[cfg(feature = "orchard")]
+        let has_shielded_receiver = has_orchard || has_sapling;
+        #[cfg(not(feature = "orchard"))]
+        let has_shielded_receiver = has_sapling;
+
+        if !has_shielded_receiver {
+            None
+        } else {
+            Some(Self {
+                #[cfg(feature = "orchard")]
+                has_orchard,
+                has_sapling,
+                #[cfg(feature = "transparent-inputs")]
+                has_p2pkh,
+            })
+        }
+    }
+}
+
 /// A [ZIP 316](https://zips.z.cash/zip-0316) unified full viewing key.
 #[derive(Clone, Debug)]
 #[doc(hidden)]
@@ -560,29 +620,55 @@ impl UnifiedFullViewingKey {
         self.orchard.as_ref()
     }
 
-    /// Attempts to derive the Unified Address for the given diversifier index.
+    /// Attempts to derive the Unified Address for the given diversifier index and
+    /// receiver types.
     ///
     /// Returns `None` if the specified index does not produce a valid diversifier.
-    // TODO: Allow filtering down by receiver types?
-    pub fn address(&self, j: DiversifierIndex) -> Option<UnifiedAddress> {
-        let sapling = if let Some(extfvk) = self.sapling.as_ref() {
-            Some(extfvk.address(j)?)
+    pub fn address(
+        &self,
+        j: DiversifierIndex,
+        request: UnifiedAddressRequest,
+    ) -> Result<UnifiedAddress, AddressGenerationError> {
+        #[cfg(feature = "orchard")]
+        let orchard = {
+            let orchard_j = orchard::keys::DiversifierIndex::from(*j.as_bytes());
+            self.orchard
+                .as_ref()
+                .filter(|_| request.has_orchard)
+                .map(|ofvk| ofvk.address_at(orchard_j, Scope::External))
+        };
+
+        let sapling = if let Some(extfvk) = self.sapling.as_ref().filter(|_| request.has_sapling) {
+            // If a Sapling receiver type is requested, we must be able to construct an
+            // address; if we're unable to do so, then no Unified Address exists at this
+            // diversifier and we use `?` to early-return from this method.
+            Some(
+                extfvk
+                    .address(j)
+                    .ok_or(AddressGenerationError::InvalidSaplingDiversifierIndex(j))?,
+            )
         } else {
             None
         };
 
         #[cfg(feature = "transparent-inputs")]
-        let transparent = if let Some(tfvk) = self.transparent.as_ref() {
+        let transparent = if let Some(tfvk) =
+            self.transparent.as_ref().filter(|_| request.has_p2pkh)
+        {
+            // If a transparent receiver type is requested, we must be able to construct an
+            // address; if we're unable to do so, then no Unified Address exists at this
+            // diversifier.
             match to_transparent_child_index(j) {
                 Some(transparent_j) => match tfvk
                     .derive_external_ivk()
                     .and_then(|tivk| tivk.derive_address(transparent_j))
                 {
                     Ok(taddr) => Some(taddr),
-                    Err(_) => return None,
+                    Err(_) => return Err(AddressGenerationError::InvalidTransparentChildIndex(j)),
                 },
-                // Diversifier doesn't generate a valid transparent child index.
-                None => return None,
+                // Diversifier doesn't generate a valid transparent child index, so we eagerly
+                // return `None`.
+                None => return Err(AddressGenerationError::InvalidTransparentChildIndex(j)),
             }
         } else {
             None
@@ -592,10 +678,11 @@ impl UnifiedFullViewingKey {
 
         UnifiedAddress::from_receivers(
             #[cfg(feature = "orchard")]
-            None,
+            orchard,
             sapling,
             transparent,
         )
+        .ok_or(AddressGenerationError::ShieldedReceiverRequired)
     }
 
     /// Searches the diversifier space starting at diversifier index `j` for one which will
@@ -606,6 +693,7 @@ impl UnifiedFullViewingKey {
     pub fn find_address(
         &self,
         mut j: DiversifierIndex,
+        request: UnifiedAddressRequest,
     ) -> Option<(UnifiedAddress, DiversifierIndex)> {
         // If we need to generate a transparent receiver, check that the user has not
         // specified an invalid transparent child index, from which we can never search to
@@ -617,12 +705,19 @@ impl UnifiedFullViewingKey {
 
         // Find a working diversifier and construct the associated address.
         loop {
-            let res = self.address(j);
-            if let Some(ua) = res {
-                break Some((ua, j));
-            }
-            if j.increment().is_err() {
-                break None;
+            let res = self.address(j, request);
+            match res {
+                Ok(ua) => {
+                    break Some((ua, j));
+                }
+                Err(AddressGenerationError::InvalidSaplingDiversifierIndex(_)) => {
+                    if j.increment().is_err() {
+                        break None;
+                    }
+                }
+                Err(_) => {
+                    break None;
+                }
             }
         }
     }
@@ -630,7 +725,8 @@ impl UnifiedFullViewingKey {
     /// Returns the Unified Address corresponding to the smallest valid diversifier index,
     /// along with that index.
     pub fn default_address(&self) -> (UnifiedAddress, DiversifierIndex) {
-        self.find_address(DiversifierIndex::new())
+        // FIXME: Enable Orchard keys
+        self.find_address(DiversifierIndex::new(), UnifiedAddressRequest::DEFAULT)
             .expect("UFVK should have at least one valid diversifier")
     }
 }
@@ -663,19 +759,18 @@ mod tests {
     use proptest::prelude::proptest;
 
     use super::{sapling, UnifiedFullViewingKey};
-    use zcash_primitives::{consensus::MAIN_NETWORK, zip32::AccountId};
+    use zcash_primitives::consensus::MAIN_NETWORK;
+    use zip32::AccountId;
 
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::{address::Address, encoding::AddressCodec},
         zcash_address::test_vectors,
-        zcash_primitives::{
-            legacy::{
-                self,
-                keys::{AccountPrivKey, IncomingViewingKey},
-            },
-            zip32::DiversifierIndex,
+        zcash_primitives::legacy::{
+            self,
+            keys::{AccountPrivKey, IncomingViewingKey},
         },
+        zip32::DiversifierIndex,
     };
 
     #[cfg(feature = "unstable")]
@@ -797,6 +892,8 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn ufvk_derivation() {
+        use crate::keys::UnifiedAddressRequest;
+
         use super::UnifiedSpendingKey;
 
         for tv in test_vectors::UNIFIED {
@@ -816,8 +913,14 @@ mod tests {
                 continue;
             }
 
-            let ua = ufvk.address(d_idx).unwrap_or_else(|| panic!("diversifier index {} should have produced a valid unified address for account {}",
-                tv.diversifier_index, tv.account));
+            let ua = ufvk
+                .address(d_idx, UnifiedAddressRequest::DEFAULT)
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "unified address generation failed for account {}: {:?}",
+                        tv.account, err
+                    )
+                });
 
             match Address::decode(&MAIN_NETWORK, tv.unified_addr) {
                 Some(Address::Unified(tvua)) => {

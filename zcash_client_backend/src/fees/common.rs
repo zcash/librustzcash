@@ -86,6 +86,7 @@ where
 
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
     #[cfg(feature = "orchard")]
+    #[allow(clippy::if_same_then_else)]
     let (change_pool, sapling_change, orchard_change) =
         if orchard_in.is_positive() || orchard_out.is_positive() {
             // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs
