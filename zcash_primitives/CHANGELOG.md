@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- `zcash_primitives::transactions::component::amount::DEFAULT_FEE` increased zip317 
+  minimum possible fee.
 
 ## [0.11.0] - 2023-04-15
 ### Added

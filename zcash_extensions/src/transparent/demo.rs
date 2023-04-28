@@ -814,7 +814,7 @@ mod tests {
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
         let to = extsk.default_address().1;
-        let note1 = to.create_note(101000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note1 = to.create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cm1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::empty();
         // fake that the note appears in some previous
