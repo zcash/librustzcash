@@ -448,10 +448,12 @@ impl<Cache> TestState<Cache> {
         >,
     > {
         let params = self.network();
+        let prover = test_prover();
         create_spend_to_address(
             &mut self.db_data,
             &params,
-            test_prover(),
+            &prover,
+            &prover,
             usk,
             to,
             amount,
@@ -484,10 +486,12 @@ impl<Cache> TestState<Cache> {
         InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
     {
         let params = self.network();
+        let prover = test_prover();
         spend(
             &mut self.db_data,
             &params,
-            test_prover(),
+            &prover,
+            &prover,
             input_selector,
             usk,
             request,
@@ -614,10 +618,12 @@ impl<Cache> TestState<Cache> {
         FeeRuleT: FeeRule,
     {
         let params = self.network();
+        let prover = test_prover();
         create_proposed_transaction(
             &mut self.db_data,
             &params,
-            test_prover(),
+            &prover,
+            &prover,
             usk,
             ovk_policy,
             proposal,
@@ -647,10 +653,12 @@ impl<Cache> TestState<Cache> {
         InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
     {
         let params = self.network();
+        let prover = test_prover();
         shield_transparent_funds(
             &mut self.db_data,
             &params,
-            test_prover(),
+            &prover,
+            &prover,
             input_selector,
             shielding_threshold,
             usk,

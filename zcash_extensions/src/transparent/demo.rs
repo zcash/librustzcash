@@ -839,7 +839,7 @@ mod tests {
             .unwrap();
         let (tx_a, _) = builder_a
             .txn_builder
-            .build_zfuture(&prover, &fee_rule)
+            .build_zfuture(&prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_a = tx_a.tze_bundle().unwrap();
@@ -857,7 +857,7 @@ mod tests {
             .unwrap();
         let (tx_b, _) = builder_b
             .txn_builder
-            .build_zfuture(&prover, &fee_rule)
+            .build_zfuture(&prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_b = tx_b.tze_bundle().unwrap();
@@ -882,7 +882,7 @@ mod tests {
 
         let (tx_c, _) = builder_c
             .txn_builder
-            .build_zfuture(&prover, &fee_rule)
+            .build_zfuture(&prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_c = tx_c.tze_bundle().unwrap();

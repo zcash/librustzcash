@@ -275,7 +275,8 @@ pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
-    type SaplingAuth = sapling::builder::Unauthorized;
+    type SaplingAuth =
+        sapling::builder::InProgress<sapling::builder::Proven, sapling::builder::Unsigned>;
     type OrchardAuth =
         orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
 

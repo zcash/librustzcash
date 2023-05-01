@@ -8,7 +8,7 @@ use zcash_primitives::{
     sapling::{
         self,
         note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
-        prover::TxProver as SaplingProver,
+        prover::{OutputProver, SpendProver},
         Node,
     },
     transaction::{
@@ -191,7 +191,8 @@ where
 pub fn create_spend_to_address<DbT, ParamsT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    prover: impl SaplingProver,
+    spend_prover: &impl SpendProver,
+    output_prover: &impl OutputProver,
     usk: &UnifiedSpendingKey,
     to: &RecipientAddress,
     amount: NonNegativeAmount,
@@ -231,7 +232,15 @@ where
         change_memo,
     )?;
 
-    create_proposed_transaction(wallet_db, params, prover, usk, ovk_policy, &proposal)
+    create_proposed_transaction(
+        wallet_db,
+        params,
+        spend_prover,
+        output_prover,
+        usk,
+        ovk_policy,
+        &proposal,
+    )
 }
 
 /// Constructs a transaction that sends funds as specified by the `request` argument
@@ -289,7 +298,8 @@ where
 pub fn spend<DbT, ParamsT, InputsT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    prover: impl SaplingProver,
+    spend_prover: &impl SpendProver,
+    output_prover: &impl OutputProver,
     input_selector: &InputsT,
     usk: &UnifiedSpendingKey,
     request: zip321::TransactionRequest,
@@ -324,7 +334,15 @@ where
         min_confirmations,
     )?;
 
-    create_proposed_transaction(wallet_db, params, prover, usk, ovk_policy, &proposal)
+    create_proposed_transaction(
+        wallet_db,
+        params,
+        spend_prover,
+        output_prover,
+        usk,
+        ovk_policy,
+        &proposal,
+    )
 }
 
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction
@@ -475,7 +493,8 @@ where
 pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    prover: impl SaplingProver,
+    spend_prover: &impl SpendProver,
+    output_prover: &impl OutputProver,
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
     proposal: &Proposal<FeeRuleT, DbT::NoteRef>,
@@ -663,7 +682,8 @@ where
     }
 
     // Build the transaction with the specified fee rule
-    let (tx, sapling_build_meta) = builder.build(&prover, proposal.fee_rule())?;
+    let (tx, sapling_build_meta) =
+        builder.build(spend_prover, output_prover, proposal.fee_rule())?;
 
     let internal_ivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
     let sapling_outputs =
@@ -768,7 +788,8 @@ where
 pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    prover: impl SaplingProver,
+    spend_prover: &impl SpendProver,
+    output_prover: &impl OutputProver,
     input_selector: &InputsT,
     shielding_threshold: NonNegativeAmount,
     usk: &UnifiedSpendingKey,
@@ -798,7 +819,15 @@ where
         min_confirmations,
     )?;
 
-    create_proposed_transaction(wallet_db, params, prover, usk, OvkPolicy::Sender, &proposal)
+    create_proposed_transaction(
+        wallet_db,
+        params,
+        spend_prover,
+        output_prover,
+        usk,
+        OvkPolicy::Sender,
+        &proposal,
+    )
 }
 
 #[allow(clippy::type_complexity)]

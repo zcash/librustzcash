@@ -12,7 +12,11 @@ use crate::{
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
-    sapling::{self, prover::TxProver, Diversifier, Note, PaymentAddress},
+    sapling::{
+        self,
+        prover::{OutputProver, SpendProver},
+        redjubjub, Diversifier, Note, PaymentAddress,
+    },
     transaction::{
         components::{
             amount::{Amount, BalanceError},
@@ -162,6 +166,7 @@ pub struct Builder<'a, P, R> {
     // `add_sapling_spend` or `add_orchard_spend`, we will build an unauthorized, unproven
     // transaction, and then the caller will be responsible for using the spending keys or their
     // derivatives for proving and signing to complete transaction creation.
+    sapling_asks: Vec<redjubjub::PrivateKey>,
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
@@ -266,6 +271,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             transparent_builder: TransparentBuilder::empty(),
             sapling_builder: SaplingBuilder::new(params, target_height),
             orchard_builder,
+            sapling_asks: vec![],
             orchard_saks: Vec::new(),
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
@@ -329,7 +335,12 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         merkle_path: sapling::MerklePath,
     ) -> Result<(), sapling_builder::Error> {
         self.sapling_builder
-            .add_spend(&mut self.rng, extsk, diversifier, note, merkle_path)
+            .add_spend(&mut self.rng, &extsk, diversifier, note, merkle_path)?;
+
+        self.sapling_asks
+            .push(redjubjub::PrivateKey(extsk.expsk.ask));
+
+        Ok(())
     }
 
     /// Adds a Sapling address to send funds to.
@@ -432,13 +443,14 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
-    pub fn build<FR: FeeRule>(
+    pub fn build<SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
-        prover: &impl TxProver,
+        spend_prover: &SP,
+        output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(prover, fee.into())
+        self.build_internal(spend_prover, output_prover, fee.into())
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -446,9 +458,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
     #[cfg(feature = "zfuture")]
-    pub fn build_zfuture<FR: FutureFeeRule>(
+    pub fn build_zfuture<SP: SpendProver, OP: OutputProver, FR: FutureFeeRule>(
         self,
-        prover: &impl TxProver,
+        spend_prover: &SP,
+        output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
         let fee = fee_rule
@@ -464,12 +477,13 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             )
             .map_err(Error::Fee)?;
 
-        self.build_internal(prover, fee.into())
+        self.build_internal(spend_prover, output_prover, fee.into())
     }
 
-    fn build_internal<FE>(
+    fn build_internal<SP: SpendProver, OP: OutputProver, FE>(
         self,
-        prover: &impl TxProver,
+        spend_prover: &SP,
+        output_prover: &OP,
         fee: Amount,
     ) -> Result<(Transaction, SaplingMetadata), Error<FE>> {
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
@@ -497,17 +511,27 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         let transparent_bundle = self.transparent_builder.build();
 
         let mut rng = self.rng;
-        let mut ctx = prover.new_sapling_proving_context();
-        let sapling_bundle = self
+        let (sapling_bundle, tx_metadata) = match self
             .sapling_builder
-            .build(
-                prover,
-                &mut ctx,
-                &mut rng,
-                self.target_height,
-                self.progress_notifier.as_ref(),
-            )
-            .map_err(Error::SaplingBuild)?;
+            .build::<SP, OP, _>(&mut rng, self.target_height)
+            .map_err(Error::SaplingBuild)?
+            .map(|(bundle, tx_metadata)| {
+                // We need to create proofs before signatures, because we still support
+                // creating V4 transactions, which commit to the Sapling proofs in the
+                // transaction digest.
+                (
+                    bundle.create_proofs(
+                        spend_prover,
+                        output_prover,
+                        &mut rng,
+                        self.progress_notifier.as_ref(),
+                    ),
+                    tx_metadata,
+                )
+            }) {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, SaplingMetadata::empty()),
+        };
 
         let orchard_bundle: Option<orchard::Bundle<_, Amount>> =
             if let Some(builder) = self.orchard_builder {
@@ -560,17 +584,17 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         let shielded_sig_commitment =
             signature_hash(&unauthed_tx, &SignableInput::Shielded, &txid_parts);
 
-        let (sapling_bundle, tx_metadata) = match unauthed_tx
+        let sapling_bundle = unauthed_tx
             .sapling_bundle
             .map(|b| {
-                b.apply_signatures(prover, &mut ctx, &mut rng, shielded_sig_commitment.as_ref())
+                b.apply_signatures(
+                    &mut rng,
+                    *shielded_sig_commitment.as_ref(),
+                    &self.sapling_asks,
+                )
             })
             .transpose()
-            .map_err(Error::SaplingBuild)?
-        {
-            Some((bundle, meta)) => (Some(bundle), meta),
-            None => (None, SaplingMetadata::empty()),
-        };
+            .map_err(Error::SaplingBuild)?;
 
         let orchard_bundle = unauthed_tx
             .orchard_bundle
@@ -648,7 +672,7 @@ mod testing {
     use super::{Builder, Error, SaplingMetadata};
     use crate::{
         consensus::{self, BlockHeight},
-        sapling::prover::mock::MockTxProver,
+        sapling::prover::mock::{MockOutputProver, MockSpendProver},
         transaction::fees::fixed,
         transaction::Transaction,
     };
@@ -693,7 +717,11 @@ mod testing {
     impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
             #[allow(deprecated)]
-            self.build(&MockTxProver, &fixed::FeeRule::standard())
+            self.build(
+                &MockSpendProver,
+                &MockOutputProver,
+                &fixed::FeeRule::standard(),
+            )
         }
     }
 }
@@ -710,10 +738,7 @@ mod tests {
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{self, Node, Rseed},
-        transaction::components::{
-            amount::{Amount, NonNegativeAmount},
-            sapling::builder::{self as sapling_builder},
-        },
+        transaction::components::amount::{Amount, BalanceError, NonNegativeAmount},
         zip32::ExtendedSpendingKey,
     };
 
@@ -759,6 +784,7 @@ mod tests {
             tze_builder: std::marker::PhantomData,
             progress_notifier: None,
             orchard_builder: None,
+            sapling_asks: vec![],
             orchard_saks: Vec::new(),
         };
 
@@ -828,12 +854,9 @@ mod tests {
             )
             .unwrap();
 
-        // Expect a binding signature error, because our inputs aren't valid, but this shows
-        // that a binding signature was attempted
-        assert_matches!(
-            builder.mock_build(),
-            Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
-        );
+        // A binding signature (and bundle) is present because there is a Sapling spend.
+        let (tx, _) = builder.mock_build().unwrap();
+        assert!(tx.sapling_bundle().is_some());
     }
 
     #[test]
@@ -950,9 +973,6 @@ mod tests {
 
         // Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
-        //
-        // (Still fails because we are using a MockTxProver which doesn't correctly
-        // compute bindingSig.)
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
             builder
@@ -982,8 +1002,8 @@ mod tests {
                 .unwrap();
             assert_matches!(
                 builder.mock_build(),
-                Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
-            )
+                Ok((tx, _)) if tx.fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
+            );
         }
     }
 }

@@ -34,19 +34,11 @@ pub trait Authorization: Debug {
     type AuthSig: Clone + Debug;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Unproven;
-
-impl Authorization for Unproven {
-    type SpendProof = ();
-    type OutputProof = ();
-    type AuthSig = ();
-}
-
 /// Authorizing data for a bundle of Sapling spends and outputs, ready to be committed to
 /// the ledger.
 #[derive(Debug, Copy, Clone)]
 pub struct Authorized {
+    // TODO: Make this private.
     pub binding_sig: redjubjub::Signature,
 }
 

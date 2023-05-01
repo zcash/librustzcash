@@ -36,11 +36,11 @@ pub fn spend_sig<R: RngCore + CryptoRng>(
     sighash: &[u8; 32],
     rng: &mut R,
 ) -> Signature {
-    spend_sig_internal(ask, ar, sighash, rng)
+    spend_sig_internal(&ask, ar, sighash, rng)
 }
 
 pub(crate) fn spend_sig_internal<R: RngCore>(
-    ask: PrivateKey,
+    ask: &PrivateKey,
     ar: jubjub::Fr,
     sighash: &[u8; 32],
     rng: &mut R,
@@ -58,6 +58,29 @@ pub(crate) fn spend_sig_internal<R: RngCore>(
 
     // Do the signing
     rsk.sign(&data_to_be_signed, rng, SPENDING_KEY_GENERATOR)
+}
+
+/// Verifies a spendAuthSig.
+///
+/// This only exists because the RedJubjub implementation inside `zcash_primitives` does
+/// not implement key prefixing (which was added in response to a Sapling audit). This
+/// will be fixed by migrating to the redjubjub crate.
+pub(crate) fn verify_spend_sig(
+    ak: &PublicKey,
+    alpha: jubjub::Fr,
+    sighash: &[u8; 32],
+    sig: &Signature,
+) -> bool {
+    // We compute `rk` (needed for key prefixing)
+    let rk = ak.randomize(alpha, SPENDING_KEY_GENERATOR);
+
+    // Compute the signature's message for rk/spend_auth_sig
+    let mut data_to_be_signed = [0u8; 64];
+    data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
+    data_to_be_signed[32..64].copy_from_slice(&sighash[..]);
+
+    // Do the verifying
+    rk.verify(&data_to_be_signed, sig, SPENDING_KEY_GENERATOR)
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

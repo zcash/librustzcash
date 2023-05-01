@@ -12,13 +12,11 @@ use zcash_primitives::{
             try_sapling_compact_note_decryption, try_sapling_note_decryption,
             PreparedIncomingViewingKey, SaplingDomain,
         },
-        prover::mock::MockTxProver,
+        prover::mock::{MockOutputProver, MockSpendProver},
         value::NoteValue,
         Diversifier, SaplingIvk,
     },
-    transaction::components::sapling::{
-        builder::SaplingBuilder, CompactOutputDescription, GrothProofBytes, OutputDescription,
-    },
+    transaction::components::sapling::{builder::SaplingBuilder, CompactOutputDescription},
 };
 
 #[cfg(unix)]
@@ -32,7 +30,7 @@ fn bench_note_decryption(c: &mut Criterion) {
     let invalid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
 
     // Construct a Sapling output.
-    let output: OutputDescription<GrothProofBytes> = {
+    let output = {
         let diversifier = Diversifier([0; 11]);
         let pa = valid_ivk.to_payment_address(diversifier).unwrap();
 
@@ -46,8 +44,8 @@ fn bench_note_decryption(c: &mut Criterion) {
                 MemoBytes::empty(),
             )
             .unwrap();
-        let bundle = builder
-            .build(&MockTxProver, &mut (), &mut rng, height, None)
+        let (bundle, _) = builder
+            .build::<MockSpendProver, MockOutputProver, _>(&mut rng, height)
             .unwrap()
             .unwrap();
         bundle.shielded_outputs()[0].clone()
