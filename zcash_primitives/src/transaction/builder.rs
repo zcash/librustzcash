@@ -653,7 +653,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_u64(49000).unwrap(),
+                Amount::from_u64(40000).unwrap(),
             )
             .unwrap();
 
@@ -689,7 +689,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_u64(49000).unwrap(),
+                Amount::from_u64(40000).unwrap(),
             )
             .unwrap();
 
@@ -778,7 +778,7 @@ mod tests {
             );
         }
 
-        let note1 = to.create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note1 = to.create_note(59999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::empty();
         tree.append(cmu1).unwrap();
