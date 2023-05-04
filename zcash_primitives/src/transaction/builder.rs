@@ -778,6 +778,7 @@ mod tests {
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
         use crate::consensus::NetworkUpgrade;
         use crate::transaction::builder::{self, TransparentBuilder};
+        use crate::transaction::components::orchard::builder::WithoutOrchard;
 
         let sapling_activation_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -796,6 +797,8 @@ mod tests {
             #[cfg(not(feature = "zfuture"))]
             tze_builder: std::marker::PhantomData,
             progress_notifier: None,
+            orchard_builder: WithoutOrchard,
+            orchard_saks: Vec::new(),
         };
 
         let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::from(0)).unwrap();

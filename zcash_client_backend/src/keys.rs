@@ -703,6 +703,8 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn ufvk_derivation() {
+        use super::UnifiedSpendingKey;
+
         for tv in test_vectors::UNIFIED {
             let usk = UnifiedSpendingKey::from_seed(
                 &MAIN_NETWORK,
