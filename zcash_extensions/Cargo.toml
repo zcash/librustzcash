@@ -15,7 +15,6 @@ zcash_primitives = { version = "0.11", path = "../zcash_primitives", default-fea
 
 [dev-dependencies]
 ff = "0.13"
-incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }
 jubjub = "0.10"
 rand_core = "0.6"
 zcash_address = { version = "0.2", path = "../components/zcash_address" }

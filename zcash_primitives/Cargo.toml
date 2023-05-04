@@ -47,7 +47,6 @@ nonempty = "0.7"
 orchard = { version = "0.4", default-features = false }
 
 # - Note Commitment Trees
-bridgetree = "0.2"
 incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }
 
 # - Static constants

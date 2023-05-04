@@ -478,7 +478,6 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
 mod tests {
     use blake2b_simd::Params;
     use ff::Field;
-    use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     use rand_core::OsRng;
 
     use zcash_primitives::{
@@ -486,7 +485,7 @@ mod tests {
         constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
-        sapling::{Node, Rseed},
+        sapling::{self, Node, Rseed},
         transaction::{
             builder::Builder,
             components::{
@@ -815,11 +814,11 @@ mod tests {
         let to = extsk.default_address().1;
         let note1 = to.create_note(101000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cm1 = Node::from_cmu(&note1.cmu());
-        let mut tree = CommitmentTree::empty();
+        let mut tree = sapling::CommitmentTree::empty();
         // fake that the note appears in some previous
         // shielded output
         tree.append(cm1).unwrap();
-        let witness1 = IncrementalWitness::from_tree(tree);
+        let witness1 = sapling::IncrementalWitness::from_tree(tree);
 
         let mut builder_a = demo_builder(tx_height);
         builder_a
