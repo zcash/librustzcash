@@ -32,7 +32,7 @@ impl HashSer for MerkleHashOrchard {
         reader.read_exact(&mut repr)?;
         <Option<_>>::from(Self::from_bytes(&repr)).ok_or_else(|| {
             io::Error::new(
-                io::ErrorKind::InvalidInput,
+                io::ErrorKind::InvalidData,
                 "Non-canonical encoding of Pallas base field value.",
             )
         })
@@ -57,7 +57,7 @@ pub fn write_usize_leu64<W: Write>(mut writer: W, value: usize) -> io::Result<()
 pub fn read_leu64_usize<R: Read>(mut reader: R) -> io::Result<usize> {
     reader.read_u64::<LittleEndian>()?.try_into().map_err(|e| {
         io::Error::new(
-            io::ErrorKind::InvalidInput,
+            io::ErrorKind::InvalidData,
             format!(
                 "usize could not be decoded from a 64-bit value on this platform: {:?}",
                 e
@@ -136,7 +136,7 @@ pub fn read_nonempty_frontier_v1<H: HashSer + Clone, R: Read>(
 
     NonEmptyFrontier::from_parts(position, leaf, ommers).map_err(|err| {
         io::Error::new(
-            io::ErrorKind::InvalidInput,
+            io::ErrorKind::InvalidData,
             format!("Parsing resulted in an invalid Merkle frontier: {:?}", err),
         )
     })
@@ -155,7 +155,7 @@ pub fn read_frontier_v1<H: HashSer + Clone, R: Read>(reader: R) -> io::Result<Fr
         None => Ok(Frontier::empty()),
         Some(f) => Frontier::try_from(f).map_err(|err| {
             io::Error::new(
-                io::ErrorKind::InvalidInput,
+                io::ErrorKind::InvalidData,
                 format!("Parsing resulted in an invalid Merkle frontier: {:?}", err),
             )
         }),
@@ -217,11 +217,14 @@ pub fn write_incremental_witness<Node: HashSer, W: Write, const DEPTH: u8>(
 /// Reads a Merkle path from its serialized form.
 pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
     mut witness: &[u8],
-) -> Result<MerklePath<Node, DEPTH>, ()> {
+) -> io::Result<MerklePath<Node, DEPTH>> {
     // Skip the first byte, which should be DEPTH to signify the length of
     // the following vector of Pedersen hashes.
     if witness[0] != DEPTH {
-        return Err(());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "depth is not as expected",
+        ));
     }
     witness = &witness[1..];
 
@@ -236,29 +239,51 @@ pub fn merkle_path_from_slice<Node: HashSer, const DEPTH: u8>(
             // Length of inner vector should be the length of a Pedersen hash
             if bytes[0] == 32 {
                 // Sibling node should be an element of Fr
-                Node::read(&bytes[1..]).map_err(|_| ())
+                Node::read(&bytes[1..])
             } else {
-                Err(())
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "length of auth path element is not the expected 32 bytes",
+                ))
             }
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<io::Result<Vec<_>>>()?;
     if auth_path.len() != usize::from(DEPTH) {
-        return Err(());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("length of auth path is not the expected {} elements", DEPTH),
+        ));
     }
 
     // Read the position from the witness
-    let position = witness
-        .read_u64::<LittleEndian>()
-        .map_err(|_| ())
-        .and_then(|p| Position::try_from(p).map_err(|_| ()))?;
+    let position = witness.read_u64::<LittleEndian>().and_then(|p| {
+        Position::try_from(p).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("decoded position {} exceeded the range of a `usize`", p),
+            )
+        })
+    })?;
 
     // The witness should be empty now; if it wasn't, the caller would
     // have provided more information than they should have, indicating
     // a bug downstream
     if witness.is_empty() {
-        MerklePath::from_parts(auth_path, position)
+        let path_len = auth_path.len();
+        MerklePath::from_parts(auth_path, position).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "auth path expected to contain {} elements, got {}",
+                    DEPTH, path_len
+                ),
+            )
+        })
     } else {
-        Err(())
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing data found in auth path decoding",
+        ))
     }
 }
 

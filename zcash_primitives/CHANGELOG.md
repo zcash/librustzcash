@@ -64,7 +64,7 @@ and this library adheres to Rust's notion of
 - `merkle_tree::write_incremental_witness` replaces `merkle_tree::IncrementalWitness::write`
 - `merkle_tree::read_incremental_witness` replaces `merkle_tree::IncrementalWitness::read`
 - `merkle_tree::merkle_path_from_slice` replaces `merkle_tree::MerklePath::from_slice`
-- `sapling::{CommitmentTree, IncrementalWitness, MerklePath}`
+- `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
 
 ### Changed
 - The bounds on the `H` parameter to the following methods have changed:
