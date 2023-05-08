@@ -11,6 +11,72 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transactions::component::amount::DEFAULT_FEE` increased zip317 
   minimum possible fee.
 
+### Removed
+- `merkle_tree::Hashable` has been removed and its uses have been replaced by
+  `incrementalmerkletree::Hashable` and `merkle_tree::HashSer`.
+- The `Hashable` bound on the `Node` parameter to the `IncrementalWitness`
+  type has been removed.
+- `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
+  have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
+- `merkle_tree::{CommitmentTree, IncrementalWitness, MerklePath}` have been removed in
+  favor of versions of these types that are now provided by the
+  `incrementalmerkletree` crate. The replacement types now use const generic
+  parameters for enforcing the note commitment tree depth. Serialization
+  methods for these types that do not exist for the `incrementalmerkletree`
+  replacement types have been replaced by new methods in the `merkle_tree` module.
+- `merkle_tree::incremental::write_auth_fragment_v1` has been removed without replacement.
+- The `merkle_tree::incremental` module has been removed; its former contents
+  were either moved to the `merkle_tree` module or were `zcashd`-specific
+  serialization methods which have been removed entirely and moved into the
+  [zcashd](https://github.com/zcash/zcash) repository.
+- The dependency on the `bridgetree` crate has been removed from
+  `zcash_primitives` and the following zcashd-specific serialization methods
+  have been moved to the [zcashd](https://github.com/zcash/zcash) repository:
+  - `read_auth_fragment_v1`
+  - `read_bridge_v1`
+  - `read_bridge_v2`
+  - `write_bridge_v2`
+  - `write_bridge`
+  - `read_checkpoint_v1`
+  - `read_checkpoint_v2`
+  - `write_checkpoint_v2`
+  - `read_tree`
+  - `write_tree`
+- `merkle_tree::{SER_V1, SER_V2}` have been removed as they are now unused.
+
+### Moved
+- The following constants and methods have been moved from the
+  `merkle_tree::incremental` module into the `merkle_tree` module to
+  consolidate the serialization code for commitment tree frontiers:
+  - `write_usize_leu64`
+  - `read_leu64_usize`
+  - `write_position`
+  - `read_position`
+  - `write_address`
+  - `read_address`
+  - `read_frontier_v0`
+  - `write_nonempty_frontier`
+  - `read_nonempty_frontier_v1`
+  - `write_frontier_v1`
+  - `read_frontier_v1`
+
+### Added
+- `merkle_tree::incremental::{read_address, write_address}`
+- `merkle_tree::incremental::read_bridge_v2`
+- `merkle_tree::write_commitment_tree` replaces `merkle_tree::CommitmentTree::write`
+- `merkle_tree::read_commitment_tree` replaces `merkle_tree::CommitmentTree::read`
+- `merkle_tree::write_incremental_witness` replaces `merkle_tree::IncrementalWitness::write`
+- `merkle_tree::read_incremental_witness` replaces `merkle_tree::IncrementalWitness::read`
+- `merkle_tree::merkle_path_from_slice` replaces `merkle_tree::MerklePath::from_slice`
+- `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
+
+### Changed
+- The bounds on the `H` parameter to the following methods have changed:
+  - `merkle_tree::incremental::read_frontier_v0`
+  - `merkle_tree::incremental::read_auth_fragment_v1`
+- The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}` 
+  data types are now statically constrained using const generic type parameters.
+
 ## [0.11.0] - 2023-04-15
 ### Added
 - `zcash_primitives::zip32::fingerprint` module, containing types for deriving
