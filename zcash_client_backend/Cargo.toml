@@ -36,7 +36,7 @@ bech32 = "0.9"
 bs58 = { version = "0.4", features = ["check"] }
 
 # - Errors
-hdwallet = { version = "0.3.1", optional = true }
+hdwallet = { version = "0.4", optional = true }
 
 # - Logging and metrics
 memuse = "0.2"

@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
+- Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`.
 - `zcash_primitives::transactions::component::amount::DEFAULT_FEE` increased zip317 
   minimum possible fee.
 
