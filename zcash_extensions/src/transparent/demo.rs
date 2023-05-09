@@ -807,6 +807,9 @@ mod tests {
         //
 
         let mut rng = OsRng;
+
+        // FIXME: implement zcash_primitives::transaction::fees::FutureFeeRule for zip317::FeeRule.
+        #[allow(deprecated)]
         let fee_rule = fixed::FeeRule::standard();
 
         // create some inputs to spend

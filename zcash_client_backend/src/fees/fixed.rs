@@ -173,7 +173,9 @@ mod tests {
 
     #[test]
     fn change_without_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(FixedFeeRule::standard());
+        #[allow(deprecated)]
+        let fee_rule = FixedFeeRule::standard();
+        let change_strategy = SingleOutputChangeStrategy::new(fee_rule);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -200,7 +202,9 @@ mod tests {
 
     #[test]
     fn dust_change() {
-        let change_strategy = SingleOutputChangeStrategy::new(FixedFeeRule::standard());
+        #[allow(deprecated)]
+        let fee_rule = FixedFeeRule::standard();
+        let change_strategy = SingleOutputChangeStrategy::new(fee_rule);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(

@@ -535,6 +535,7 @@ mod testing {
         }
 
         pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
+            #[allow(deprecated)]
             self.build(&MockTxProver, &fixed::FeeRule::standard())
         }
     }
@@ -552,7 +553,7 @@ mod tests {
         memo::MemoBytes,
         sapling::{Node, Rseed},
         transaction::components::{
-            amount::{Amount, DEFAULT_FEE},
+            amount::Amount,
             sapling::builder::{self as sapling_builder},
             transparent::builder::{self as transparent_builder},
         },
@@ -713,6 +714,8 @@ mod tests {
 
     #[test]
     fn fails_on_negative_change() {
+        use crate::transaction::fees::zip317::MINIMUM_FEE;
+
         let mut rng = OsRng;
 
         // Just use the master key as the ExtendedSpendingKey for this test
@@ -727,7 +730,7 @@ mod tests {
             let builder = Builder::new(TEST_NETWORK, tx_height);
             assert_eq!(
                 builder.mock_build(),
-                Err(Error::InsufficientFunds(DEFAULT_FEE))
+                Err(Error::InsufficientFunds(MINIMUM_FEE))
             );
         }
 
@@ -736,7 +739,7 @@ mod tests {
         let to = dfvk.default_address().1;
 
         // Fail if there is only a Sapling output
-        // 0.0005 z-ZEC out, 0.00001 t-ZEC fee
+        // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
@@ -750,13 +753,13 @@ mod tests {
             assert_eq!(
                 builder.mock_build(),
                 Err(Error::InsufficientFunds(
-                    (Amount::from_i64(50000).unwrap() + DEFAULT_FEE).unwrap()
+                    (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
                 ))
             );
         }
 
         // Fail if there is only a transparent output
-        // 0.0005 t-ZEC out, 0.00001 t-ZEC fee
+        // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
@@ -768,7 +771,7 @@ mod tests {
             assert_eq!(
                 builder.mock_build(),
                 Err(Error::InsufficientFunds(
-                    (Amount::from_i64(50000).unwrap() + DEFAULT_FEE).unwrap()
+                    (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
                 ))
             );
         }
@@ -780,7 +783,7 @@ mod tests {
         let mut witness1 = IncrementalWitness::from_tree(tree.clone());
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.00001 t-ZEC fee, 0.00050999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder

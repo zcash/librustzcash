@@ -8,7 +8,13 @@ use orchard::value as orchard;
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
-pub const DEFAULT_FEE: Amount = Amount(10_000);
+#[deprecated(
+    since = "0.12.0",
+    note = "To calculate the ZIP 317 fee, use `transaction::fees::zip317::FeeRule`.
+For a constant representing the minimum ZIP 317 fee, use `transaction::fees::zip317::MINIMUM_FEE`.
+For the constant amount 1000 zatoshis, use `Amount::const_from_i64(1000)`."
+)]
+pub const DEFAULT_FEE: Amount = Amount(1000);
 
 /// A type-safe representation of some quantity of Zcash.
 ///
@@ -30,6 +36,14 @@ impl Amount {
     /// Returns a zero-valued Amount.
     pub const fn zero() -> Self {
         Amount(0)
+    }
+
+    /// Creates a constant Amount from an i64.
+    ///
+    /// Panics: if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    pub const fn const_from_i64(amount: i64) -> Self {
+        assert!(-MAX_MONEY <= amount && amount <= MAX_MONEY); // contains is not const
+        Amount(amount)
     }
 
     /// Creates an Amount from an i64.

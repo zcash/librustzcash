@@ -8,8 +8,6 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`.
-- `zcash_primitives::transactions::component::amount::DEFAULT_FEE` increased zip317 
-  minimum possible fee.
 
 ### Removed
 - `merkle_tree::Hashable` has been removed and its uses have been replaced by
@@ -69,6 +67,10 @@ and this library adheres to Rust's notion of
 - `merkle_tree::read_incremental_witness` replaces `merkle_tree::IncrementalWitness::read`
 - `merkle_tree::merkle_path_from_slice` replaces `merkle_tree::MerklePath::from_slice`
 - `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
+- `transaction::fees::zip317::MINIMUM_FEE`, reflecting the minimum possible
+  [ZIP 317](https://zips.z.cash/zip-0317) conventional fee.
+- `transaction::components::amount::Amount::const_from_i64`, intended for constructing
+  a constant `Amount`.
 
 ### Changed
 - The bounds on the `H` parameter to the following methods have changed:
@@ -76,6 +78,17 @@ and this library adheres to Rust's notion of
   - `merkle_tree::incremental::read_auth_fragment_v1`
 - The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}` 
   data types are now statically constrained using const generic type parameters.
+- `transaction::fees::fixed::FeeRule::standard()` now uses the ZIP 317 minimum fee
+  (10000 zatoshis rather than 1000 zatoshis) as the fixed fee. To be compliant with
+  ZIP 317, use `transaction::fees::zip317::FeeRule::standard()` instead.
+
+### Deprecated
+- `transaction::components::amount::DEFAULT_FEE` has been deprecated. Depending on
+  context, you may want to use `transaction::fees::zip317::MINIMUM_FEE`, or calculate
+  the ZIP 317 conventional fee using `transaction::fees::zip317::FeeRule` instead.
+- `transaction::fees::fixed::FeeRule::standard()` has been deprecated.
+  Use either `transaction::fees::zip317::FeeRule::standard()` or
+  `transaction::fees::fixed::FeeRule::non_standard`.
 
 ## [0.11.0] - 2023-04-15
 ### Added
