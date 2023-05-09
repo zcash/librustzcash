@@ -21,6 +21,7 @@ pub trait FeeRule {
     /// Implementations of this method should compute the fee amount given exactly the inputs and
     /// outputs specified, and should NOT compute speculative fees given any additional change
     /// outputs that may need to be created in order for inputs and outputs to balance.
+    #[allow(clippy::too_many_arguments)]
     fn fee_required<P: consensus::Parameters>(
         &self,
         params: &P,

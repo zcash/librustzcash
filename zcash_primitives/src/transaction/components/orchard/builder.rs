@@ -13,6 +13,7 @@ pub struct WithoutOrchard;
 pub struct WithOrchard(pub(crate) Option<Builder>);
 
 pub trait MaybeOrchard {
+    #[allow(clippy::type_complexity)]
     fn build<V: core::convert::TryFrom<i64>>(
         self,
         rng: impl rand::RngCore,
