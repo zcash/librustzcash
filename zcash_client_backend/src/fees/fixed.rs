@@ -185,7 +185,7 @@ mod tests {
             &Vec::<TxOut>::new(),
             &[TestSaplingInput {
                 note_id: 0,
-                value: Amount::from_u64(60000).unwrap(),
+                value: Amount::from_u64(45000).unwrap(),
             }],
             &[SaplingPayment::new(Amount::from_u64(40000).unwrap())],
             &DustOutputPolicy::default(),
@@ -193,8 +193,8 @@ mod tests {
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(Amount::from_u64(10000).unwrap())]
-                && balance.fee_required() == Amount::from_u64(10000).unwrap()
+            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(Amount::from_u64(4000).unwrap())]
+                && balance.fee_required() == Amount::from_u64(1000).unwrap()
         );
     }
 
@@ -218,7 +218,7 @@ mod tests {
                 // enough to pay a fee, plus dust
                 TestSaplingInput {
                     note_id: 0,
-                    value: Amount::from_u64(10100).unwrap(),
+                    value: Amount::from_u64(1100).unwrap(),
                 },
             ],
             &[SaplingPayment::new(Amount::from_u64(40000).unwrap())],
@@ -228,7 +228,7 @@ mod tests {
         assert_matches!(
             result,
             Err(ChangeError::InsufficientFunds { available, required })
-            if available == Amount::from_u64(50100).unwrap() && required == Amount::from_u64(60000).unwrap()
+            if available == Amount::from_u64(41100).unwrap() && required == Amount::from_u64(42000).unwrap()
         );
     }
 }
