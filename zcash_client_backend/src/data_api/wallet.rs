@@ -185,7 +185,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[deprecated(
-    note = "Use `spend` instead. Note that this uses a fixed fee of 10000 zatoshis, which is not compliant with ZIP 317."
+    note = "Use `spend` instead. `create_spend_to_address` uses a fixed fee of 10000 zatoshis, which is not compliant with ZIP 317."
 )]
 pub fn create_spend_to_address<DbT, ParamsT>(
     wallet_db: &mut DbT,
