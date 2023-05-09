@@ -78,6 +78,9 @@ and this library adheres to Rust's notion of
   - `merkle_tree::incremental::read_auth_fragment_v1`
 - The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}` 
   data types are now statically constrained using const generic type parameters.
+- `transaction::fees::fixed::FeeRule::standard()` now uses the ZIP 317 minimum fee
+  (10000 zatoshis rather than 1000 zatoshis) as the fixed fee. To be compliant with
+  ZIP 317, use `transaction::fees::zip317::FeeRule::standard()` instead.
 
 ## [0.11.0] - 2023-04-15
 ### Added

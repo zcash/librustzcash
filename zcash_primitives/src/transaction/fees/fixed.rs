@@ -1,9 +1,7 @@
 use crate::{
     consensus::{self, BlockHeight},
-    transaction::components::{
-        amount::{Amount, DEFAULT_FEE},
-        transparent::fees as transparent,
-    },
+    transaction::components::{amount::Amount, transparent::fees as transparent},
+    transaction::fees::zip317,
 };
 
 #[cfg(feature = "zfuture")]
@@ -22,10 +20,17 @@ impl FeeRule {
         Self { fixed_fee }
     }
 
-    /// Creates a new fixed fee rule with the standard default fee.
+    /// Creates a new fixed fee rule with the minimum possible [ZIP 317] fee,
+    /// i.e. 10000 zatoshis.
+    ///
+    /// Note that using a fixed fee is not compliant with [ZIP 317]; consider
+    /// using [`zcash_primitives::transaction::fees::zip317::FeeRule`] instead.
+    ///
+    /// [`zcash_primitives::transaction::fees::zip317::FeeRule`]: crate::transaction::fees::zip317::FeeRule
+    /// [ZIP 317]: https://zips.z.cash/zip-0317
     pub fn standard() -> Self {
         Self {
-            fixed_fee: DEFAULT_FEE,
+            fixed_fee: zip317::MINIMUM_FEE,
         }
     }
 
