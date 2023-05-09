@@ -32,6 +32,14 @@ impl Amount {
         Amount(0)
     }
 
+    /// Creates a constant Amount from an i64.
+    ///
+    /// Panics: if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    pub const fn const_from_i64(amount: i64) -> Self {
+        assert!(-MAX_MONEY <= amount && amount <= MAX_MONEY); // contains is not const
+        Amount(amount)
+    }
+
     /// Creates an Amount from an i64.
     ///
     /// Returns an error if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.

@@ -67,6 +67,10 @@ and this library adheres to Rust's notion of
 - `merkle_tree::read_incremental_witness` replaces `merkle_tree::IncrementalWitness::read`
 - `merkle_tree::merkle_path_from_slice` replaces `merkle_tree::MerklePath::from_slice`
 - `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
+- `transaction::fees::zip317::MINIMUM_FEE`, reflecting the minimum possible
+  [ZIP 317](https://zips.z.cash/zip-0317) conventional fee.
+- `transaction::components::amount::Amount::const_from_i64`, intended for constructing
+  a constant `Amount`.
 
 ### Changed
 - The bounds on the `H` parameter to the following methods have changed:
