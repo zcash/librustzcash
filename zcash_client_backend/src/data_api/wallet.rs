@@ -184,7 +184,9 @@ where
 /// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-#[deprecated(note = "Use `spend` instead.")]
+#[deprecated(
+    note = "Use `spend` instead. Note that this uses a fixed fee of 10000 zatoshis, which is not compliant with ZIP 317."
+)]
 pub fn create_spend_to_address<DbT, ParamsT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
@@ -221,7 +223,9 @@ where
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
 
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fixed::FeeRule::standard());
+    #[allow(deprecated)]
+    let fee_rule = fixed::FeeRule::standard();
+    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fee_rule);
     spend(
         wallet_db,
         params,

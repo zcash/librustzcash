@@ -82,6 +82,14 @@ and this library adheres to Rust's notion of
   (10000 zatoshis rather than 1000 zatoshis) as the fixed fee. To be compliant with
   ZIP 317, use `transaction::fees::zip317::FeeRule::standard()` instead.
 
+### Deprecated
+- `transaction::components::amount::DEFAULT_FEE` has been deprecated. Depending on
+  context, you may want to use `transaction::fees::zip317::MINIMUM_FEE`, or calculate
+  the ZIP 317 conventional fee using `transaction::fees::zip317::FeeRule` instead.
+- `transaction::fees::fixed::FeeRule::standard()` has been deprecated.
+  Use either `transaction::fees::zip317::FeeRule::standard()` or
+  `transaction::fees::fixed::FeeRule::non_standard`.
+
 ## [0.11.0] - 2023-04-15
 ### Added
 - `zcash_primitives::zip32::fingerprint` module, containing types for deriving

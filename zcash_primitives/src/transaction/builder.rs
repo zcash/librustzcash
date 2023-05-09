@@ -533,6 +533,7 @@ mod testing {
         }
 
         pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
+            #[allow(deprecated)]
             self.build(&MockTxProver, &fixed::FeeRule::standard())
         }
     }

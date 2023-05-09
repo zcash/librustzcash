@@ -24,10 +24,15 @@ impl FeeRule {
     /// i.e. 10000 zatoshis.
     ///
     /// Note that using a fixed fee is not compliant with [ZIP 317]; consider
-    /// using [`zcash_primitives::transaction::fees::zip317::FeeRule`] instead.
+    /// using [`zcash_primitives::transaction::fees::zip317::FeeRule::standard()`]
+    /// instead.
     ///
-    /// [`zcash_primitives::transaction::fees::zip317::FeeRule`]: crate::transaction::fees::zip317::FeeRule
+    /// [`zcash_primitives::transaction::fees::zip317::FeeRule::standard()`]: crate::transaction::fees::zip317::FeeRule::standard
     /// [ZIP 317]: https://zips.z.cash/zip-0317
+    #[deprecated(
+        since = "0.12.0",
+        note = "To calculate the ZIP 317 fee, use `transaction::fees::zip317::FeeRule::standard()`. For a fixed fee, use the `non_standard` constructor."
+    )]
     pub fn standard() -> Self {
         Self {
             fixed_fee: zip317::MINIMUM_FEE,

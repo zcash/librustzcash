@@ -8,6 +8,12 @@ use orchard::value as orchard;
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
+#[deprecated(
+    since = "0.12.0",
+    note = "To calculate the ZIP 317 fee, use `transaction::fees::zip317::FeeRule`.
+For a constant representing the minimum ZIP 317 fee, use `transaction::fees::zip317::MINIMUM_FEE`.
+For the constant amount 1000 zatoshis, use `Amount::const_from_i64(1000)`."
+)]
 pub const DEFAULT_FEE: Amount = Amount(1000);
 
 /// A type-safe representation of some quantity of Zcash.
