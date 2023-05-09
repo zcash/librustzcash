@@ -571,9 +571,9 @@ mod tests {
             if available == Amount::zero() && required == Amount::from_u64(12000).unwrap()
         );
 
-        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 21 (that don't send us funds)
+        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
         // until just before the first transaction expires
-        for i in 1..22 {
+        for i in 1..42 {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
@@ -605,11 +605,11 @@ mod tests {
             if available == Amount::zero() && required == Amount::from_u64(12000).unwrap()
         );
 
-        // Mine block SAPLING_ACTIVATION_HEIGHT + 22 so that the first transaction expires
+        // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
         let (cb, _) = fake_compact_block(
-            sapling_activation_height() + 22,
+            sapling_activation_height() + 42,
             cb.hash(),
-            &ExtendedSpendingKey::master(&[22]).to_diversifiable_full_viewing_key(),
+            &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
             value,
         );
@@ -716,9 +716,9 @@ mod tests {
             send_and_recover_with_policy(&mut db_write, OvkPolicy::Sender).unwrap();
         assert_eq!(&recovered_to, &addr2);
 
-        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 22 (that don't send us funds)
+        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 42 (that don't send us funds)
         // so that the first transaction expires
-        for i in 1..=22 {
+        for i in 1..=42 {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
