@@ -45,7 +45,9 @@ use crate::{
     },
 };
 
-const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
+/// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
+/// <https://zips.z.cash/zip-0203#changes-for-blossom>
+const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 /// Errors that can occur during transaction construction.
 #[derive(Debug, PartialEq, Eq)]
@@ -200,7 +202,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// # Default values
     ///
     /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
+    /// expiry delta.
     pub fn new_with_rng(params: P, target_height: BlockHeight, rng: R) -> Builder<'a, P, R> {
         Self::new_internal(params, rng, target_height)
     }
@@ -525,7 +527,7 @@ mod testing {
         /// # Default values
         ///
         /// The expiry height will be set to the given height plus the default transaction
-        /// expiry delta (20 blocks).
+        /// expiry delta.
         ///
         /// WARNING: DO NOT USE IN PRODUCTION
         pub fn test_only_new_with_rng(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
