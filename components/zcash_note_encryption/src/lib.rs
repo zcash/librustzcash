@@ -667,9 +667,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D, ENC_CIP
         }
     }
 
-    if let NoteValidity::Valid =
-        check_note_validity::<D>(&note, &ephemeral_key, &output.cmstar_bytes())
-    {
+    if D::ExtractedCommitmentBytes::from(&D::cmstar(&note)) == output.cmstar_bytes() {
         Some((note, to, memo))
     } else {
         None
