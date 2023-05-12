@@ -6,16 +6,57 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Bumped dependencies to `hdwallet 0.4`.
+
+## [0.9.0] - 2023-04-28
+### Added
+- `data_api::SentTransactionOutput::from_parts`
+- `data_api::WalletRead::get_min_unspent_height`
 
 ### Changed
+- `decrypt::DecryptedOutput` is now parameterized by a `Note` type parameter,
+  to allow reuse of the data structure for non-Sapling contexts.
+- `data_api::SentTransactionOutput` must now be constructed using
+  `SentTransactionOutput::from_parts`. The internal state of `SentTransactionOutput`
+  is now private, and accessible via methods that have the same names as the 
+  previously exposed fields.
+
+### Renamed
+- The following types and fields have been renamed in preparation for supporting
+  `orchard` in wallet APIs:
+  - `WalletTx::shielded_spends`  -> `WalletTx::sapling_spends`
+  - `WalletTx::shielded_outputs` -> `WalletTx::sapling_outputs`
+  - `WalletShieldedSpend` -> `WalletSaplingSpend`. Also, the internals of this
+    data structure have been made private.
+  - `WalletShieldedOutput` -> `WalletSaplingOutput`. Also, the internals of this
+    data structure have been made private.
+- The `data_api::WalletWrite::rewind_to_height` method has been renamed to
+  `truncate_to_height` to better reflect its semantics.
+
+### Removed
+  - `wallet::WalletTx::num_spends`
+  - `wallet::WalletTx::num_outputs`
+  - `wallet::WalletSaplingOutput::to` is redundant and has been removed; the
+    recipient address can be obtained from the note.
+  - `decrypt::DecryptedOutput::to` is redundant and has been removed; the
+    recipient address can be obtained from the note.
+
+## [0.8.0] - 2023-04-15
+### Changed
 - Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `orchard 0.4`,
-  `tonic 0.9`, `base64 0.21`, `bech32 0.9`.
+  `tonic 0.9`, `base64 0.21`, `bech32 0.9`, `zcash_primitives 0.11`.
 - The dependency on `zcash_primitives` no longer enables the `multicore` feature
   by default in order to support compilation under `wasm32-wasi`. Users of other
   platforms may need to include an explicit dependency on `zcash_primitives`
   without `default-features = false` or otherwise explicitly enable the
   `zcash_primitives/multicore` feature if they did not already depend
   upon `zcash_primitives` with default features enabled.
+
+### Fixed
+- `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy` now takes
+  into account the Sapling output padding behaviour of
+  `zcash_primitives::transaction::components::sapling::builder::SaplingBuilder`.
 
 ## [0.7.0] - 2023-02-01
 ### Added

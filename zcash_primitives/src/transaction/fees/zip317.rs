@@ -13,6 +13,13 @@ use crate::{
     },
 };
 
+/// The minimum conventional fee using the standard [ZIP 317] constants. Equivalent to
+/// `(FeeRule::standard().marginal_fee() * FeeRule::standard().grace_actions()).unwrap()`,
+/// but as a constant.
+///
+/// [ZIP 317]: https//zips.z.cash/zip-0317
+pub const MINIMUM_FEE: Amount = Amount::const_from_i64(10_000);
+
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
 /// This fee rule supports only P2pkh transparent inputs; an error will be returned if a coin

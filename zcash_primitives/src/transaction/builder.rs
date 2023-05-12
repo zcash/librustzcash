@@ -5,9 +5,6 @@ use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
 
-#[cfg(not(feature = "zfuture"))]
-use std::marker::PhantomData;
-
 use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
@@ -15,14 +12,13 @@ use crate::{
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
-    merkle_tree::MerklePath,
-    sapling::{prover::TxProver, value::NoteValue, Diversifier, Node, Note, PaymentAddress},
+    sapling::{self, prover::TxProver, value::NoteValue, Diversifier, Note, PaymentAddress},
     transaction::{
         components::{
             amount::{Amount, BalanceError},
             sapling::{
-                self,
-                builder::{SaplingBuilder, SaplingMetadata},
+                builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
+                fees as sapling_fees,
             },
             transparent::{self, builder::TransparentBuilder},
         },
@@ -49,7 +45,9 @@ use crate::{
     },
 };
 
-const DEFAULT_TX_EXPIRY_DELTA: u32 = 20;
+/// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
+/// <https://zips.z.cash/zip-0203#changes-for-blossom>
+const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
 /// Errors that can occur during transaction construction.
 #[derive(Debug, PartialEq, Eq)]
@@ -67,7 +65,7 @@ pub enum Error<FeeError> {
     /// An error occurred in constructing the transparent parts of a transaction.
     TransparentBuild(transparent::builder::Error),
     /// An error occurred in constructing the Sapling parts of a transaction.
-    SaplingBuild(sapling::builder::Error),
+    SaplingBuild(sapling_builder::Error),
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(feature = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -144,7 +142,7 @@ pub struct Builder<'a, P, R> {
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(feature = "zfuture"))]
-    tze_builder: PhantomData<&'a ()>,
+    tze_builder: std::marker::PhantomData<&'a ()>,
     progress_notifier: Option<Sender<Progress>>,
 }
 
@@ -173,13 +171,13 @@ impl<'a, P, R> Builder<'a, P, R> {
 
     /// Returns the set of Sapling inputs currently committed to be consumed
     /// by the transaction.
-    pub fn sapling_inputs(&self) -> &[impl sapling::fees::InputView<()>] {
+    pub fn sapling_inputs(&self) -> &[impl sapling_fees::InputView<()>] {
         self.sapling_builder.inputs()
     }
 
     /// Returns the set of Sapling outputs currently set to be produced by
     /// the transaction.
-    pub fn sapling_outputs(&self) -> &[impl sapling::fees::OutputView] {
+    pub fn sapling_outputs(&self) -> &[impl sapling_fees::OutputView] {
         self.sapling_builder.outputs()
     }
 }
@@ -204,7 +202,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// # Default values
     ///
     /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
+    /// expiry delta.
     pub fn new_with_rng(params: P, target_height: BlockHeight, rng: R) -> Builder<'a, P, R> {
         Self::new_internal(params, rng, target_height)
     }
@@ -226,7 +224,7 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
-            tze_builder: PhantomData,
+            tze_builder: std::marker::PhantomData,
             progress_notifier: None,
         }
     }
@@ -240,8 +238,8 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         extsk: ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note,
-        merkle_path: MerklePath<Node>,
-    ) -> Result<(), sapling::builder::Error> {
+        merkle_path: sapling::MerklePath,
+    ) -> Result<(), sapling_builder::Error> {
         self.sapling_builder
             .add_spend(&mut self.rng, extsk, diversifier, note, merkle_path)
     }
@@ -253,9 +251,9 @@ impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
         to: PaymentAddress,
         value: Amount,
         memo: MemoBytes,
-    ) -> Result<(), sapling::builder::Error> {
+    ) -> Result<(), sapling_builder::Error> {
         if value.is_negative() {
-            return Err(sapling::builder::Error::InvalidAmount);
+            return Err(sapling_builder::Error::InvalidAmount);
         }
         self.sapling_builder.add_output(
             &mut self.rng,
@@ -529,7 +527,7 @@ mod testing {
         /// # Default values
         ///
         /// The expiry height will be set to the given height plus the default transaction
-        /// expiry delta (20 blocks).
+        /// expiry delta.
         ///
         /// WARNING: DO NOT USE IN PRODUCTION
         pub fn test_only_new_with_rng(params: P, height: BlockHeight, rng: R) -> Builder<'a, P, R> {
@@ -537,6 +535,7 @@ mod testing {
         }
 
         pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
+            #[allow(deprecated)]
             self.build(&MockTxProver, &fixed::FeeRule::standard())
         }
     }
@@ -545,18 +544,18 @@ mod testing {
 #[cfg(test)]
 mod tests {
     use ff::Field;
+    use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
     use rand_core::OsRng;
 
     use crate::{
         consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
         legacy::TransparentAddress,
         memo::MemoBytes,
-        merkle_tree::{CommitmentTree, IncrementalWitness},
         sapling::{Node, Rseed},
         transaction::components::{
-            amount::{Amount, DEFAULT_FEE},
-            sapling::builder::{self as build_s},
-            transparent::builder::{self as build_t},
+            amount::Amount,
+            sapling::builder::{self as sapling_builder},
+            transparent::builder::{self as transparent_builder},
         },
         zip32::ExtendedSpendingKey,
     };
@@ -566,9 +565,6 @@ mod tests {
     #[cfg(feature = "zfuture")]
     #[cfg(feature = "transparent-inputs")]
     use super::TzeBuilder;
-
-    #[cfg(not(feature = "zfuture"))]
-    use std::marker::PhantomData;
 
     #[cfg(feature = "transparent-inputs")]
     use crate::{
@@ -599,7 +595,7 @@ mod tests {
                 Amount::from_i64(-1).unwrap(),
                 MemoBytes::empty()
             ),
-            Err(build_s::Error::InvalidAmount)
+            Err(sapling_builder::Error::InvalidAmount)
         );
     }
 
@@ -626,7 +622,7 @@ mod tests {
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
-            tze_builder: PhantomData,
+            tze_builder: std::marker::PhantomData,
             progress_notifier: None,
         };
 
@@ -653,7 +649,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_u64(49000).unwrap(),
+                Amount::from_u64(40000).unwrap(),
             )
             .unwrap();
 
@@ -672,9 +668,9 @@ mod tests {
 
         let note1 = to.create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu1 = Node::from_cmu(&note1.cmu());
-        let mut tree = CommitmentTree::empty();
+        let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let witness1 = IncrementalWitness::from_tree(&tree);
+        let witness1 = IncrementalWitness::from_tree(tree);
 
         let tx_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
@@ -689,7 +685,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_u64(49000).unwrap(),
+                Amount::from_u64(40000).unwrap(),
             )
             .unwrap();
 
@@ -697,7 +693,7 @@ mod tests {
         // that a binding signature was attempted
         assert_eq!(
             builder.mock_build(),
-            Err(Error::SaplingBuild(build_s::Error::BindingSig))
+            Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
         );
     }
 
@@ -712,12 +708,14 @@ mod tests {
                 &TransparentAddress::PublicKey([0; 20]),
                 Amount::from_i64(-1).unwrap(),
             ),
-            Err(build_t::Error::InvalidAmount)
+            Err(transparent_builder::Error::InvalidAmount)
         );
     }
 
     #[test]
     fn fails_on_negative_change() {
+        use crate::transaction::fees::zip317::MINIMUM_FEE;
+
         let mut rng = OsRng;
 
         // Just use the master key as the ExtendedSpendingKey for this test
@@ -732,7 +730,7 @@ mod tests {
             let builder = Builder::new(TEST_NETWORK, tx_height);
             assert_eq!(
                 builder.mock_build(),
-                Err(Error::InsufficientFunds(DEFAULT_FEE))
+                Err(Error::InsufficientFunds(MINIMUM_FEE))
             );
         }
 
@@ -741,7 +739,7 @@ mod tests {
         let to = dfvk.default_address().1;
 
         // Fail if there is only a Sapling output
-        // 0.0005 z-ZEC out, 0.00001 t-ZEC fee
+        // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
@@ -755,13 +753,13 @@ mod tests {
             assert_eq!(
                 builder.mock_build(),
                 Err(Error::InsufficientFunds(
-                    (Amount::from_i64(50000).unwrap() + DEFAULT_FEE).unwrap()
+                    (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
                 ))
             );
         }
 
         // Fail if there is only a transparent output
-        // 0.0005 t-ZEC out, 0.00001 t-ZEC fee
+        // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
@@ -773,19 +771,19 @@ mod tests {
             assert_eq!(
                 builder.mock_build(),
                 Err(Error::InsufficientFunds(
-                    (Amount::from_i64(50000).unwrap() + DEFAULT_FEE).unwrap()
+                    (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
                 ))
             );
         }
 
-        let note1 = to.create_note(50999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note1 = to.create_note(59999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cmu1 = Node::from_cmu(&note1.cmu());
-        let mut tree = CommitmentTree::empty();
+        let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
-        let mut witness1 = IncrementalWitness::from_tree(&tree);
+        let mut witness1 = IncrementalWitness::from_tree(tree.clone());
 
         // Fail if there is insufficient input
-        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.00001 t-ZEC fee, 0.00050999 z-ZEC in
+        // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height);
             builder
@@ -820,7 +818,7 @@ mod tests {
         let cmu2 = Node::from_cmu(&note2.cmu());
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();
-        let witness2 = IncrementalWitness::from_tree(&tree);
+        let witness2 = IncrementalWitness::from_tree(tree);
 
         // Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
@@ -856,7 +854,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 builder.mock_build(),
-                Err(Error::SaplingBuild(build_s::Error::BindingSig))
+                Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
             )
         }
     }

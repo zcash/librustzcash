@@ -24,7 +24,7 @@ pub use address::PaymentAddress;
 pub use keys::{Diversifier, NullifierDerivingKey, ProofGenerationKey, SaplingIvk, ViewingKey};
 pub use note::{nullifier::Nullifier, Note, Rseed};
 pub use tree::{
-    merkle_hash, Node, SAPLING_COMMITMENT_TREE_DEPTH, SAPLING_COMMITMENT_TREE_DEPTH_U8,
+    merkle_hash, CommitmentTree, IncrementalWitness, MerklePath, Node, NOTE_COMMITMENT_TREE_DEPTH,
 };
 
 /// Create the spendAuthSig for a Sapling SpendDescription.

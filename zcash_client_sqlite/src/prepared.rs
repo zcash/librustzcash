@@ -12,8 +12,8 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Diversifier, Node, Nullifier},
+    merkle_tree::{write_commitment_tree, write_incremental_witness},
+    sapling::{self, Diversifier, Nullifier},
     transaction::{components::Amount, TxId},
     zip32::{AccountId, DiversifierIndex},
 };
@@ -156,7 +156,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     "SELECT id_tx FROM transactions WHERE txid = ?",
                 )?,
                 stmt_mark_sapling_note_spent: wallet_db.conn.prepare(
-                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
+                    "UPDATE sapling_received_notes SET spent = ? WHERE nf = ?"
                 )?,
                 #[cfg(feature = "transparent-inputs")]
                 stmt_mark_transparent_utxo_spent: wallet_db.conn.prepare(
@@ -217,11 +217,11 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     RETURNING id_utxo"
                 )?,
                 stmt_insert_received_note: wallet_db.conn.prepare(
-                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
+                    "INSERT INTO sapling_received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
                     VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
                 )?,
                 stmt_update_received_note: wallet_db.conn.prepare(
-                    "UPDATE received_notes
+                    "UPDATE sapling_received_notes
                     SET account = :account,
                         diversifier = :diversifier,
                         value = :value,
@@ -232,7 +232,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     WHERE tx = :tx AND output_index = :output_index",
                 )?,
                 stmt_select_received_note: wallet_db.conn.prepare(
-                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
+                    "SELECT id_note FROM sapling_received_notes WHERE tx = ? AND output_index = ?"
                 )?,
                 stmt_update_sent_output: wallet_db.conn.prepare(
                     "UPDATE sent_notes
@@ -261,9 +261,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     "DELETE FROM sapling_witnesses WHERE block < ?"
                 )?,
                 stmt_update_expired: wallet_db.conn.prepare(
-                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
+                    "UPDATE sapling_received_notes SET spent = NULL WHERE EXISTS (
                         SELECT id_tx FROM transactions
-                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
+                        WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
                 )?,
                 stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
@@ -277,10 +277,10 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
-        commitment_tree: &CommitmentTree<Node>,
+        commitment_tree: &sapling::CommitmentTree,
     ) -> Result<(), SqliteClientError> {
         let mut encoded_tree = Vec::new();
-        commitment_tree.write(&mut encoded_tree).unwrap();
+        write_commitment_tree(commitment_tree, &mut encoded_tree).unwrap();
 
         self.stmt_insert_block.execute(params![
             u32::from(block_height),
@@ -684,9 +684,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         diversifier: &Diversifier,
         value: u64,
         rcm: [u8; 32],
-        nf: &Option<Nullifier>,
+        nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
-        is_change: Option<bool>,
+        is_change: bool,
     ) -> Result<NoteId, SqliteClientError> {
         let sql_args: &[(&str, &dyn ToSql)] = &[
             (":tx", &tx_ref),
@@ -695,7 +695,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":diversifier", &diversifier.0.as_ref()),
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
-            (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
+            (":nf", &nf.map(|nf| nf.0.as_ref())),
             (
                 ":memo",
                 &memo
@@ -726,9 +726,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         diversifier: &Diversifier,
         value: u64,
         rcm: [u8; 32],
-        nf: &Option<Nullifier>,
+        nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
-        is_change: Option<bool>,
+        is_change: bool,
         tx_ref: i64,
         output_index: usize,
     ) -> Result<bool, SqliteClientError> {
@@ -737,7 +737,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":diversifier", &diversifier.0.as_ref()),
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
-            (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
+            (":nf", &nf.map(|nf| nf.0.as_ref())),
             (
                 ":memo",
                 &memo
@@ -777,7 +777,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         &mut self,
         note_id: NoteId,
         height: BlockHeight,
-        witness: &IncrementalWitness<Node>,
+        witness: &sapling::IncrementalWitness,
     ) -> Result<(), SqliteClientError> {
         let note_id = match note_id {
             NoteId::ReceivedNoteId(note_id) => Ok(note_id),
@@ -785,7 +785,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         }?;
 
         let mut encoded = Vec::new();
-        witness.write(&mut encoded).unwrap();
+        write_incremental_witness(witness, &mut encoded).unwrap();
 
         self.stmt_insert_witness
             .execute(params![note_id, u32::from(height), encoded])?;

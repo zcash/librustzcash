@@ -7,9 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Removed
+- `circuit::sapling::TREE_DEPTH` use `zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH` instead
+
+## [0.11.0] - 2023-04-15
 ### Changed
 - Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `jubjub 0.10`,
-  `bellman 0.14`, `redjubjub 0.7`
+  `bellman 0.14`, `redjubjub 0.7`, `zcash_primitives 0.11`.
 
 ## [0.10.0] - 2023-02-01
 ### Added

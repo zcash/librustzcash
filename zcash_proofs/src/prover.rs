@@ -4,12 +4,11 @@ use bellman::groth16::{Parameters, PreparedVerifyingKey};
 use bls12_381::Bls12;
 use std::path::Path;
 use zcash_primitives::{
-    merkle_tree::MerklePath,
     sapling::{
         prover::TxProver,
         redjubjub::{PublicKey, Signature},
         value::ValueCommitment,
-        Diversifier, Node, PaymentAddress, ProofGenerationKey, Rseed,
+        Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
     },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
@@ -154,7 +153,7 @@ impl TxProver for LocalTxProver {
         ar: jubjub::Fr,
         value: u64,
         anchor: bls12_381::Scalar,
-        merkle_path: MerklePath<Node>,
+        merkle_path: MerklePath,
     ) -> Result<([u8; GROTH_PROOF_SIZE], ValueCommitment, PublicKey), ()> {
         let (proof, cv, rk) = ctx.spend_proof(
             proof_generation_key,

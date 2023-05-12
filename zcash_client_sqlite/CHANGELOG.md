@@ -6,9 +6,64 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Bumped dependencies to `hdwallet 0.4`.
+
+## [0.7.0] - 2023-04-28
+### Changed
+- Bumped dependencies to `zcash_client_backend 0.9`.
+
+### Removed
+- The following deprecated types and methods have been removed from the public API:
+  - `wallet::ShieldedOutput`
+  - `wallet::block_height_extrema`
+  - `wallet::get_address`
+  - `wallet::get_all_nullifiers`
+  - `wallet::get_balance`
+  - `wallet::get_balance_at`
+  - `wallet::get_block_hash`
+  - `wallet::get_commitment_tree`
+  - `wallet::get_nullifiers`
+  - `wallet::get_received_memo`
+  - `wallet::get_rewind_height`
+  - `wallet::get_sent_memo`
+  - `wallet::get_spendable_sapling_notes`
+  - `wallet::get_transaction`
+  - `wallet::get_tx_height`
+  - `wallet::get_unified_full_viewing_keys`
+  - `wallet::get_witnesses`
+  - `wallet::insert_block`
+  - `wallet::insert_witnesses`
+  - `wallet::is_valid_account_extfvk`
+  - `wallet::mark_sapling_note_spent`
+  - `wallet::put_tx_data`
+  - `wallet::put_tx_meta`
+  - `wallet::prune_witnesses`
+  - `wallet::select_spendable_sapling_notes`
+  - `wallet::update_expired_notes`
+  - `wallet::transact::get_spendable_sapling_notes`
+  - `wallet::transact::select_spendable_sapling_notes`
+
+## [0.6.0] - 2023-04-15
+### Added
+- SQLite view `v_tx_outputs`, exposing the history of transaction outputs sent
+  from and received by the wallet. See `zcash_client_sqlite::wallet` for view
+  documentation.
+
+### Fixed
+- In a previous crate release, `WalletDb` was modified to start tracking Sapling
+  change notes in both the `sent_notes` and `received_notes` tables, as a form
+  of double-entry accounting. This broke assumptions in the `v_transactions`
+  SQLite view, and also left the `sent_notes` table in an inconsistent state. A
+  migration has been added to this release which fixes the `sent_notes` table to
+  consistently store Sapling change notes.
+- The SQLite view `v_transactions` had several bugs independently from the above
+  issue, and has been rewritten. See `zcash_client_sqlite::wallet` for view
+  documentation.
 
 ### Changed
-- Bumped dependencies to `group 0.13`, `jubjub 0.10`
+- Bumped dependencies to `group 0.13`, `jubjub 0.10`, `zcash_primitives 0.11`,
+  `zcash_client_backend 0.8`.
 - The dependency on `zcash_primitives` no longer enables the `multicore` feature
   by default in order to support compilation under `wasm32-wasi`. Users of other
   platforms may need to include an explicit dependency on `zcash_primitives`
@@ -16,7 +71,10 @@ and this library adheres to Rust's notion of
   `zcash_primitives/multicore` feature if they did not already depend
   upon `zcash_primitives` with default features enabled.
 
-## [0.7.0] - 2023-02-01
+### Removed
+- SQLite views `v_tx_received` and `v_tx_sent` (use `v_tx_outputs` instead).
+
+## [0.5.0] - 2023-02-01
 ### Added
 - `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db
  to the specified height following the same logic as homonymous functions on

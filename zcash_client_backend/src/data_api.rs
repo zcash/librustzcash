@@ -10,8 +10,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier, PaymentAddress},
+    sapling::{self, Nullifier, PaymentAddress},
     transaction::{
         components::{amount::Amount, OutPoint},
         Transaction, TxId,
@@ -82,6 +81,9 @@ pub trait WalletRead {
             })
         })
     }
+
+    /// Returns the minimum block height corresponding to an unspent note in the wallet.
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns the block hash for the block at the given height, if the
     /// associated block data is available. Returns `Ok(None)` if the hash
@@ -163,14 +165,14 @@ pub trait WalletRead {
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error>;
 
     /// Returns the incremental witnesses as of the specified block height.
     #[allow(clippy::type_complexity)]
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error>;
 
     /// Returns the nullifiers for notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as
@@ -236,7 +238,7 @@ pub struct PrunedBlock<'a> {
     pub block_height: BlockHeight,
     pub block_hash: BlockHash,
     pub block_time: u32,
-    pub commitment_tree: &'a CommitmentTree<Node>,
+    pub commitment_tree: &'a sapling::CommitmentTree,
     pub transactions: &'a Vec<WalletTx<Nullifier>>,
 }
 
@@ -247,7 +249,7 @@ pub struct PrunedBlock<'a> {
 /// wallet database when transactions are successfully decrypted.
 pub struct DecryptedTransaction<'a> {
     pub tx: &'a Transaction,
-    pub sapling_outputs: &'a Vec<DecryptedOutput>,
+    pub sapling_outputs: &'a Vec<DecryptedOutput<sapling::Note>>,
 }
 
 /// A transaction that was constructed and sent by the wallet.
@@ -287,21 +289,58 @@ pub enum Recipient {
     InternalAccount(AccountId, PoolType),
 }
 
+/// A type that represents an output (either Sapling or transparent) that was sent by the wallet.
 pub struct SentTransactionOutput {
-    /// The index within the transaction that contains the recipient output.
+    output_index: usize,
+    recipient: Recipient,
+    value: Amount,
+    memo: Option<MemoBytes>,
+    sapling_change_to: Option<(AccountId, sapling::Note)>,
+}
+
+impl SentTransactionOutput {
+    pub fn from_parts(
+        output_index: usize,
+        recipient: Recipient,
+        value: Amount,
+        memo: Option<MemoBytes>,
+        sapling_change_to: Option<(AccountId, sapling::Note)>,
+    ) -> Self {
+        Self {
+            output_index,
+            recipient,
+            value,
+            memo,
+            sapling_change_to,
+        }
+    }
+    /// Returns the index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
     ///   outputs of the transaction.
     /// - If `recipient_address` is a transparent address, this is an index into the
     ///   transparent outputs of the transaction.
-    pub output_index: usize,
-    /// The recipient address of the transaction, or the account
-    /// id for wallet-internal transactions.
-    pub recipient: Recipient,
-    /// The value of the newly created output
-    pub value: Amount,
-    /// The memo that was attached to the output, if any
-    pub memo: Option<MemoBytes>,
+    pub fn output_index(&self) -> usize {
+        self.output_index
+    }
+    /// Returns the recipient address of the transaction, or the account id for wallet-internal
+    /// transactions.
+    pub fn recipient(&self) -> &Recipient {
+        &self.recipient
+    }
+    /// Returns the value of the newly created output.
+    pub fn value(&self) -> Amount {
+        self.value
+    }
+    /// Returns the memo that was attached to the output, if any.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
+    }
+
+    /// Returns t decrypted note, if the sent output belongs to this wallet
+    pub fn sapling_change_to(&self) -> Option<&(AccountId, sapling::Note)> {
+        self.sapling_change_to.as_ref()
+    }
 }
 
 /// This trait encapsulates the write capabilities required to update stored
@@ -348,8 +387,8 @@ pub trait WalletWrite: WalletRead {
     fn advance_by_block(
         &mut self,
         block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
+        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
@@ -361,7 +400,7 @@ pub trait WalletWrite: WalletRead {
     /// persistent wallet store.
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
 
-    /// Rewinds the wallet database to the specified height.
+    /// Truncates the wallet database to the specified height.
     ///
     /// This method assumes that the state of the underlying data store is
     /// consistent up to a particular block height. Since it is possible that
@@ -373,8 +412,8 @@ pub trait WalletWrite: WalletRead {
     /// most recent block and all other operations will treat this block
     /// as the chain tip for balance determination purposes.
     ///
-    /// There may be restrictions on how far it is possible to rewind.
-    fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
+    /// There may be restrictions on heights to which it is possible to truncate.
+    fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Adds a transparent UTXO received by the wallet to the data store.
     fn put_received_transparent_utxo(
@@ -393,8 +432,7 @@ pub mod testing {
         consensus::{BlockHeight, Network},
         legacy::TransparentAddress,
         memo::Memo,
-        merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::{Node, Nullifier},
+        sapling::{self, Nullifier},
         transaction::{
             components::{Amount, OutPoint},
             Transaction, TxId,
@@ -420,6 +458,10 @@ pub mod testing {
         type TxRef = TxId;
 
         fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)
         }
 
@@ -481,7 +523,7 @@ pub mod testing {
         fn get_commitment_tree(
             &self,
             _block_height: BlockHeight,
-        ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+        ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
             Ok(None)
         }
 
@@ -489,7 +531,7 @@ pub mod testing {
         fn get_witnesses(
             &self,
             _block_height: BlockHeight,
-        ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -569,8 +611,8 @@ pub mod testing {
         fn advance_by_block(
             &mut self,
             _block: &PrunedBlock,
-            _updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
-        ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+            _updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
+        ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
             Ok(vec![])
         }
 
@@ -588,7 +630,7 @@ pub mod testing {
             Ok(TxId::from_bytes([0u8; 32]))
         }
 
-        fn rewind_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
+        fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {
             Ok(())
         }
 

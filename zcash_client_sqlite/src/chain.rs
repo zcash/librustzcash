@@ -141,7 +141,7 @@ pub(crate) fn blockmetadb_insert(
 }
 
 #[cfg(feature = "unstable")]
-pub(crate) fn blockmetadb_rewind_to_height(
+pub(crate) fn blockmetadb_truncate_to_height(
     conn: &Connection,
     block_height: BlockHeight,
 ) -> Result<(), rusqlite::Error> {
@@ -284,7 +284,7 @@ mod tests {
             self, fake_compact_block, fake_compact_block_spending, init_test_accounts_table,
             insert_into_cache, sapling_activation_height, AddressType,
         },
-        wallet::{get_balance, init::init_wallet_db, rewind_to_height},
+        wallet::{get_balance, init::init_wallet_db, truncate_to_height},
         AccountId, BlockDb, WalletDb,
     };
 
@@ -479,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn data_db_rewinding() {
+    fn data_db_truncation() {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
@@ -529,7 +529,7 @@ mod tests {
         );
 
         // "Rewind" to height of last scanned block
-        rewind_to_height(&db_data, sapling_activation_height() + 1).unwrap();
+        truncate_to_height(&db_data, sapling_activation_height() + 1).unwrap();
 
         // Account balance should be unaltered
         assert_eq!(
@@ -538,7 +538,7 @@ mod tests {
         );
 
         // Rewind so that one block is dropped
-        rewind_to_height(&db_data, sapling_activation_height()).unwrap();
+        truncate_to_height(&db_data, sapling_activation_height()).unwrap();
 
         // Account balance should only contain the first received note
         assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);

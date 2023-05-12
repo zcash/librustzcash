@@ -325,12 +325,11 @@ fn combine_nodes<'a, V: Version>(left: IndexedNode<'a, V>, right: IndexedNode<'a
 
 #[cfg(test)]
 mod tests {
-
     use super::{Entry, EntryKind, EntryLink, Tree};
     use crate::{node_data, NodeData, Version, V2};
 
     use assert_matches::assert_matches;
-    use quickcheck::{quickcheck, TestResult};
+    use proptest::prelude::*;
 
     fn leaf(height: u32) -> node_data::V2 {
         node_data::V2 {
@@ -640,100 +639,88 @@ mod tests {
         assert_eq!(tree.len(), 4083); // 4095 - log2(4096)
     }
 
-    quickcheck! {
-        fn there_and_back(number: u32) -> TestResult {
-            if number > 1024*1024 {
-                TestResult::discard()
-            } else {
-                let mut tree = initial();
-                for i in 0..number {
-                    tree.append_leaf(leaf(i+3)).expect("Failed to append");
-                }
-                for _ in 0..number {
-                    tree.truncate_leaf().expect("Failed to truncate");
-                }
+    proptest! {
+        #[test]
+        fn prop_there_and_back(number in 0u32..=1024) {
+            let mut tree = initial();
+            for i in 0..number {
+                tree.append_leaf(leaf(i+3)).expect("Failed to append");
+            }
+            for _ in 0..number {
+                tree.truncate_leaf().expect("Failed to truncate");
+            }
 
-                TestResult::from_bool(matches!(tree.root(), EntryLink::Stored(2)))
+            assert_matches!(tree.root(), EntryLink::Stored(2));
+        }
+
+        #[test]
+        fn prop_leaf_count(number in 3u32..=1024) {
+            let mut tree = initial();
+            for i in 1..(number-1) {
+                tree.append_leaf(leaf(i+2)).expect("Failed to append");
+            }
+
+            assert_eq!(tree.root_node().expect("no root").node.leaf_count(), number as u64);
+        }
+
+        #[test]
+        fn prop_parity(number in 3u32..=2048) {
+            let mut tree = initial();
+            for i in 1..(number-1) {
+                tree.append_leaf(leaf(i+2)).expect("Failed to append");
+            }
+
+            if number & (number - 1) == 0 {
+                assert_matches!(tree.root(), EntryLink::Stored(_));
+            } else {
+                assert_matches!(tree.root(), EntryLink::Generated(_));
             }
         }
 
-        fn leaf_count(number: u32) -> TestResult {
-            if !(3..=1024 * 1024).contains(&number) {
-                TestResult::discard()
-            } else {
-                let mut tree = initial();
-                for i in 1..(number-1) {
-                    tree.append_leaf(leaf(i+2)).expect("Failed to append");
-                }
-
-                TestResult::from_bool(
-                    tree.root_node().expect("no root").node.leaf_count() == number as u64
-                )
-            }
-        }
-
-        fn parity(number: u32) -> TestResult {
-            if !(3..=2048 * 2048).contains(&number) {
-                TestResult::discard()
-            } else {
-                let mut tree = initial();
-                for i in 1..(number-1) {
-                    tree.append_leaf(leaf(i+2)).expect("Failed to append");
-                }
-
-                TestResult::from_bool(
-                    if number & (number - 1) == 0 {
-                        matches!(tree.root(), EntryLink::Stored(_))
-                    } else {
-                        matches!(tree.root(), EntryLink::Generated(_))
-                    }
-                )
-            }
-        }
-
-        fn parity_with_truncate(add: u32, delete: u32) -> TestResult {
+        #[test]
+        fn prop_parity_with_truncate(
+            add_and_delete in (0u32..=2048).prop_flat_map(
+                |add| (Just(add), 0..=add)
+            )
+        ) {
+            let (add, delete) = add_and_delete;
             // First we add `add` number of leaves, then delete `delete` number of leaves
             // What is left should be consistent with generated-stored structure
-            if add > 2048 * 2048 || add < delete {
-                TestResult::discard()
+            let mut tree = initial();
+            for i in 0..add {
+                tree.append_leaf(leaf(i+3)).expect("Failed to append");
+            }
+            for _ in 0..delete {
+                tree.truncate_leaf().expect("Failed to truncate");
+            }
+
+            let total = add - delete + 2;
+
+            if total & (total - 1) == 0 {
+                assert_matches!(tree.root(), EntryLink::Stored(_));
             } else {
-                let mut tree = initial();
-                for i in 0..add {
-                    tree.append_leaf(leaf(i+3)).expect("Failed to append");
-                }
-                for _ in 0..delete {
-                    tree.truncate_leaf().expect("Failed to truncate");
-                }
-
-                let total = add - delete + 2;
-
-                TestResult::from_bool(
-                    if total & (total - 1) == 0 {
-                        matches!(tree.root(), EntryLink::Stored(_))
-                    } else {
-                        matches!(tree.root(), EntryLink::Generated(_))
-                    }
-                )
+                assert_matches!(tree.root(), EntryLink::Generated(_));
             }
         }
 
-        // Length of tree is always less than number of leaves squared
-        fn stored_length(add: u32, delete: u32) -> TestResult {
-            if add > 2048 * 2048 || add < delete {
-                TestResult::discard()
-            } else {
-                let mut tree = initial();
-                for i in 0..add {
-                    tree.append_leaf(leaf(i+3)).expect("Failed to append");
-                }
-                for _ in 0..delete {
-                    tree.truncate_leaf().expect("Failed to truncate");
-                }
-
-                let total = add - delete + 2;
-
-                TestResult::from_bool(total * total > tree.len())
+        #[test]
+        fn prop_stored_length(
+            add_and_delete in (0u32..=2048).prop_flat_map(
+                |add| (Just(add), 0..=add)
+            )
+        ) {
+            let (add, delete) = add_and_delete;
+            let mut tree = initial();
+            for i in 0..add {
+                tree.append_leaf(leaf(i+3)).expect("Failed to append");
             }
+            for _ in 0..delete {
+                tree.truncate_leaf().expect("Failed to truncate");
+            }
+
+            let total = add - delete + 2;
+
+            assert!(total * total > tree.len())
         }
     }
 }

@@ -4,8 +4,12 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    merkle_tree::MerklePath,
-    sapling::{self, prover::TxProver as SaplingProver, Node},
+    sapling::{
+        self,
+        note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
+        prover::TxProver as SaplingProver,
+        Node,
+    },
     transaction::{
         builder::Builder,
         components::amount::{Amount, BalanceError},
@@ -180,7 +184,9 @@ where
 /// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-#[deprecated(note = "Use `spend` instead.")]
+#[deprecated(
+    note = "Use `spend` instead. `create_spend_to_address` uses a fixed fee of 10000 zatoshis, which is not compliant with ZIP 317."
+)]
 pub fn create_spend_to_address<DbT, ParamsT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
@@ -217,7 +223,9 @@ where
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
 
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fixed::FeeRule::standard());
+    #[allow(deprecated)]
+    let fee_rule = fixed::FeeRule::standard();
+    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fee_rule);
     spend(
         wallet_db,
         params,
@@ -554,6 +562,7 @@ where
     // Build the transaction with the specified fee rule
     let (tx, sapling_build_meta) = builder.build(&prover, proposal.fee_rule())?;
 
+    let internal_ivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
     let sapling_outputs =
         sapling_output_meta
             .into_iter()
@@ -563,12 +572,22 @@ where
                     .output_index(i)
                     .expect("An output should exist in the transaction for each shielded payment.");
 
-                SentTransactionOutput {
-                    output_index,
-                    recipient,
-                    value,
-                    memo,
-                }
+                let received_as =
+                    if let Recipient::InternalAccount(account, PoolType::Sapling) = recipient {
+                        tx.sapling_bundle().and_then(|bundle| {
+                            try_sapling_note_decryption(
+                                params,
+                                proposal.target_height(),
+                                &internal_ivk,
+                                &bundle.shielded_outputs()[output_index],
+                            )
+                            .map(|(note, _, _)| (account, note))
+                        })
+                    } else {
+                        None
+                    };
+
+                SentTransactionOutput::from_parts(output_index, recipient, value, memo, received_as)
             });
 
     let transparent_outputs = transparent_output_meta.into_iter().map(|(addr, value)| {
@@ -584,12 +603,13 @@ where
             .map(|(index, _)| index)
             .expect("An output should exist in the transaction for each transparent payment.");
 
-        SentTransactionOutput {
+        SentTransactionOutput::from_parts(
             output_index,
-            recipient: Recipient::Transparent(addr),
+            Recipient::Transparent(addr),
             value,
-            memo: None,
-        }
+            None,
+            None,
+        )
     });
 
     wallet_db
@@ -684,11 +704,7 @@ fn select_key_for_note<N>(
     selected: &SpendableNote<N>,
     extsk: &ExtendedSpendingKey,
     dfvk: &DiversifiableFullViewingKey,
-) -> Option<(
-    sapling::Note,
-    ExtendedSpendingKey,
-    MerklePath<sapling::Node>,
-)> {
+) -> Option<(sapling::Note, ExtendedSpendingKey, sapling::MerklePath)> {
     let merkle_path = selected.witness.path().expect("the tree is not empty");
 
     // Attempt to reconstruct the note being spent using both the internal and external dfvks

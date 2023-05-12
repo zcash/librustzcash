@@ -42,9 +42,8 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
-    memo::Memo,
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier},
+    memo::{Memo, MemoBytes},
+    sapling::{self, Nullifier},
     transaction::{
         components::{amount::Amount, OutPoint},
         Transaction, TxId,
@@ -61,7 +60,7 @@ use zcash_client_backend::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::{SpendableNote, WalletTransparentOutput},
-    TransferType,
+    DecryptedOutput, TransferType,
 };
 
 use crate::error::SqliteClientError;
@@ -136,24 +135,24 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     type TxRef = i64;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        #[allow(deprecated)]
         wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::get_min_unspent_height(self).map_err(SqliteClientError::from)
+    }
+
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_unified_full_viewing_keys(self)
     }
 
@@ -176,7 +175,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
-        #[allow(deprecated)]
         wallet::is_valid_account_extfvk(self, account, extfvk)
     }
 
@@ -185,17 +183,14 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_balance_at(self, account, anchor_height)
     }
 
     fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_transaction(self, id_tx)
     }
 
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
-        #[allow(deprecated)]
         match id_note {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
             NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
@@ -205,28 +200,24 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_commitment_tree(self, block_height)
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
+        wallet::get_sapling_commitment_tree(self, block_height)
     }
 
     #[allow(clippy::type_complexity)]
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_witnesses(self, block_height)
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
+        wallet::get_sapling_witnesses(self, block_height)
     }
 
     fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_nullifiers(self)
+        wallet::get_sapling_nullifiers(self)
     }
 
     fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_all_nullifiers(self)
+        wallet::get_all_sapling_nullifiers(self)
     }
 
     fn get_spendable_sapling_notes(
@@ -235,7 +226,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
-        #[allow(deprecated)]
         wallet::transact::get_spendable_sapling_notes(self, account, anchor_height, exclude)
     }
 
@@ -246,7 +236,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
-        #[allow(deprecated)]
         wallet::transact::select_spendable_sapling_notes(
             self,
             account,
@@ -308,6 +297,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.block_height_extrema()
     }
 
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        self.wallet_db.get_min_unspent_height()
+    }
+
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
         self.wallet_db.get_block_hash(block_height)
     }
@@ -363,7 +356,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
         self.wallet_db.get_commitment_tree(block_height)
     }
 
@@ -371,7 +364,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
         self.wallet_db.get_witnesses(block_height)
     }
 
@@ -458,7 +451,6 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     }
 }
 
-#[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     type UtxoRef = UtxoId;
 
@@ -522,8 +514,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     fn advance_by_block(
         &mut self,
         block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
         // database updates for each block are transactional
         self.transactionally(|up| {
             // Insert the block into the database.
@@ -540,15 +532,15 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 let tx_row = wallet::put_tx_meta(up, tx, block.block_height)?;
 
                 // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.shielded_spends {
-                    wallet::mark_sapling_note_spent(up, tx_row, &spend.nf)?;
+                for spend in &tx.sapling_spends {
+                    wallet::mark_sapling_note_spent(up, tx_row, spend.nf())?;
                 }
 
-                for output in &tx.shielded_outputs {
+                for output in &tx.sapling_outputs {
                     let received_note_id = wallet::put_received_note(up, output, tx_row)?;
 
                     // Save witness for note.
-                    new_witnesses.push((received_note_id, output.witness.clone()));
+                    new_witnesses.push((received_note_id, output.witness().clone()));
                 }
             }
 
@@ -584,7 +576,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.to)
+                            Recipient::Sapling(output.note.recipient())
                         } else {
                             Recipient::InternalAccount(output.account, PoolType::Sapling)
                         };
@@ -599,6 +591,10 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                                 SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
                             Some(&output.memo),
                         )?;
+
+                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            wallet::put_received_note(up, output, tx_ref)?;
+                        }
                     }
                     TransferType::Incoming => {
                         match spending_account_id {
@@ -683,6 +679,22 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             for output in &sent_tx.outputs {
                 wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
+
+                if let Some((account, note)) = output.sapling_change_to() {
+                    wallet::put_received_note(
+                        up,
+                        &DecryptedOutput {
+                            index: output.output_index(),
+                            note: note.clone(),
+                            account: *account,
+                            memo: output
+                                .memo()
+                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                            transfer_type: TransferType::WalletInternal,
+                        },
+                        tx_ref,
+                    )?;
+                }
             }
 
             // Return the row number of the transaction, so the caller can fetch it for sending.
@@ -690,8 +702,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         })
     }
 
-    fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::rewind_to_height(self.wallet_db, block_height)
+    fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
+        wallet::truncate_to_height(self.wallet_db, block_height)
     }
 
     fn put_received_transparent_utxo(
@@ -890,8 +902,8 @@ impl FsBlockDb {
     /// If the requested height is greater than or equal to the height
     /// of the last scanned block, or if the DB is empty, this function
     /// does nothing.
-    pub fn rewind_to_height(&self, block_height: BlockHeight) -> Result<(), FsBlockDbError> {
-        Ok(chain::blockmetadb_rewind_to_height(
+    pub fn truncate_to_height(&self, block_height: BlockHeight) -> Result<(), FsBlockDbError> {
+        Ok(chain::blockmetadb_truncate_to_height(
             &self.conn,
             block_height,
         )?)
@@ -968,7 +980,6 @@ impl std::fmt::Display for FsBlockDbError {
 extern crate assert_matches;
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use prost::Message;
     use rand_core::{OsRng, RngCore};
@@ -1379,7 +1390,9 @@ mod tests {
         assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        db_meta.rewind_to_height(BlockHeight::from_u32(1)).unwrap();
+        db_meta
+            .truncate_to_height(BlockHeight::from_u32(1))
+            .unwrap();
         assert_eq!(
             db_meta.get_max_cached_height().unwrap(),
             Some(BlockHeight::from_u32(1)),
