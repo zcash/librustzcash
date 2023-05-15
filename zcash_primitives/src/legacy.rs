@@ -1,6 +1,8 @@
 //! Support for legacy transparent addresses and scripts.
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
+
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Shl;
 
@@ -10,6 +12,7 @@ use zcash_encoding::Vector;
 pub mod keys;
 
 /// Minimal subset of script opcodes.
+#[derive(Debug)]
 enum OpCode {
     // push value
     PushData1 = 0x4c,
@@ -28,9 +31,63 @@ enum OpCode {
     CheckSig = 0xac,
 }
 
+impl OpCode {
+    fn parse(b: u8) -> Option<Self> {
+        match b {
+            0x4c => Some(OpCode::PushData1),
+            0x4d => Some(OpCode::PushData2),
+            0x4e => Some(OpCode::PushData4),
+            0x76 => Some(OpCode::Dup),
+            0x87 => Some(OpCode::Equal),
+            0x88 => Some(OpCode::EqualVerify),
+            0xa9 => Some(OpCode::Hash160),
+            0xac => Some(OpCode::CheckSig),
+            _ => None,
+        }
+    }
+}
+
 /// A serialized script, used inside transparent inputs and outputs of a transaction.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Script(pub Vec<u8>);
+
+impl fmt::Debug for Script {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct ScriptPrinter<'s>(&'s [u8]);
+        impl<'s> fmt::Debug for ScriptPrinter<'s> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let mut l = f.debug_list();
+                let mut unknown: Option<String> = None;
+                for b in self.0 {
+                    if let Some(opcode) = OpCode::parse(*b) {
+                        if let Some(s) = unknown.take() {
+                            l.entry(&s);
+                        }
+                        l.entry(&opcode);
+                    } else {
+                        let encoded = format!("{:02x}", b);
+                        if let Some(s) = &mut unknown {
+                            s.push_str(&encoded);
+                        } else {
+                            unknown = Some(encoded);
+                        }
+                    }
+                }
+                l.finish()
+            }
+        }
+
+        if f.alternate() {
+            f.debug_tuple("Script")
+                .field(&ScriptPrinter(&self.0))
+                .finish()
+        } else {
+            f.debug_tuple("Script")
+                .field(&hex::encode(&self.0))
+                .finish()
+        }
+    }
+}
 
 impl Script {
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {

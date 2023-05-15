@@ -19,6 +19,8 @@
 #![deny(unsafe_code)]
 // TODO: #![deny(missing_docs)]
 
+use core::fmt::{self, Write};
+
 #[cfg(feature = "alloc")]
 extern crate alloc;
 #[cfg(feature = "alloc")]
@@ -72,8 +74,27 @@ impl AsRef<[u8]> for OutgoingCipherKey {
 /// Newtype representing the byte encoding of an [`EphemeralPublicKey`].
 ///
 /// [`EphemeralPublicKey`]: Domain::EphemeralPublicKey
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct EphemeralKeyBytes(pub [u8; 32]);
+
+impl fmt::Debug for EphemeralKeyBytes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct HexFmt<'b>(&'b [u8]);
+        impl<'b> fmt::Debug for HexFmt<'b> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_char('"')?;
+                for b in self.0 {
+                    f.write_fmt(format_args!("{:02x}", b))?;
+                }
+                f.write_char('"')
+            }
+        }
+
+        f.debug_tuple("EphemeralKeyBytes")
+            .field(&HexFmt(&self.0))
+            .finish()
+    }
+}
 
 impl AsRef<[u8]> for EphemeralKeyBytes {
     fn as_ref(&self) -> &[u8] {
