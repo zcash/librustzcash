@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- MSRV is now 1.65.0.
 
 ### Removed
 - `circuit::sapling::TREE_DEPTH` use `zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH` instead

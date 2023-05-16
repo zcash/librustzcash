@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
+- MSRV is now 1.65.0.
 - Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`.
 
 ### Removed

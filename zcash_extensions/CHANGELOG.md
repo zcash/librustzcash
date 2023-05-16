@@ -7,4 +7,4 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 Initial release.
-MSRV is 1.60.0.
+MSRV is 1.65.0.
