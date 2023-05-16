@@ -155,8 +155,10 @@ pub trait WalletRead {
     /// Returns the memo for a note.
     ///
     /// Implementations of this method must return an error if the note identifier
-    /// does not appear in the backing data store.
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error>;
+    /// does not appear in the backing data store. Returns `Ok(None)` if the note
+    /// is known to the wallet but memo data has not yet been populated for that
+    /// note.
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error>;
 
     /// Returns a transaction.
     fn get_transaction(&self, id_tx: Self::TxRef) -> Result<Transaction, Self::Error>;
@@ -512,8 +514,8 @@ pub mod testing {
             Ok(Amount::zero())
         }
 
-        fn get_memo(&self, _id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
-            Ok(Memo::Empty)
+        fn get_memo(&self, _id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
+            Ok(None)
         }
 
         fn get_transaction(&self, _id_tx: Self::TxRef) -> Result<Transaction, Self::Error> {
