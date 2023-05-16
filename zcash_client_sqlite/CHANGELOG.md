@@ -7,6 +7,14 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.7.1] - 2023-05-17
+
+### Fixed
+- Fixes a potential crash that could occur when attempting to read a memo from 
+  sqlite when the memo value is `NULL`. At present, we return the empty memo
+  in this case; in the future, the `get_memo` API will be updated to reflect
+  the potential absence of memo data.
+
 ## [0.7.0] - 2023-04-28
 ### Changed
 - Bumped dependencies to `zcash_client_backend 0.9`.
