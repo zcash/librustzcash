@@ -152,7 +152,7 @@ impl AccountPubKey {
 #[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
 pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
     TransparentAddress::PublicKey(
-        *ripemd::Ripemd160::digest(Sha256::digest(&pubkey.serialize())).as_ref(),
+        *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
     )
 }
 

@@ -6,6 +6,10 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `impl Eq for zcash_client_backend::address::RecipientAddress`
+- `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
+
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`.

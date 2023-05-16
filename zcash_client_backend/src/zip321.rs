@@ -53,7 +53,7 @@ pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
 }
 
 /// A single payment being requested.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Payment {
     /// The payment address to which the payment should be sent.
     pub recipient_address: RecipientAddress,
@@ -111,7 +111,7 @@ impl Payment {
 /// When constructing a transaction in response to such a request,
 /// a separate output should be added to the transaction for each
 /// payment value in the request.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TransactionRequest {
     payments: Vec<Payment>,
 }
@@ -402,7 +402,7 @@ mod parse {
 
     /// A data type that defines the possible parameter types which may occur within a
     /// ZIP 321 URI.
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub enum Param {
         Addr(Box<RecipientAddress>),
         Amount(Amount),

@@ -22,7 +22,7 @@ impl<R: Read> HashReader<R> {
 
     /// Destroy this reader and return the hash of what was read.
     pub fn into_hash(self) -> Output<Sha256> {
-        Sha256::digest(&self.hasher.finalize())
+        Sha256::digest(self.hasher.finalize())
     }
 }
 
@@ -54,7 +54,7 @@ impl Default for HashWriter {
 impl HashWriter {
     /// Destroy this writer and return the hash of what was written.
     pub fn into_hash(self) -> Output<Sha256> {
-        Sha256::digest(&self.hasher.finalize())
+        Sha256::digest(self.hasher.finalize())
     }
 }
 
