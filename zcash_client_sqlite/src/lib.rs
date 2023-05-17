@@ -190,7 +190,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         wallet::get_transaction(self, id_tx)
     }
 
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
         match id_note {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
             NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
@@ -349,7 +349,7 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_transaction(id_tx)
     }
 
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
         self.wallet_db.get_memo(id_note)
     }
 

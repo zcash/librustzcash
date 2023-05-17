@@ -480,17 +480,21 @@ pub(crate) fn get_balance_at<P>(
 pub(crate) fn get_received_memo<P>(
     wdb: &WalletDb<P>,
     id_note: i64,
-) -> Result<Memo, SqliteClientError> {
-    let memo_bytes: Vec<_> = wdb.conn.query_row(
+) -> Result<Option<Memo>, SqliteClientError> {
+    let memo_bytes: Option<Vec<_>> = wdb.conn.query_row(
         "SELECT memo FROM sapling_received_notes
         WHERE id_note = ?",
         [id_note],
         |row| row.get(0),
     )?;
 
-    MemoBytes::from_bytes(&memo_bytes)
-        .and_then(Memo::try_from)
-        .map_err(SqliteClientError::from)
+    memo_bytes
+        .map(|b| {
+            MemoBytes::from_bytes(&b)
+                .and_then(Memo::try_from)
+                .map_err(SqliteClientError::from)
+        })
+        .transpose()
 }
 
 /// Looks up a transaction by its internal database identifier.
@@ -519,17 +523,24 @@ pub(crate) fn get_transaction<P: Parameters>(
 ///
 /// The note is identified by its row index in the `sent_notes` table within the wdb
 /// database.
-pub(crate) fn get_sent_memo<P>(wdb: &WalletDb<P>, id_note: i64) -> Result<Memo, SqliteClientError> {
-    let memo_bytes: Vec<_> = wdb.conn.query_row(
+pub(crate) fn get_sent_memo<P>(
+    wdb: &WalletDb<P>,
+    id_note: i64,
+) -> Result<Option<Memo>, SqliteClientError> {
+    let memo_bytes: Option<Vec<_>> = wdb.conn.query_row(
         "SELECT memo FROM sent_notes
         WHERE id_note = ?",
         [id_note],
         |row| row.get(0),
     )?;
 
-    MemoBytes::from_bytes(&memo_bytes)
-        .and_then(Memo::try_from)
-        .map_err(SqliteClientError::from)
+    memo_bytes
+        .map(|b| {
+            MemoBytes::from_bytes(&b)
+                .and_then(Memo::try_from)
+                .map_err(SqliteClientError::from)
+        })
+        .transpose()
 }
 
 /// Returns the minimum and maximum heights for blocks stored in the wallet database.
