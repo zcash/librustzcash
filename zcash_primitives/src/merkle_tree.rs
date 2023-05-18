@@ -67,21 +67,21 @@ pub fn read_leu64_usize<R: Read>(mut reader: R) -> io::Result<usize> {
 }
 
 pub fn write_position<W: Write>(mut writer: W, position: Position) -> io::Result<()> {
-    write_usize_leu64(&mut writer, position.into())
+    writer.write_u64::<LittleEndian>(position.into())
 }
 
 pub fn read_position<R: Read>(mut reader: R) -> io::Result<Position> {
-    read_leu64_usize(&mut reader).map(Position::from)
+    reader.read_u64::<LittleEndian>().map(Position::from)
 }
 
 pub fn write_address<W: Write>(mut writer: W, addr: Address) -> io::Result<()> {
     writer.write_u8(addr.level().into())?;
-    write_usize_leu64(&mut writer, addr.index())
+    writer.write_u64::<LittleEndian>(addr.index())
 }
 
 pub fn read_address<R: Read>(mut reader: R) -> io::Result<Address> {
     let level = reader.read_u8().map(Level::from)?;
-    let index = read_leu64_usize(&mut reader).map(usize::from)?;
+    let index = reader.read_u64::<LittleEndian>()?;
     Ok(Address::from_parts(level, index))
 }
 

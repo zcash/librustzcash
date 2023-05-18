@@ -90,7 +90,7 @@ impl SaplingProvingContext {
         );
 
         // We now have the full witness for our circuit
-        let pos: usize = merkle_path.position().into();
+        let pos: u64 = merkle_path.position().into();
         let instance = Spend {
             value_commitment_opening: Some(value_commitment_opening),
             proof_generation_key: Some(proof_generation_key),
