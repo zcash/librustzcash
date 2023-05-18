@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.60.0.
+- Bumped dependencies to `primitive-types 0.12`.
 
 ## [0.3.0] - 2022-05-11
 ### Added

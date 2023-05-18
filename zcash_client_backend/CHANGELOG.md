@@ -6,6 +6,11 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Bumped dependencies to `hdwallet 0.4`.
+- `WalletRead::get_memo` now returns `Result<Option<Memo>, Self::Error>`
+  instead of `Result<Memo, Self::Error>` in order to make representable
+  wallet states where the full note plaintext is not available.
 
 ## [0.9.0] - 2023-04-28
 ### Added
@@ -17,7 +22,7 @@ and this library adheres to Rust's notion of
   to allow reuse of the data structure for non-Sapling contexts.
 - `data_api::SentTransactionOutput` must now be constructed using
   `SentTransactionOutput::from_parts`. The internal state of `SentTransactionOutput`
-  is now private, and accessible via methods that have the same names as the 
+  is now private, and accessible via methods that have the same names as the
   previously exposed fields.
 
 ### Renamed

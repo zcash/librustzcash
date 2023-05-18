@@ -7,7 +7,6 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
 use zcash_primitives::{
     consensus,
-    merkle_tree::{CommitmentTree, IncrementalWitness},
     sapling::{
         self,
         note_encryption::{PreparedIncomingViewingKey, SaplingDomain},
@@ -60,7 +59,7 @@ pub trait ScanningKey {
     fn sapling_nf(
         key: &Self::SaplingNk,
         note: &Note,
-        witness: &IncrementalWitness<Node>,
+        witness: &sapling::IncrementalWitness,
     ) -> Self::Nf;
 }
 
@@ -88,9 +87,13 @@ impl ScanningKey for DiversifiableFullViewingKey {
     fn sapling_nf(
         key: &Self::SaplingNk,
         note: &Note,
-        witness: &IncrementalWitness<Node>,
+        witness: &sapling::IncrementalWitness,
     ) -> Self::Nf {
-        note.nf(key, witness.position() as u64)
+        note.nf(
+            key,
+            u64::try_from(witness.position())
+                .expect("Sapling note commitment tree position must fit into a u64"),
+        )
     }
 }
 
@@ -108,7 +111,7 @@ impl ScanningKey for SaplingIvk {
         [((), self.clone(), ())]
     }
 
-    fn sapling_nf(_key: &Self::SaplingNk, _note: &Note, _witness: &IncrementalWitness<Node>) {}
+    fn sapling_nf(_key: &Self::SaplingNk, _note: &Note, _witness: &sapling::IncrementalWitness) {}
 }
 
 /// Scans a [`CompactBlock`] with a set of [`ScanningKey`]s.
@@ -130,8 +133,8 @@ impl ScanningKey for SaplingIvk {
 /// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`ScanningKey`]: crate::welding_rig::ScanningKey
-/// [`CommitmentTree`]: zcash_primitives::merkle_tree::CommitmentTree
-/// [`IncrementalWitness`]: zcash_primitives::merkle_tree::IncrementalWitness
+/// [`CommitmentTree`]: zcash_primitives::sapling::CommitmentTree
+/// [`IncrementalWitness`]: zcash_primitives::sapling::IncrementalWitness
 /// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
 pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
@@ -139,8 +142,8 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
     nullifiers: &[(AccountId, Nullifier)],
-    tree: &mut CommitmentTree<Node>,
-    existing_witnesses: &mut [&mut IncrementalWitness<Node>],
+    tree: &mut sapling::CommitmentTree,
+    existing_witnesses: &mut [&mut sapling::IncrementalWitness],
 ) -> Vec<WalletTx<K::Nf>> {
     scan_block_with_runner::<_, _, ()>(
         params,
@@ -200,8 +203,8 @@ pub(crate) fn scan_block_with_runner<
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
     nullifiers: &[(AccountId, Nullifier)],
-    tree: &mut CommitmentTree<Node>,
-    existing_witnesses: &mut [&mut IncrementalWitness<Node>],
+    tree: &mut sapling::CommitmentTree,
+    existing_witnesses: &mut [&mut sapling::IncrementalWitness],
     mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,
 ) -> Vec<WalletTx<K::Nf>> {
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
@@ -350,7 +353,7 @@ pub(crate) fn scan_block_with_runner<
                     // - Notes created by consolidation transactions.
                     // - Notes sent from one account to itself.
                     let is_change = spent_from_accounts.contains(&account);
-                    let witness = IncrementalWitness::from_tree(tree);
+                    let witness = sapling::IncrementalWitness::from_tree(tree.clone());
                     let nf = K::sapling_nf(&nk, &note, &witness);
 
                     shielded_outputs.push(WalletSaplingOutput::from_parts(
@@ -392,12 +395,11 @@ mod tests {
         consensus::{BlockHeight, Network},
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
-        merkle_tree::CommitmentTree,
         sapling::{
             note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
             util::generate_random_rseed,
             value::NoteValue,
-            Note, Nullifier, SaplingIvk,
+            CommitmentTree, Note, Nullifier, SaplingIvk,
         },
         transaction::components::Amount,
         zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},

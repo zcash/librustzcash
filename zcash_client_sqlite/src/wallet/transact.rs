@@ -7,7 +7,7 @@ use group::ff::PrimeField;
 
 use zcash_primitives::{
     consensus::BlockHeight,
-    merkle_tree::IncrementalWitness,
+    merkle_tree::read_incremental_witness,
     sapling::{Diversifier, Rseed},
     transaction::components::Amount,
     zip32::AccountId,
@@ -50,7 +50,7 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientErr
 
     let witness = {
         let d: Vec<_> = row.get(4)?;
-        IncrementalWitness::read(&d[..])?
+        read_incremental_witness(&d[..])?
     };
 
     Ok(SpendableNote {
@@ -354,7 +354,7 @@ mod tests {
                 available,
                 required
             })
-            if available == Amount::zero() && required == Amount::from_u64(1001).unwrap()
+            if available == Amount::zero() && required == Amount::from_u64(10001).unwrap()
         );
     }
 
@@ -437,7 +437,7 @@ mod tests {
                 required
             })
             if available == Amount::from_u64(50000).unwrap()
-                && required == Amount::from_u64(71000).unwrap()
+                && required == Amount::from_u64(80000).unwrap()
         );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
@@ -472,7 +472,7 @@ mod tests {
                 required
             })
             if available == Amount::from_u64(50000).unwrap()
-                && required == Amount::from_u64(71000).unwrap()
+                && required == Amount::from_u64(80000).unwrap()
         );
 
         // Mine block 11 so that the second note becomes verified
@@ -568,12 +568,12 @@ mod tests {
                 available,
                 required
             })
-            if available == Amount::zero() && required == Amount::from_u64(3000).unwrap()
+            if available == Amount::zero() && required == Amount::from_u64(12000).unwrap()
         );
 
-        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 21 (that don't send us funds)
+        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
         // until just before the first transaction expires
-        for i in 1..22 {
+        for i in 1..42 {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
@@ -602,14 +602,14 @@ mod tests {
                 available,
                 required
             })
-            if available == Amount::zero() && required == Amount::from_u64(3000).unwrap()
+            if available == Amount::zero() && required == Amount::from_u64(12000).unwrap()
         );
 
-        // Mine block SAPLING_ACTIVATION_HEIGHT + 22 so that the first transaction expires
+        // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
         let (cb, _) = fake_compact_block(
-            sapling_activation_height() + 22,
+            sapling_activation_height() + 42,
             cb.hash(),
-            &ExtendedSpendingKey::master(&[22]).to_diversifiable_full_viewing_key(),
+            &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
             value,
         );
@@ -716,9 +716,9 @@ mod tests {
             send_and_recover_with_policy(&mut db_write, OvkPolicy::Sender).unwrap();
         assert_eq!(&recovered_to, &addr2);
 
-        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 22 (that don't send us funds)
+        // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 42 (that don't send us funds)
         // so that the first transaction expires
-        for i in 1..=22 {
+        for i in 1..=42 {
             let (cb, _) = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
@@ -752,7 +752,7 @@ mod tests {
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(51000).unwrap();
+        let value = Amount::from_u64(60000).unwrap();
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
@@ -806,7 +806,7 @@ mod tests {
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(51000).unwrap();
+        let value = Amount::from_u64(60000).unwrap();
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),

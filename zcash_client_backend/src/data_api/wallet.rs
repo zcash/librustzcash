@@ -4,7 +4,6 @@ use std::fmt::Debug;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    merkle_tree::MerklePath,
     sapling::{
         self,
         note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
@@ -185,7 +184,9 @@ where
 /// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-#[deprecated(note = "Use `spend` instead.")]
+#[deprecated(
+    note = "Use `spend` instead. `create_spend_to_address` uses a fixed fee of 10000 zatoshis, which is not compliant with ZIP 317."
+)]
 pub fn create_spend_to_address<DbT, ParamsT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
@@ -222,7 +223,9 @@ where
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
 
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fixed::FeeRule::standard());
+    #[allow(deprecated)]
+    let fee_rule = fixed::FeeRule::standard();
+    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fee_rule);
     spend(
         wallet_db,
         params,
@@ -701,11 +704,7 @@ fn select_key_for_note<N>(
     selected: &SpendableNote<N>,
     extsk: &ExtendedSpendingKey,
     dfvk: &DiversifiableFullViewingKey,
-) -> Option<(
-    sapling::Note,
-    ExtendedSpendingKey,
-    MerklePath<sapling::Node>,
-)> {
+) -> Option<(sapling::Note, ExtendedSpendingKey, sapling::MerklePath)> {
     let merkle_path = selected.witness.path().expect("the tree is not empty");
 
     // Attempt to reconstruct the note being spent using both the internal and external dfvks

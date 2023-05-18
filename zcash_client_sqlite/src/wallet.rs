@@ -73,8 +73,8 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Note, Nullifier},
+    merkle_tree::{read_commitment_tree, read_incremental_witness},
+    sapling::{self, Note, Nullifier},
     transaction::{components::Amount, Transaction, TxId},
     zip32::{
         sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
@@ -698,14 +698,14 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 pub(crate) fn get_sapling_commitment_tree<P>(
     wdb: &WalletDb<P>,
     block_height: BlockHeight,
-) -> Result<Option<CommitmentTree<Node>>, SqliteClientError> {
+) -> Result<Option<sapling::CommitmentTree>, SqliteClientError> {
     wdb.conn
         .query_row_and_then(
             "SELECT sapling_tree FROM blocks WHERE height = ?",
             [u32::from(block_height)],
             |row| {
                 let row_data: Vec<u8> = row.get(0)?;
-                CommitmentTree::read(&row_data[..]).map_err(|e| {
+                read_commitment_tree(&row_data[..]).map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
                         row_data.len(),
                         rusqlite::types::Type::Blob,
@@ -723,7 +723,7 @@ pub(crate) fn get_sapling_commitment_tree<P>(
 pub(crate) fn get_sapling_witnesses<P>(
     wdb: &WalletDb<P>,
     block_height: BlockHeight,
-) -> Result<Vec<(NoteId, IncrementalWitness<Node>)>, SqliteClientError> {
+) -> Result<Vec<(NoteId, sapling::IncrementalWitness)>, SqliteClientError> {
     let mut stmt_fetch_witnesses = wdb
         .conn
         .prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
@@ -731,7 +731,7 @@ pub(crate) fn get_sapling_witnesses<P>(
         .query_map([u32::from(block_height)], |row| {
             let id_note = NoteId::ReceivedNoteId(row.get(0)?);
             let wdb: Vec<u8> = row.get(1)?;
-            Ok(IncrementalWitness::read(&wdb[..]).map(|witness| (id_note, witness)))
+            Ok(read_incremental_witness(&wdb[..]).map(|witness| (id_note, witness)))
         })
         .map_err(SqliteClientError::from)?;
 
@@ -895,7 +895,7 @@ pub(crate) fn insert_block<'a, P>(
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
-    commitment_tree: &CommitmentTree<Node>,
+    commitment_tree: &sapling::CommitmentTree,
 ) -> Result<(), SqliteClientError> {
     stmts.stmt_insert_block(block_height, block_hash, block_time, commitment_tree)
 }
@@ -1060,7 +1060,7 @@ pub(crate) fn put_received_note<'a, P, T: ReceivedSaplingOutput>(
 pub(crate) fn insert_witness<'a, P>(
     stmts: &mut DataConnStmtCache<'a, P>,
     note_id: i64,
-    witness: &IncrementalWitness<Node>,
+    witness: &sapling::IncrementalWitness,
     height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
     stmts.stmt_insert_witness(NoteId::ReceivedNoteId(note_id), height, witness)

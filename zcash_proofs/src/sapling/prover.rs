@@ -7,11 +7,10 @@ use group::{Curve, GroupEncoding};
 use rand_core::OsRng;
 use zcash_primitives::{
     constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
-    merkle_tree::MerklePath,
     sapling::{
         redjubjub::{PublicKey, Signature},
         value::{CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment},
-        Diversifier, Node, Note, PaymentAddress, ProofGenerationKey, Rseed,
+        Diversifier, MerklePath, Note, PaymentAddress, ProofGenerationKey, Rseed,
     },
     transaction::components::Amount,
 };
@@ -52,7 +51,7 @@ impl SaplingProvingContext {
         ar: jubjub::Fr,
         value: u64,
         anchor: bls12_381::Scalar,
-        merkle_path: MerklePath<Node>,
+        merkle_path: MerklePath,
         proving_key: &Parameters<Bls12>,
         verifying_key: &PreparedVerifyingKey<Bls12>,
     ) -> Result<(Proof<Bls12>, ValueCommitment, PublicKey), ()> {
@@ -84,9 +83,14 @@ impl SaplingProvingContext {
         // Let's compute the nullifier while we have the position
         let note = Note::from_parts(payment_address, NoteValue::from_raw(value), rseed);
 
-        let nullifier = note.nf(&viewing_key.nk, merkle_path.position);
+        let nullifier = note.nf(
+            &viewing_key.nk,
+            u64::try_from(merkle_path.position())
+                .expect("Sapling note commitment tree position must fit into a u64"),
+        );
 
         // We now have the full witness for our circuit
+        let pos: usize = merkle_path.position().into();
         let instance = Spend {
             value_commitment_opening: Some(value_commitment_opening),
             proof_generation_key: Some(proof_generation_key),
@@ -94,9 +98,10 @@ impl SaplingProvingContext {
             commitment_randomness: Some(note.rcm()),
             ar: Some(ar),
             auth_path: merkle_path
-                .auth_path
+                .path_elems()
                 .iter()
-                .map(|(node, b)| Some(((*node).into(), *b)))
+                .enumerate()
+                .map(|(i, node)| Some(((*node).into(), pos >> i & 0x1 == 1)))
                 .collect(),
             anchor: Some(anchor),
         };

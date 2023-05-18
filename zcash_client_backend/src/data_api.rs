@@ -10,8 +10,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{self, Node, Nullifier, PaymentAddress},
+    sapling::{self, Nullifier, PaymentAddress},
     transaction::{
         components::{amount::Amount, OutPoint},
         Transaction, TxId,
@@ -156,8 +155,10 @@ pub trait WalletRead {
     /// Returns the memo for a note.
     ///
     /// Implementations of this method must return an error if the note identifier
-    /// does not appear in the backing data store.
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error>;
+    /// does not appear in the backing data store. Returns `Ok(None)` if the note
+    /// is known to the wallet but memo data has not yet been populated for that
+    /// note.
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error>;
 
     /// Returns a transaction.
     fn get_transaction(&self, id_tx: Self::TxRef) -> Result<Transaction, Self::Error>;
@@ -166,14 +167,14 @@ pub trait WalletRead {
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error>;
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error>;
 
     /// Returns the incremental witnesses as of the specified block height.
     #[allow(clippy::type_complexity)]
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error>;
 
     /// Returns the nullifiers for notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as
@@ -239,7 +240,7 @@ pub struct PrunedBlock<'a> {
     pub block_height: BlockHeight,
     pub block_hash: BlockHash,
     pub block_time: u32,
-    pub commitment_tree: &'a CommitmentTree<Node>,
+    pub commitment_tree: &'a sapling::CommitmentTree,
     pub transactions: &'a Vec<WalletTx<Nullifier>>,
 }
 
@@ -388,8 +389,8 @@ pub trait WalletWrite: WalletRead {
     fn advance_by_block(
         &mut self,
         block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error>;
+        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
@@ -433,8 +434,7 @@ pub mod testing {
         consensus::{BlockHeight, Network},
         legacy::TransparentAddress,
         memo::Memo,
-        merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::{Node, Nullifier},
+        sapling::{self, Nullifier},
         transaction::{
             components::{Amount, OutPoint},
             Transaction, TxId,
@@ -514,8 +514,8 @@ pub mod testing {
             Ok(Amount::zero())
         }
 
-        fn get_memo(&self, _id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
-            Ok(Memo::Empty)
+        fn get_memo(&self, _id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
+            Ok(None)
         }
 
         fn get_transaction(&self, _id_tx: Self::TxRef) -> Result<Transaction, Self::Error> {
@@ -525,7 +525,7 @@ pub mod testing {
         fn get_commitment_tree(
             &self,
             _block_height: BlockHeight,
-        ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+        ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
             Ok(None)
         }
 
@@ -533,7 +533,7 @@ pub mod testing {
         fn get_witnesses(
             &self,
             _block_height: BlockHeight,
-        ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -613,8 +613,8 @@ pub mod testing {
         fn advance_by_block(
             &mut self,
             _block: &PrunedBlock,
-            _updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
-        ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+            _updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
+        ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
             Ok(vec![])
         }
 

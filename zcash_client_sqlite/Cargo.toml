@@ -14,6 +14,7 @@ edition = "2021"
 rust-version = "1.60"
 
 [dependencies]
+incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }
 zcash_client_backend = { version = "0.9", path = "../zcash_client_backend" }
 zcash_primitives = { version = "0.11", path = "../zcash_primitives", default-features = false }
 
@@ -21,7 +22,7 @@ zcash_primitives = { version = "0.11", path = "../zcash_primitives", default-fea
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Errors
 bs58 = { version = "0.4", features = ["check"] }
-hdwallet = { version = "0.3.1", optional = true }
+hdwallet = { version = "0.4", optional = true }
 
 # - Logging and metrics
 tracing = "0.1"

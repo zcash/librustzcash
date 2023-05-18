@@ -1,11 +1,10 @@
 //! Abstractions over the proving system and parameters.
 
 use crate::{
-    merkle_tree::MerklePath,
     sapling::{
+        self,
         redjubjub::{PublicKey, Signature},
         value::ValueCommitment,
-        Node,
     },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
@@ -35,7 +34,7 @@ pub trait TxProver {
         ar: jubjub::Fr,
         value: u64,
         anchor: bls12_381::Scalar,
-        merkle_path: MerklePath<Node>,
+        merkle_path: sapling::MerklePath,
     ) -> Result<([u8; GROTH_PROOF_SIZE], ValueCommitment, PublicKey), ()>;
 
     /// Create the value commitment and proof for a Sapling [`OutputDescription`],
@@ -67,18 +66,17 @@ pub trait TxProver {
 pub mod mock {
     use rand_core::OsRng;
 
+    use super::TxProver;
     use crate::{
         constants::SPENDING_KEY_GENERATOR,
-        merkle_tree::MerklePath,
         sapling::{
+            self,
             redjubjub::{PublicKey, Signature},
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
-            Diversifier, Node, PaymentAddress, ProofGenerationKey, Rseed,
+            Diversifier, PaymentAddress, ProofGenerationKey, Rseed,
         },
         transaction::components::{Amount, GROTH_PROOF_SIZE},
     };
-
-    use super::TxProver;
 
     pub struct MockTxProver;
 
@@ -96,7 +94,7 @@ pub mod mock {
             ar: jubjub::Fr,
             value: u64,
             _anchor: bls12_381::Scalar,
-            _merkle_path: MerklePath<Node>,
+            _merkle_path: sapling::MerklePath,
         ) -> Result<([u8; GROTH_PROOF_SIZE], ValueCommitment, PublicKey), ()> {
             let mut rng = OsRng;
 

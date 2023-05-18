@@ -6,9 +6,7 @@ use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
 use zcash_primitives::constants;
 
-use zcash_primitives::sapling::{
-    PaymentAddress, ProofGenerationKey, SAPLING_COMMITMENT_TREE_DEPTH,
-};
+use zcash_primitives::sapling::{PaymentAddress, ProofGenerationKey};
 
 use super::ecc;
 use super::pedersen_hash;
@@ -28,8 +26,6 @@ use group::ff::PrimeFieldBits;
 
 #[cfg(test)]
 use zcash_primitives::sapling::value::NoteValue;
-
-pub const TREE_DEPTH: usize = SAPLING_COMMITMENT_TREE_DEPTH;
 
 /// The opening (value and randomness) of a Sapling value commitment.
 #[derive(Clone)]

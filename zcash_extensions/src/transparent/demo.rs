@@ -480,15 +480,12 @@ mod tests {
     use ff::Field;
     use rand_core::OsRng;
 
-    use zcash_proofs::prover::LocalTxProver;
-
     use zcash_primitives::{
         consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
         constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
-        merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::{Node, Rseed},
+        sapling::{self, Node, Rseed},
         transaction::{
             builder::Builder,
             components::{
@@ -500,6 +497,7 @@ mod tests {
         },
         zip32::ExtendedSpendingKey,
     };
+    use zcash_proofs::prover::LocalTxProver;
 
     use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
 
@@ -809,18 +807,21 @@ mod tests {
         //
 
         let mut rng = OsRng;
+
+        // FIXME: implement zcash_primitives::transaction::fees::FutureFeeRule for zip317::FeeRule.
+        #[allow(deprecated)]
         let fee_rule = fixed::FeeRule::standard();
 
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
         let to = extsk.default_address().1;
-        let note1 = to.create_note(101000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note1 = to.create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
         let cm1 = Node::from_cmu(&note1.cmu());
-        let mut tree = CommitmentTree::empty();
+        let mut tree = sapling::CommitmentTree::empty();
         // fake that the note appears in some previous
         // shielded output
         tree.append(cm1).unwrap();
-        let witness1 = IncrementalWitness::from_tree(&tree);
+        let witness1 = sapling::IncrementalWitness::from_tree(tree);
 
         let mut builder_a = demo_builder(tx_height);
         builder_a
