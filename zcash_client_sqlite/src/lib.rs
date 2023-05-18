@@ -196,6 +196,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
             NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
         }
+        .map(|m| m.unwrap_or(Memo::Empty))
     }
 
     fn get_commitment_tree(
