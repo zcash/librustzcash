@@ -11,7 +11,7 @@ repository = "https://github.com/zcash/librustzcash"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.65"
 
 [dependencies]
 incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }

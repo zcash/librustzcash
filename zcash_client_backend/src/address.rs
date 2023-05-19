@@ -174,7 +174,7 @@ impl UnifiedAddress {
 
 /// An address that funds can be sent to.
 // TODO: rename to ParsedAddress
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RecipientAddress {
     Shielded(PaymentAddress),
     Transparent(TransparentAddress),

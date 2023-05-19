@@ -434,10 +434,7 @@ where
             Ok(balance) => balance,
             Err(ChangeError::DustInputs { transparent, .. }) => {
                 let exclusions: BTreeSet<OutPoint> = transparent.into_iter().collect();
-                transparent_inputs = transparent_inputs
-                    .into_iter()
-                    .filter(|i| !exclusions.contains(i.outpoint()))
-                    .collect();
+                transparent_inputs.retain(|i| !exclusions.contains(i.outpoint()));
 
                 self.change_strategy.compute_balance(
                     params,

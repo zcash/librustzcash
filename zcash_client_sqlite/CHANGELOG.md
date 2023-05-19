@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
+- MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`.
 
 ## [0.7.1] - 2023-05-17
