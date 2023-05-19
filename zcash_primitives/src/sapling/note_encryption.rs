@@ -64,10 +64,12 @@ pub fn prf_ock(
     )
 }
 
+/// `get_pk_d` must check that the diversifier contained within the note plaintext is a
+/// valid Sapling diversifier.
 fn sapling_parse_note_plaintext_without_memo<F, P: consensus::Parameters>(
     domain: &SaplingDomain<P>,
     plaintext: &[u8],
-    get_validated_pk_d: F,
+    get_pk_d: F,
 ) -> Option<(Note, PaymentAddress)>
 where
     F: FnOnce(&Diversifier) -> Option<DiversifiedTransmissionKey>,
@@ -91,9 +93,10 @@ where
         Rseed::AfterZip212(r)
     };
 
-    let pk_d = get_validated_pk_d(&diversifier)?;
+    let pk_d = get_pk_d(&diversifier)?;
 
-    let to = PaymentAddress::from_parts(diversifier, pk_d)?;
+    // `diversifier` was checked by `get_pk_d`.
+    let to = PaymentAddress::from_parts_unchecked(diversifier, pk_d)?;
     let note = to.create_note(value.into(), rseed);
     Some((note, to))
 }
@@ -254,16 +257,12 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     fn parse_note_plaintext_without_memo_ovk(
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
-        esk: &Self::EphemeralSecretKey,
-        ephemeral_key: &EphemeralKeyBytes,
+        _esk: &Self::EphemeralSecretKey,
+        _ephemeral_key: &EphemeralKeyBytes,
         plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(self, &plaintext.0, |diversifier| {
-            if esk.derive_public(diversifier.g_d()?.into()).to_bytes().0 == ephemeral_key.0 {
-                Some(*pk_d)
-            } else {
-                None
-            }
+            diversifier.g_d().map(|_| *pk_d)
         })
     }
 
