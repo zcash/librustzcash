@@ -21,6 +21,11 @@ pub mod compact_formats;
 #[rustfmt::skip]
 #[allow(unknown_lints)]
 #[allow(clippy::derive_partial_eq_without_eq)]
+pub mod proposal;
+
+#[rustfmt::skip]
+#[allow(unknown_lints)]
+#[allow(clippy::derive_partial_eq_without_eq)]
 pub mod service;
 
 impl compact_formats::CompactBlock {
