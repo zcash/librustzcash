@@ -498,9 +498,8 @@ where
                 &dfvk,
                 checkpoint_depth,
             )?
-            .ok_or(Error::NoteMismatch(selected.note_id))?;
-
-            builder.add_sapling_spend(key, selected.diversifier, note, merkle_path)?;
+            .ok_or(Error::NoteMismatch(selected.internal_note_id().clone()))?;
+            builder.add_sapling_spend(key, selected.diversifier(), note, merkle_path)?;
         }
         Ok(())
     })?;
@@ -774,15 +773,15 @@ fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
     // corresponding to the unified spending key, checking against the witness we are using
     // to spend the note that we've used the correct key.
     let external_note = dfvk
-        .diversified_address(selected.diversifier)
-        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .diversified_address(selected.diversifier())
+        .map(|addr| addr.create_note(selected.value().into(), selected.rseed()));
     let internal_note = dfvk
-        .diversified_change_address(selected.diversifier)
-        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .diversified_change_address(selected.diversifier())
+        .map(|addr| addr.create_note(selected.value().into(), selected.rseed()));
 
     let expected_root = commitment_tree.root_at_checkpoint(checkpoint_depth)?;
     let merkle_path = commitment_tree
-        .witness_caching(selected.note_commitment_tree_position, checkpoint_depth)?;
+        .witness_caching(selected.note_commitment_tree_position(), checkpoint_depth)?;
 
     Ok(external_note
         .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))

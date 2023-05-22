@@ -92,6 +92,12 @@ impl AsRef<[u8; 32]> for TxId {
     }
 }
 
+impl From<TxId> for [u8; 32] {
+    fn from(value: TxId) -> Self {
+        value.0
+    }
+}
+
 impl TxId {
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         TxId(bytes)

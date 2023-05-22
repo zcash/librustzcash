@@ -419,7 +419,7 @@ where
 
             let new_available = sapling_inputs
                 .iter()
-                .map(|n| n.note_value)
+                .map(|n| n.value())
                 .sum::<Option<Amount>>()
                 .ok_or(BalanceError::Overflow)?;
 

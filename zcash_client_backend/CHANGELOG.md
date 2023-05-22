@@ -7,9 +7,17 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+
+- Added methods to `zcash_client_backend::wallet::ReceivedSaplingNote`:
+  `{from_parts, txid, output_index, diversifier, rseed, note_commitment_tree_position}`.
+
 ### Changed
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` now returns
   a `ScanSummary` containing metadata about the scanned blocks on success.
+- The fields of `zcash_client_backend::wallet::ReceivedSaplingNote` are now
+  private. Use `ReceivedSaplingNote::from_parts` for construction instead.
+  Accessor methods are provided for each previously-public field.
 
 ## [0.10.0] - 2023-09-25
 
