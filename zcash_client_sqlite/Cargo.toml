@@ -17,6 +17,7 @@ rust-version = "1.65"
 incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
 shardtree = { version = "0.0", features = ["legacy-api"] }
 zcash_client_backend = { version = "0.9", path = "../zcash_client_backend" }
+zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
 
 # Dependencies exposed in a public API:
@@ -28,7 +29,8 @@ hdwallet = { version = "0.4", optional = true }
 # - Logging and metrics
 tracing = "0.1"
 
-# - Protobuf interfaces
+# - Serialization
+byteorder = "1"
 prost = "0.11"
 
 # - Secret management
@@ -49,6 +51,7 @@ uuid = "1.1"
 [dev-dependencies]
 assert_matches = "1.5"
 incrementalmerkletree = { version = "0.4", features = ["legacy-api", "test-dependencies"] }
+shardtree = { version = "0.0", features = ["legacy-api", "test-dependencies"] }
 proptest = "1.0.0"
 rand_core = "0.6"
 regex = "1.4"

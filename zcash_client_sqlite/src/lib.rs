@@ -78,6 +78,7 @@ use {
 
 pub mod chain;
 pub mod error;
+mod serialization;
 pub mod wallet;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
