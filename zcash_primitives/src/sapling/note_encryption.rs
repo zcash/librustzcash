@@ -257,8 +257,6 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     fn parse_note_plaintext_without_memo_ovk(
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
-        _esk: &Self::EphemeralSecretKey,
-        _ephemeral_key: &EphemeralKeyBytes,
         plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)> {
         sapling_parse_note_plaintext_without_memo(self, &plaintext.0, |diversifier| {
