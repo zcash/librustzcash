@@ -237,8 +237,6 @@ pub trait Domain {
     fn parse_note_plaintext_without_memo_ovk(
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
-        esk: &Self::EphemeralSecretKey,
-        ephemeral_key: &EphemeralKeyBytes,
         plaintext: &NotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)>;
 
@@ -654,7 +652,7 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D, ENC_CIP
         .ok()?;
 
     let (note, to) =
-        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &plaintext)?;
+        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &plaintext)?;
     let memo = domain.extract_memo(&plaintext);
 
     // ZIP 212: Check that the esk provided to this function is consistent with the esk we
