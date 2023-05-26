@@ -36,6 +36,17 @@ impl PaymentAddress {
         // Check that the diversifier is valid
         diversifier.g_d()?;
 
+        Self::from_parts_unchecked(diversifier, pk_d)
+    }
+
+    /// Constructs a PaymentAddress from a diversifier and a Jubjub point.
+    ///
+    /// Returns None if `pk_d` is the identity. The caller must check that `diversifier`
+    /// is valid for Sapling.
+    pub(crate) fn from_parts_unchecked(
+        diversifier: Diversifier,
+        pk_d: DiversifiedTransmissionKey,
+    ) -> Option<Self> {
         if pk_d.is_identity() {
             None
         } else {

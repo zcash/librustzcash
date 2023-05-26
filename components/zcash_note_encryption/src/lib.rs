@@ -229,8 +229,6 @@ pub trait Domain {
     ///   which may be passed via `self`).
     /// - The note plaintext contains valid encodings of its various fields.
     /// - Any domain-specific requirements are satisfied.
-    /// - `ephemeral_key` can be derived from `esk` and the diversifier within the note
-    ///   plaintext.
     ///
     /// `&self` is passed here to enable the implementation to enforce contextual checks,
     /// such as rules like [ZIP 212] that become active at a specific block height.
