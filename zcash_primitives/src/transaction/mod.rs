@@ -730,6 +730,13 @@ impl Transaction {
         Ok((consensus_branch_id, lock_time, expiry_height))
     }
 
+    #[cfg(feature = "temporary-zcashd")]
+    pub fn temporary_zcashd_read_v5_sapling<R: Read>(
+        reader: R,
+    ) -> io::Result<Option<sapling::Bundle<sapling::Authorized>>> {
+        Self::read_v5_sapling(reader)
+    }
+
     #[allow(clippy::redundant_closure)]
     fn read_v5_sapling<R: Read>(
         mut reader: R,
@@ -917,8 +924,23 @@ impl Transaction {
         Ok(())
     }
 
-    pub fn write_v5_sapling<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = &self.sapling_bundle {
+    #[cfg(feature = "temporary-zcashd")]
+    pub fn temporary_zcashd_write_v5_sapling<W: Write>(
+        sapling_bundle: Option<&sapling::Bundle<sapling::Authorized>>,
+        writer: W,
+    ) -> io::Result<()> {
+        Self::write_v5_sapling_inner(sapling_bundle, writer)
+    }
+
+    pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
+        Self::write_v5_sapling_inner(self.sapling_bundle.as_ref(), writer)
+    }
+
+    fn write_v5_sapling_inner<W: Write>(
+        sapling_bundle: Option<&sapling::Bundle<sapling::Authorized>>,
+        mut writer: W,
+    ) -> io::Result<()> {
+        if let Some(bundle) = sapling_bundle {
             Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
                 e.write_v5_without_witness_data(w)
             })?;

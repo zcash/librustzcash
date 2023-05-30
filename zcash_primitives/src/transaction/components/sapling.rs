@@ -192,6 +192,24 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
+impl DynamicUsage for Bundle<Authorized> {
+    fn dynamic_usage(&self) -> usize {
+        self.shielded_spends.dynamic_usage() + self.shielded_outputs.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        let bounds = (
+            self.shielded_spends.dynamic_usage_bounds(),
+            self.shielded_outputs.dynamic_usage_bounds(),
+        );
+
+        (
+            bounds.0 .0 + bounds.1 .0,
+            bounds.0 .1.zip(bounds.1 .1).map(|(a, b)| a + b),
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct SpendDescription<A: Authorization> {
     cv: ValueCommitment,
@@ -260,6 +278,16 @@ impl<A: Authorization> SpendDescription<A> {
     /// Returns the authorization signature for this spend.
     pub fn spend_auth_sig(&self) -> &A::AuthSig {
         &self.spend_auth_sig
+    }
+}
+
+impl DynamicUsage for SpendDescription<Authorized> {
+    fn dynamic_usage(&self) -> usize {
+        self.zkproof.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        self.zkproof.dynamic_usage_bounds()
     }
 }
 
