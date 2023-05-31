@@ -22,4 +22,4 @@ codegen-units = 1
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "62f0c9039b0bee94c16c40c272e19c5922290664" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "11b6858ac81a79675de205980155a49d6f92b71e" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "2a4f27c937fbcbdb66163e1bb426ce1fcb5bc4f8" }
