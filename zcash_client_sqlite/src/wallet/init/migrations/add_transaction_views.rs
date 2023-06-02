@@ -327,7 +327,7 @@ mod tests {
             .unwrap();
 
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, '');
 
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, address, value)
@@ -460,7 +460,7 @@ mod tests {
         db_data
             .conn
             .execute_batch(
-                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');",
+                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');",
             )
             .unwrap();
         db_data.conn.execute(

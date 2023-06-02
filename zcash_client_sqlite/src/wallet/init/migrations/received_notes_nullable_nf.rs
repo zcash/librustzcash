@@ -262,7 +262,7 @@ mod tests {
 
         // Tx 0 contains two received notes of 2 and 5 zatoshis that are controlled by account 0.
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
 
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)

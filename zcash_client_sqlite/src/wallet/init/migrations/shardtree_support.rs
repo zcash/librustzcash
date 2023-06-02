@@ -65,7 +65,7 @@ impl RusqliteMigration for Migration {
                 subtree_end_height INTEGER,
                 root_hash BLOB,
                 shard_data BLOB,
-                contains_marked INTEGER NOT NULL,
+                contains_marked INTEGER,
                 CONSTRAINT root_unique UNIQUE (root_hash)
             );
             CREATE TABLE sapling_tree_cap (
@@ -101,19 +101,24 @@ impl RusqliteMigration for Migration {
             let mut block_rows = stmt_blocks.query([])?;
             while let Some(row) = block_rows.next()? {
                 let block_height: u32 = row.get(0)?;
-                let row_data: Vec<u8> = row.get(1)?;
+                let sapling_tree_data: Vec<u8> = row.get(1)?;
+                if sapling_tree_data == vec![0x00] {
+                    continue;
+                }
+
                 let block_end_tree = read_commitment_tree::<
                     sapling::Node,
                     _,
                     { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-                >(&row_data[..])
+                >(&sapling_tree_data[..])
                 .map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        row_data.len(),
+                        sapling_tree_data.len(),
                         rusqlite::types::Type::Blob,
                         Box::new(e),
                     )
                 })?;
+
                 stmt_update_block_sapling_tree_size
                     .execute(params![block_end_tree.size(), block_height])?;
 
