@@ -201,7 +201,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
-        wallet::get_sapling_commitment_tree(self, block_height)
+        wallet::sapling::get_sapling_commitment_tree(self, block_height)
     }
 
     #[allow(clippy::type_complexity)]
@@ -209,7 +209,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        wallet::get_sapling_witnesses(self, block_height)
+        wallet::sapling::get_sapling_witnesses(self, block_height)
     }
 
     fn get_sapling_nullifiers(
@@ -217,8 +217,8 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         query: data_api::NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
         match query {
-            NullifierQuery::Unspent => wallet::get_sapling_nullifiers(self),
-            NullifierQuery::All => wallet::get_all_sapling_nullifiers(self),
+            NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self),
+            NullifierQuery::All => wallet::sapling::get_all_sapling_nullifiers(self),
         }
     }
 
@@ -228,7 +228,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::transact::get_spendable_sapling_notes(self, account, anchor_height, exclude)
+        wallet::sapling::get_spendable_sapling_notes(self, account, anchor_height, exclude)
     }
 
     fn select_spendable_sapling_notes(
@@ -238,7 +238,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::transact::select_spendable_sapling_notes(
+        wallet::sapling::select_spendable_sapling_notes(
             self,
             account,
             target_value,
@@ -534,11 +534,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
                 // Mark notes as spent and remove them from the scanning cache
                 for spend in &tx.sapling_spends {
-                    wallet::mark_sapling_note_spent(up, tx_row, spend.nf())?;
+                    wallet::sapling::mark_sapling_note_spent(up, tx_row, spend.nf())?;
                 }
 
                 for output in &tx.sapling_outputs {
-                    let received_note_id = wallet::put_received_note(up, output, tx_row)?;
+                    let received_note_id = wallet::sapling::put_received_note(up, output, tx_row)?;
 
                     // Save witness for note.
                     new_witnesses.push((received_note_id, output.witness().clone()));
@@ -549,7 +549,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter())
             {
                 if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
-                    wallet::insert_witness(up, rnid, witness, block.block_height)?;
+                    wallet::sapling::insert_witness(up, rnid, witness, block.block_height)?;
                 } else {
                     return Err(SqliteClientError::InvalidNoteId);
                 }
@@ -594,7 +594,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         )?;
 
                         if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            wallet::put_received_note(up, output, tx_ref)?;
+                            wallet::sapling::put_received_note(up, output, tx_ref)?;
                         }
                     }
                     TransferType::Incoming => {
@@ -608,7 +608,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                             }
                         }
 
-                        wallet::put_received_note(up, output, tx_ref)?;
+                        wallet::sapling::put_received_note(up, output, tx_ref)?;
                     }
                 }
             }
@@ -669,7 +669,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             // reasonable assumption for a light client such as a mobile phone.
             if let Some(bundle) = sent_tx.tx.sapling_bundle() {
                 for spend in bundle.shielded_spends() {
-                    wallet::mark_sapling_note_spent(up, tx_ref, spend.nullifier())?;
+                    wallet::sapling::mark_sapling_note_spent(up, tx_ref, spend.nullifier())?;
                 }
             }
 
@@ -682,7 +682,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
 
                 if let Some((account, note)) = output.sapling_change_to() {
-                    wallet::put_received_note(
+                    wallet::sapling::put_received_note(
                         up,
                         &DecryptedOutput {
                             index: output.output_index(),

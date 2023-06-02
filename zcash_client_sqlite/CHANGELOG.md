@@ -10,6 +10,9 @@ and this library adheres to Rust's notion of
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`.
 
+### Removed
+- The empty `wallet::transact` module has been removed.
+
 ## [0.7.1] - 2023-05-17
 
 ### Fixed
