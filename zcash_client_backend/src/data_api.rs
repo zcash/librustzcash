@@ -10,7 +10,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    sapling::{self, Nullifier, PaymentAddress},
+    sapling,
     transaction::{
         components::{amount::Amount, OutPoint},
         Transaction, TxId,
@@ -22,12 +22,17 @@ use crate::{
     address::{AddressMetadata, UnifiedAddress},
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{SpendableNote, WalletTransparentOutput, WalletTx},
+    wallet::{ReceivedSaplingNote, WalletTransparentOutput, WalletTx},
 };
 
 pub mod chain;
 pub mod error;
 pub mod wallet;
+
+pub enum NullifierQuery {
+    Unspent,
+    All,
+}
 
 /// Read-only operations required for light wallet functions.
 ///
@@ -107,15 +112,15 @@ pub trait WalletRead {
             .map(|oo| oo.flatten())
     }
 
-    /// Returns the block height in which the specified transaction was mined,
-    /// or `Ok(None)` if the transaction is not mined in the main chain.
+    /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
+    /// transaction is not in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns the most recently generated unified address for the specified account, if the
     /// account identifier specified refers to a valid account for this wallet.
     ///
-    /// This will return `Ok(None)` if the account identifier does not correspond
-    /// to a known account.
+    /// This will return `Ok(None)` if the account identifier does not correspond to a known
+    /// account.
     fn get_current_address(
         &self,
         account: AccountId,
@@ -126,26 +131,23 @@ pub trait WalletRead {
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error>;
 
-    /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`],
-    /// if any.
+    /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<AccountId>, Self::Error>;
 
-    /// Checks whether the specified extended full viewing key is
-    /// associated with the account.
+    /// Checks whether the specified extended full viewing key is associated with the account.
     fn is_valid_account_extfvk(
         &self,
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error>;
 
-    /// Returns the wallet balance for an account as of the specified block
-    /// height.
+    /// Returns the wallet balance for an account as of the specified block height.
     ///
-    /// This may be used to obtain a balance that ignores notes that have been
-    /// received so recently that they are not yet deemed spendable.
+    /// This may be used to obtain a balance that ignores notes that have been received so recently
+    /// that they are not yet deemed spendable.
     fn get_balance_at(
         &self,
         account: AccountId,
@@ -176,15 +178,13 @@ pub trait WalletRead {
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error>;
 
-    /// Returns the nullifiers for notes that the wallet is tracking, along with their
-    /// associated account IDs, that are either unspent or have not yet been confirmed as
-    /// spent (in that the spending transaction has not yet been included in a block).
-    fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
-
-    /// Returns all nullifiers for notes that the wallet is tracking
-    /// (including those for notes that have been previously spent),
-    /// along with the account identifiers with which they are associated.
-    fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error>;
+    /// Returns the nullifiers for notes that the wallet is tracking, along with their associated
+    /// account IDs, that are either unspent or have not yet been confirmed as spent (in that a
+    /// spending transaction known to the wallet has not yet been included in a block).
+    fn get_sapling_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error>;
 
     /// Return all unspent Sapling notes.
     fn get_spendable_sapling_notes(
@@ -192,17 +192,17 @@ pub trait WalletRead {
         account: AccountId,
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
 
-    /// Returns a list of spendable Sapling notes sufficient to cover the specified
-    /// target value, if possible.
+    /// Returns a list of spendable Sapling notes sufficient to cover the specified target value,
+    /// if possible.
     fn select_spendable_sapling_notes(
         &self,
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
 
     /// Returns the set of all transparent receivers associated with the given account.
     ///
@@ -241,7 +241,7 @@ pub struct PrunedBlock<'a> {
     pub block_hash: BlockHash,
     pub block_time: u32,
     pub commitment_tree: &'a sapling::CommitmentTree,
-    pub transactions: &'a Vec<WalletTx<Nullifier>>,
+    pub transactions: &'a Vec<WalletTx<sapling::Nullifier>>,
 }
 
 /// A transaction that was detected during scanning of the blockchain,
@@ -286,7 +286,7 @@ pub enum PoolType {
 #[derive(Debug, Clone)]
 pub enum Recipient {
     Transparent(TransparentAddress),
-    Sapling(PaymentAddress),
+    Sapling(sapling::PaymentAddress),
     Unified(UnifiedAddress, PoolType),
     InternalAccount(AccountId, PoolType),
 }
@@ -395,7 +395,7 @@ pub trait WalletWrite: WalletRead {
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
         &mut self,
-        received_tx: &DecryptedTransaction,
+        received_tx: DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error>;
 
     /// Saves information about a transaction that was constructed and sent by the wallet to the
@@ -434,7 +434,7 @@ pub mod testing {
         consensus::{BlockHeight, Network},
         legacy::TransparentAddress,
         memo::Memo,
-        sapling::{self, Nullifier},
+        sapling,
         transaction::{
             components::{Amount, OutPoint},
             Transaction, TxId,
@@ -445,10 +445,12 @@ pub mod testing {
     use crate::{
         address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-        wallet::{SpendableNote, WalletTransparentOutput},
+        wallet::{ReceivedSaplingNote, WalletTransparentOutput},
     };
 
-    use super::{DecryptedTransaction, PrunedBlock, SentTransaction, WalletRead, WalletWrite};
+    use super::{
+        DecryptedTransaction, NullifierQuery, PrunedBlock, SentTransaction, WalletRead, WalletWrite,
+    };
 
     pub struct MockWalletDb {
         pub network: Network,
@@ -537,11 +539,10 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-            Ok(Vec::new())
-        }
-
-        fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
+        fn get_sapling_nullifiers(
+            &self,
+            _query: NullifierQuery,
+        ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -550,7 +551,7 @@ pub mod testing {
             _account: AccountId,
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -560,7 +561,7 @@ pub mod testing {
             _target_value: Amount,
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<SpendableNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -620,7 +621,7 @@ pub mod testing {
 
         fn store_decrypted_tx(
             &mut self,
-            _received_tx: &DecryptedTransaction,
+            _received_tx: DecryptedTransaction,
         ) -> Result<Self::TxRef, Self::Error> {
             Ok(TxId::from_bytes([0u8; 32]))
         }

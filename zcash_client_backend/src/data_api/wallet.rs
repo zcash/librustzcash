@@ -28,7 +28,7 @@ use crate::{
     decrypt_transaction,
     fees::{self, ChangeValue, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    wallet::{OvkPolicy, SpendableNote},
+    wallet::{OvkPolicy, ReceivedSaplingNote},
     zip321::{self, Payment},
 };
 
@@ -68,7 +68,7 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .expect("Sapling activation height must be known.");
 
-    data.store_decrypted_tx(&DecryptedTransaction {
+    data.store_decrypted_tx(DecryptedTransaction {
         tx,
         sapling_outputs: &decrypt_transaction(params, height, tx, &ufvks),
     })?;
@@ -701,7 +701,7 @@ where
 }
 
 fn select_key_for_note<N>(
-    selected: &SpendableNote<N>,
+    selected: &ReceivedSaplingNote<N>,
     extsk: &ExtendedSpendingKey,
     dfvk: &DiversifiableFullViewingKey,
 ) -> Option<(sapling::Note, ExtendedSpendingKey, sapling::MerklePath)> {

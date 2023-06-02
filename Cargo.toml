@@ -21,5 +21,5 @@ codegen-units = 1
 [patch.crates-io]
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "62f0c9039b0bee94c16c40c272e19c5922290664" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "2a4f27c937fbcbdb66163e1bb426ce1fcb5bc4f8" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "2dbdd345670ea22337a0efa6734272d54551285f" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "35054e85b85dc144b4572ed0fd57ea164f50c26a" }

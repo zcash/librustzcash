@@ -1,23 +1,78 @@
-//! Functions for creating transactions.
-//!
-use rusqlite::{named_params, types::Value, Row};
-use std::rc::Rc;
-
+//! Functions for Sapling support in the wallet.
 use group::ff::PrimeField;
+use rusqlite::{named_params, types::Value, OptionalExtension, Row};
+use std::rc::Rc;
 
 use zcash_primitives::{
     consensus::BlockHeight,
-    merkle_tree::read_incremental_witness,
-    sapling::{Diversifier, Rseed},
+    memo::MemoBytes,
+    merkle_tree::{read_commitment_tree, read_incremental_witness},
+    sapling::{self, Diversifier, Note, Nullifier, Rseed},
     transaction::components::Amount,
     zip32::AccountId,
 };
 
-use zcash_client_backend::wallet::SpendableNote;
+use zcash_client_backend::{
+    wallet::{ReceivedSaplingNote, WalletSaplingOutput},
+    DecryptedOutput, TransferType,
+};
 
-use crate::{error::SqliteClientError, NoteId, WalletDb};
+use crate::{error::SqliteClientError, DataConnStmtCache, NoteId, WalletDb};
 
-fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientError> {
+/// This trait provides a generalization over shielded output representations.
+pub(crate) trait ReceivedSaplingOutput {
+    fn index(&self) -> usize;
+    fn account(&self) -> AccountId;
+    fn note(&self) -> &Note;
+    fn memo(&self) -> Option<&MemoBytes>;
+    fn is_change(&self) -> bool;
+    fn nullifier(&self) -> Option<&Nullifier>;
+}
+
+impl ReceivedSaplingOutput for WalletSaplingOutput<Nullifier> {
+    fn index(&self) -> usize {
+        self.index()
+    }
+    fn account(&self) -> AccountId {
+        WalletSaplingOutput::account(self)
+    }
+    fn note(&self) -> &Note {
+        WalletSaplingOutput::note(self)
+    }
+    fn memo(&self) -> Option<&MemoBytes> {
+        None
+    }
+    fn is_change(&self) -> bool {
+        WalletSaplingOutput::is_change(self)
+    }
+
+    fn nullifier(&self) -> Option<&Nullifier> {
+        Some(self.nf())
+    }
+}
+
+impl ReceivedSaplingOutput for DecryptedOutput<Note> {
+    fn index(&self) -> usize {
+        self.index
+    }
+    fn account(&self) -> AccountId {
+        self.account
+    }
+    fn note(&self) -> &Note {
+        &self.note
+    }
+    fn memo(&self) -> Option<&MemoBytes> {
+        Some(&self.memo)
+    }
+    fn is_change(&self) -> bool {
+        self.transfer_type == TransferType::WalletInternal
+    }
+    fn nullifier(&self) -> Option<&Nullifier> {
+        None
+    }
+}
+
+fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<NoteId>, SqliteClientError> {
     let note_id = NoteId::ReceivedNoteId(row.get(0)?);
     let diversifier = {
         let d: Vec<_> = row.get(1)?;
@@ -53,7 +108,7 @@ fn to_spendable_note(row: &Row) -> Result<SpendableNote<NoteId>, SqliteClientErr
         read_incremental_witness(&d[..])?
     };
 
-    Ok(SpendableNote {
+    Ok(ReceivedSaplingNote {
         note_id,
         diversifier,
         note_value,
@@ -67,7 +122,7 @@ pub(crate) fn get_spendable_sapling_notes<P>(
     account: AccountId,
     anchor_height: BlockHeight,
     exclude: &[NoteId],
-) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
+) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
     let mut stmt_select_notes = wdb.conn.prepare(
         "SELECT id_note, diversifier, value, rcm, witness
             FROM sapling_received_notes
@@ -107,7 +162,7 @@ pub(crate) fn select_spendable_sapling_notes<P>(
     target_value: Amount,
     anchor_height: BlockHeight,
     exclude: &[NoteId],
-) -> Result<Vec<SpendableNote<NoteId>>, SqliteClientError> {
+) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the
     // selected notes. This is achieved in several steps:
@@ -171,6 +226,182 @@ pub(crate) fn select_spendable_sapling_notes<P>(
     )?;
 
     notes.collect::<Result<_, _>>()
+}
+
+/// Returns the commitment tree for the block at the specified height,
+/// if any.
+pub(crate) fn get_sapling_commitment_tree<P>(
+    wdb: &WalletDb<P>,
+    block_height: BlockHeight,
+) -> Result<Option<sapling::CommitmentTree>, SqliteClientError> {
+    wdb.conn
+        .query_row_and_then(
+            "SELECT sapling_tree FROM blocks WHERE height = ?",
+            [u32::from(block_height)],
+            |row| {
+                let row_data: Vec<u8> = row.get(0)?;
+                read_commitment_tree(&row_data[..]).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        row_data.len(),
+                        rusqlite::types::Type::Blob,
+                        Box::new(e),
+                    )
+                })
+            },
+        )
+        .optional()
+        .map_err(SqliteClientError::from)
+}
+
+/// Returns the incremental witnesses for the block at the specified height,
+/// if any.
+pub(crate) fn get_sapling_witnesses<P>(
+    wdb: &WalletDb<P>,
+    block_height: BlockHeight,
+) -> Result<Vec<(NoteId, sapling::IncrementalWitness)>, SqliteClientError> {
+    let mut stmt_fetch_witnesses = wdb
+        .conn
+        .prepare("SELECT note, witness FROM sapling_witnesses WHERE block = ?")?;
+    let witnesses = stmt_fetch_witnesses
+        .query_map([u32::from(block_height)], |row| {
+            let id_note = NoteId::ReceivedNoteId(row.get(0)?);
+            let wdb: Vec<u8> = row.get(1)?;
+            Ok(read_incremental_witness(&wdb[..]).map(|witness| (id_note, witness)))
+        })
+        .map_err(SqliteClientError::from)?;
+
+    // unwrap database error & IO error from IncrementalWitness::read
+    let res: Vec<_> = witnesses.collect::<Result<Result<_, _>, _>>()??;
+    Ok(res)
+}
+
+/// Records the incremental witness for the specified note,
+/// as of the given block height.
+pub(crate) fn insert_witness<'a, P>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    note_id: i64,
+    witness: &sapling::IncrementalWitness,
+    height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    stmts.stmt_insert_witness(NoteId::ReceivedNoteId(note_id), height, witness)
+}
+
+/// Retrieves the set of nullifiers for "potentially spendable" Sapling notes that the
+/// wallet is tracking.
+///
+/// "Potentially spendable" means:
+/// - The transaction in which the note was created has been observed as mined.
+/// - No transaction in which the note's nullifier appears has been observed as mined.
+pub(crate) fn get_sapling_nullifiers<P>(
+    wdb: &WalletDb<P>,
+) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
+    // Get the nullifiers for the notes we are tracking
+    let mut stmt_fetch_nullifiers = wdb.conn.prepare(
+        "SELECT rn.id_note, rn.account, rn.nf, tx.block as block
+         FROM sapling_received_notes rn
+         LEFT OUTER JOIN transactions tx
+         ON tx.id_tx = rn.spent
+         WHERE block IS NULL
+         AND nf IS NOT NULL",
+    )?;
+    let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
+        let account: u32 = row.get(1)?;
+        let nf_bytes: Vec<u8> = row.get(2)?;
+        Ok((
+            AccountId::from(account),
+            Nullifier::from_slice(&nf_bytes).unwrap(),
+        ))
+    })?;
+
+    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
+    Ok(res)
+}
+
+/// Returns the nullifiers for the notes that this wallet is tracking.
+pub(crate) fn get_all_sapling_nullifiers<P>(
+    wdb: &WalletDb<P>,
+) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
+    // Get the nullifiers for the notes we are tracking
+    let mut stmt_fetch_nullifiers = wdb.conn.prepare(
+        "SELECT rn.id_note, rn.account, rn.nf
+         FROM sapling_received_notes rn
+         WHERE nf IS NOT NULL",
+    )?;
+    let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
+        let account: u32 = row.get(1)?;
+        let nf_bytes: Vec<u8> = row.get(2)?;
+        Ok((
+            AccountId::from(account),
+            Nullifier::from_slice(&nf_bytes).unwrap(),
+        ))
+    })?;
+
+    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
+    Ok(res)
+}
+
+/// Marks a given nullifier as having been revealed in the construction
+/// of the specified transaction.
+///
+/// Marking a note spent in this fashion does NOT imply that the
+/// spending transaction has been mined.
+pub(crate) fn mark_sapling_note_spent<'a, P>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    tx_ref: i64,
+    nf: &Nullifier,
+) -> Result<(), SqliteClientError> {
+    stmts.stmt_mark_sapling_note_spent(tx_ref, nf)?;
+    Ok(())
+}
+
+/// Records the specified shielded output as having been received.
+///
+/// This implementation relies on the facts that:
+/// - A transaction will not contain more than 2^63 shielded outputs.
+/// - A note value will never exceed 2^63 zatoshis.
+pub(crate) fn put_received_note<'a, P, T: ReceivedSaplingOutput>(
+    stmts: &mut DataConnStmtCache<'a, P>,
+    output: &T,
+    tx_ref: i64,
+) -> Result<NoteId, SqliteClientError> {
+    let rcm = output.note().rcm().to_repr();
+    let account = output.account();
+    let to = output.note().recipient();
+    let diversifier = to.diversifier();
+    let value = output.note().value();
+    let memo = output.memo();
+    let is_change = output.is_change();
+    let output_index = output.index();
+    let nf = output.nullifier();
+
+    // First try updating an existing received note into the database.
+    if !stmts.stmt_update_received_note(
+        account,
+        diversifier,
+        value.inner(),
+        rcm,
+        nf,
+        memo,
+        is_change,
+        tx_ref,
+        output_index,
+    )? {
+        // It isn't there, so insert our note into the database.
+        stmts.stmt_insert_received_note(
+            tx_ref,
+            output_index,
+            account,
+            diversifier,
+            value.inner(),
+            rcm,
+            nf,
+            memo,
+            is_change,
+        )
+    } else {
+        // It was there, so grab its row number.
+        stmts.stmt_select_received_note(tx_ref, output.index())
+    }
 }
 
 #[cfg(test)]
