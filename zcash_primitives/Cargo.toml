@@ -1,7 +1,7 @@
 [package]
 name = "zcash_primitives"
 description = "Rust implementations of the Zcash primitives"
-version = "0.11.0"
+version = "0.12.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -19,7 +19,7 @@ all-features = true
 
 [dependencies]
 equihash = { version = "0.2", path = "../components/equihash" }
-zcash_address = { version = "0.2", path = "../components/zcash_address" }
+zcash_address = { version = "0.3", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 
 # Dependencies exposed in a public API:
@@ -44,10 +44,10 @@ ff = "0.13"
 group = { version = "0.13", features = ["wnaf-memuse"] }
 jubjub = "0.10"
 nonempty = "0.7"
-orchard = { version = "0.4", default-features = false }
+orchard = { version = "0.5", default-features = false }
 
 # - Note Commitment Trees
-incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }
+incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
 
 # - Static constants
 lazy_static = "1"
@@ -82,17 +82,17 @@ aes = "0.8"
 fpe = "0.6"
 
 [dependencies.zcash_note_encryption]
-version = "0.3"
+version = "0.4"
 features = ["pre-zip-212"]
 
 [dev-dependencies]
 chacha20poly1305 = "0.10"
 criterion = "0.4"
-incrementalmerkletree = { version = "0.3", features = ["legacy-api", "test-dependencies"] }
+incrementalmerkletree = { version = "0.4", features = ["legacy-api", "test-dependencies"] }
 proptest = "1.0.0"
 assert_matches = "1.3.0"
 rand_xorshift = "0.3"
-orchard = { version = "0.4", default-features = false, features = ["test-dependencies"] }
+orchard = { version = "0.5", default-features = false, features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56

@@ -14,14 +14,14 @@ edition = "2021"
 rust-version = "1.65"
 
 [dependencies]
-incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }
+incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
 zcash_client_backend = { version = "0.9", path = "../zcash_client_backend" }
-zcash_primitives = { version = "0.11", path = "../zcash_primitives", default-features = false }
+zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Errors
-bs58 = { version = "0.4", features = ["check"] }
+bs58 = { version = "0.5", features = ["check"] }
 hdwallet = { version = "0.4", optional = true }
 
 # - Logging and metrics
@@ -51,10 +51,10 @@ proptest = "1.0.0"
 rand_core = "0.6"
 regex = "1.4"
 tempfile = "3.5.0"
-zcash_note_encryption = "0.3"
-zcash_proofs = { version = "0.11", path = "../zcash_proofs" }
-zcash_primitives = { version = "0.11", path = "../zcash_primitives", features = ["test-dependencies"] }
-zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
+zcash_note_encryption = "0.4"
+zcash_proofs = { version = "0.12", path = "../zcash_proofs" }
+zcash_primitives = { version = "0.12", path = "../zcash_primitives", features = ["test-dependencies"] }
+zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
 mainnet = []

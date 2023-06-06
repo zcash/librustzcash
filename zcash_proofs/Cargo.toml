@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.11.0"
+version = "0.12.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -17,14 +17,14 @@ categories = ["cryptography::cryptocurrencies"]
 all-features = true
 
 [dependencies]
-zcash_primitives = { version = "0.11", path = "../zcash_primitives", default-features = false }
+zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 bls12_381 = "0.8"
 group = "0.13"
-incrementalmerkletree = { version = "0.3", features = ["legacy-api"] }
+incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
 jubjub = "0.10"
 lazy_static = "1"
 minreq = { version = "2", features = ["https"], optional = true }

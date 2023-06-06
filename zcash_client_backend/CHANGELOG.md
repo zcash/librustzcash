@@ -9,13 +9,21 @@ and this library adheres to Rust's notion of
 ### Added
 - `impl Eq for zcash_client_backend::address::RecipientAddress`
 - `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
+- `data_api::NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
 
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `hdwallet 0.4`.
+- Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.12`, `zcash_note_encryption 0.4`,
+  `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`
 - `WalletRead::get_memo` now returns `Result<Option<Memo>, Self::Error>`
   instead of `Result<Memo, Self::Error>` in order to make representable
   wallet states where the full note plaintext is not available.
+- `WalletRead::get_nullifiers` has been renamed to `WalletRead::get_sapling_nullifiers`
+  and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
+- `wallet::SpendableNote` has been renamed to `wallet::ReceivedSaplingNote`.
+
+### Removed
+- `WalletRead::get_all_nullifiers`
 
 ## [0.9.0] - 2023-04-28
 ### Added

@@ -91,7 +91,7 @@ impl ScanningKey for DiversifiableFullViewingKey {
     ) -> Self::Nf {
         note.nf(
             key,
-            u64::try_from(witness.tip_position())
+            u64::try_from(witness.position())
                 .expect("Sapling note commitment tree position must fit into a u64"),
         )
     }

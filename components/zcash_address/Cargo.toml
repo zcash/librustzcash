@@ -1,7 +1,7 @@
 [package]
 name = "zcash_address"
 description = "Zcash address parsing and serialization"
-version = "0.2.1"
+version = "0.3.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
 ]
@@ -16,7 +16,7 @@ keywords = ["zcash", "address", "sapling", "unified"]
 
 [dependencies]
 bech32 = "0.9"
-bs58 = { version = "0.4", features = ["check"] }
+bs58 = { version = "0.5", features = ["check"] }
 f4jumble = { version = "0.1", path = "../f4jumble" }
 zcash_encoding = { version = "0.2", path = "../zcash_encoding" }
 
