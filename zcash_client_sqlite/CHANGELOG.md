@@ -8,7 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`
+- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`
 
 ### Removed
 - The empty `wallet::transact` module has been removed.

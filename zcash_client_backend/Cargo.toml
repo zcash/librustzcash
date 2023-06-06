@@ -34,7 +34,7 @@ time = "0.2"
 # - Encodings
 base64 = "0.21"
 bech32 = "0.9"
-bs58 = { version = "0.4", features = ["check"] }
+bs58 = { version = "0.5", features = ["check"] }
 
 # - Errors
 hdwallet = { version = "0.4", optional = true }

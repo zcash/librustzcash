@@ -21,7 +21,7 @@ zcash_primitives = { version = "0.11", path = "../zcash_primitives", default-fea
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Errors
-bs58 = { version = "0.4", features = ["check"] }
+bs58 = { version = "0.5", features = ["check"] }
 hdwallet = { version = "0.4", optional = true }
 
 # - Logging and metrics
