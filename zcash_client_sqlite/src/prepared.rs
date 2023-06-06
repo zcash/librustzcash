@@ -89,14 +89,6 @@ impl<'a> InsertAddress<'a> {
 /// [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
 pub struct DataConnStmtCache<'a, P> {
     pub(crate) wallet_db: &'a WalletDb<P>,
-    stmt_insert_block: Statement<'a>,
-
-    stmt_insert_tx_meta: Statement<'a>,
-    stmt_update_tx_meta: Statement<'a>,
-
-    stmt_insert_tx_data: Statement<'a>,
-    stmt_update_tx_data: Statement<'a>,
-    stmt_select_tx_ref: Statement<'a>,
 
     stmt_mark_sapling_note_spent: Statement<'a>,
     #[cfg(feature = "transparent-inputs")]
@@ -129,32 +121,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         Ok(
             DataConnStmtCache {
                 wallet_db,
-                stmt_insert_block: wallet_db.conn.prepare(
-                    "INSERT INTO blocks (height, hash, time, sapling_tree)
-                    VALUES (?, ?, ?, ?)",
-                )?,
-                stmt_insert_tx_meta: wallet_db.conn.prepare(
-                    "INSERT INTO transactions (txid, block, tx_index)
-                    VALUES (?, ?, ?)",
-                )?,
-                stmt_update_tx_meta: wallet_db.conn.prepare(
-                    "UPDATE transactions
-                    SET block = ?, tx_index = ? WHERE txid = ?",
-                )?,
-                stmt_insert_tx_data: wallet_db.conn.prepare(
-                    "INSERT INTO transactions (txid, created, expiry_height, raw, fee)
-                    VALUES (?, ?, ?, ?, ?)",
-                )?,
-                stmt_update_tx_data: wallet_db.conn.prepare(
-                    "UPDATE transactions
-                    SET expiry_height = :expiry_height,
-                        raw = :raw,
-                        fee = IFNULL(:fee, fee)
-                    WHERE txid = :txid",
-                )?,
-                stmt_select_tx_ref: wallet_db.conn.prepare(
-                    "SELECT id_tx FROM transactions WHERE txid = ?",
-                )?,
                 stmt_mark_sapling_note_spent: wallet_db.conn.prepare(
                     "UPDATE sapling_received_notes SET spent = ? WHERE nf = ?"
                 )?,
@@ -269,119 +235,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
             }
         )
-    }
-
-    /// Inserts information about a scanned block into the database.
-    pub fn stmt_insert_block(
-        &mut self,
-        block_height: BlockHeight,
-        block_hash: BlockHash,
-        block_time: u32,
-        commitment_tree: &sapling::CommitmentTree,
-    ) -> Result<(), SqliteClientError> {
-        let mut encoded_tree = Vec::new();
-        write_commitment_tree(commitment_tree, &mut encoded_tree).unwrap();
-
-        self.stmt_insert_block.execute(params![
-            u32::from(block_height),
-            &block_hash.0[..],
-            block_time,
-            encoded_tree
-        ])?;
-
-        Ok(())
-    }
-
-    /// Inserts the given transaction and its block metadata into the wallet.
-    ///
-    /// Returns the database row for the newly-inserted transaction, or an error if the
-    /// transaction exists.
-    pub(crate) fn stmt_insert_tx_meta(
-        &mut self,
-        txid: &TxId,
-        height: BlockHeight,
-        tx_index: usize,
-    ) -> Result<i64, SqliteClientError> {
-        self.stmt_insert_tx_meta.execute(params![
-            &txid.as_ref()[..],
-            u32::from(height),
-            (tx_index as i64),
-        ])?;
-
-        Ok(self.wallet_db.conn.last_insert_rowid())
-    }
-
-    /// Updates the block metadata for the given transaction.
-    ///
-    /// Returns `false` if the transaction doesn't exist in the wallet.
-    pub(crate) fn stmt_update_tx_meta(
-        &mut self,
-        height: BlockHeight,
-        tx_index: usize,
-        txid: &TxId,
-    ) -> Result<bool, SqliteClientError> {
-        match self.stmt_update_tx_meta.execute(params![
-            u32::from(height),
-            (tx_index as i64),
-            &txid.as_ref()[..],
-        ])? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => unreachable!("txid column is marked as UNIQUE"),
-        }
-    }
-
-    /// Inserts the given transaction and its data into the wallet.
-    ///
-    /// Returns the database row for the newly-inserted transaction, or an error if the
-    /// transaction exists.
-    pub(crate) fn stmt_insert_tx_data(
-        &mut self,
-        txid: &TxId,
-        created_at: Option<time::OffsetDateTime>,
-        expiry_height: BlockHeight,
-        raw_tx: &[u8],
-        fee: Option<Amount>,
-    ) -> Result<i64, SqliteClientError> {
-        self.stmt_insert_tx_data.execute(params![
-            &txid.as_ref()[..],
-            created_at,
-            u32::from(expiry_height),
-            raw_tx,
-            fee.map(i64::from)
-        ])?;
-
-        Ok(self.wallet_db.conn.last_insert_rowid())
-    }
-
-    /// Updates the data for the given transaction.
-    ///
-    /// Returns `false` if the transaction doesn't exist in the wallet.
-    pub(crate) fn stmt_update_tx_data(
-        &mut self,
-        expiry_height: BlockHeight,
-        raw_tx: &[u8],
-        fee: Option<Amount>,
-        txid: &TxId,
-    ) -> Result<bool, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":expiry_height", &u32::from(expiry_height)),
-            (":raw", &raw_tx),
-            (":fee", &fee.map(i64::from)),
-            (":txid", &&txid.as_ref()[..]),
-        ];
-        match self.stmt_update_tx_data.execute(sql_args)? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => unreachable!("txid column is marked as UNIQUE"),
-        }
-    }
-
-    /// Finds the database row for the given `txid`, if the transaction is in the wallet.
-    pub(crate) fn stmt_select_tx_ref(&mut self, txid: &TxId) -> Result<i64, SqliteClientError> {
-        self.stmt_select_tx_ref
-            .query_row([&txid.as_ref()[..]], |row| row.get(0))
-            .map_err(SqliteClientError::from)
     }
 
     /// Marks a given nullifier as having been revealed in the construction of the

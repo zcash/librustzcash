@@ -64,7 +64,7 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
-use rusqlite::{named_params, OptionalExtension, ToSql};
+use rusqlite::{named_params, params, OptionalExtension, ToSql};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -72,6 +72,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
+    merkle_tree::{write_commitment_tree, write_incremental_witness},
     sapling::CommitmentTree,
     transaction::{components::Amount, Transaction, TxId},
     zip32::{
@@ -94,7 +95,7 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
-    rusqlite::{params, Connection},
+    rusqlite::Connection,
     std::collections::BTreeSet,
     zcash_client_backend::{
         address::AddressMetadata, encoding::AddressCodec, wallet::WalletTransparentOutput,
@@ -739,7 +740,22 @@ pub(crate) fn insert_block<'a, P>(
     block_time: u32,
     commitment_tree: &CommitmentTree,
 ) -> Result<(), SqliteClientError> {
-    stmts.stmt_insert_block(block_height, block_hash, block_time, commitment_tree)
+    let mut encoded_tree = Vec::new();
+    write_commitment_tree(commitment_tree, &mut encoded_tree).unwrap();
+
+    let mut stmt_insert_block = stmts.wallet_db.conn.prepare_cached(
+        "INSERT INTO blocks (height, hash, time, sapling_tree)
+            VALUES (?, ?, ?, ?)",
+    )?;
+
+    stmt_insert_block.execute(params![
+        u32::from(block_height),
+        &block_hash.0[..],
+        block_time,
+        encoded_tree
+    ])?;
+
+    Ok(())
 }
 
 /// Inserts information about a mined transaction that was observed to
@@ -749,13 +765,25 @@ pub(crate) fn put_tx_meta<'a, P, N>(
     tx: &WalletTx<N>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
-    if !stmts.stmt_update_tx_meta(height, tx.index, &tx.txid)? {
-        // It isn't there, so insert our transaction into the database.
-        stmts.stmt_insert_tx_meta(&tx.txid, height, tx.index)
-    } else {
-        // It was there, so grab its row number.
-        stmts.stmt_select_tx_ref(&tx.txid)
-    }
+    // It isn't there, so insert our transaction into the database.
+    let mut stmt_upsert_tx_meta = stmts.wallet_db.conn.prepare_cached(
+        "INSERT INTO transactions (txid, block, tx_index)
+        VALUES (:txid, :block, :tx_index) 
+        ON CONFLICT (txid) DO UPDATE
+        SET block = :block,
+            tx_index = :tx_index
+        RETURNING id_tx",
+    )?;
+
+    let tx_params = named_params![
+        ":txid": &tx.txid.as_ref()[..],
+        ":block": u32::from(height),
+        ":tx_index": i64::try_from(tx.index).expect("transaction indices are representable as i64"),
+    ];
+
+    stmt_upsert_tx_meta
+        .query_row(tx_params, |row| row.get::<_, i64>(0))
+        .map_err(SqliteClientError::from)
 }
 
 /// Inserts full transaction data into the database.
@@ -765,18 +793,31 @@ pub(crate) fn put_tx_data<'a, P>(
     fee: Option<Amount>,
     created_at: Option<time::OffsetDateTime>,
 ) -> Result<i64, SqliteClientError> {
-    let txid = tx.txid();
+    let mut stmt_upsert_tx_data = stmts.wallet_db.conn.prepare_cached(
+        "INSERT INTO transactions (txid, created, expiry_height, raw, fee)
+        VALUES (:txid, :created_at, :expiry_height, :raw, :fee)
+        ON CONFLICT (txid) DO UPDATE
+        SET expiry_height = :expiry_height,
+            raw = :raw,
+            fee = IFNULL(:fee, fee)
+        RETURNING id_tx",
+    )?;
 
+    let txid = tx.txid();
     let mut raw_tx = vec![];
     tx.write(&mut raw_tx)?;
 
-    if !stmts.stmt_update_tx_data(tx.expiry_height(), &raw_tx, fee, &txid)? {
-        // It isn't there, so insert our transaction into the database.
-        stmts.stmt_insert_tx_data(&txid, created_at, tx.expiry_height(), &raw_tx, fee)
-    } else {
-        // It was there, so grab its row number.
-        stmts.stmt_select_tx_ref(&txid)
-    }
+    let tx_params = named_params![
+        ":txid": &txid.as_ref()[..],
+        ":created_at": created_at,
+        ":expiry_height": u32::from(tx.expiry_height()),
+        ":raw": raw_tx,
+        ":fee": fee.map(i64::from),
+    ];
+
+    stmt_upsert_tx_data
+        .query_row(tx_params, |row| row.get::<_, i64>(0))
+        .map_err(SqliteClientError::from)
 }
 
 /// Marks the given UTXO as having been spent.
