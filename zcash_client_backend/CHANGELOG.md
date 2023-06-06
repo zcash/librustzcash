@@ -13,7 +13,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `hdwallet 0.4`, `zcash_note_encryption 0.4`,
+- Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.12`, `zcash_note_encryption 0.4`,
   `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`
 - `WalletRead::get_memo` now returns `Result<Option<Memo>, Self::Error>`
   instead of `Result<Memo, Self::Error>` in order to make representable

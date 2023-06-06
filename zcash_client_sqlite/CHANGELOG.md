@@ -8,7 +8,8 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`
+- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`,
+  `zcash_primitives 0.12`
 
 ### Removed
 - The empty `wallet::transact` module has been removed.
@@ -16,7 +17,7 @@ and this library adheres to Rust's notion of
 ## [0.7.1] - 2023-05-17
 
 ### Fixed
-- Fixes a potential crash that could occur when attempting to read a memo from 
+- Fixes a potential crash that could occur when attempting to read a memo from
   sqlite when the memo value is `NULL`. At present, we return the empty memo
   in this case; in the future, the `get_memo` API will be updated to reflect
   the potential absence of memo data.
