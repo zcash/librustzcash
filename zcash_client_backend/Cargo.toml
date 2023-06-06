@@ -21,7 +21,7 @@ development = ["zcash_proofs"]
 
 [dependencies]
 incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
-zcash_address = { version = "0.2", path = "../components/zcash_address" }
+zcash_address = { version = "0.3", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.11", path = "../zcash_primitives", default-features = false }
@@ -86,7 +86,7 @@ rand_core = "0.6"
 rand_xorshift = "0.3"
 tempfile = "3.5.0"
 zcash_proofs = { version = "0.11", path = "../zcash_proofs", default-features = false }
-zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
+zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
 lightwalletd-tonic = ["tonic"]
