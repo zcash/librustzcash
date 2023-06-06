@@ -32,7 +32,7 @@ pub enum Zip321Error {
     /// when using a valid UTF-8 lead byte.
     MemoBytesError(memo::Error),
     /// The ZIP 321 request included more payments than can be created within a single Zcash
-    /// transaction.
+    /// transaction. The wrapped value is the number of payments in the request.
     TooManyPayments(usize),
     /// Parsing encountered a duplicate ZIP 321 URI parameter for the returned payment index.
     DuplicateParameter(parse::Param, usize),
