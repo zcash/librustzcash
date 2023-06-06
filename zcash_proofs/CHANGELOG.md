@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Changed
+- Bumped dependencies to `incrementalmerkletree 0.4`, `zcash_primitives 0.12`
 - MSRV is now 1.65.0.
 
 ### Removed

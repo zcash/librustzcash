@@ -17,7 +17,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`.
+- Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`, `incrementalmerkletree 0.4`
+  `zcash_note_encryption 0.4`, `orchard 0.5`
 
 ### Removed
 - `merkle_tree::Hashable` has been removed and its uses have been replaced by
