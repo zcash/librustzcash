@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.0] - 2023-06-06
 ### Changed
 - The `esk` and `ephemeral_key` arguments have been removed from 
   `Domain::parse_note_plaintext_without_memo_ovk`. It is therefore no longer
