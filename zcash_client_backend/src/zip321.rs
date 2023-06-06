@@ -26,12 +26,22 @@ use crate::address::RecipientAddress;
 /// Errors that may be produced in decoding of payment requests.
 #[derive(Debug)]
 pub enum Zip321Error {
+    /// A memo field in the ZIP 321 URI was not properly base-64 encoded
     InvalidBase64(base64::DecodeError),
+    /// A memo value exceeded 512 bytes in length or could not be interpreted as a UTF-8 string
+    /// when using a valid UTF-8 lead byte.
     MemoBytesError(memo::Error),
+    /// The ZIP 321 request included more payments than can be created within a single Zcash
+    /// transaction. The wrapped value is the number of payments in the request.
     TooManyPayments(usize),
+    /// Parsing encountered a duplicate ZIP 321 URI parameter for the returned payment index.
     DuplicateParameter(parse::Param, usize),
+    /// The payment at the wrapped index attempted to include a memo when sending to a
+    /// transparent recipient address, which is not supported by the protocol.
     TransparentMemo(usize),
+    /// The payment at the wrapped index did not include a recipient address.
     RecipientMissing(usize),
+    /// The ZIP 321 URI was malformed and failed to parse.
     ParseError(String),
 }
 
