@@ -1,6 +1,6 @@
 //! Functions for Sapling support in the wallet.
 use group::ff::PrimeField;
-use rusqlite::{named_params, types::Value, OptionalExtension, Row};
+use rusqlite::{named_params, params, types::Value, Connection, OptionalExtension, Row};
 use std::rc::Rc;
 
 use zcash_primitives::{
@@ -117,13 +117,13 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<NoteId>, SqliteCli
     })
 }
 
-pub(crate) fn get_spendable_sapling_notes<P>(
-    wdb: &WalletDb<P>,
+pub(crate) fn get_spendable_sapling_notes(
+    conn: &Connection,
     account: AccountId,
     anchor_height: BlockHeight,
     exclude: &[NoteId],
 ) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
-    let mut stmt_select_notes = wdb.conn.prepare(
+    let mut stmt_select_notes = conn.prepare_cached(
         "SELECT id_note, diversifier, value, rcm, witness
             FROM sapling_received_notes
             INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
@@ -156,8 +156,8 @@ pub(crate) fn get_spendable_sapling_notes<P>(
     notes.collect::<Result<_, _>>()
 }
 
-pub(crate) fn select_spendable_sapling_notes<P>(
-    wdb: &WalletDb<P>,
+pub(crate) fn select_spendable_sapling_notes(
+    conn: &Connection,
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
@@ -181,7 +181,7 @@ pub(crate) fn select_spendable_sapling_notes<P>(
     //    required value, bringing the sum of all selected notes across the threshold.
     //
     // 4) Match the selected notes against the witnesses at the desired height.
-    let mut stmt_select_notes = wdb.conn.prepare(
+    let mut stmt_select_notes = conn.prepare_cached(
         "WITH selected AS (
             WITH eligible AS (
                 SELECT id_note, diversifier, value, rcm,
@@ -189,8 +189,8 @@ pub(crate) fn select_spendable_sapling_notes<P>(
                         (PARTITION BY account, spent ORDER BY id_note) AS so_far
                 FROM sapling_received_notes
                 INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-                WHERE account = :account 
-                AND spent IS NULL 
+                WHERE account = :account
+                AND spent IS NULL
                 AND transactions.block <= :anchor_height
                 AND id_note NOT IN rarray(:exclude)
             )
@@ -318,11 +318,11 @@ pub(crate) fn get_sapling_nullifiers<P>(
 }
 
 /// Returns the nullifiers for the notes that this wallet is tracking.
-pub(crate) fn get_all_sapling_nullifiers<P>(
-    wdb: &WalletDb<P>,
+pub(crate) fn get_all_sapling_nullifiers(
+    conn: &Connection,
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
-    let mut stmt_fetch_nullifiers = wdb.conn.prepare(
+    let mut stmt_fetch_nullifiers = conn.prepare(
         "SELECT rn.id_note, rn.account, rn.nf
          FROM sapling_received_notes rn
          WHERE nf IS NOT NULL",
@@ -345,13 +345,19 @@ pub(crate) fn get_all_sapling_nullifiers<P>(
 ///
 /// Marking a note spent in this fashion does NOT imply that the
 /// spending transaction has been mined.
-pub(crate) fn mark_sapling_note_spent<'a, P>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+pub(crate) fn mark_sapling_note_spent(
+    conn: &Connection,
     tx_ref: i64,
     nf: &Nullifier,
-) -> Result<(), SqliteClientError> {
-    stmts.stmt_mark_sapling_note_spent(tx_ref, nf)?;
-    Ok(())
+) -> Result<bool, SqliteClientError> {
+    let mut stmt_mark_sapling_note_spent =
+        conn.prepare_cached("UPDATE sapling_received_notes SET spent = ? WHERE nf = ?")?;
+
+    match stmt_mark_sapling_note_spent.execute(params![tx_ref, &nf.0[..]])? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => unreachable!("nf column is marked as UNIQUE"),
+    }
 }
 
 /// Records the specified shielded output as having been received.
@@ -359,49 +365,50 @@ pub(crate) fn mark_sapling_note_spent<'a, P>(
 /// This implementation relies on the facts that:
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
-pub(crate) fn put_received_note<'a, P, T: ReceivedSaplingOutput>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
+    conn: &Connection,
     output: &T,
     tx_ref: i64,
 ) -> Result<NoteId, SqliteClientError> {
+    let mut stmt_upsert_received_note = conn.prepare_cached(
+        "INSERT INTO sapling_received_notes
+        (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
+        VALUES
+        (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)
+        ON CONFLICT (tx, output_index) DO UPDATE
+        SET account = :account,
+            diversifier = :diversifier,
+            value = :value,
+            rcm = :rcm,
+            nf = IFNULL(:nf, nf),
+            memo = IFNULL(:memo, memo),
+            is_change = IFNULL(:is_change, is_change)
+        RETURNING id_note",
+    )?;
+
     let rcm = output.note().rcm().to_repr();
-    let account = output.account();
     let to = output.note().recipient();
     let diversifier = to.diversifier();
-    let value = output.note().value();
-    let memo = output.memo();
-    let is_change = output.is_change();
-    let output_index = output.index();
-    let nf = output.nullifier();
 
-    // First try updating an existing received note into the database.
-    if !stmts.stmt_update_received_note(
-        account,
-        diversifier,
-        value.inner(),
-        rcm,
-        nf,
-        memo,
-        is_change,
-        tx_ref,
-        output_index,
-    )? {
-        // It isn't there, so insert our note into the database.
-        stmts.stmt_insert_received_note(
-            tx_ref,
-            output_index,
-            account,
-            diversifier,
-            value.inner(),
-            rcm,
-            nf,
-            memo,
-            is_change,
-        )
-    } else {
-        // It was there, so grab its row number.
-        stmts.stmt_select_received_note(tx_ref, output.index())
-    }
+    let sql_args = named_params![
+        ":tx": &tx_ref,
+        ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
+        ":account": u32::from(output.account()),
+        ":diversifier": &diversifier.0.as_ref(),
+        ":value": output.note().value().inner(),
+        ":rcm": &rcm.as_ref(),
+        ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
+        ":memo": output.memo()
+            .filter(|m| *m != &MemoBytes::empty())
+            .map(|m| m.as_slice()),
+        ":is_change": output.is_change()
+    ];
+
+    stmt_upsert_received_note
+        .query_row(sql_args, |row| {
+            row.get::<_, i64>(0).map(NoteId::ReceivedNoteId)
+        })
+        .map_err(SqliteClientError::from)
 }
 
 #[cfg(test)]

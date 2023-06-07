@@ -768,7 +768,7 @@ pub(crate) fn put_tx_meta<'a, P, N>(
     // It isn't there, so insert our transaction into the database.
     let mut stmt_upsert_tx_meta = stmts.wallet_db.conn.prepare_cached(
         "INSERT INTO transactions (txid, block, tx_index)
-        VALUES (:txid, :block, :tx_index) 
+        VALUES (:txid, :block, :tx_index)
         ON CONFLICT (txid) DO UPDATE
         SET block = :block,
             tx_index = :tx_index

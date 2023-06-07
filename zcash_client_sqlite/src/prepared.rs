@@ -90,7 +90,6 @@ impl<'a> InsertAddress<'a> {
 pub struct DataConnStmtCache<'a, P> {
     pub(crate) wallet_db: &'a WalletDb<P>,
 
-    stmt_mark_sapling_note_spent: Statement<'a>,
     #[cfg(feature = "transparent-inputs")]
     stmt_mark_transparent_utxo_spent: Statement<'a>,
 
@@ -102,9 +101,6 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_insert_legacy_transparent_utxo: Statement<'a>,
     #[cfg(feature = "transparent-inputs")]
     stmt_update_legacy_transparent_utxo: Statement<'a>,
-    stmt_insert_received_note: Statement<'a>,
-    stmt_update_received_note: Statement<'a>,
-    stmt_select_received_note: Statement<'a>,
 
     stmt_insert_sent_output: Statement<'a>,
     stmt_update_sent_output: Statement<'a>,
@@ -121,9 +117,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         Ok(
             DataConnStmtCache {
                 wallet_db,
-                stmt_mark_sapling_note_spent: wallet_db.conn.prepare(
-                    "UPDATE sapling_received_notes SET spent = ? WHERE nf = ?"
-                )?,
                 #[cfg(feature = "transparent-inputs")]
                 stmt_mark_transparent_utxo_spent: wallet_db.conn.prepare(
                     "UPDATE utxos SET spent_in_tx = :spent_in_tx
@@ -182,24 +175,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                       AND prevout_idx = :prevout_idx
                     RETURNING id_utxo"
                 )?,
-                stmt_insert_received_note: wallet_db.conn.prepare(
-                    "INSERT INTO sapling_received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
-                    VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
-                )?,
-                stmt_update_received_note: wallet_db.conn.prepare(
-                    "UPDATE sapling_received_notes
-                    SET account = :account,
-                        diversifier = :diversifier,
-                        value = :value,
-                        rcm = :rcm,
-                        nf = IFNULL(:nf, nf),
-                        memo = IFNULL(:memo, memo),
-                        is_change = IFNULL(:is_change, is_change)
-                    WHERE tx = :tx AND output_index = :output_index",
-                )?,
-                stmt_select_received_note: wallet_db.conn.prepare(
-                    "SELECT id_note FROM sapling_received_notes WHERE tx = ? AND output_index = ?"
-                )?,
                 stmt_update_sent_output: wallet_db.conn.prepare(
                     "UPDATE sent_notes
                     SET from_account = :from_account,
@@ -235,28 +210,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                 stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
             }
         )
-    }
-
-    /// Marks a given nullifier as having been revealed in the construction of the
-    /// specified transaction.
-    ///
-    /// Marking a note spent in this fashion does NOT imply that the spending transaction
-    /// has been mined.
-    ///
-    /// Returns `false` if the nullifier does not correspond to any received note.
-    pub(crate) fn stmt_mark_sapling_note_spent(
-        &mut self,
-        tx_ref: i64,
-        nf: &Nullifier,
-    ) -> Result<bool, SqliteClientError> {
-        match self
-            .stmt_mark_sapling_note_spent
-            .execute(params![tx_ref, &nf.0[..]])?
-        {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => unreachable!("nf column is marked as UNIQUE"),
-        }
     }
 
     /// Marks the given UTXO as having been spent.
@@ -520,107 +473,6 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 }
 
 impl<'a, P> DataConnStmtCache<'a, P> {
-    /// Inserts the given received note into the wallet.
-    ///
-    /// This implementation relies on the facts that:
-    /// - A transaction will not contain more than 2^63 shielded outputs.
-    /// - A note value will never exceed 2^63 zatoshis.
-    ///
-    /// Returns the database row for the newly-inserted note, or an error if the note
-    /// exists.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_insert_received_note(
-        &mut self,
-        tx_ref: i64,
-        output_index: usize,
-        account: AccountId,
-        diversifier: &Diversifier,
-        value: u64,
-        rcm: [u8; 32],
-        nf: Option<&Nullifier>,
-        memo: Option<&MemoBytes>,
-        is_change: bool,
-    ) -> Result<NoteId, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":tx", &tx_ref),
-            (":output_index", &(output_index as i64)),
-            (":account", &u32::from(account)),
-            (":diversifier", &diversifier.0.as_ref()),
-            (":value", &(value as i64)),
-            (":rcm", &rcm.as_ref()),
-            (":nf", &nf.map(|nf| nf.0.as_ref())),
-            (
-                ":memo",
-                &memo
-                    .filter(|m| *m != &MemoBytes::empty())
-                    .map(|m| m.as_slice()),
-            ),
-            (":is_change", &is_change),
-        ];
-
-        self.stmt_insert_received_note.execute(sql_args)?;
-
-        Ok(NoteId::ReceivedNoteId(
-            self.wallet_db.conn.last_insert_rowid(),
-        ))
-    }
-
-    /// Updates the data for the given transaction.
-    ///
-    /// This implementation relies on the facts that:
-    /// - A transaction will not contain more than 2^63 shielded outputs.
-    /// - A note value will never exceed 2^63 zatoshis.
-    ///
-    /// Returns `false` if the transaction doesn't exist in the wallet.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn stmt_update_received_note(
-        &mut self,
-        account: AccountId,
-        diversifier: &Diversifier,
-        value: u64,
-        rcm: [u8; 32],
-        nf: Option<&Nullifier>,
-        memo: Option<&MemoBytes>,
-        is_change: bool,
-        tx_ref: i64,
-        output_index: usize,
-    ) -> Result<bool, SqliteClientError> {
-        let sql_args: &[(&str, &dyn ToSql)] = &[
-            (":account", &u32::from(account)),
-            (":diversifier", &diversifier.0.as_ref()),
-            (":value", &(value as i64)),
-            (":rcm", &rcm.as_ref()),
-            (":nf", &nf.map(|nf| nf.0.as_ref())),
-            (
-                ":memo",
-                &memo
-                    .filter(|m| *m != &MemoBytes::empty())
-                    .map(|m| m.as_slice()),
-            ),
-            (":is_change", &is_change),
-            (":tx", &tx_ref),
-            (":output_index", &(output_index as i64)),
-        ];
-
-        match self.stmt_update_received_note.execute(sql_args)? {
-            0 => Ok(false),
-            1 => Ok(true),
-            _ => unreachable!("tx_output constraint is marked as UNIQUE"),
-        }
-    }
-
-    /// Finds the database row for the given `txid`, if the transaction is in the wallet.
-    pub(crate) fn stmt_select_received_note(
-        &mut self,
-        tx_ref: i64,
-        output_index: usize,
-    ) -> Result<NoteId, SqliteClientError> {
-        self.stmt_select_received_note
-            .query_row(params![tx_ref, (output_index as i64)], |row| {
-                row.get(0).map(NoteId::ReceivedNoteId)
-            })
-            .map_err(SqliteClientError::from)
-    }
 
     /// Records the incremental witness for the specified note, as of the given block
     /// height.
