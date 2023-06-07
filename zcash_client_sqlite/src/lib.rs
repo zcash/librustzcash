@@ -588,7 +588,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                         };
 
                         wallet::put_sent_output(
-                            up,
+                            &up.wallet_db.conn,
+                            &up.wallet_db.params,
                             output.account,
                             tx_ref,
                             output.index,
@@ -638,7 +639,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
                             wallet::put_sent_output(
-                                up,
+                                &up.wallet_db.conn,
+                                &up.wallet_db.params,
                                 *account_id,
                                 tx_ref,
                                 output_index,
@@ -688,7 +690,13 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             }
 
             for output in &sent_tx.outputs {
-                wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
+                wallet::insert_sent_output(
+                    &up.wallet_db.conn,
+                    &up.wallet_db.params,
+                    tx_ref,
+                    sent_tx.account,
+                    output,
+                )?;
 
                 if let Some((account, note)) = output.sapling_change_to() {
                     wallet::sapling::put_received_note(

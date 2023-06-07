@@ -72,7 +72,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    merkle_tree::{write_commitment_tree, write_incremental_witness},
+    merkle_tree::write_commitment_tree,
     sapling::CommitmentTree,
     transaction::{components::Amount, Transaction, TxId},
     zip32::{
@@ -891,23 +891,63 @@ pub(crate) fn update_expired_notes<P>(
     stmts.stmt_update_expired(height)
 }
 
+// A utility function for creation of parameters for use in `insert_sent_output`
+// and `put_sent_output`
+//
+// - If `to` is a Unified address, this is an index into the outputs of the transaction
+//   within the bundle associated with the recipient's output pool.
+// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
+//   transaction.
+// - If `to` is a transparent address, this is an index into the transparent outputs of
+//   the transaction.
+// - If `to` is an internal account, this is an index into the Sapling outputs of the
+//   transaction.
+fn recipient_params<P: consensus::Parameters>(
+    params: &P,
+    to: &Recipient,
+) -> (Option<String>, Option<u32>, PoolType) {
+    match to {
+        Recipient::Transparent(addr) => (Some(addr.encode(params)), None, PoolType::Transparent),
+        Recipient::Sapling(addr) => (Some(addr.encode(params)), None, PoolType::Sapling),
+        Recipient::Unified(addr, pool) => (Some(addr.encode(params)), None, *pool),
+        Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
+    }
+}
+
 /// Records information about a transaction output that your wallet created.
 ///
 /// This is a crate-internal convenience method.
-pub(crate) fn insert_sent_output<'a, P: consensus::Parameters>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+pub(crate) fn insert_sent_output<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
     tx_ref: i64,
     from_account: AccountId,
     output: &SentTransactionOutput,
 ) -> Result<(), SqliteClientError> {
-    stmts.stmt_insert_sent_output(
-        tx_ref,
-        output.output_index(),
-        from_account,
-        output.recipient(),
-        output.value(),
-        output.memo(),
-    )
+    let mut stmt_insert_sent_output = conn.prepare_cached(
+        "INSERT INTO sent_notes (
+            tx, output_pool, output_index, from_account,
+            to_address, to_account, value, memo)
+        VALUES (
+            :tx, :output_pool, :output_index, :from_account,
+            :to_address, :to_account, :value, :memo)",
+    )?;
+
+    let (to_address, to_account, pool_type) = recipient_params(params, output.recipient());
+    let sql_args = named_params![
+        ":tx": &tx_ref,
+        ":output_pool": &pool_code(pool_type),
+        ":output_index": &i64::try_from(output.output_index()).unwrap(),
+        ":from_account": &u32::from(from_account),
+        ":to_address": &to_address,
+        ":to_account": &to_account,
+        ":value": &i64::from(output.value()),
+        ":memo": output.memo().filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+    ];
+
+    stmt_insert_sent_output.execute(sql_args)?;
+
+    Ok(())
 }
 
 /// Records information about a transaction output that your wallet created.
@@ -915,7 +955,8 @@ pub(crate) fn insert_sent_output<'a, P: consensus::Parameters>(
 /// This is a crate-internal convenience method.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_sent_output<'a, P: consensus::Parameters>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+    conn: &Connection,
+    params: &P,
     from_account: AccountId,
     tx_ref: i64,
     output_index: usize,
@@ -923,16 +964,34 @@ pub(crate) fn put_sent_output<'a, P: consensus::Parameters>(
     value: Amount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
-    if !stmts.stmt_update_sent_output(from_account, recipient, value, memo, tx_ref, output_index)? {
-        stmts.stmt_insert_sent_output(
-            tx_ref,
-            output_index,
-            from_account,
-            recipient,
-            value,
-            memo,
-        )?;
-    }
+    let mut stmt_upsert_sent_output = conn.prepare_cached(
+        "INSERT INTO sent_notes (
+            tx, output_pool, output_index, from_account,
+            to_address, to_account, value, memo)
+        VALUES (
+            :tx, :output_pool, :output_index, :from_account,
+            :to_address, :to_account, :value, :memo)
+        ON CONFLICT (tx, output_pool, output_index) DO UPDATE
+        SET from_account = :from_account,
+            to_address = :to_address,
+            to_account = :to_account,
+            value = :value,
+            memo = IFNULL(:memo, memo)",
+    )?;
+
+    let (to_address, to_account, pool_type) = recipient_params(params, recipient);
+    let sql_args = named_params![
+        ":tx": &tx_ref,
+        ":output_pool": &pool_code(pool_type),
+        ":output_index": &i64::try_from(output_index).unwrap(),
+        ":from_account": &u32::from(from_account),
+        ":to_address": &to_address,
+        ":to_account": &to_account,
+        ":value": &i64::from(value),
+        ":memo": &memo.filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+    ];
+
+    stmt_upsert_sent_output.execute(sql_args)?;
 
     Ok(())
 }
