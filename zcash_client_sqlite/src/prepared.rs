@@ -12,10 +12,10 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     merkle_tree::write_incremental_witness,
     sapling,
-    zip32::{AccountId, DiversifierIndex},
+    zip32::AccountId,
 };
 
-use zcash_client_backend::{address::UnifiedAddress, encoding::AddressCodec};
+use zcash_client_backend::encoding::AddressCodec;
 
 use crate::{error::SqliteClientError, NoteId, WalletDb};
 
@@ -25,53 +25,6 @@ use {
     zcash_client_backend::wallet::WalletTransparentOutput,
     zcash_primitives::transaction::components::transparent::OutPoint,
 };
-
-pub(crate) struct InsertAddress<'a> {
-    stmt: Statement<'a>,
-}
-
-impl<'a> InsertAddress<'a> {
-    pub(crate) fn new(conn: &'a rusqlite::Connection) -> Result<Self, rusqlite::Error> {
-        Ok(InsertAddress {
-            stmt: conn.prepare(
-                "INSERT INTO addresses (
-                    account,
-                    diversifier_index_be,
-                    address,
-                    cached_transparent_receiver_address
-                )
-                VALUES (
-                    :account,
-                    :diversifier_index_be,
-                    :address,
-                    :cached_transparent_receiver_address
-                )",
-            )?,
-        })
-    }
-
-    /// Adds the given address and diversifier index to the addresses table.
-    ///
-    /// Returns the database row for the newly-inserted address.
-    pub(crate) fn execute<P: consensus::Parameters>(
-        &mut self,
-        params: &P,
-        account: AccountId,
-        mut diversifier_index: DiversifierIndex,
-        address: &UnifiedAddress,
-    ) -> Result<(), rusqlite::Error> {
-        // the diversifier index is stored in big-endian order to allow sorting
-        diversifier_index.0.reverse();
-        self.stmt.execute(named_params![
-            ":account": &u32::from(account),
-            ":diversifier_index_be": &&diversifier_index.0[..],
-            ":address": &address.encode(params),
-            ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
-        ])?;
-
-        Ok(())
-    }
-}
 
 /// The primary type used to implement [`WalletWrite`] for the SQLite database.
 ///
@@ -98,8 +51,6 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_insert_witness: Statement<'a>,
     stmt_prune_witnesses: Statement<'a>,
     stmt_update_expired: Statement<'a>,
-
-    stmt_insert_address: InsertAddress<'a>,
 }
 
 impl<'a, P> DataConnStmtCache<'a, P> {
@@ -178,7 +129,6 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                         WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
                 )?,
-                stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
             }
         )
     }
@@ -322,25 +272,6 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
             )
             .optional()
             .map_err(SqliteClientError::from)
-    }
-
-    /// Adds the given address and diversifier index to the addresses table.
-    ///
-    /// Returns the database row for the newly-inserted address.
-    pub(crate) fn stmt_insert_address(
-        &mut self,
-        account: AccountId,
-        diversifier_index: DiversifierIndex,
-        address: &UnifiedAddress,
-    ) -> Result<(), SqliteClientError> {
-        self.stmt_insert_address.execute(
-            &self.wallet_db.params,
-            account,
-            diversifier_index,
-            address,
-        )?;
-
-        Ok(())
     }
 }
 

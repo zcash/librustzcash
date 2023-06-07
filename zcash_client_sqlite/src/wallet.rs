@@ -64,7 +64,7 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
-use rusqlite::{named_params, params, OptionalExtension, ToSql};
+use rusqlite::{named_params, params, Connection, OptionalExtension, ToSql};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -84,22 +84,18 @@ use zcash_primitives::{
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
     data_api::{PoolType, Recipient, SentTransactionOutput},
+    encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
     wallet::WalletTx,
 };
 
-use crate::{
-    error::SqliteClientError, prepared::InsertAddress, DataConnStmtCache, WalletDb, PRUNING_HEIGHT,
-};
+use crate::{error::SqliteClientError, DataConnStmtCache, WalletDb, PRUNING_HEIGHT};
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
-    rusqlite::Connection,
     std::collections::BTreeSet,
-    zcash_client_backend::{
-        address::AddressMetadata, encoding::AddressCodec, wallet::WalletTransparentOutput,
-    },
+    zcash_client_backend::{address::AddressMetadata, wallet::WalletTransparentOutput},
     zcash_primitives::{
         legacy::{keys::IncomingViewingKey, Script, TransparentAddress},
         transaction::components::{OutPoint, TxOut},
@@ -157,7 +153,7 @@ pub(crate) fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::E
 
     // Always derive the default Unified Address for the account.
     let (address, d_idx) = key.default_address();
-    InsertAddress::new(conn)?.execute(network, account, d_idx, &address)?;
+    insert_address(conn, network, account, d_idx, &address)?;
 
     Ok(())
 }
@@ -199,6 +195,43 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
             .map(|addr| (addr, DiversifierIndex(di_be)))
     })
     .transpose()
+}
+
+/// Adds the given address and diversifier index to the addresses table.
+///
+/// Returns the database row for the newly-inserted address.
+pub(crate) fn insert_address<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountId,
+    mut diversifier_index: DiversifierIndex,
+    address: &UnifiedAddress,
+) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO addresses (
+                    account,
+                    diversifier_index_be,
+                    address,
+                    cached_transparent_receiver_address
+                )
+                VALUES (
+                    :account,
+                    :diversifier_index_be,
+                    :address,
+                    :cached_transparent_receiver_address
+                )",
+    )?;
+
+    // the diversifier index is stored in big-endian order to allow sorting
+    diversifier_index.0.reverse();
+    stmt.execute(named_params![
+        ":account": &u32::from(account),
+        ":diversifier_index_be": &&diversifier_index.0[..],
+        ":address": &address.encode(params),
+        ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
+    ])?;
+
+    Ok(())
 }
 
 #[cfg(feature = "transparent-inputs")]

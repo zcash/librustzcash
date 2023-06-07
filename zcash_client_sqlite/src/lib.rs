@@ -502,7 +502,13 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                     .find_address(search_from)
                     .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
 
-                self.stmt_insert_address(account, diversifier_index, &addr)?;
+                wallet::insert_address(
+                    &self.wallet_db.conn,
+                    &self.wallet_db.params,
+                    account,
+                    diversifier_index,
+                    &addr,
+                )?;
 
                 Ok(Some(addr))
             }
