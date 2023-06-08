@@ -47,6 +47,7 @@ uuid = "1.1"
 
 [dev-dependencies]
 assert_matches = "1.5"
+incrementalmerkletree = { version = "0.4", features = ["legacy-api", "test-dependencies"] }
 proptest = "1.0.0"
 rand_core = "0.6"
 regex = "1.4"
@@ -59,6 +60,7 @@ zcash_address = { version = "0.3", path = "../components/zcash_address", feature
 [features]
 mainnet = []
 test-dependencies = [
+    "incrementalmerkletree/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_client_backend/test-dependencies",
 ]
