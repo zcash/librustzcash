@@ -628,7 +628,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             // If any of the utxos spent in the transaction are ours, mark them as spent.
             #[cfg(feature = "transparent-inputs")]
             for txin in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
-                wallet::mark_transparent_utxo_spent(up, tx_ref, &txin.prevout)?;
+                wallet::mark_transparent_utxo_spent(&up.wallet_db.conn, tx_ref, &txin.prevout)?;
             }
 
             // If we have some transparent outputs:
@@ -692,7 +692,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             #[cfg(feature = "transparent-inputs")]
             for utxo_outpoint in &sent_tx.utxos_spent {
-                wallet::mark_transparent_utxo_spent(up, tx_ref, utxo_outpoint)?;
+                wallet::mark_transparent_utxo_spent(&up.wallet_db.conn, tx_ref, utxo_outpoint)?;
             }
 
             for output in &sent_tx.outputs {
@@ -735,7 +735,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         _output: &WalletTransparentOutput,
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::put_received_transparent_utxo(self, _output);
+        return wallet::put_received_transparent_utxo(
+            &self.wallet_db.conn,
+            &self.wallet_db.params,
+            _output,
+        );
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(

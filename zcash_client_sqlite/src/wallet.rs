@@ -855,56 +855,106 @@ pub(crate) fn put_tx_data<'a, P>(
 
 /// Marks the given UTXO as having been spent.
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn mark_transparent_utxo_spent<'a, P>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+pub(crate) fn mark_transparent_utxo_spent(
+    conn: &Connection,
     tx_ref: i64,
     outpoint: &OutPoint,
 ) -> Result<(), SqliteClientError> {
-    stmts.stmt_mark_transparent_utxo_spent(tx_ref, outpoint)?;
+    let mut stmt_mark_transparent_utxo_spent = conn.prepare_cached(
+        "UPDATE utxos SET spent_in_tx = :spent_in_tx
+        WHERE prevout_txid = :prevout_txid
+        AND prevout_idx = :prevout_idx",
+    )?;
 
+    let sql_args = named_params![
+        ":spent_in_tx": &tx_ref,
+        ":prevout_txid": &outpoint.hash().to_vec(),
+        ":prevout_idx": &outpoint.n(),
+    ];
+
+    stmt_mark_transparent_utxo_spent.execute(sql_args)?;
     Ok(())
 }
 
 /// Adds the given received UTXO to the datastore.
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn put_received_transparent_utxo<'a, P: consensus::Parameters>(
-    stmts: &mut DataConnStmtCache<'a, P>,
+pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
     output: &WalletTransparentOutput,
 ) -> Result<UtxoId, SqliteClientError> {
-    stmts
-        .stmt_update_received_transparent_utxo(output)
-        .transpose()
-        .or_else(|| {
-            stmts
-                .stmt_insert_received_transparent_utxo(output)
-                .transpose()
-        })
-        .unwrap_or_else(|| {
-            // This could occur if the UTXO is received at the legacy transparent
-            // address, in which case the join to the `addresses` table will fail.
-            // In this case, we should look up the legacy address for account 0 and
-            // check whether it matches the address for the received UTXO, and if
-            // so then insert/update it directly.
-            let account = AccountId::from(0u32);
-            get_legacy_transparent_address(&stmts.wallet_db.params, &stmts.wallet_db.conn, account)
-                .and_then(|legacy_taddr| {
-                    if legacy_taddr
-                        .iter()
-                        .any(|(taddr, _)| taddr == output.recipient_address())
-                    {
-                        stmts
-                            .stmt_update_legacy_transparent_utxo(output, account)
-                            .transpose()
-                            .unwrap_or_else(|| {
-                                stmts.stmt_insert_legacy_transparent_utxo(output, account)
-                            })
-                    } else {
-                        Err(SqliteClientError::AddressNotRecognized(
-                            *output.recipient_address(),
-                        ))
-                    }
-                })
-        })
+    let address_str = output.recipient_address().encode(params);
+    let account_id = conn
+        .query_row(
+            "SELECT account FROM addresses WHERE cached_transparent_receiver_address = :address",
+            named_params![":address": &address_str],
+            |row| row.get::<_, u32>(0).map(AccountId::from),
+        )
+        .optional()?;
+
+    let utxoid = if let Some(account) = account_id {
+        put_legacy_transparent_utxo(conn, params, output, account)?
+    } else {
+        // If the UTXO is received at the legacy transparent address, there may be no entry in the
+        // addresses table that can be used to tie the address to a particular account. In this
+        // case, we should look up the legacy address for account 0 and check whether it matches
+        // the address for the received UTXO, and if so then insert/update it directly.
+        let account = AccountId::from(0u32);
+        get_legacy_transparent_address(params, conn, account).and_then(|legacy_taddr| {
+            if legacy_taddr
+                .iter()
+                .any(|(taddr, _)| taddr == output.recipient_address())
+            {
+                put_legacy_transparent_utxo(conn, params, output, account)
+                    .map_err(SqliteClientError::from)
+            } else {
+                Err(SqliteClientError::AddressNotRecognized(
+                    *output.recipient_address(),
+                ))
+            }
+        })?
+    };
+
+    Ok(utxoid)
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    output: &WalletTransparentOutput,
+    received_by_account: AccountId,
+) -> Result<UtxoId, rusqlite::Error> {
+    #[cfg(feature = "transparent-inputs")]
+    let mut stmt_upsert_legacy_transparent_utxo = conn.prepare_cached(
+        "INSERT INTO utxos (
+            prevout_txid, prevout_idx, 
+            received_by_account, address, script,
+            value_zat, height)
+        VALUES
+            (:prevout_txid, :prevout_idx,
+            :received_by_account, :address, :script,
+            :value_zat, :height)
+        ON CONFLICT (prevout_txid, prevout_idx) DO UPDATE
+        SET received_by_account = :received_by_account,
+            height = :height,
+            address = :address,
+            script = :script,
+            value_zat = :value_zat
+        RETURNING id_utxo",
+    )?;
+
+    let sql_args = named_params![
+        ":prevout_txid": &output.outpoint().hash().to_vec(),
+        ":prevout_idx": &output.outpoint().n(),
+        ":received_by_account": &u32::from(received_by_account),
+        ":address": &output.recipient_address().encode(params),
+        ":script": &output.txout().script_pubkey.0,
+        ":value_zat": &i64::from(output.txout().value),
+        ":height": &u32::from(output.height()),
+    ];
+
+    stmt_upsert_legacy_transparent_utxo.query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))
 }
 
 /// Removes old incremental witnesses up to the given block height.
@@ -1112,7 +1162,8 @@ mod tests {
         )
         .unwrap();
 
-        let res0 = super::put_received_transparent_utxo(&mut ops, &utxo);
+        let res0 =
+            super::put_received_transparent_utxo(&ops.wallet_db.conn, &ops.wallet_db.params, &utxo);
         assert_matches!(res0, Ok(_));
 
         // Change the mined height of the UTXO and upsert; we should get back
@@ -1126,7 +1177,11 @@ mod tests {
             BlockHeight::from_u32(34567),
         )
         .unwrap();
-        let res1 = super::put_received_transparent_utxo(&mut ops, &utxo2);
+        let res1 = super::put_received_transparent_utxo(
+            &ops.wallet_db.conn,
+            &ops.wallet_db.params,
+            &utxo2,
+        );
         assert_matches!(res1, Ok(id) if id == res0.unwrap());
 
         assert_matches!(
@@ -1167,7 +1222,11 @@ mod tests {
             )
             .unwrap();
 
-        let res2 = super::put_received_transparent_utxo(&mut ops, &utxo2);
+        let res2 = super::put_received_transparent_utxo(
+            &ops.wallet_db.conn,
+            &ops.wallet_db.params,
+            &utxo2,
+        );
         assert_matches!(res2, Err(_));
     }
 }
