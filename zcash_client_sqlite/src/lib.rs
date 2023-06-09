@@ -32,11 +32,9 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use rusqlite::Connection;
+use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::collections::HashMap;
-use std::fmt;
-use std::path::Path;
+use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, path::Path};
 
 use zcash_primitives::{
     block::BlockHash,
@@ -72,9 +70,6 @@ use {
     std::{fs, io},
 };
 
-mod prepared;
-pub use prepared::DataConnStmtCache;
-
 pub mod chain;
 pub mod error;
 pub mod wallet;
@@ -107,12 +102,21 @@ impl fmt::Display for NoteId {
 pub struct UtxoId(pub i64);
 
 /// A wrapper for the SQLite connection to the wallet database.
-pub struct WalletDb<P> {
-    conn: Connection,
+pub struct WalletDb<C, P> {
+    conn: C,
     params: P,
 }
 
-impl<P: consensus::Parameters> WalletDb<P> {
+/// A wrapper for a SQLite transaction affecting the wallet database.
+pub struct WalletTransaction<'conn>(pub(crate) rusqlite::Transaction<'conn>);
+
+impl Borrow<rusqlite::Connection> for WalletTransaction<'_> {
+    fn borrow(&self) -> &rusqlite::Connection {
+        &self.0
+    }
+}
+
+impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
     /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).and_then(move |conn| {
@@ -121,53 +125,60 @@ impl<P: consensus::Parameters> WalletDb<P> {
         })
     }
 
-    /// Given a wallet database connection, obtain a handle for the write operations
-    /// for that database. This operation may eagerly initialize and cache sqlite
-    /// prepared statements that are used in write operations.
-    pub fn get_update_ops(&self) -> Result<DataConnStmtCache<'_, P>, SqliteClientError> {
-        DataConnStmtCache::new(self)
+    pub fn transactionally<F, A>(&mut self, f: F) -> Result<A, SqliteClientError>
+    where
+        F: FnOnce(&WalletDb<WalletTransaction<'_>, P>) -> Result<A, SqliteClientError>,
+    {
+        let wdb = WalletDb {
+            conn: WalletTransaction(self.conn.transaction()?),
+            params: self.params.clone(),
+        };
+        let result = f(&wdb)?;
+        wdb.conn.0.commit()?;
+        Ok(result)
     }
 }
 
-impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
     type NoteRef = NoteId;
     type TxRef = i64;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        wallet::block_height_extrema(self).map_err(SqliteClientError::from)
+        wallet::block_height_extrema(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_min_unspent_height(self).map_err(SqliteClientError::from)
+        wallet::get_min_unspent_height(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
+        wallet::get_block_hash(self.conn.borrow(), block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
+        wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
-        wallet::get_unified_full_viewing_keys(self)
+        wallet::get_unified_full_viewing_keys(self.conn.borrow(), &self.params)
     }
 
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<AccountId>, Self::Error> {
-        wallet::get_account_for_ufvk(self, ufvk)
+        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
     }
 
     fn get_current_address(
         &self,
         account: AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_current_address(self, account).map(|res| res.map(|(addr, _)| addr))
+        wallet::get_current_address(self.conn.borrow(), &self.params, account)
+            .map(|res| res.map(|(addr, _)| addr))
     }
 
     fn is_valid_account_extfvk(
@@ -175,7 +186,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
-        wallet::is_valid_account_extfvk(self, account, extfvk)
+        wallet::is_valid_account_extfvk(self.conn.borrow(), &self.params, account, extfvk)
     }
 
     fn get_balance_at(
@@ -183,17 +194,19 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        wallet::get_balance_at(self, account, anchor_height)
+        wallet::get_balance_at(self.conn.borrow(), account, anchor_height)
     }
 
     fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self, id_tx)
+        wallet::get_transaction(self.conn.borrow(), &self.params, id_tx)
     }
 
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
         match id_note {
-            NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
-            NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
+            NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self.conn.borrow(), id_note),
+            NoteId::ReceivedNoteId(id_note) => {
+                wallet::get_received_memo(self.conn.borrow(), id_note)
+            }
         }
     }
 
@@ -201,7 +214,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
-        wallet::sapling::get_sapling_commitment_tree(self, block_height)
+        wallet::sapling::get_sapling_commitment_tree(self.conn.borrow(), block_height)
     }
 
     #[allow(clippy::type_complexity)]
@@ -209,7 +222,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         &self,
         block_height: BlockHeight,
     ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        wallet::sapling::get_sapling_witnesses(self, block_height)
+        wallet::sapling::get_sapling_witnesses(self.conn.borrow(), block_height)
     }
 
     fn get_sapling_nullifiers(
@@ -217,8 +230,8 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         query: data_api::NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
         match query {
-            NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self),
-            NullifierQuery::All => wallet::sapling::get_all_sapling_nullifiers(&self.conn),
+            NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self.conn.borrow()),
+            NullifierQuery::All => wallet::sapling::get_all_sapling_nullifiers(self.conn.borrow()),
         }
     }
 
@@ -228,7 +241,12 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::sapling::get_spendable_sapling_notes(&self.conn, account, anchor_height, exclude)
+        wallet::sapling::get_spendable_sapling_notes(
+            self.conn.borrow(),
+            account,
+            anchor_height,
+            exclude,
+        )
     }
 
     fn select_spendable_sapling_notes(
@@ -239,7 +257,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
         wallet::sapling::select_spendable_sapling_notes(
-            &self.conn,
+            self.conn.borrow(),
             account,
             target_value,
             anchor_height,
@@ -252,7 +270,7 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         _account: AccountId,
     ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::get_transparent_receivers(&self.params, &self.conn, _account);
+        return wallet::get_transparent_receivers(self.conn.borrow(), &self.params, _account);
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -267,7 +285,13 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         _exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::get_unspent_transparent_outputs(self, _address, _max_height, _exclude);
+        return wallet::get_unspent_transparent_outputs(
+            self.conn.borrow(),
+            &self.params,
+            _address,
+            _max_height,
+            _exclude,
+        );
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -281,7 +305,12 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         _max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::get_transparent_balances(self, _account, _max_height);
+        return wallet::get_transparent_balances(
+            self.conn.borrow(),
+            &self.params,
+            _account,
+            _max_height,
+        );
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -290,177 +319,15 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     }
 }
 
-impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
-    type Error = SqliteClientError;
-    type NoteRef = NoteId;
-    type TxRef = i64;
-
-    fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        self.wallet_db.block_height_extrema()
-    }
-
-    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        self.wallet_db.get_min_unspent_height()
-    }
-
-    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        self.wallet_db.get_block_hash(block_height)
-    }
-
-    fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        self.wallet_db.get_tx_height(txid)
-    }
-
-    fn get_unified_full_viewing_keys(
-        &self,
-    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
-        self.wallet_db.get_unified_full_viewing_keys()
-    }
-
-    fn get_account_for_ufvk(
-        &self,
-        ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<AccountId>, Self::Error> {
-        self.wallet_db.get_account_for_ufvk(ufvk)
-    }
-
-    fn get_current_address(
-        &self,
-        account: AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        self.wallet_db.get_current_address(account)
-    }
-
-    fn is_valid_account_extfvk(
-        &self,
-        account: AccountId,
-        extfvk: &ExtendedFullViewingKey,
-    ) -> Result<bool, Self::Error> {
-        self.wallet_db.is_valid_account_extfvk(account, extfvk)
-    }
-
-    fn get_balance_at(
-        &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-    ) -> Result<Amount, Self::Error> {
-        self.wallet_db.get_balance_at(account, anchor_height)
-    }
-
-    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        self.wallet_db.get_transaction(id_tx)
-    }
-
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
-        self.wallet_db.get_memo(id_note)
-    }
-
-    fn get_commitment_tree(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
-        self.wallet_db.get_commitment_tree(block_height)
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn get_witnesses(
-        &self,
-        block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        self.wallet_db.get_witnesses(block_height)
-    }
-
-    fn get_sapling_nullifiers(
-        &self,
-        query: data_api::NullifierQuery,
-    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
-        self.wallet_db.get_sapling_nullifiers(query)
-    }
-
-    fn get_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        self.wallet_db
-            .get_spendable_sapling_notes(account, anchor_height, exclude)
-    }
-
-    fn select_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        target_value: Amount,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        self.wallet_db
-            .select_spendable_sapling_notes(account, target_value, anchor_height, exclude)
-    }
-
-    fn get_transparent_receivers(
-        &self,
-        account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
-        self.wallet_db.get_transparent_receivers(account)
-    }
-
-    fn get_unspent_transparent_outputs(
-        &self,
-        address: &TransparentAddress,
-        max_height: BlockHeight,
-        exclude: &[OutPoint],
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        self.wallet_db
-            .get_unspent_transparent_outputs(address, max_height, exclude)
-    }
-
-    fn get_transparent_balances(
-        &self,
-        account: AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
-        self.wallet_db.get_transparent_balances(account, max_height)
-    }
-}
-
-impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
-    fn transactionally<F, A>(&mut self, f: F) -> Result<A, SqliteClientError>
-    where
-        F: FnOnce(&mut Self) -> Result<A, SqliteClientError>,
-    {
-        self.wallet_db.conn.execute("BEGIN IMMEDIATE", [])?;
-        match f(self) {
-            Ok(result) => {
-                self.wallet_db.conn.execute("COMMIT", [])?;
-                Ok(result)
-            }
-            Err(error) => {
-                match self.wallet_db.conn.execute("ROLLBACK", []) {
-                    Ok(_) => Err(error),
-                    Err(e) =>
-                        // Panicking here is probably the right thing to do, because it
-                        // means the database is corrupt.
-                        panic!(
-                            "Rollback failed with error {} while attempting to recover from error {}; database is likely corrupt.",
-                            e,
-                            error
-                        )
-                }
-            }
-        }
-    }
-}
-
-impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
+impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P> {
     type UtxoRef = UtxoId;
 
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
-        self.transactionally(|stmts| {
-            let account = wallet::get_max_account_id(stmts.wallet_db)?
+        self.transactionally(|wdb| {
+            let account = wallet::get_max_account_id(&wdb.conn.0)?
                 .map(|a| AccountId::from(u32::from(a) + 1))
                 .unwrap_or_else(|| AccountId::from(0));
 
@@ -468,15 +335,11 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 return Err(SqliteClientError::AccountIdOutOfRange);
             }
 
-            let usk = UnifiedSpendingKey::from_seed(
-                &stmts.wallet_db.params,
-                seed.expose_secret(),
-                account,
-            )
-            .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
+            let usk = UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account)
+                .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            wallet::add_account(stmts.wallet_db, account, &ufvk)?;
+            wallet::add_account(&wdb.conn.0, &wdb.params, account, &ufvk)?;
 
             Ok((account, usk))
         })
@@ -486,34 +349,37 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         &mut self,
         account: AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        match self.get_unified_full_viewing_keys()?.get(&account) {
-            Some(ufvk) => {
-                let search_from = match wallet::get_current_address(self.wallet_db, account)? {
-                    Some((_, mut last_diversifier_index)) => {
-                        last_diversifier_index
-                            .increment()
-                            .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
-                        last_diversifier_index
-                    }
-                    None => DiversifierIndex::default(),
-                };
+        self.transactionally(
+            |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account) {
+                Some(ufvk) => {
+                    let search_from =
+                        match wallet::get_current_address(&wdb.conn.0, &wdb.params, account)? {
+                            Some((_, mut last_diversifier_index)) => {
+                                last_diversifier_index
+                                    .increment()
+                                    .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
+                                last_diversifier_index
+                            }
+                            None => DiversifierIndex::default(),
+                        };
 
-                let (addr, diversifier_index) = ufvk
-                    .find_address(search_from)
-                    .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
+                    let (addr, diversifier_index) = ufvk
+                        .find_address(search_from)
+                        .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
 
-                wallet::insert_address(
-                    &self.wallet_db.conn,
-                    &self.wallet_db.params,
-                    account,
-                    diversifier_index,
-                    &addr,
-                )?;
+                    wallet::insert_address(
+                        &wdb.conn.0,
+                        &wdb.params,
+                        account,
+                        diversifier_index,
+                        &addr,
+                    )?;
 
-                Ok(Some(addr))
-            }
-            None => Ok(None),
-        }
+                    Ok(Some(addr))
+                }
+                None => Ok(None),
+            },
+        )
     }
 
     #[tracing::instrument(skip_all, fields(height = u32::from(block.block_height)))]
@@ -523,11 +389,10 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         block: &PrunedBlock,
         updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
     ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
-        // database updates for each block are transactional
-        self.transactionally(|up| {
+        self.transactionally(|wdb| {
             // Insert the block into the database.
             wallet::insert_block(
-                up,
+                &wdb.conn.0,
                 block.block_height,
                 block.block_hash,
                 block.block_time,
@@ -536,20 +401,16 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             let mut new_witnesses = vec![];
             for tx in block.transactions {
-                let tx_row = wallet::put_tx_meta(up, tx, block.block_height)?;
+                let tx_row = wallet::put_tx_meta(&wdb.conn.0, tx, block.block_height)?;
 
                 // Mark notes as spent and remove them from the scanning cache
                 for spend in &tx.sapling_spends {
-                    wallet::sapling::mark_sapling_note_spent(
-                        &up.wallet_db.conn,
-                        tx_row,
-                        spend.nf(),
-                    )?;
+                    wallet::sapling::mark_sapling_note_spent(&wdb.conn.0, tx_row, spend.nf())?;
                 }
 
                 for output in &tx.sapling_outputs {
                     let received_note_id =
-                        wallet::sapling::put_received_note(&up.wallet_db.conn, output, tx_row)?;
+                        wallet::sapling::put_received_note(&wdb.conn.0, output, tx_row)?;
 
                     // Save witness for note.
                     new_witnesses.push((received_note_id, output.witness().clone()));
@@ -560,17 +421,22 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter())
             {
                 if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
-                    wallet::sapling::insert_witness(up, rnid, witness, block.block_height)?;
+                    wallet::sapling::insert_witness(
+                        &wdb.conn.0,
+                        rnid,
+                        witness,
+                        block.block_height,
+                    )?;
                 } else {
                     return Err(SqliteClientError::InvalidNoteId);
                 }
             }
 
             // Prune the stored witnesses (we only expect rollbacks of at most PRUNING_HEIGHT blocks).
-            wallet::prune_witnesses(up, block.block_height - PRUNING_HEIGHT)?;
+            wallet::prune_witnesses(&wdb.conn.0, block.block_height - PRUNING_HEIGHT)?;
 
             // Update now-expired transactions that didn't get mined.
-            wallet::update_expired_notes(up, block.block_height)?;
+            wallet::update_expired_notes(&wdb.conn.0, block.block_height)?;
 
             Ok(new_witnesses)
         })
@@ -580,93 +446,114 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         &mut self,
         d_tx: DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error> {
-        self.transactionally(|up| {
-            let tx_ref = wallet::put_tx_data(up, d_tx.tx, None, None)?;
+        self.transactionally(|wdb| {
+        let tx_ref = wallet::put_tx_data(&wdb.conn.0, d_tx.tx, None, None)?;
 
-            let mut spending_account_id: Option<AccountId> = None;
-            for output in d_tx.sapling_outputs {
-                match output.transfer_type {
-                    TransferType::Outgoing | TransferType::WalletInternal => {
-                        let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.note.recipient())
-                        } else {
-                            Recipient::InternalAccount(output.account, PoolType::Sapling)
-                        };
+        let mut spending_account_id: Option<AccountId> = None;
+        for output in d_tx.sapling_outputs {
+            match output.transfer_type {
+                TransferType::Outgoing | TransferType::WalletInternal => {
+                    let recipient = if output.transfer_type == TransferType::Outgoing {
+                        Recipient::Sapling(output.note.recipient())
+                    } else {
+                        Recipient::InternalAccount(output.account, PoolType::Sapling)
+                    };
 
-                        wallet::put_sent_output(
-                            &up.wallet_db.conn,
-                            &up.wallet_db.params,
-                            output.account,
-                            tx_ref,
-                            output.index,
-                            &recipient,
-                            Amount::from_u64(output.note.value().inner()).map_err(|_|
-                                SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
-                            Some(&output.memo),
-                        )?;
+                    wallet::put_sent_output(
+                        &wdb.conn.0,
+                        &wdb.params,
+                        output.account,
+                        tx_ref,
+                        output.index,
+                        &recipient,
+                        Amount::from_u64(output.note.value().inner()).map_err(|_| {
+                            SqliteClientError::CorruptedData(
+                                "Note value is not a valid Zcash amount.".to_string(),
+                            )
+                        })?,
+                        Some(&output.memo),
+                    )?;
 
-                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            wallet::sapling::put_received_note(&up.wallet_db.conn, output, tx_ref)?;
-                        }
+                    if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                        wallet::sapling::put_received_note(&wdb.conn.0, output, tx_ref)?;
                     }
-                    TransferType::Incoming => {
-                        match spending_account_id {
-                            Some(id) =>
-                                if id != output.account {
-                                    panic!("Unable to determine a unique account identifier for z->t spend.");
-                                }
-                            None => {
-                                spending_account_id = Some(output.account);
+                }
+                TransferType::Incoming => {
+                    match spending_account_id {
+                        Some(id) => {
+                            if id != output.account {
+                                panic!("Unable to determine a unique account identifier for z->t spend.");
                             }
                         }
-
-                        wallet::sapling::put_received_note(&up.wallet_db.conn, output, tx_ref)?;
-                    }
-                }
-            }
-
-            // If any of the utxos spent in the transaction are ours, mark them as spent.
-            #[cfg(feature = "transparent-inputs")]
-            for txin in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
-                wallet::mark_transparent_utxo_spent(&up.wallet_db.conn, tx_ref, &txin.prevout)?;
-            }
-
-            // If we have some transparent outputs:
-            if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
-                let nullifiers = self.wallet_db.get_sapling_nullifiers(data_api::NullifierQuery::All)?;
-                // If the transaction contains shielded spends from our wallet, we will store z->t
-                // transactions we observe in the same way they would be stored by
-                // create_spend_to_address.
-                if let Some((account_id, _)) = nullifiers.iter().find(
-                    |(_, nf)|
-                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
-                        .any(|input| nf == input.nullifier())
-                ) {
-                    for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
-                        if let Some(address) = txout.recipient_address() {
-                            wallet::put_sent_output(
-                                &up.wallet_db.conn,
-                                &up.wallet_db.params,
-                                *account_id,
-                                tx_ref,
-                                output_index,
-                                &Recipient::Transparent(address),
-                                txout.value,
-                                None
-                            )?;
+                        None => {
+                            spending_account_id = Some(output.account);
                         }
                     }
+
+                    wallet::sapling::put_received_note(&wdb.conn.0, output, tx_ref)?;
                 }
             }
-            Ok(tx_ref)
+        }
+
+        // If any of the utxos spent in the transaction are ours, mark them as spent.
+        #[cfg(feature = "transparent-inputs")]
+        for txin in d_tx
+            .tx
+            .transparent_bundle()
+            .iter()
+            .flat_map(|b| b.vin.iter())
+        {
+            wallet::mark_transparent_utxo_spent(&wdb.conn.0, tx_ref, &txin.prevout)?;
+        }
+
+        // If we have some transparent outputs:
+        if !d_tx
+            .tx
+            .transparent_bundle()
+            .iter()
+            .any(|b| b.vout.is_empty())
+        {
+            let nullifiers = wdb.get_sapling_nullifiers(data_api::NullifierQuery::All)?;
+            // If the transaction contains shielded spends from our wallet, we will store z->t
+            // transactions we observe in the same way they would be stored by
+            // create_spend_to_address.
+            if let Some((account_id, _)) = nullifiers.iter().find(|(_, nf)| {
+                d_tx.tx
+                    .sapling_bundle()
+                    .iter()
+                    .flat_map(|b| b.shielded_spends().iter())
+                    .any(|input| nf == input.nullifier())
+            }) {
+                for (output_index, txout) in d_tx
+                    .tx
+                    .transparent_bundle()
+                    .iter()
+                    .flat_map(|b| b.vout.iter())
+                    .enumerate()
+                {
+                    if let Some(address) = txout.recipient_address() {
+                        wallet::put_sent_output(
+                            &wdb.conn.0,
+                            &wdb.params,
+                            *account_id,
+                            tx_ref,
+                            output_index,
+                            &Recipient::Transparent(address),
+                            txout.value,
+                            None,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(tx_ref)
         })
     }
 
     fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error> {
-        // Update the database atomically, to ensure the result is internally consistent.
-        self.transactionally(|up| {
+        self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(
-                up,
+                &wdb.conn.0,
                 sent_tx.tx,
                 Some(sent_tx.fee_amount),
                 Some(sent_tx.created),
@@ -683,7 +570,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             if let Some(bundle) = sent_tx.tx.sapling_bundle() {
                 for spend in bundle.shielded_spends() {
                     wallet::sapling::mark_sapling_note_spent(
-                        &up.wallet_db.conn,
+                        &wdb.conn.0,
                         tx_ref,
                         spend.nullifier(),
                     )?;
@@ -692,13 +579,13 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             #[cfg(feature = "transparent-inputs")]
             for utxo_outpoint in &sent_tx.utxos_spent {
-                wallet::mark_transparent_utxo_spent(&up.wallet_db.conn, tx_ref, utxo_outpoint)?;
+                wallet::mark_transparent_utxo_spent(&wdb.conn.0, tx_ref, utxo_outpoint)?;
             }
 
             for output in &sent_tx.outputs {
                 wallet::insert_sent_output(
-                    &up.wallet_db.conn,
-                    &up.wallet_db.params,
+                    &wdb.conn.0,
+                    &wdb.params,
                     tx_ref,
                     sent_tx.account,
                     output,
@@ -706,7 +593,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
                 if let Some((account, note)) = output.sapling_change_to() {
                     wallet::sapling::put_received_note(
-                        &up.wallet_db.conn,
+                        &wdb.conn.0,
                         &DecryptedOutput {
                             index: output.output_index(),
                             note: note.clone(),
@@ -727,7 +614,9 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     }
 
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::truncate_to_height(self.wallet_db, block_height)
+        self.transactionally(|wdb| {
+            wallet::truncate_to_height(&wdb.conn.0, &wdb.params, block_height)
+        })
     }
 
     fn put_received_transparent_utxo(
@@ -735,11 +624,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         _output: &WalletTransparentOutput,
     ) -> Result<Self::UtxoRef, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::put_received_transparent_utxo(
-            &self.wallet_db.conn,
-            &self.wallet_db.params,
-            _output,
-        );
+        return wallet::put_received_transparent_utxo(&self.conn, &self.params, _output);
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -1083,7 +968,7 @@ mod tests {
 
     #[cfg(test)]
     pub(crate) fn init_test_accounts_table(
-        db_data: &WalletDb<Network>,
+        db_data: &mut WalletDb<rusqlite::Connection, Network>,
     ) -> (DiversifiableFullViewingKey, Option<TransparentAddress>) {
         let (ufvk, taddr) = init_test_accounts_table_ufvk(db_data);
         (ufvk.sapling().unwrap().clone(), taddr)
@@ -1091,7 +976,7 @@ mod tests {
 
     #[cfg(test)]
     pub(crate) fn init_test_accounts_table_ufvk(
-        db_data: &WalletDb<Network>,
+        db_data: &mut WalletDb<rusqlite::Connection, Network>,
     ) -> (UnifiedFullViewingKey, Option<TransparentAddress>) {
         let seed = [0u8; 32];
         let account = AccountId::from(0);
@@ -1318,13 +1203,12 @@ mod tests {
 
         let account = AccountId::from(0);
         init_wallet_db(&mut db_data, None).unwrap();
-        let _ = init_test_accounts_table_ufvk(&db_data);
+        init_test_accounts_table_ufvk(&mut db_data);
 
         let current_addr = db_data.get_current_address(account).unwrap();
         assert!(current_addr.is_some());
 
-        let mut update_ops = db_data.get_update_ops().unwrap();
-        let addr2 = update_ops.get_next_available_address(account).unwrap();
+        let addr2 = db_data.get_next_available_address(account).unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
@@ -1349,7 +1233,7 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet.
-        let (ufvk, taddr) = init_test_accounts_table_ufvk(&db_data);
+        let (ufvk, taddr) = init_test_accounts_table_ufvk(&mut db_data);
         let taddr = taddr.unwrap();
 
         let receivers = db_data.get_transparent_receivers(0.into()).unwrap();

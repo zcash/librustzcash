@@ -111,14 +111,14 @@ impl std::error::Error for WalletMigrationError {
 // check for unspent transparent outputs whenever running initialization with a version of the
 // library *not* compiled with the `transparent-inputs` feature flag, and fail if any are present.
 pub fn init_wallet_db<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<P>,
+    wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
     init_wallet_db_internal(wdb, seed, &[])
 }
 
 fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
-    wdb: &mut WalletDb<P>,
+    wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
 ) -> Result<(), MigratorError<WalletMigrationError>> {
@@ -200,7 +200,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 /// let dfvk = extsk.to_diversifiable_full_viewing_key();
 /// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
 /// let ufvks = HashMap::from([(account, ufvk)]);
-/// init_accounts_table(&db_data, &ufvks).unwrap();
+/// init_accounts_table(&mut db_data, &ufvks).unwrap();
 /// # }
 /// ```
 ///
@@ -208,29 +208,29 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 /// [`scan_cached_blocks`]: zcash_client_backend::data_api::chain::scan_cached_blocks
 /// [`create_spend_to_address`]: zcash_client_backend::data_api::wallet::create_spend_to_address
 pub fn init_accounts_table<P: consensus::Parameters>(
-    wdb: &WalletDb<P>,
+    wallet_db: &mut WalletDb<rusqlite::Connection, P>,
     keys: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Result<(), SqliteClientError> {
-    let mut empty_check = wdb.conn.prepare("SELECT * FROM accounts LIMIT 1")?;
-    if empty_check.exists([])? {
-        return Err(SqliteClientError::TableNotEmpty);
-    }
-
-    // Ensure that the account identifiers are sequential and begin at zero.
-    if let Some(account_id) = keys.keys().max() {
-        if usize::try_from(u32::from(*account_id)).unwrap() >= keys.len() {
-            return Err(SqliteClientError::AccountIdDiscontinuity);
+    wallet_db.transactionally(|wdb| {
+        let mut empty_check = wdb.conn.0.prepare("SELECT * FROM accounts LIMIT 1")?;
+        if empty_check.exists([])? {
+            return Err(SqliteClientError::TableNotEmpty);
         }
-    }
 
-    // Insert accounts atomically
-    wdb.conn.execute("BEGIN IMMEDIATE", [])?;
-    for (account, key) in keys.iter() {
-        wallet::add_account(wdb, *account, key)?;
-    }
-    wdb.conn.execute("COMMIT", [])?;
+        // Ensure that the account identifiers are sequential and begin at zero.
+        if let Some(account_id) = keys.keys().max() {
+            if usize::try_from(u32::from(*account_id)).unwrap() >= keys.len() {
+                return Err(SqliteClientError::AccountIdDiscontinuity);
+            }
+        }
 
-    Ok(())
+        // Insert accounts atomically
+        for (account, key) in keys.iter() {
+            wallet::add_account(&wdb.conn.0, &wdb.params, *account, key)?;
+        }
+
+        Ok(())
+    })
 }
 
 /// Initialises the data database with the given block.
@@ -262,33 +262,35 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 /// let sapling_tree = &[];
 ///
 /// let data_file = NamedTempFile::new().unwrap();
-/// let db = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-/// init_blocks_table(&db, height, hash, time, sapling_tree);
+/// let mut db = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+/// init_blocks_table(&mut db, height, hash, time, sapling_tree);
 /// ```
-pub fn init_blocks_table<P>(
-    wdb: &WalletDb<P>,
+pub fn init_blocks_table<P: consensus::Parameters>(
+    wallet_db: &mut WalletDb<rusqlite::Connection, P>,
     height: BlockHeight,
     hash: BlockHash,
     time: u32,
     sapling_tree: &[u8],
 ) -> Result<(), SqliteClientError> {
-    let mut empty_check = wdb.conn.prepare("SELECT * FROM blocks LIMIT 1")?;
-    if empty_check.exists([])? {
-        return Err(SqliteClientError::TableNotEmpty);
-    }
+    wallet_db.transactionally(|wdb| {
+        let mut empty_check = wdb.conn.0.prepare("SELECT * FROM blocks LIMIT 1")?;
+        if empty_check.exists([])? {
+            return Err(SqliteClientError::TableNotEmpty);
+        }
 
-    wdb.conn.execute(
-        "INSERT INTO blocks (height, hash, time, sapling_tree)
+        wdb.conn.0.execute(
+            "INSERT INTO blocks (height, hash, time, sapling_tree)
         VALUES (?, ?, ?, ?)",
-        [
-            u32::from(height).to_sql()?,
-            hash.0.to_sql()?,
-            time.to_sql()?,
-            sapling_tree.to_sql()?,
-        ],
-    )?;
+            [
+                u32::from(height).to_sql()?,
+                hash.0.to_sql()?,
+                time.to_sql()?,
+                sapling_tree.to_sql()?,
+            ],
+        )?;
 
-    Ok(())
+        Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -606,7 +608,7 @@ mod tests {
     #[test]
     fn init_migrate_from_0_3_0() {
         fn init_0_3_0<P>(
-            wdb: &mut WalletDb<P>,
+            wdb: &mut WalletDb<rusqlite::Connection, P>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -722,7 +724,7 @@ mod tests {
     #[test]
     fn init_migrate_from_autoshielding_poc() {
         fn init_autoshielding<P>(
-            wdb: &WalletDb<P>,
+            wdb: &mut WalletDb<rusqlite::Connection, P>,
             extfvk: &ExtendedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -878,14 +880,14 @@ mod tests {
         let extfvk = secret_key.to_extended_full_viewing_key();
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_autoshielding(&db_data, &extfvk, account).unwrap();
+        init_autoshielding(&mut db_data, &extfvk, account).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(seed.to_vec()))).unwrap();
     }
 
     #[test]
     fn init_migrate_from_main_pre_migrations() {
         fn init_main<P>(
-            wdb: &WalletDb<P>,
+            wdb: &mut WalletDb<rusqlite::Connection, P>,
             ufvk: &UnifiedFullViewingKey,
             account: AccountId,
         ) -> Result<(), rusqlite::Error> {
@@ -1025,7 +1027,12 @@ mod tests {
         let secret_key = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account).unwrap();
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_main(&db_data, &secret_key.to_unified_full_viewing_key(), account).unwrap();
+        init_main(
+            &mut db_data,
+            &secret_key.to_unified_full_viewing_key(),
+            account,
+        )
+        .unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(seed.to_vec()))).unwrap();
     }
 
@@ -1036,8 +1043,8 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // We can call the function as many times as we want with no data
-        init_accounts_table(&db_data, &HashMap::new()).unwrap();
-        init_accounts_table(&db_data, &HashMap::new()).unwrap();
+        init_accounts_table(&mut db_data, &HashMap::new()).unwrap();
+        init_accounts_table(&mut db_data, &HashMap::new()).unwrap();
 
         let seed = [0u8; 32];
         let account = AccountId::from(0);
@@ -1062,11 +1069,11 @@ mod tests {
         let ufvk = UnifiedFullViewingKey::new(Some(dfvk), None).unwrap();
         let ufvks = HashMap::from([(account, ufvk)]);
 
-        init_accounts_table(&db_data, &ufvks).unwrap();
+        init_accounts_table(&mut db_data, &ufvks).unwrap();
 
         // Subsequent calls should return an error
-        init_accounts_table(&db_data, &HashMap::new()).unwrap_err();
-        init_accounts_table(&db_data, &ufvks).unwrap_err();
+        init_accounts_table(&mut db_data, &HashMap::new()).unwrap_err();
+        init_accounts_table(&mut db_data, &ufvks).unwrap_err();
     }
 
     #[test]
@@ -1090,12 +1097,12 @@ mod tests {
 
         // should fail if we have a gap
         assert_matches!(
-            init_accounts_table(&db_data, &ufvks(&[0, 2])),
+            init_accounts_table(&mut db_data, &ufvks(&[0, 2])),
             Err(SqliteClientError::AccountIdDiscontinuity)
         );
 
         // should succeed if there are no gaps
-        assert!(init_accounts_table(&db_data, &ufvks(&[0, 1, 2])).is_ok());
+        assert!(init_accounts_table(&mut db_data, &ufvks(&[0, 1, 2])).is_ok());
     }
 
     #[test]
@@ -1106,7 +1113,7 @@ mod tests {
 
         // First call with data should initialise the blocks table
         init_blocks_table(
-            &db_data,
+            &mut db_data,
             BlockHeight::from(1u32),
             BlockHash([1; 32]),
             1,
@@ -1116,7 +1123,7 @@ mod tests {
 
         // Subsequent calls should return an error
         init_blocks_table(
-            &db_data,
+            &mut db_data,
             BlockHeight::from(2u32),
             BlockHash([2; 32]),
             2,
@@ -1139,7 +1146,7 @@ mod tests {
         let ufvk = usk.to_unified_full_viewing_key();
         let expected_address = ufvk.sapling().unwrap().default_address().1;
         let ufvks = HashMap::from([(account_id, ufvk)]);
-        init_accounts_table(&db_data, &ufvks).unwrap();
+        init_accounts_table(&mut db_data, &ufvks).unwrap();
 
         // The account's address should be in the data DB
         let ua = db_data.get_current_address(AccountId::from(0)).unwrap();
@@ -1153,16 +1160,15 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), Network::MainNetwork).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
 
-        let mut ops = db_data.get_update_ops().unwrap();
         let seed = test_vectors::UNIFIED[0].root_seed;
-        let (account, _usk) = ops.create_account(&Secret::new(seed.to_vec())).unwrap();
+        let (account, _usk) = db_data.create_account(&Secret::new(seed.to_vec())).unwrap();
         assert_eq!(account, AccountId::from(0u32));
 
         for tv in &test_vectors::UNIFIED[..3] {
             if let Some(RecipientAddress::Unified(tvua)) =
                 RecipientAddress::decode(&Network::MainNetwork, tv.unified_addr)
             {
-                let (ua, di) = wallet::get_current_address(&db_data, account)
+                let (ua, di) = wallet::get_current_address(&db_data.conn, &db_data.params, account)
                     .unwrap()
                     .expect("create_account generated the first address");
                 assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
@@ -1170,7 +1176,8 @@ mod tests {
                 assert_eq!(tvua.sapling(), ua.sapling());
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
-                ops.get_next_available_address(account)
+                db_data
+                    .get_next_available_address(account)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

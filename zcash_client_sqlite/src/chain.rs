@@ -299,7 +299,7 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Empty chain should return None
         assert_matches!(db_data.get_max_height_hash(), Ok(None));
@@ -328,8 +328,7 @@ mod tests {
         assert_matches!(validate_chain_result, Ok(()));
 
         // Scan the cache
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -348,7 +347,7 @@ mod tests {
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -365,7 +364,7 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
@@ -386,8 +385,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -427,7 +425,7 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Create some fake CompactBlocks
         let (cb, _) = fake_compact_block(
@@ -448,8 +446,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Data-only chain should be valid
         validate_chain(&db_cache, db_data.get_max_height_hash().unwrap(), None).unwrap();
@@ -489,11 +486,11 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
@@ -519,36 +516,46 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
 
         // "Rewind" to height of last scanned block
-        truncate_to_height(&db_data, sapling_activation_height() + 1).unwrap();
+        db_data
+            .transactionally(|wdb| {
+                truncate_to_height(&wdb.conn.0, &wdb.params, sapling_activation_height() + 1)
+            })
+            .unwrap();
 
         // Account balance should be unaltered
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
 
         // Rewind so that one block is dropped
-        truncate_to_height(&db_data, sapling_activation_height()).unwrap();
+        db_data
+            .transactionally(|wdb| {
+                truncate_to_height(&wdb.conn.0, &wdb.params, sapling_activation_height())
+            })
+            .unwrap();
 
         // Account balance should only contain the first received note
-        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            value
+        );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Account balance should again reflect both received notes
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
     }
@@ -564,7 +571,7 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
         let value = Amount::from_u64(50000).unwrap();
@@ -576,9 +583,11 @@ mod tests {
             value,
         );
         insert_into_cache(&db_cache, &cb1);
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
-        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            value
+        );
 
         // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
         let (cb2, _) = fake_compact_block(
@@ -596,7 +605,7 @@ mod tests {
             value,
         );
         insert_into_cache(&db_cache, &cb3);
-        match scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None) {
+        match scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None) {
             Err(Error::Chain(e)) => {
                 assert_matches!(
                     e.cause(),
@@ -609,9 +618,9 @@ mod tests {
 
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
         insert_into_cache(&db_cache, &cb2);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             Amount::from_u64(150_000).unwrap()
         );
     }
@@ -627,11 +636,11 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
@@ -647,11 +656,13 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Account balance should reflect the received note
-        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            value
+        );
 
         // Create a second fake CompactBlock sending more value to the address
         let value2 = Amount::from_u64(7).unwrap();
@@ -665,11 +676,11 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
     }
@@ -685,11 +696,11 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
@@ -705,11 +716,13 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Account balance should reflect the received note
-        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            value
+        );
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
@@ -728,11 +741,11 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_write, None).unwrap();
+        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None).unwrap();
 
         // Account balance should equal the change
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             (value - value2).unwrap()
         );
     }
