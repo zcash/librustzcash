@@ -980,15 +980,6 @@ pub(crate) fn update_expired_notes(
 
 // A utility function for creation of parameters for use in `insert_sent_output`
 // and `put_sent_output`
-//
-// - If `to` is a Unified address, this is an index into the outputs of the transaction
-//   within the bundle associated with the recipient's output pool.
-// - If `to` is a Sapling address, this is an index into the Sapling outputs of the
-//   transaction.
-// - If `to` is a transparent address, this is an index into the transparent outputs of
-//   the transaction.
-// - If `to` is an internal account, this is an index into the Sapling outputs of the
-//   transaction.
 fn recipient_params<P: consensus::Parameters>(
     params: &P,
     to: &Recipient,
@@ -1002,8 +993,6 @@ fn recipient_params<P: consensus::Parameters>(
 }
 
 /// Records information about a transaction output that your wallet created.
-///
-/// This is a crate-internal convenience method.
 pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1037,9 +1026,17 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     Ok(())
 }
 
-/// Records information about a transaction output that your wallet created.
+/// Records information about a transaction output that your wallet created, from the constituent
+/// properties of that output.
 ///
-/// This is a crate-internal convenience method.
+/// - If `recipient` is a Unified address, `output_index` is an index into the outputs of the
+///   transaction within the bundle associated with the recipient's output pool.
+/// - If `recipient` is a Sapling address, `output_index` is an index into the Sapling outputs of
+///   the transaction.
+/// - If `recipient` is a transparent address, `output_index` is an index into the transparent
+///   outputs of the transaction.
+/// - If `recipient` is an internal account, `output_index` is an index into the Sapling outputs of
+///   the transaction.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn put_sent_output<P: consensus::Parameters>(
     conn: &rusqlite::Connection,

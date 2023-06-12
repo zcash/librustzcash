@@ -108,9 +108,9 @@ pub struct WalletDb<C, P> {
 }
 
 /// A wrapper for a SQLite transaction affecting the wallet database.
-pub struct WalletTransaction<'conn>(pub(crate) rusqlite::Transaction<'conn>);
+pub struct SqlTransaction<'conn>(pub(crate) rusqlite::Transaction<'conn>);
 
-impl Borrow<rusqlite::Connection> for WalletTransaction<'_> {
+impl Borrow<rusqlite::Connection> for SqlTransaction<'_> {
     fn borrow(&self) -> &rusqlite::Connection {
         &self.0
     }
@@ -127,10 +127,10 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
 
     pub fn transactionally<F, A>(&mut self, f: F) -> Result<A, SqliteClientError>
     where
-        F: FnOnce(&WalletDb<WalletTransaction<'_>, P>) -> Result<A, SqliteClientError>,
+        F: FnOnce(&WalletDb<SqlTransaction<'_>, P>) -> Result<A, SqliteClientError>,
     {
         let wdb = WalletDb {
-            conn: WalletTransaction(self.conn.transaction()?),
+            conn: SqlTransaction(self.conn.transaction()?),
             params: self.params.clone(),
         };
         let result = f(&wdb)?;
