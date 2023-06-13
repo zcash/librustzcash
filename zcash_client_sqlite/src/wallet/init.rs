@@ -237,7 +237,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 
         // Insert accounts atomically
         for (account, key) in keys.iter() {
-            wallet::add_account(&wdb.conn.0, &wdb.params, *account, key)?;
+            wallet::add_account(wdb.conn.0, &wdb.params, *account, key)?;
         }
 
         Ok(())
@@ -394,6 +394,9 @@ mod tests {
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
             )",
             "CREATE TABLE sapling_tree_cap (
+                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
+                -- upsert functionality; the table will only ever contain one row
+                cap_id INTEGER PRIMARY KEY,
                 cap_data BLOB NOT NULL
             )",
             "CREATE TABLE sapling_tree_checkpoint_marks_removed (

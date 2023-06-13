@@ -89,7 +89,9 @@ use zcash_client_backend::{
     wallet::WalletTx,
 };
 
-use crate::{error::SqliteClientError, PRUNING_HEIGHT};
+use crate::{
+    error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_HEIGHT,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -637,7 +639,7 @@ pub(crate) fn get_min_unspent_height(
 /// block, this function does nothing.
 ///
 /// This should only be executed inside a transactional context.
-pub(crate) fn truncate_to_height<P: consensus::Parameters>(
+pub(crate) fn truncate_to_height<P: consensus::Parameters + Clone>(
     conn: &rusqlite::Transaction,
     params: &P,
     block_height: BlockHeight,
@@ -662,7 +664,16 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 
     // nothing to do if we're deleting back down to the max height
     if block_height < last_scanned_height {
-        // Decrement witnesses.
+        // Truncate the note commitment trees
+        let mut wdb = WalletDb {
+            conn: SqlTransaction(conn),
+            params: params.clone(),
+        };
+        wdb.with_sapling_tree_mut(|tree| {
+            tree.truncate_removing_checkpoint(&block_height).map(|_| ())
+        })?;
+
+        // Remove any legacy Sapling witnesses
         conn.execute(
             "DELETE FROM sapling_witnesses WHERE block > ?",
             [u32::from(block_height)],

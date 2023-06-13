@@ -539,7 +539,7 @@ mod tests {
         // "Rewind" to height of last scanned block
         db_data
             .transactionally(|wdb| {
-                truncate_to_height(&wdb.conn.0, &wdb.params, sapling_activation_height() + 1)
+                truncate_to_height(wdb.conn.0, &wdb.params, sapling_activation_height() + 1)
             })
             .unwrap();
 
@@ -552,7 +552,7 @@ mod tests {
         // Rewind so that one block is dropped
         db_data
             .transactionally(|wdb| {
-                truncate_to_height(&wdb.conn.0, &wdb.params, sapling_activation_height())
+                truncate_to_height(wdb.conn.0, &wdb.params, sapling_activation_height())
             })
             .unwrap();
 

@@ -69,6 +69,9 @@ impl RusqliteMigration for Migration {
                 CONSTRAINT root_unique UNIQUE (root_hash)
             );
             CREATE TABLE sapling_tree_cap (
+                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
+                -- upsert functionality; the table will only ever contain one row
+                cap_id INTEGER PRIMARY KEY,
                 cap_data BLOB NOT NULL
             );",
         )?;
