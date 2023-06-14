@@ -1,18 +1,21 @@
 use either::Either;
-
-use incrementalmerkletree::{Address, Position};
 use rusqlite::{self, named_params, Connection, OptionalExtension};
-use shardtree::{Checkpoint, LocatedPrunableTree, PrunableTree, ShardStore, TreeState};
-
 use std::{
     collections::BTreeSet,
     io::{self, Cursor},
     ops::Deref,
 };
 
+use incrementalmerkletree::{Address, Level, Position};
+use shardtree::{Checkpoint, LocatedPrunableTree, PrunableTree, ShardStore, TreeState};
+
 use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer, sapling};
 
+use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+
 use crate::serialization::{read_shard, write_shard_v1};
+
+const SHARD_ROOT_LEVEL: Level = Level::new(SAPLING_SHARD_HEIGHT);
 
 pub struct WalletDbSaplingShardStore<'conn, 'a> {
     pub(crate) conn: &'a rusqlite::Transaction<'conn>,
@@ -39,8 +42,7 @@ impl<'conn, 'a: 'conn> ShardStore for WalletDbSaplingShardStore<'conn, 'a> {
     }
 
     fn last_shard(&self) -> Result<Option<LocatedPrunableTree<Self::H>>, Self::Error> {
-        // SELECT shard_data FROM sapling_tree ORDER BY shard_index DESC LIMIT 1
-        todo!()
+        last_shard(self.conn)
     }
 
     fn put_shard(&mut self, subtree: LocatedPrunableTree<Self::H>) -> Result<(), Self::Error> {
@@ -48,8 +50,7 @@ impl<'conn, 'a: 'conn> ShardStore for WalletDbSaplingShardStore<'conn, 'a> {
     }
 
     fn get_shard_roots(&self) -> Result<Vec<Address>, Self::Error> {
-        // SELECT
-        todo!()
+        get_shard_roots(self.conn)
     }
 
     fn truncate(&mut self, from: Address) -> Result<(), Self::Error> {
@@ -86,9 +87,9 @@ impl<'conn, 'a: 'conn> ShardStore for WalletDbSaplingShardStore<'conn, 'a> {
 
     fn get_checkpoint_at_depth(
         &self,
-        _checkpoint_depth: usize,
+        checkpoint_depth: usize,
     ) -> Result<Option<(Self::CheckpointId, Checkpoint)>, Self::Error> {
-        todo!()
+        get_checkpoint_at_depth(self.conn, checkpoint_depth)
     }
 
     fn get_checkpoint(
@@ -150,6 +151,31 @@ pub(crate) fn get_shard(
     .transpose()
 }
 
+pub(crate) fn last_shard(
+    conn: &rusqlite::Connection,
+) -> Result<Option<LocatedPrunableTree<sapling::Node>>, Error> {
+    conn.query_row(
+        "SELECT shard_index, shard_data
+                 FROM sapling_tree_shards
+                 ORDER BY shard_index DESC
+                 LIMIT 1",
+        [],
+        |row| {
+            let shard_index: u64 = row.get(0)?;
+            let shard_data: Vec<u8> = row.get(1)?;
+            Ok((shard_index, shard_data))
+        },
+    )
+    .optional()
+    .map_err(Either::Right)?
+    .map(|(shard_index, shard_data)| {
+        let shard_root = Address::from_parts(SHARD_ROOT_LEVEL, shard_index);
+        let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Either::Left)?;
+        Ok(LocatedPrunableTree::from_parts(shard_root, shard_tree))
+    })
+    .transpose()
+}
+
 pub(crate) fn put_shard(
     conn: &rusqlite::Connection,
     subtree: LocatedPrunableTree<sapling::Node>,
@@ -172,10 +198,10 @@ pub(crate) fn put_shard(
 
     conn.prepare_cached(
         "INSERT INTO sapling_tree_shards (shard_index, root_hash, shard_data)
-             VALUES (:shard_index, :root_hash, :shard_data)
-             ON CONFLICT (shard_index) DO UPDATE
-             SET root_hash = :root_hash,
-             shard_data = :shard_data",
+                 VALUES (:shard_index, :root_hash, :shard_data)
+                 ON CONFLICT (shard_index) DO UPDATE
+                 SET root_hash = :root_hash,
+                 shard_data = :shard_data",
     )
     .and_then(|mut stmt_put_shard| {
         stmt_put_shard.execute(named_params![
@@ -187,6 +213,22 @@ pub(crate) fn put_shard(
     .map_err(Either::Right)?;
 
     Ok(())
+}
+
+pub(crate) fn get_shard_roots(conn: &rusqlite::Connection) -> Result<Vec<Address>, Error> {
+    let mut stmt = conn
+        .prepare("SELECT shard_index FROM sapling_tree_shards ORDER BY shard_index")
+        .map_err(Either::Right)?;
+    let mut rows = stmt.query([]).map_err(Either::Right)?;
+
+    let mut res = vec![];
+    while let Some(row) = rows.next().map_err(Either::Right)? {
+        res.push(Address::from_parts(
+            SHARD_ROOT_LEVEL,
+            row.get(0).map_err(Either::Right)?,
+        ));
+    }
+    Ok(res)
 }
 
 pub(crate) fn truncate(conn: &rusqlite::Transaction<'_>, from: Address) -> Result<(), Error> {
@@ -264,8 +306,8 @@ pub(crate) fn get_checkpoint<C: Deref<Target = Connection>>(
     let checkpoint_position = conn
         .query_row(
             "SELECT position
-                FROM sapling_tree_checkpoints
-                WHERE checkpoint_id = ?",
+            FROM sapling_tree_checkpoints
+            WHERE checkpoint_id = ?",
             [u32::from(checkpoint_id)],
             |row| {
                 row.get::<_, Option<u64>>(0)
@@ -275,32 +317,91 @@ pub(crate) fn get_checkpoint<C: Deref<Target = Connection>>(
         .optional()
         .map_err(Either::Right)?;
 
-    let mut marks_removed = BTreeSet::new();
-    let mut stmt = conn
-        .prepare_cached(
-            "SELECT mark_removed_position
-                FROM sapling_tree_checkpoint_marks_removed
-                WHERE checkpoint_id = ?",
+    checkpoint_position
+        .map(|pos_opt| {
+            let mut marks_removed = BTreeSet::new();
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT mark_removed_position
+                    FROM sapling_tree_checkpoint_marks_removed
+                    WHERE checkpoint_id = ?",
+                )
+                .map_err(Either::Right)?;
+            let mut mark_removed_rows = stmt
+                .query([u32::from(checkpoint_id)])
+                .map_err(Either::Right)?;
+
+            while let Some(row) = mark_removed_rows.next().map_err(Either::Right)? {
+                marks_removed.insert(
+                    row.get::<_, u64>(0)
+                        .map(Position::from)
+                        .map_err(Either::Right)?,
+                );
+            }
+
+            Ok(Checkpoint::from_parts(
+                pos_opt.map_or(TreeState::Empty, TreeState::AtPosition),
+                marks_removed,
+            ))
+        })
+        .transpose()
+}
+
+pub(crate) fn get_checkpoint_at_depth<C: Deref<Target = Connection>>(
+    conn: &C,
+    checkpoint_depth: usize,
+) -> Result<Option<(BlockHeight, Checkpoint)>, Either<io::Error, rusqlite::Error>> {
+    let checkpoint_parts = conn
+        .query_row(
+            "SELECT checkpoint_id, position
+            FROM sapling_tree_checkpoints
+            ORDER BY checkpoint_id DESC
+            LIMIT 1
+            OFFSET :offset",
+            named_params![":offset": checkpoint_depth],
+            |row| {
+                let checkpoint_id: u32 = row.get(0)?;
+                let position: Option<u64> = row.get(1)?;
+                Ok((
+                    BlockHeight::from(checkpoint_id),
+                    position.map(Position::from),
+                ))
+            },
         )
-        .map_err(Either::Right)?;
-    let mut mark_removed_rows = stmt
-        .query([u32::from(checkpoint_id)])
+        .optional()
         .map_err(Either::Right)?;
 
-    while let Some(row) = mark_removed_rows.next().map_err(Either::Right)? {
-        marks_removed.insert(
-            row.get::<_, u64>(0)
-                .map(Position::from)
-                .map_err(Either::Right)?,
-        );
-    }
+    checkpoint_parts
+        .map(|(checkpoint_id, pos_opt)| {
+            let mut marks_removed = BTreeSet::new();
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT mark_removed_position
+                    FROM sapling_tree_checkpoint_marks_removed
+                    WHERE checkpoint_id = ?",
+                )
+                .map_err(Either::Right)?;
+            let mut mark_removed_rows = stmt
+                .query([u32::from(checkpoint_id)])
+                .map_err(Either::Right)?;
 
-    Ok(checkpoint_position.map(|pos_opt| {
-        Checkpoint::from_parts(
-            pos_opt.map_or(TreeState::Empty, TreeState::AtPosition),
-            marks_removed,
-        )
-    }))
+            while let Some(row) = mark_removed_rows.next().map_err(Either::Right)? {
+                marks_removed.insert(
+                    row.get::<_, u64>(0)
+                        .map(Position::from)
+                        .map_err(Either::Right)?,
+                );
+            }
+
+            Ok((
+                checkpoint_id,
+                Checkpoint::from_parts(
+                    pos_opt.map_or(TreeState::Empty, TreeState::AtPosition),
+                    marks_removed,
+                ),
+            ))
+        })
+        .transpose()
 }
 
 pub(crate) fn update_checkpoint_with<F>(

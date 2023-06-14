@@ -399,7 +399,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         self.transactionally(|wdb| {
             // Insert the block into the database.
             let block_height = block.block_height;
-            wallet::insert_block(
+            wallet::put_block(
                 wdb.conn.0,
                 block_height,
                 block.block_hash,

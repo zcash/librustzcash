@@ -11,6 +11,7 @@ use schemer_rusqlite::RusqliteMigration;
 use shardtree::ShardTree;
 use uuid::Uuid;
 
+use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 use zcash_primitives::{
     consensus::BlockHeight,
     merkle_tree::{read_commitment_tree, read_incremental_witness},
@@ -93,7 +94,7 @@ impl RusqliteMigration for Migration {
         let mut shard_tree: ShardTree<
             _,
             { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-            { sapling::NOTE_COMMITMENT_TREE_DEPTH / 2 },
+            SAPLING_SHARD_HEIGHT,
         > = ShardTree::new(shard_store, 100);
         // Insert all the tree information that we can get from block-end commitment trees
         {

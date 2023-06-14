@@ -64,7 +64,7 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
-use rusqlite::{self, named_params, params, OptionalExtension, ToSql};
+use rusqlite::{self, named_params, OptionalExtension, ToSql};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::Cursor;
@@ -735,15 +735,18 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
-         WHERE u.address = ?
-         AND u.height <= ?
+         WHERE u.address = :address
+         AND u.height <= :max_height
          AND tx.block IS NULL",
     )?;
 
     let addr_str = address.encode(params);
 
     let mut utxos = Vec::<WalletTransparentOutput>::new();
-    let mut rows = stmt_blocks.query(params![addr_str, u32::from(max_height)])?;
+    let mut rows = stmt_blocks.query(named_params![
+        ":address": addr_str,
+        ":max_height": u32::from(max_height)
+    ])?;
     let excluded: BTreeSet<OutPoint> = exclude.iter().cloned().collect();
     while let Some(row) = rows.next()? {
         let txid: Vec<u8> = row.get(0)?;
@@ -796,14 +799,17 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
-         WHERE u.received_by_account = ?
-         AND u.height <= ?
+         WHERE u.received_by_account = :account_id
+         AND u.height <= :max_height
          AND tx.block IS NULL
          GROUP BY u.address",
     )?;
 
     let mut res = HashMap::new();
-    let mut rows = stmt_blocks.query(params![u32::from(account), u32::from(max_height)])?;
+    let mut rows = stmt_blocks.query(named_params![
+        ":account_id": u32::from(account),
+        ":max_height": u32::from(max_height)
+    ])?;
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get(0)?;
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
@@ -816,14 +822,14 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 }
 
 /// Inserts information about a scanned block into the database.
-pub(crate) fn insert_block(
+pub(crate) fn put_block(
     conn: &rusqlite::Connection,
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
     sapling_commitment_tree_size: Option<u64>,
 ) -> Result<(), SqliteClientError> {
-    let mut stmt_insert_block = conn.prepare_cached(
+    let mut stmt_upsert_block = conn.prepare_cached(
         "INSERT INTO blocks (
             height,
             hash,
@@ -831,14 +837,24 @@ pub(crate) fn insert_block(
             sapling_commitment_tree_size,
             sapling_tree
         )
-        VALUES (?, ?, ?, ?, x'00')",
+        VALUES (
+            :height,
+            :hash,
+            :block_time,
+            :sapling_commitment_tree_size,
+            x'00'
+        )
+        ON CONFLICT (height) DO UPDATE
+        SET hash = :hash,
+            time = :block_time,
+            sapling_commitment_tree_size = :sapling_commitment_tree_size",
     )?;
 
-    stmt_insert_block.execute(params![
-        u32::from(block_height),
-        &block_hash.0[..],
-        block_time,
-        sapling_commitment_tree_size
+    stmt_upsert_block.execute(named_params![
+        ":height": u32::from(block_height),
+        ":hash": &block_hash.0[..],
+        ":block_time": block_time,
+        ":sapling_commitment_tree_size": sapling_commitment_tree_size
     ])?;
 
     Ok(())
@@ -981,7 +997,7 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")]
     let mut stmt_upsert_legacy_transparent_utxo = conn.prepare_cached(
         "INSERT INTO utxos (
-            prevout_txid, prevout_idx, 
+            prevout_txid, prevout_idx,
             received_by_account, address, script,
             value_zat, height)
         VALUES

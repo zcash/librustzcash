@@ -23,12 +23,12 @@ pub mod migrations;
 
 /// Implements a traversal of `limit` blocks of the block cache database.
 ///
-/// Starting at the next block above `last_scanned_height`, the `with_row` callback is invoked with
-/// each block retrieved from the backing store. If the `limit` value provided is `None`, all
-/// blocks are traversed up to the maximum height.
+/// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
+/// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
+/// maximum height.
 pub(crate) fn blockdb_with_blocks<F, DbErrT, NoteRef>(
     block_source: &BlockDb,
-    last_scanned_height: Option<BlockHeight>,
+    from_height: Option<BlockHeight>,
     limit: Option<u32>,
     mut with_row: F,
 ) -> Result<(), Error<DbErrT, SqliteClientError, NoteRef>>
@@ -43,15 +43,15 @@ where
     let mut stmt_blocks = block_source
         .0
         .prepare(
-            "SELECT height, data FROM compactblocks 
-            WHERE height > ? 
+            "SELECT height, data FROM compactblocks
+            WHERE height >= ?
             ORDER BY height ASC LIMIT ?",
         )
         .map_err(to_chain_error)?;
 
     let mut rows = stmt_blocks
         .query(params![
-            last_scanned_height.map_or(0u32, u32::from),
+            from_height.map_or(0u32, u32::from),
             limit.unwrap_or(u32::max_value()),
         ])
         .map_err(to_chain_error)?;
@@ -191,13 +191,13 @@ pub(crate) fn blockmetadb_find_block(
 /// Implements a traversal of `limit` blocks of the filesystem-backed
 /// block cache.
 ///
-/// Starting at the next block height above `last_scanned_height`, the `with_row` callback is
-/// invoked with each block retrieved from the backing store. If the `limit` value provided is
-/// `None`, all blocks are traversed up to the maximum height for which metadata is available.
+/// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
+/// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
+/// maximum height for which metadata is available.
 #[cfg(feature = "unstable")]
 pub(crate) fn fsblockdb_with_blocks<F, DbErrT, NoteRef>(
     cache: &FsBlockDb,
-    last_scanned_height: Option<BlockHeight>,
+    from_height: Option<BlockHeight>,
     limit: Option<u32>,
     mut with_block: F,
 ) -> Result<(), Error<DbErrT, FsBlockDbError, NoteRef>>
@@ -214,7 +214,7 @@ where
         .prepare(
             "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
              FROM compactblocks_meta
-             WHERE height > ?
+             WHERE height >= ?
              ORDER BY height ASC LIMIT ?",
         )
         .map_err(to_chain_error)?;
@@ -222,7 +222,7 @@ where
     let rows = stmt_blocks
         .query_map(
             params![
-                last_scanned_height.map_or(0u32, u32::from),
+                from_height.map_or(0u32, u32::from),
                 limit.unwrap_or(u32::max_value()),
             ],
             |row| {
@@ -269,14 +269,22 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_primitives::{
-        block::BlockHash, transaction::components::Amount, zip32::ExtendedSpendingKey,
+        block::BlockHash,
+        transaction::{components::Amount, fees::zip317::FeeRule},
+        zip32::ExtendedSpendingKey,
     };
 
-    use zcash_client_backend::data_api::chain::{
-        error::{Cause, Error},
-        scan_cached_blocks, validate_chain,
+    use zcash_client_backend::{
+        address::RecipientAddress,
+        data_api::{
+            chain::{error::Error, scan_cached_blocks, validate_chain},
+            wallet::{input_selection::GreedyInputSelector, spend},
+            WalletRead, WalletWrite,
+        },
+        fees::{zip317::SingleOutputChangeStrategy, DustOutputPolicy},
+        wallet::OvkPolicy,
+        zip321::{Payment, TransactionRequest},
     };
-    use zcash_client_backend::data_api::WalletRead;
 
     use crate::{
         chain::init::init_cache_database,
@@ -573,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_cached_blocks_requires_sequential_blocks() {
+    fn scan_cached_blocks_allows_blocks_out_of_order() {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
@@ -583,7 +591,9 @@ mod tests {
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
+        let seed = Secret::new([0u8; 32].to_vec());
+        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
         let value = Amount::from_u64(50000).unwrap();
@@ -602,7 +612,7 @@ mod tests {
             value
         );
 
-        // We cannot scan a block of height SAPLING_ACTIVATION_HEIGHT + 2 next
+        // Create blocks to reach SAPLING_ACTIVATION_HEIGHT + 2
         let (cb2, _) = fake_compact_block(
             sapling_activation_height() + 1,
             cb1.hash(),
@@ -619,24 +629,61 @@ mod tests {
             value,
             2,
         );
-        insert_into_cache(&db_cache, &cb3);
-        match scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None) {
-            Err(Error::Chain(e)) => {
-                assert_matches!(
-                    e.cause(),
-                    Cause::BlockHeightDiscontinuity(h) if *h
-                        == sapling_activation_height() + 2
-                );
-            }
-            Ok(_) | Err(_) => panic!("Should have failed"),
-        }
 
-        // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan both
+        // Scan the later block first
+        insert_into_cache(&db_cache, &cb3);
+        assert_matches!(
+            scan_cached_blocks(
+                &tests::network(),
+                &db_cache,
+                &mut db_data,
+                Some(sapling_activation_height() + 2),
+                None
+            ),
+            Ok(_)
+        );
+
+        // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan that
         insert_into_cache(&db_cache, &cb2);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            Some(sapling_activation_height() + 1),
+            Some(1),
+        )
+        .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             Amount::from_u64(150_000).unwrap()
+        );
+
+        // We can spend the received notes
+        let req = TransactionRequest::new(vec![Payment {
+            recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
+            amount: Amount::from_u64(110_000).unwrap(),
+            memo: None,
+            label: None,
+            message: None,
+            other_params: vec![],
+        }])
+        .unwrap();
+        let input_selector = GreedyInputSelector::new(
+            SingleOutputChangeStrategy::new(FeeRule::standard()),
+            DustOutputPolicy::default(),
+        );
+        assert_matches!(
+            spend(
+                &mut db_data,
+                &tests::network(),
+                crate::wallet::sapling::tests::test_prover(),
+                &input_selector,
+                &usk,
+                req,
+                OvkPolicy::Sender,
+                1,
+            ),
+            Ok(_)
         );
     }
 

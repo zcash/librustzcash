@@ -368,7 +368,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 
 #[cfg(test)]
 #[allow(deprecated)]
-mod tests {
+pub(crate) mod tests {
     use rusqlite::Connection;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
@@ -427,7 +427,7 @@ mod tests {
         },
     };
 
-    fn test_prover() -> impl TxProver {
+    pub fn test_prover() -> impl TxProver {
         match LocalTxProver::with_default_location() {
             Some(tx_prover) => tx_prover,
             None => {
@@ -463,7 +463,7 @@ mod tests {
                 Amount::from_u64(1).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Err(data_api::error::Error::KeyNotRecognized)
         );
@@ -492,7 +492,7 @@ mod tests {
                 Amount::from_u64(1).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Err(data_api::error::Error::ScanRequired)
         );
@@ -535,7 +535,7 @@ mod tests {
                 Amount::from_u64(1).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -740,7 +740,7 @@ mod tests {
                 Amount::from_u64(15000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Ok(_)
         );
@@ -756,7 +756,7 @@ mod tests {
                 Amount::from_u64(2000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -791,7 +791,7 @@ mod tests {
                 Amount::from_u64(2000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -822,7 +822,7 @@ mod tests {
             Amount::from_u64(2000).unwrap(),
             None,
             OvkPolicy::Sender,
-            10,
+            1,
         )
         .unwrap();
     }
@@ -874,7 +874,7 @@ mod tests {
                 Amount::from_u64(15000).unwrap(),
                 None,
                 ovk_policy,
-                10,
+                1,
             )
             .unwrap();
 
@@ -962,7 +962,7 @@ mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
+        let (_, anchor_height) = db_data.get_target_and_anchor_heights(1).unwrap().unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -983,7 +983,7 @@ mod tests {
                 Amount::from_u64(50000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Ok(_)
         );
@@ -1039,7 +1039,7 @@ mod tests {
                 Amount::from_u64(50000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                1,
             ),
             Ok(_)
         );
@@ -1193,7 +1193,7 @@ mod tests {
             DustOutputPolicy::default(),
         );
 
-        // Add funds to the wallet
+        // Ensure that the wallet has at least one block
         let (cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
@@ -1215,7 +1215,7 @@ mod tests {
                 &usk,
                 &[*taddr],
                 &MemoBytes::empty(),
-                0
+                1
             ),
             Ok(_)
         );
