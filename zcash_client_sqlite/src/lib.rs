@@ -392,7 +392,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
     #[tracing::instrument(skip_all, fields(height = u32::from(block.block_height)))]
     #[allow(clippy::type_complexity)]
-    fn advance_by_block(
+    fn put_block(
         &mut self,
         block: PrunedBlock<sapling::Nullifier>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error> {

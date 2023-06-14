@@ -401,7 +401,7 @@ pub trait WalletWrite: WalletRead {
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
     #[allow(clippy::type_complexity)]
-    fn advance_by_block(
+    fn put_block(
         &mut self,
         block: PrunedBlock<sapling::Nullifier>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error>;
@@ -660,7 +660,7 @@ pub mod testing {
         }
 
         #[allow(clippy::type_complexity)]
-        fn advance_by_block(
+        fn put_block(
             &mut self,
             _block: PrunedBlock<sapling::Nullifier>,
         ) -> Result<Vec<Self::NoteRef>, Self::Error> {

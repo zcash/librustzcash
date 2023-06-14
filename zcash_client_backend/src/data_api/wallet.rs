@@ -119,7 +119,8 @@ where
 ///   can allow the sender to view the resulting notes on the blockchain.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
-///   spent. A value of 10 confirmations is recommended.
+///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
+///   not supported.
 ///
 /// # Examples
 ///
@@ -318,6 +319,10 @@ where
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<DataSource = DbT>,
 {
+    assert!(
+        min_confirmations > 0,
+        "zero-conf transactions are not supported"
+    );
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
         .map_err(Error::DataSource)?
@@ -372,6 +377,10 @@ where
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<DataSource = DbT>,
 {
+    assert!(
+        min_confirmations > 0,
+        "zero-conf transactions are not supported"
+    );
     input_selector
         .propose_transaction(
             params,
@@ -409,6 +418,10 @@ where
     DbT::NoteRef: Copy + Eq + Ord,
     InputsT: InputSelector<DataSource = DbT>,
 {
+    assert!(
+        min_confirmations > 0,
+        "zero-conf transactions are not supported"
+    );
     input_selector
         .propose_shielding(
             params,
@@ -453,6 +466,10 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
+    assert!(
+        min_confirmations > 0,
+        "zero-conf transactions are not supported"
+    );
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
         .map_err(Error::DataSource)?
@@ -495,8 +512,7 @@ where
                 selected,
                 usk.sapling(),
                 &dfvk,
-                min_confirmations
-                    .try_into()
+                usize::try_from(min_confirmations - 1)
                     .expect("min_confirmations should never be anywhere close to usize::MAX"),
             )?
             .ok_or(Error::NoteMismatch(selected.note_id))?;

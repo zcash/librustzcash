@@ -1,8 +1,8 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
 
 use core::marker::PhantomData;
-use std::collections::BTreeSet;
 use std::fmt;
+use std::{collections::BTreeSet, fmt::Debug};
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
@@ -121,6 +121,21 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// recipients).
     pub fn is_shielding(&self) -> bool {
         self.is_shielding
+    }
+}
+
+impl<FeeRuleT, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Proposal")
+            .field("transaction_request", &self.transaction_request)
+            .field("transparent_inputs", &self.transparent_inputs)
+            .field("sapling_inputs", &self.sapling_inputs.len())
+            .field("balance", &self.balance)
+            //.field("fee_rule", &self.fee_rule)
+            .field("min_target_height", &self.min_target_height)
+            .field("min_anchor_height", &self.min_anchor_height)
+            .field("is_shielding", &self.is_shielding)
+            .finish()
     }
 }
 

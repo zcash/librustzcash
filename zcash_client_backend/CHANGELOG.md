@@ -7,9 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
-- `impl Eq for zcash_client_backend::address::RecipientAddress`
-- `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
+- `impl Eq for address::RecipientAddress`
+- `impl Eq for zip321::{Payment, TransactionRequest}`
 - `data_api::NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
+- `WalletWrite::put_block`
+- `impl Debug` for `{data_api::wallet::input_selection::Proposal, wallet::ReceivedSaplingNote}
 
 ### Changed
 - MSRV is now 1.65.0.
@@ -21,9 +23,14 @@ and this library adheres to Rust's notion of
 - `WalletRead::get_nullifiers` has been renamed to `WalletRead::get_sapling_nullifiers`
   and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
 - `wallet::SpendableNote` has been renamed to `wallet::ReceivedSaplingNote`.
+- `data_api::chain::scan_cached_blocks` now takes a `from_height` argument that
+  permits the caller to control the starting position of the scan range.
+- `WalletWrite::advance_by_block` has been replaced by `WalletWrite::put_block`
+  to reflect the semantic change that scanning is no longer a linear operation.
 
 ### Removed
 - `WalletRead::get_all_nullifiers`
+- `WalletWrite::advance_by_block` 
 
 ## [0.9.0] - 2023-04-28
 ### Added

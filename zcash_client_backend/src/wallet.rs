@@ -175,6 +175,7 @@ impl<N> WalletSaplingOutput<N> {
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
+#[derive(Debug)]
 pub struct ReceivedSaplingNote<NoteRef> {
     pub note_id: NoteRef,
     pub diversifier: sapling::Diversifier,

@@ -175,7 +175,7 @@ where
     // comparing against the `validate_from` hash.
 
     block_source.with_blocks::<_, Infallible, Infallible>(
-        validate_from.map(|(h, _)| h),
+        validate_from.map(|(h, _)| h + 1),
         limit,
         move |block| {
             if let Some((valid_height, valid_hash)) = validate_from {
@@ -260,18 +260,20 @@ where
     );
 
     // Start at either the provided height, or where we synced up to previously.
-    let (last_scanned_height, commitment_tree_meta) = from_height.map_or_else(
+    let (from_height, commitment_tree_meta) = from_height.map_or_else(
         || {
             data_db.fully_scanned_height().map_or_else(
                 |e| Err(Error::Wallet(e)),
-                |next| Ok(next.map_or_else(|| (None, None), |(h, m)| (Some(h), Some(m)))),
+                |last_scanned| {
+                    Ok(last_scanned.map_or_else(|| (None, None), |(h, m)| (Some(h + 1), Some(m))))
+                },
             )
         },
         |h| Ok((Some(h), None)),
     )?;
 
     block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        last_scanned_height,
+        from_height,
         limit,
         |block: CompactBlock| {
             add_block_to_runner(params, block, &mut batch_runner);
@@ -282,7 +284,7 @@ where
     batch_runner.flush();
 
     block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        last_scanned_height,
+        from_height,
         limit,
         |block: CompactBlock| {
             let pruned_block = scan_block_with_runner(
@@ -308,9 +310,7 @@ where
                     .map(|out| (out.account(), *out.nf()))
             }));
 
-            data_db
-                .advance_by_block(pruned_block)
-                .map_err(Error::Wallet)?;
+            data_db.put_block(pruned_block).map_err(Error::Wallet)?;
 
             Ok(())
         },
