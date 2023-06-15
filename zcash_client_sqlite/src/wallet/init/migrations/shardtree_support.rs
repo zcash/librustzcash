@@ -20,7 +20,7 @@ use zcash_primitives::{
 
 use crate::wallet::{
     init::{migrations::received_notes_nullable_nf, WalletMigrationError},
-    sapling::commitment_tree::WalletDbSaplingShardStore,
+    sapling::commitment_tree::SqliteShardStore,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
@@ -87,10 +87,14 @@ impl RusqliteMigration for Migration {
                 checkpoint_id INTEGER NOT NULL,
                 mark_removed_position INTEGER NOT NULL,
                 FOREIGN KEY (checkpoint_id) REFERENCES sapling_tree_checkpoints(checkpoint_id)
+                ON DELETE CASCADE
             );",
         )?;
 
-        let shard_store = WalletDbSaplingShardStore::from_connection(transaction)?;
+        let shard_store =
+            SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+                transaction,
+            )?;
         let mut shard_tree: ShardTree<
             _,
             { sapling::NOTE_COMMITMENT_TREE_DEPTH },

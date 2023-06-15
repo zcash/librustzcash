@@ -292,6 +292,7 @@ pub mod testing {
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
     use incrementalmerkletree::frontier::testing::TestNode;
     use std::io::{self, Read, Write};
+    use zcash_encoding::Vector;
 
     use super::HashSer;
 
@@ -302,6 +303,23 @@ pub mod testing {
 
         fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
             writer.write_u64::<LittleEndian>(self.0)
+        }
+    }
+
+    impl HashSer for String {
+        fn read<R: Read>(reader: R) -> io::Result<String> {
+            Vector::read(reader, |r| r.read_u8()).and_then(|xs| {
+                String::from_utf8(xs).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Not a valid utf8 string: {:?}", e),
+                    )
+                })
+            })
+        }
+
+        fn write<W: Write>(&self, writer: W) -> io::Result<()> {
+            Vector::write(writer, self.as_bytes(), |w, b| w.write_u8(*b))
         }
     }
 }

@@ -66,9 +66,7 @@ use zcash_client_backend::{
     DecryptedOutput, TransferType,
 };
 
-use crate::{
-    error::SqliteClientError, wallet::sapling::commitment_tree::WalletDbSaplingShardStore,
-};
+use crate::{error::SqliteClientError, wallet::sapling::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "unstable")]
 use {
@@ -617,7 +615,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
 impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Connection, P> {
     type Error = Either<io::Error, rusqlite::Error>;
-    type SaplingShardStore<'a> = WalletDbSaplingShardStore<'a, 'a>;
+    type SaplingShardStore<'a> =
+        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
@@ -634,7 +633,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
             .conn
             .transaction()
             .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
-        let shard_store = WalletDbSaplingShardStore::from_connection(&tx)
+        let shard_store = SqliteShardStore::from_connection(&tx)
             .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
         let result = {
             let mut shardtree = ShardTree::new(shard_store, 100);
@@ -648,7 +647,8 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
 
 impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
     type Error = Either<io::Error, rusqlite::Error>;
-    type SaplingShardStore<'a> = WalletDbSaplingShardStore<'a, 'a>;
+    type SaplingShardStore<'a> =
+        SqliteShardStore<&'a rusqlite::Transaction<'a>, sapling::Node, SAPLING_SHARD_HEIGHT>;
 
     fn with_sapling_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
@@ -662,7 +662,7 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
         E: From<ShardTreeError<Either<io::Error, rusqlite::Error>>>,
     {
         let mut shardtree = ShardTree::new(
-            WalletDbSaplingShardStore::from_connection(self.conn.0)
+            SqliteShardStore::from_connection(self.conn.0)
                 .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?,
             100,
         );

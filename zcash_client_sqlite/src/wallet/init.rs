@@ -403,6 +403,7 @@ mod tests {
                 checkpoint_id INTEGER NOT NULL,
                 mark_removed_position INTEGER NOT NULL,
                 FOREIGN KEY (checkpoint_id) REFERENCES sapling_tree_checkpoints(checkpoint_id)
+                ON DELETE CASCADE
             )",
             "CREATE TABLE sapling_tree_checkpoints (
                 checkpoint_id INTEGER PRIMARY KEY,
