@@ -19,6 +19,8 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, NoteId};
 
+use super::memo_repr;
+
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;
@@ -407,9 +409,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":value": output.note().value().inner(),
         ":rcm": &rcm.as_ref(),
         ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
-        ":memo": output.memo()
-            .filter(|m| *m != &MemoBytes::empty())
-            .map(|m| m.as_slice()),
+        ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change()
     ];
 

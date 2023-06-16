@@ -115,6 +115,11 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     }
 }
 
+pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
+    memo.filter(|m| *m != &MemoBytes::empty())
+        .map(|m| m.as_slice())
+}
+
 pub(crate) fn get_max_account_id(
     conn: &rusqlite::Connection,
 ) -> Result<Option<AccountId>, SqliteClientError> {
@@ -1067,7 +1072,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
         ":to_address": &to_address,
         ":to_account": &to_account,
         ":value": &i64::from(value),
-        ":memo": &memo.filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+        ":memo": memo_repr(memo)
     ];
 
     stmt_upsert_sent_output.execute(sql_args)?;
