@@ -22,8 +22,6 @@ use crate::{error::SqliteClientError, NoteId};
 
 use super::memo_repr;
 
-pub(crate) mod commitment_tree;
-
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;

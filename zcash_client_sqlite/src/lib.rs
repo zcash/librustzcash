@@ -66,7 +66,7 @@ use zcash_client_backend::{
     DecryptedOutput, TransferType,
 };
 
-use crate::{error::SqliteClientError, wallet::sapling::commitment_tree::SqliteShardStore};
+use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "unstable")]
 use {

@@ -104,6 +104,7 @@ use {
     },
 };
 
+pub(crate) mod commitment_tree;
 pub mod init;
 pub(crate) mod sapling;
 

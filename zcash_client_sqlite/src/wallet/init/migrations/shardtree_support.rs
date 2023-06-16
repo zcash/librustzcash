@@ -19,8 +19,8 @@ use zcash_primitives::{
 };
 
 use crate::wallet::{
+    commitment_tree::SqliteShardStore,
     init::{migrations::received_notes_nullable_nf, WalletMigrationError},
-    sapling::commitment_tree::SqliteShardStore,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
