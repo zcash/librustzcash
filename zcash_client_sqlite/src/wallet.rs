@@ -626,13 +626,13 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         // Rewind received notes
         conn.execute(
             "DELETE FROM sapling_received_notes
-                WHERE id_note IN (
-                    SELECT rn.id_note
-                    FROM sapling_received_notes rn
-                    LEFT OUTER JOIN transactions tx
-                    ON tx.id_tx = rn.tx
-                    WHERE tx.block IS NOT NULL AND tx.block > ?
-                );",
+            WHERE id_note IN (
+                SELECT rn.id_note
+                FROM sapling_received_notes rn
+                LEFT OUTER JOIN transactions tx
+                ON tx.id_tx = rn.tx
+                WHERE tx.block IS NOT NULL AND tx.block > ?
+            );",
             [u32::from(block_height)],
         )?;
 
@@ -969,11 +969,11 @@ pub(crate) fn update_expired_notes(
     height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_update_expired = conn.prepare_cached(
-                    "UPDATE sapling_received_notes SET spent = NULL WHERE EXISTS (
-                        SELECT id_tx FROM transactions
-                        WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
-                    )",
-                )?;
+        "UPDATE sapling_received_notes SET spent = NULL WHERE EXISTS (
+            SELECT id_tx FROM transactions
+            WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
+        )",
+    )?;
     stmt_update_expired.execute([u32::from(height)])?;
     Ok(())
 }
