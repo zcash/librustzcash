@@ -523,16 +523,12 @@ pub(crate) fn block_height_extrema(
     conn: &rusqlite::Connection,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
     conn.query_row("SELECT MIN(height), MAX(height) FROM blocks", [], |row| {
-        let min_height: u32 = row.get(0)?;
-        let max_height: u32 = row.get(1)?;
-        Ok(Some((
-            BlockHeight::from(min_height),
-            BlockHeight::from(max_height),
-        )))
+        let min_height: Option<u32> = row.get(0)?;
+        let max_height: Option<u32> = row.get(1)?;
+        Ok(min_height
+            .map(BlockHeight::from)
+            .zip(max_height.map(BlockHeight::from)))
     })
-    //.optional() doesn't work here because a failed aggregate function
-    //produces a runtime error, not an empty set of rows.
-    .or(Ok(None))
 }
 
 /// Returns the block height at which the specified transaction was mined,
@@ -602,9 +598,8 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 
     // Recall where we synced up to previously.
     let last_scanned_height = conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
-        row.get(0)
-            .map(|h: u32| h.into())
-            .or_else(|_| Ok(sapling_activation_height - 1))
+        row.get::<_, Option<u32>>(0)
+            .map(|opt| opt.map_or_else(|| sapling_activation_height - 1, BlockHeight::from))
     })?;
 
     if block_height < last_scanned_height - PRUNING_HEIGHT {
