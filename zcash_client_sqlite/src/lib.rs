@@ -633,7 +633,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
             .conn
             .transaction()
             .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
-        let shard_store = SqliteShardStore::from_connection(&tx)
+        let shard_store = SqliteShardStore::from_connection(&tx, "sapling")
             .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
         let result = {
             let mut shardtree = ShardTree::new(shard_store, 100);
@@ -662,7 +662,7 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
         E: From<ShardTreeError<Either<io::Error, rusqlite::Error>>>,
     {
         let mut shardtree = ShardTree::new(
-            SqliteShardStore::from_connection(self.conn.0)
+            SqliteShardStore::from_connection(self.conn.0, "sapling")
                 .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?,
             100,
         );

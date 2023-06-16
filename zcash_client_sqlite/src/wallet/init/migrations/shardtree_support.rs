@@ -94,6 +94,7 @@ impl RusqliteMigration for Migration {
         let shard_store =
             SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
                 transaction,
+                "sapling",
             )?;
         let mut shard_tree: ShardTree<
             _,
