@@ -36,10 +36,10 @@ secrecy = "0.8"
 # - SQLite databases
 group = "0.13"
 jubjub = "0.10"
-rusqlite = { version = "0.25", features = ["bundled", "time", "array"] }
+rusqlite = { version = "0.29.0", features = ["bundled", "time", "array"] }
 schemer = "0.2"
-schemer-rusqlite = "0.2.1"
-time = "0.2"
+schemer-rusqlite = "0.2.2"
+time = "0.3.22"
 uuid = "1.1"
 
 # Dependencies used internally:

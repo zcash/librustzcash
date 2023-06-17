@@ -29,7 +29,7 @@ zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-fea
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Data Access API
-time = "0.2"
+time = "0.3.22"
 
 # - Encodings
 base64 = "0.21"
