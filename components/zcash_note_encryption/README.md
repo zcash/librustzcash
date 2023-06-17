@@ -12,6 +12,15 @@ users with their own existing types can similarly implement the trait themselves
 [`zcash_primitives`]: https://crates.io/crates/zcash_primitives
 [`orchard`]: https://crates.io/crates/orchard
 
+## Cross-Workspace Dependency Cycle
+
+There is a cross-workspace cyclic dependency: `zcash_client_backend` (local)
+depends on [`orchard`](https://github.com/zcash/orchard) which depends on this crate
+`zcash_note_encryption`. For this reason `zcash_client_backend` does not depend on the local
+`zcash_note_encryption` crate, but rather the published crate release.
+
+This issue is tracked in [#768](https://github.com/zcash/librustzcash/issues/768).
+
 ## License
 
 Licensed under either of

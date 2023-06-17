@@ -23,6 +23,7 @@ development = ["zcash_proofs"]
 incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
 zcash_address = { version = "0.3", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
+# Note: this is not the local workspace crate! See `components/zcash_note_encryption/README.md` for rationale:
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
 

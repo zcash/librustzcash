@@ -51,6 +51,7 @@ proptest = "1.0.0"
 rand_core = "0.6"
 regex = "1.4"
 tempfile = "3.5.0"
+# Note: this is not the local workspace crate! See `components/zcash_note_encryption/README.md` for rationale:
 zcash_note_encryption = "0.4"
 zcash_proofs = { version = "0.12", path = "../zcash_proofs" }
 zcash_primitives = { version = "0.12", path = "../zcash_primitives", features = ["test-dependencies"] }

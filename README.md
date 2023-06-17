@@ -7,6 +7,12 @@ working with Zcash.
 
 These libraries are currently under development and have not been fully-reviewed.
 
+## Cross-Workspace Dependency Cycle
+
+There is a complication in crate dependencies documented in
+[`components/zcash_note_encryption/README.md`](./components/zcash_note_encryption/README.md)
+and [issue #768](https://github.com/zcash/librustzcash/issues/768).
+
 ## License
 
 All code in this workspace is licensed under either of
