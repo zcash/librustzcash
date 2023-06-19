@@ -7,8 +7,8 @@ use criterion::Criterion;
 use group::{ff::Field, Group};
 use rand_core::{RngCore, SeedableRng};
 use rand_xorshift::XorShiftRng;
-use zcash_primitives::sapling::{Diversifier, ProofGenerationKey, ValueCommitment};
-use zcash_proofs::circuit::sapling::Spend;
+use zcash_primitives::sapling::{Diversifier, ProofGenerationKey};
+use zcash_proofs::circuit::sapling::{Spend, ValueCommitmentOpening};
 
 #[cfg(unix)]
 use pprof::criterion::{Output, PProfProfiler};
@@ -23,7 +23,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let groth_params = generate_random_parameters::<Bls12, _, _>(
         Spend {
-            value_commitment: None,
+            value_commitment_opening: None,
             proof_generation_key: None,
             payment_address: None,
             commitment_randomness: None,
@@ -36,7 +36,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     .unwrap();
 
     c.bench_function("sapling-spend-prove", |b| {
-        let value_commitment = ValueCommitment {
+        let value_commitment = ValueCommitmentOpening {
             value: 1,
             randomness: jubjub::Fr::random(&mut rng),
         };
@@ -72,9 +72,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             create_random_proof(
                 Spend {
-                    value_commitment: Some(value_commitment.clone()),
+                    value_commitment_opening: Some(value_commitment.clone()),
                     proof_generation_key: Some(proof_generation_key.clone()),
-                    payment_address: Some(payment_address.clone()),
+                    payment_address: Some(payment_address),
                     commitment_randomness: Some(commitment_randomness),
                     ar: Some(ar),
                     auth_path: auth_path.clone(),

@@ -169,20 +169,7 @@ pub trait Domain {
     fn kdf(secret: Self::SharedSecret, ephemeral_key: &EphemeralKeyBytes) -> Self::SymmetricKey;
 
     /// Encodes the given `Note` and `Memo` as a note plaintext.
-    ///
-    /// # Future breaking changes
-    ///
-    /// The `recipient` argument is present as a secondary way to obtain the diversifier;
-    /// this is due to a historical quirk of how the Sapling `Note` struct was implemented
-    /// in the `zcash_primitives` crate. `recipient` will be removed from this method in a
-    /// future crate release, once [`zcash_primitives` has been refactored].
-    ///
-    /// [`zcash_primitives` has been refactored]: https://github.com/zcash/librustzcash/issues/454
-    fn note_plaintext_bytes(
-        note: &Self::Note,
-        recipient: &Self::Recipient,
-        memo: &Self::Memo,
-    ) -> Self::NotePlaintextBytes;
+    fn note_plaintext_bytes(note: &Self::Note, memo: &Self::Memo) -> Self::NotePlaintextBytes;
 
     /// Derives the [`OutgoingCipherKey`] for an encrypted note, given the note-specific
     /// public data and an `OutgoingViewingKey`.
@@ -236,8 +223,6 @@ pub trait Domain {
     ///   which may be passed via `self`).
     /// - The note plaintext contains valid encodings of its various fields.
     /// - Any domain-specific requirements are satisfied.
-    /// - `ephemeral_key` can be derived from `esk` and the diversifier within the note
-    ///   plaintext.
     ///
     /// `&self` is passed here to enable the implementation to enforce contextual checks,
     /// such as rules like [ZIP 212] that become active at a specific block height.
@@ -246,8 +231,6 @@ pub trait Domain {
     fn parse_note_plaintext_without_memo_ovk(
         &self,
         pk_d: &Self::DiversifiedTransmissionKey,
-        esk: &Self::EphemeralSecretKey,
-        ephemeral_key: &EphemeralKeyBytes,
         plaintext: &Self::CompactNotePlaintextBytes,
     ) -> Option<(Self::Note, Self::Recipient)>;
 
@@ -345,7 +328,6 @@ pub struct NoteEncryption<D: Domain> {
     epk: D::EphemeralPublicKey,
     esk: D::EphemeralSecretKey,
     note: D::Note,
-    to: D::Recipient,
     memo: D::Memo,
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<D::OutgoingViewingKey>,
@@ -354,18 +336,12 @@ pub struct NoteEncryption<D: Domain> {
 impl<D: Domain> NoteEncryption<D> {
     /// Construct a new note encryption context for the specified note,
     /// recipient, and memo.
-    pub fn new(
-        ovk: Option<D::OutgoingViewingKey>,
-        note: D::Note,
-        to: D::Recipient,
-        memo: D::Memo,
-    ) -> Self {
+    pub fn new(ovk: Option<D::OutgoingViewingKey>, note: D::Note, memo: D::Memo) -> Self {
         let esk = D::derive_esk(&note).expect("ZIP 212 is active.");
         NoteEncryption {
             epk: D::ka_derive_public(&note, &esk),
             esk,
             note,
-            to,
             memo,
             ovk,
         }
@@ -380,14 +356,12 @@ impl<D: Domain> NoteEncryption<D> {
         esk: D::EphemeralSecretKey,
         ovk: Option<D::OutgoingViewingKey>,
         note: D::Note,
-        to: D::Recipient,
         memo: D::Memo,
     ) -> Self {
         NoteEncryption {
             epk: D::ka_derive_public(&note, &esk),
             esk,
             note,
-            to,
             memo,
             ovk,
         }
@@ -408,7 +382,7 @@ impl<D: Domain> NoteEncryption<D> {
         let pk_d = D::get_pk_d(&self.note);
         let shared_secret = D::ka_agree_enc(&self.esk, &pk_d);
         let key = D::kdf(shared_secret, &D::epk_bytes(&self.epk));
-        let mut input = D::note_plaintext_bytes(&self.note, &self.to, &self.memo);
+        let mut input = D::note_plaintext_bytes(&self.note, &self.memo);
 
         let output = input.as_mut();
 
@@ -523,6 +497,8 @@ fn check_note_validity<D: Domain>(
     cmstar_bytes: &D::ExtractedCommitmentBytes,
 ) -> NoteValidity {
     if &D::ExtractedCommitmentBytes::from(&D::cmstar(note)) == cmstar_bytes {
+        // In the case corresponding to specification section 4.19.3, we check that `esk` is equal
+        // to `D::derive_esk(note)` prior to calling this method.
         if let Some(derived_esk) = D::derive_esk(note) {
             if D::epk_bytes(&D::ka_derive_public(note, &derived_esk))
                 .ct_eq(ephemeral_key)
@@ -656,11 +632,11 @@ pub fn try_output_recovery_with_ock<D: Domain, Output: ShieldedOutput<D>>(
 
     let (compact, memo) = domain.extract_memo(&plaintext.as_ref().into());
 
-    let (note, to) =
-        domain.parse_note_plaintext_without_memo_ovk(&pk_d, &esk, &ephemeral_key, &compact)?;
+    let (note, to) = domain.parse_note_plaintext_without_memo_ovk(&pk_d, &compact)?;
 
-    // ZIP 212: Check that the esk provided to this function is consistent with the esk we
-    // can derive from the note.
+    // ZIP 212: Check that the esk provided to this function is consistent with the esk we can
+    // derive from the note. This check corresponds to `ToScalar(PRF^{expand}_{rseed}([4]) = esk`
+    // in https://zips.z.cash/protocol/protocol.pdf#decryptovk. (`ρ^opt = []` for Sapling.)
     if let Some(derived_esk) = D::derive_esk(&note) {
         if (!derived_esk.ct_eq(&esk)).into() {
             return None;

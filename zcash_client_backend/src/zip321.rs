@@ -7,6 +7,7 @@
 use core::fmt::Debug;
 use std::collections::HashMap;
 
+use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use nom::{
     character::complete::char, combinator::all_consuming, multi::separated_list0,
     sequence::preceded,
@@ -25,12 +26,22 @@ use crate::address::RecipientAddress;
 /// Errors that may be produced in decoding of payment requests.
 #[derive(Debug)]
 pub enum Zip321Error {
+    /// A memo field in the ZIP 321 URI was not properly base-64 encoded
     InvalidBase64(base64::DecodeError),
+    /// A memo value exceeded 512 bytes in length or could not be interpreted as a UTF-8 string
+    /// when using a valid UTF-8 lead byte.
     MemoBytesError(memo::Error),
+    /// The ZIP 321 request included more payments than can be created within a single Zcash
+    /// transaction. The wrapped value is the number of payments in the request.
     TooManyPayments(usize),
+    /// Parsing encountered a duplicate ZIP 321 URI parameter for the returned payment index.
     DuplicateParameter(parse::Param, usize),
+    /// The payment at the wrapped index attempted to include a memo when sending to a
+    /// transparent recipient address, which is not supported by the protocol.
     TransparentMemo(usize),
+    /// The payment at the wrapped index did not include a recipient address.
     RecipientMissing(usize),
+    /// The ZIP 321 URI was malformed and failed to parse.
     ParseError(String),
 }
 
@@ -38,20 +49,21 @@ pub enum Zip321Error {
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
 pub fn memo_to_base64(memo: &MemoBytes) -> String {
-    base64::encode_config(memo.as_slice(), base64::URL_SAFE_NO_PAD)
+    BASE64_URL_SAFE_NO_PAD.encode(memo.as_slice())
 }
 
 /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
 pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
-    base64::decode_config(s, base64::URL_SAFE_NO_PAD)
+    BASE64_URL_SAFE_NO_PAD
+        .decode(s)
         .map_err(Zip321Error::InvalidBase64)
         .and_then(|b| MemoBytes::from_bytes(&b).map_err(Zip321Error::MemoBytesError))
 }
 
 /// A single payment being requested.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Payment {
     /// The payment address to which the payment should be sent.
     pub recipient_address: RecipientAddress,
@@ -109,12 +121,17 @@ impl Payment {
 /// When constructing a transaction in response to such a request,
 /// a separate output should be added to the transaction for each
 /// payment value in the request.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TransactionRequest {
     payments: Vec<Payment>,
 }
 
 impl TransactionRequest {
+    /// Constructs a new empty transaction request.
+    pub fn empty() -> Self {
+        Self { payments: vec![] }
+    }
+
     /// Constructs a new transaction request that obeys the ZIP-321 invariants
     pub fn new(payments: Vec<Payment>) -> Result<TransactionRequest, Zip321Error> {
         let request = TransactionRequest { payments };
@@ -233,11 +250,15 @@ impl TransactionRequest {
             parse::lead_addr(params)(uri).map_err(|e| Zip321Error::ParseError(e.to_string()))?;
 
         // Parse the remaining parameters as an undifferentiated list
-        let (_, xs) = all_consuming(preceded(
-            char('?'),
-            separated_list0(char('&'), parse::zcashparam(params)),
-        ))(rest)
-        .map_err(|e| Zip321Error::ParseError(e.to_string()))?;
+        let (_, xs) = if rest.is_empty() {
+            ("", vec![])
+        } else {
+            all_consuming(preceded(
+                char('?'),
+                separated_list0(char('&'), parse::zcashparam(params)),
+            ))(rest)
+            .map_err(|e| Zip321Error::ParseError(e.to_string()))?
+        };
 
         // Construct sets of payment parameters, keyed by the payment index.
         let mut params_by_index: HashMap<usize, Vec<parse::Param>> = HashMap::new();
@@ -374,7 +395,7 @@ mod parse {
     use core::fmt::Debug;
 
     use nom::{
-        bytes::complete::{tag, take_until},
+        bytes::complete::{tag, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
         combinator::{map_opt, map_res, opt, recognize},
         sequence::{preceded, separated_pair, tuple},
@@ -391,7 +412,7 @@ mod parse {
 
     /// A data type that defines the possible parameter types which may occur within a
     /// ZIP 321 URI.
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq)]
     pub enum Param {
         Addr(Box<RecipientAddress>),
         Amount(Amount),
@@ -476,7 +497,7 @@ mod parse {
     ) -> impl Fn(&str) -> IResult<&str, Option<IndexedParam>> + '_ {
         move |input: &str| {
             map_opt(
-                preceded(tag("zcash:"), take_until("?")),
+                preceded(tag("zcash:"), take_till(|c| c == '?')),
                 |addr_str: &str| {
                     if addr_str.is_empty() {
                         Some(None) // no address is ok, so wrap in `Some`
@@ -798,6 +819,27 @@ mod tests {
                     memo: None,
                     label: None,
                     message: Some("".to_string()),
+                    other_params: vec![],
+                }
+            ]
+        };
+
+        assert_eq!(parse_result, expected);
+    }
+
+    #[test]
+    fn test_zip321_parse_no_query_params() {
+        let uri = "zcash:ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k";
+        let parse_result = TransactionRequest::from_uri(&TEST_NETWORK, uri).unwrap();
+
+        let expected = TransactionRequest {
+            payments: vec![
+                Payment {
+                    recipient_address: RecipientAddress::Shielded(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    amount: Amount::from_u64(0).unwrap(),
+                    memo: None,
+                    label: None,
+                    message: None,
                     other_params: vec![],
                 }
             ]

@@ -7,6 +7,46 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.12.0] - 2023-06-06
+### Changed
+- Bumped dependencies to `incrementalmerkletree 0.4`, `zcash_primitives 0.12`
+- MSRV is now 1.65.0.
+
+### Removed
+- `circuit::sapling::TREE_DEPTH` use `zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH` instead
+
+## [0.11.0] - 2023-04-15
+### Changed
+- Bumped dependencies to `bls12_381 0.8`, `group 0.13`, `jubjub 0.10`,
+  `bellman 0.14`, `redjubjub 0.7`, `zcash_primitives 0.11`.
+
+## [0.10.0] - 2023-02-01
+### Added
+- `zcash_proofs::circuit::sapling`:
+  - `ValueCommitmentOpening`
+  - A `value_commitment_opening` field on `Spend` and `Output`.
+
+### Changed
+- MSRV is now 1.60.0.
+- Bumped dependencies to `zcash_primitives 0.10`.
+- Note commitments now use
+  `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
+  `bls12_381::Scalar` in `zcash_proofs::sapling`:
+  - `SaplingVerificationContext::check_output`
+- Value commitments now use `zcash_primitives::sapling::value::ValueCommitment`
+  instead of `jubjub::ExtendedPoint` in `zcash_proofs::sapling`:
+  - `SaplingProvingContext::{spend_proof, output_proof}`
+  - `SaplingVerificationContext::{check_spend, check_output}`
+
+### Removed
+- `zcash_proofs::circuit::sapling`:
+  - The `value_commitment` field of `Spend` and `Output` (use
+    `value_commitment_opening` instead).
+
+## [0.9.0] - 2022-11-12
+### Changed
+- Bumped dependencies to `zcash_primitives 0.9`.
+
 ## [0.8.0] - 2022-10-19
 ### Changed
 - Bumped dependencies to `zcash_primitives 0.8`.

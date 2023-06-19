@@ -1,10 +1,10 @@
 //! Abstractions over the proving system and parameters.
 
 use crate::{
-    merkle_tree::MerklePath,
     sapling::{
+        self,
         redjubjub::{PublicKey, Signature},
-        Node,
+        value::ValueCommitment,
     },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
@@ -34,8 +34,8 @@ pub trait TxProver {
         ar: jubjub::Fr,
         value: u64,
         anchor: bls12_381::Scalar,
-        merkle_path: MerklePath<Node>,
-    ) -> Result<([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint, PublicKey), ()>;
+        merkle_path: sapling::MerklePath,
+    ) -> Result<([u8; GROTH_PROOF_SIZE], ValueCommitment, PublicKey), ()>;
 
     /// Create the value commitment and proof for a Sapling [`OutputDescription`],
     /// while accumulating its value commitment randomness inside the context for later
@@ -49,7 +49,7 @@ pub trait TxProver {
         payment_address: PaymentAddress,
         rcm: jubjub::Fr,
         value: u64,
-    ) -> ([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint);
+    ) -> ([u8; GROTH_PROOF_SIZE], ValueCommitment);
 
     /// Create the `bindingSig` for a Sapling transaction. All calls to
     /// [`TxProver::spend_proof`] and [`TxProver::output_proof`] must be completed before
@@ -64,20 +64,19 @@ pub trait TxProver {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod mock {
-    use ff::Field;
     use rand_core::OsRng;
 
+    use super::TxProver;
     use crate::{
         constants::SPENDING_KEY_GENERATOR,
-        merkle_tree::MerklePath,
         sapling::{
+            self,
             redjubjub::{PublicKey, Signature},
-            Diversifier, Node, PaymentAddress, ProofGenerationKey, Rseed, ValueCommitment,
+            value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+            Diversifier, PaymentAddress, ProofGenerationKey, Rseed,
         },
         transaction::components::{Amount, GROTH_PROOF_SIZE},
     };
-
-    use super::TxProver;
 
     pub struct MockTxProver;
 
@@ -95,16 +94,13 @@ pub mod mock {
             ar: jubjub::Fr,
             value: u64,
             _anchor: bls12_381::Scalar,
-            _merkle_path: MerklePath<Node>,
-        ) -> Result<([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint, PublicKey), ()> {
+            _merkle_path: sapling::MerklePath,
+        ) -> Result<([u8; GROTH_PROOF_SIZE], ValueCommitment, PublicKey), ()> {
             let mut rng = OsRng;
 
-            let cv = ValueCommitment {
-                value,
-                randomness: jubjub::Fr::random(&mut rng),
-            }
-            .commitment()
-            .into();
+            let value = NoteValue::from_raw(value);
+            let rcv = ValueCommitTrapdoor::random(&mut rng);
+            let cv = ValueCommitment::derive(value, rcv);
 
             let rk =
                 PublicKey(proof_generation_key.ak.into()).randomize(ar, SPENDING_KEY_GENERATOR);
@@ -119,15 +115,12 @@ pub mod mock {
             _payment_address: PaymentAddress,
             _rcm: jubjub::Fr,
             value: u64,
-        ) -> ([u8; GROTH_PROOF_SIZE], jubjub::ExtendedPoint) {
+        ) -> ([u8; GROTH_PROOF_SIZE], ValueCommitment) {
             let mut rng = OsRng;
 
-            let cv = ValueCommitment {
-                value,
-                randomness: jubjub::Fr::random(&mut rng),
-            }
-            .commitment()
-            .into();
+            let value = NoteValue::from_raw(value);
+            let rcv = ValueCommitTrapdoor::random(&mut rng);
+            let cv = ValueCommitment::derive(value, rcv);
 
             ([0u8; GROTH_PROOF_SIZE], cv)
         }

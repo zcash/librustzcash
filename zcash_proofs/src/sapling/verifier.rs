@@ -1,12 +1,14 @@
 use bellman::{gadgets::multipack, groth16::Proof};
 use bls12_381::Bls12;
-use group::{Curve, GroupEncoding};
+use group::{ff::PrimeField, Curve, GroupEncoding};
 use zcash_primitives::{
-    sapling::redjubjub::{PublicKey, Signature},
+    sapling::{
+        note::ExtractedNoteCommitment,
+        redjubjub::{PublicKey, Signature},
+        value::{CommitmentSum, ValueCommitment},
+    },
     transaction::components::Amount,
 };
-
-use super::compute_value_balance;
 
 mod single;
 pub use single::SaplingVerificationContext;
@@ -17,14 +19,14 @@ pub use batch::BatchValidator;
 /// A context object for verifying the Sapling components of a Zcash transaction.
 struct SaplingVerificationContextInner {
     // (sum of the Spend value commitments) - (sum of the Output value commitments)
-    cv_sum: jubjub::ExtendedPoint,
+    cv_sum: CommitmentSum,
 }
 
 impl SaplingVerificationContextInner {
     /// Construct a new context to be used with a single transaction.
     fn new() -> Self {
         SaplingVerificationContextInner {
-            cv_sum: jubjub::ExtendedPoint::identity(),
+            cv_sum: CommitmentSum::zero(),
         }
     }
 
@@ -33,18 +35,21 @@ impl SaplingVerificationContextInner {
     #[allow(clippy::too_many_arguments)]
     fn check_spend<C>(
         &mut self,
-        cv: jubjub::ExtendedPoint,
+        cv: &ValueCommitment,
         anchor: bls12_381::Scalar,
         nullifier: &[u8; 32],
-        rk: PublicKey,
+        rk: &PublicKey,
         sighash_value: &[u8; 32],
-        spend_auth_sig: Signature,
+        spend_auth_sig: &Signature,
         zkproof: Proof<Bls12>,
         verifier_ctx: &mut C,
-        spend_auth_sig_verifier: impl FnOnce(&mut C, PublicKey, [u8; 64], Signature) -> bool,
+        spend_auth_sig_verifier: impl FnOnce(&mut C, &PublicKey, [u8; 64], &Signature) -> bool,
         proof_verifier: impl FnOnce(&mut C, Proof<Bls12>, [bls12_381::Scalar; 7]) -> bool,
     ) -> bool {
-        if (cv.is_small_order() | rk.0.is_small_order()).into() {
+        // The "cv is not small order" happens when a SpendDescription is deserialized.
+        // This happens when transactions or blocks are received over the network, or when
+        // mined blocks are introduced via the `submitblock` RPC method on full nodes.
+        if rk.0.is_small_order().into() {
             return false;
         }
 
@@ -74,7 +79,7 @@ impl SaplingVerificationContextInner {
             public_input[1] = v;
         }
         {
-            let affine = cv.to_affine();
+            let affine = cv.as_inner().to_affine();
             let (u, v) = (affine.get_u(), affine.get_v());
             public_input[2] = u;
             public_input[3] = v;
@@ -100,13 +105,16 @@ impl SaplingVerificationContextInner {
     /// accumulating its value commitment inside the context for later use.
     fn check_output(
         &mut self,
-        cv: jubjub::ExtendedPoint,
-        cmu: bls12_381::Scalar,
+        cv: &ValueCommitment,
+        cmu: ExtractedNoteCommitment,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
         proof_verifier: impl FnOnce(Proof<Bls12>, [bls12_381::Scalar; 5]) -> bool,
     ) -> bool {
-        if (cv.is_small_order() | epk.is_small_order()).into() {
+        // The "cv is not small order" happens when an OutputDescription is deserialized.
+        // This happens when transactions or blocks are received over the network, or when
+        // mined blocks are introduced via the `submitblock` RPC method on full nodes.
+        if epk.is_small_order().into() {
             return false;
         }
 
@@ -116,7 +124,7 @@ impl SaplingVerificationContextInner {
         // Construct public input for circuit
         let mut public_input = [bls12_381::Scalar::zero(); 5];
         {
-            let affine = cv.to_affine();
+            let affine = cv.as_inner().to_affine();
             let (u, v) = (affine.get_u(), affine.get_v());
             public_input[0] = u;
             public_input[1] = v;
@@ -127,7 +135,7 @@ impl SaplingVerificationContextInner {
             public_input[2] = u;
             public_input[3] = v;
         }
-        public_input[4] = cmu;
+        public_input[4] = bls12_381::Scalar::from_repr(cmu.to_bytes()).unwrap();
 
         // Verify the proof
         proof_verifier(zkproof, public_input)
@@ -143,17 +151,8 @@ impl SaplingVerificationContextInner {
         binding_sig: Signature,
         binding_sig_verifier: impl FnOnce(PublicKey, [u8; 64], Signature) -> bool,
     ) -> bool {
-        // Obtain current cv_sum from the context
-        let mut bvk = PublicKey(self.cv_sum);
-
-        // Compute value balance
-        let value_balance = match compute_value_balance(value_balance) {
-            Some(a) => a,
-            None => return false,
-        };
-
-        // Subtract value_balance from current cv_sum to get final bvk
-        bvk.0 -= value_balance;
+        // Compute the final bvk.
+        let bvk = self.cv_sum.into_bvk(value_balance);
 
         // Compute the signature's message for bvk/binding_sig
         let mut data_to_be_signed = [0u8; 64];

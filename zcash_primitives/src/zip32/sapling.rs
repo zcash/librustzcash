@@ -417,7 +417,7 @@ impl ExtendedSpendingKey {
     /// Returns the address with the lowest valid diversifier index, along with
     /// the diversifier index that generated that address.
     pub fn default_address(&self) -> (DiversifierIndex, PaymentAddress) {
-        ExtendedFullViewingKey::from(self).default_address()
+        self.to_diversifiable_full_viewing_key().default_address()
     }
 
     /// Derives an internal spending key given an external spending key.
@@ -456,15 +456,22 @@ impl ExtendedSpendingKey {
         }
     }
 
+    #[deprecated(note = "Use `to_diversifiable_full_viewing_key` instead.")]
     pub fn to_extended_full_viewing_key(&self) -> ExtendedFullViewingKey {
-        self.into()
+        ExtendedFullViewingKey {
+            depth: self.depth,
+            parent_fvk_tag: self.parent_fvk_tag,
+            child_index: self.child_index,
+            chain_code: self.chain_code,
+            fvk: FullViewingKey::from_expanded_spending_key(&self.expsk),
+            dk: self.dk,
+        }
     }
 
     pub fn to_diversifiable_full_viewing_key(&self) -> DiversifiableFullViewingKey {
-        let extfvk = self.to_extended_full_viewing_key();
         DiversifiableFullViewingKey {
-            fvk: extfvk.fvk,
-            dk: extfvk.dk,
+            fvk: FullViewingKey::from_expanded_spending_key(&self.expsk),
+            dk: self.dk,
         }
     }
 }
@@ -500,19 +507,6 @@ impl std::fmt::Debug for ExtendedFullViewingKey {
             "ExtendedFullViewingKey(d = {}, tag_p = {:?}, i = {:?})",
             self.depth, self.parent_fvk_tag, self.child_index
         )
-    }
-}
-
-impl<'a> From<&'a ExtendedSpendingKey> for ExtendedFullViewingKey {
-    fn from(xsk: &ExtendedSpendingKey) -> Self {
-        ExtendedFullViewingKey {
-            depth: xsk.depth,
-            parent_fvk_tag: xsk.parent_fvk_tag,
-            child_index: xsk.child_index,
-            chain_code: xsk.chain_code,
-            fvk: FullViewingKey::from_expanded_spending_key(&xsk.expsk),
-            dk: xsk.dk,
-        }
     }
 }
 
@@ -752,6 +746,14 @@ impl DiversifiableFullViewingKey {
         sapling_default_address(&self.fvk, &self.dk)
     }
 
+    /// Returns the payment address corresponding to the specified diversifier, if any.
+    ///
+    /// In general, it is preferable to use `find_address` instead, but this method is
+    /// useful in some cases for matching keys to existing payment addresses.
+    pub fn diversified_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
+        self.fvk.vk.to_payment_address(diversifier)
+    }
+
     /// Returns the internal address corresponding to the smallest valid diversifier index,
     /// along with that index.
     ///
@@ -760,6 +762,17 @@ impl DiversifiableFullViewingKey {
     pub fn change_address(&self) -> (DiversifierIndex, PaymentAddress) {
         let internal_dfvk = self.derive_internal();
         sapling_default_address(&internal_dfvk.fvk, &internal_dfvk.dk)
+    }
+
+    /// Returns the change address corresponding to the specified diversifier, if any.
+    ///
+    /// In general, it is preferable to use `change_address` instead, but this method is
+    /// useful in some cases for matching keys to existing payment addresses.
+    pub fn diversified_change_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
+        self.derive_internal()
+            .fvk
+            .vk
+            .to_payment_address(diversifier)
     }
 
     /// Attempts to decrypt the given address's diversifier with this full viewing key.
@@ -798,24 +811,26 @@ mod tests {
     use group::GroupEncoding;
 
     #[test]
+    #[allow(deprecated)]
     fn derive_nonhardened_child() {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
-        let xfvk_m = ExtendedFullViewingKey::from(&xsk_m);
+        let xfvk_m = xsk_m.to_extended_full_viewing_key();
 
         let i_5 = ChildIndex::NonHardened(5);
         let xsk_5 = xsk_m.derive_child(i_5);
         let xfvk_5 = xfvk_m.derive_child(i_5);
 
         assert!(xfvk_5.is_ok());
-        assert_eq!(ExtendedFullViewingKey::from(&xsk_5), xfvk_5.unwrap());
+        assert_eq!(xsk_5.to_extended_full_viewing_key(), xfvk_5.unwrap());
     }
 
     #[test]
+    #[allow(deprecated)]
     fn derive_hardened_child() {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
-        let xfvk_m = ExtendedFullViewingKey::from(&xsk_m);
+        let xfvk_m = xsk_m.to_extended_full_viewing_key();
 
         let i_5h = ChildIndex::Hardened(5);
         let xsk_5h = xsk_m.derive_child(i_5h);
@@ -823,7 +838,7 @@ mod tests {
 
         // Cannot derive a hardened child from an ExtendedFullViewingKey
         assert!(xfvk_5h.is_err());
-        let xfvk_5h = ExtendedFullViewingKey::from(&xsk_5h);
+        let xfvk_5h = xsk_5h.to_extended_full_viewing_key();
 
         let i_7 = ChildIndex::NonHardened(7);
         let xsk_5h_7 = xsk_5h.derive_child(i_7);
@@ -831,7 +846,7 @@ mod tests {
 
         // But we *can* derive a non-hardened child from a hardened parent
         assert!(xfvk_5h_7.is_ok());
-        assert_eq!(ExtendedFullViewingKey::from(&xsk_5h_7), xfvk_5h_7.unwrap());
+        assert_eq!(xsk_5h_7.to_extended_full_viewing_key(), xfvk_5h_7.unwrap());
     }
 
     #[test]
@@ -933,7 +948,8 @@ mod tests {
     fn dfvk_round_trip() {
         let dfvk = {
             let extsk = ExtendedSpendingKey::master(&[]);
-            let extfvk = ExtendedFullViewingKey::from(&extsk);
+            #[allow(deprecated)]
+            let extfvk = extsk.to_extended_full_viewing_key();
             DiversifiableFullViewingKey::from(extfvk)
         };
 
@@ -953,7 +969,7 @@ mod tests {
     fn address() {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
-        let xfvk_m = ExtendedFullViewingKey::from(&xsk_m);
+        let xfvk_m = xsk_m.to_diversifiable_full_viewing_key();
         let j_0 = DiversifierIndex::new();
         let addr_m = xfvk_m.address(j_0).unwrap();
         assert_eq!(
@@ -980,10 +996,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn read_write() {
         let seed = [0; 32];
         let xsk = ExtendedSpendingKey::master(&seed);
-        let fvk = ExtendedFullViewingKey::from(&xsk);
+        let fvk = xsk.to_extended_full_viewing_key();
 
         let mut ser = vec![];
         xsk.write(&mut ser).unwrap();
@@ -997,6 +1014,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_vectors() {
         struct TestVector {
             ask: Option<[u8; 32]>,
@@ -1689,13 +1707,13 @@ mod tests {
         let m = ExtendedSpendingKey::master(&seed);
         let m_1 = m.derive_child(i1);
         let m_1_2h = ExtendedSpendingKey::from_path(&m, &[i1, i2h]);
-        let m_1_2hv = ExtendedFullViewingKey::from(&m_1_2h);
+        let m_1_2hv = m_1_2h.to_extended_full_viewing_key();
         let m_1_2hv_3 = m_1_2hv.derive_child(i3).unwrap();
 
         let xfvks = [
-            ExtendedFullViewingKey::from(&m),
-            ExtendedFullViewingKey::from(&m_1),
-            ExtendedFullViewingKey::from(&m_1_2h),
+            m.to_extended_full_viewing_key(),
+            m_1.to_extended_full_viewing_key(),
+            m_1_2h.to_extended_full_viewing_key(),
             m_1_2hv, // Appears twice so we can de-duplicate test code below
             m_1_2hv_3,
         ];

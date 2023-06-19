@@ -6,10 +6,37 @@ use zcash_address::{
     unified::{self, Container, Encoding},
     ConversionError, Network, ToAddress, TryFromRawAddress, ZcashAddress,
 };
-use zcash_primitives::{consensus, legacy::TransparentAddress, sapling::PaymentAddress};
+use zcash_primitives::{
+    consensus,
+    legacy::TransparentAddress,
+    sapling::PaymentAddress,
+    zip32::{AccountId, DiversifierIndex},
+};
+
+pub struct AddressMetadata {
+    account: AccountId,
+    diversifier_index: DiversifierIndex,
+}
+
+impl AddressMetadata {
+    pub fn new(account: AccountId, diversifier_index: DiversifierIndex) -> Self {
+        Self {
+            account,
+            diversifier_index,
+        }
+    }
+
+    pub fn account(&self) -> AccountId {
+        self.account
+    }
+
+    pub fn diversifier_index(&self) -> &DiversifierIndex {
+        &self.diversifier_index
+    }
+}
 
 /// A Unified Address.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnifiedAddress {
     orchard: Option<orchard::Address>,
     sapling: Option<PaymentAddress>,
@@ -147,7 +174,7 @@ impl UnifiedAddress {
 
 /// An address that funds can be sent to.
 // TODO: rename to ParsedAddress
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RecipientAddress {
     Shielded(PaymentAddress),
     Transparent(TransparentAddress),
@@ -226,7 +253,7 @@ impl RecipientAddress {
 #[cfg(test)]
 mod tests {
     use zcash_address::test_vectors;
-    use zcash_primitives::{consensus::MAIN_NETWORK, zip32::ExtendedFullViewingKey};
+    use zcash_primitives::consensus::MAIN_NETWORK;
 
     use super::{RecipientAddress, UnifiedAddress};
     use crate::keys::sapling;
@@ -241,8 +268,8 @@ mod tests {
 
         let sapling = {
             let extsk = sapling::spending_key(&[0; 32], 0, 0.into());
-            let extfvk = ExtendedFullViewingKey::from(&extsk);
-            Some(extfvk.default_address().1)
+            let dfvk = extsk.to_diversifiable_full_viewing_key();
+            Some(dfvk.default_address().1)
         };
 
         let transparent = { None };

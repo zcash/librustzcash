@@ -107,7 +107,7 @@ impl InputNote {
             // if enforce is one, they must be equal
             cs.enforce(
                 || format!("conditionally enforce correct root for bit {}", i),
-                |_| cur.lc(CS::one(), Scalar::one()) - &rt.lc(CS::one(), Scalar::one()),
+                |_| cur.lc(CS::one(), Scalar::ONE) - &rt.lc(CS::one(), Scalar::ONE),
                 |lc| lc + enforce.get_variable(),
                 |lc| lc,
             );
@@ -156,9 +156,9 @@ where
         //   x = rhs
         cs.enforce(
             || "conditional swap for x",
-            |lc| lc + &rhs.lc(CS::one(), Scalar::one()) - &lhs.lc(CS::one(), Scalar::one()),
+            |lc| lc + &rhs.lc(CS::one(), Scalar::ONE) - &lhs.lc(CS::one(), Scalar::ONE),
             |lc| lc + condition.get_variable(),
-            |lc| lc + &x.lc(CS::one(), Scalar::one()) - &lhs.lc(CS::one(), Scalar::one()),
+            |lc| lc + &x.lc(CS::one(), Scalar::ONE) - &lhs.lc(CS::one(), Scalar::ONE),
         );
 
         let y = Boolean::from(AllocatedBit::alloc(
@@ -172,9 +172,9 @@ where
         // y - rhs = condition (lhs - rhs)
         cs.enforce(
             || "conditional swap for y",
-            |lc| lc + &lhs.lc(CS::one(), Scalar::one()) - &rhs.lc(CS::one(), Scalar::one()),
+            |lc| lc + &lhs.lc(CS::one(), Scalar::ONE) - &rhs.lc(CS::one(), Scalar::ONE),
             |lc| lc + condition.get_variable(),
-            |lc| lc + &y.lc(CS::one(), Scalar::one()) - &rhs.lc(CS::one(), Scalar::one()),
+            |lc| lc + &y.lc(CS::one(), Scalar::ONE) - &rhs.lc(CS::one(), Scalar::ONE),
         );
 
         new_lhs.push(x);

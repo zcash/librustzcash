@@ -47,9 +47,9 @@ impl BatchValidator {
 
         let mut ctx = SaplingVerificationContextInner::new();
 
-        for spend in bundle.shielded_spends {
+        for spend in bundle.shielded_spends() {
             // Deserialize the proof
-            let zkproof = match groth16::Proof::read(&spend.zkproof[..]) {
+            let zkproof = match groth16::Proof::read(&spend.zkproof()[..]) {
                 Ok(p) => p,
                 Err(_) => return false,
             };
@@ -57,12 +57,12 @@ impl BatchValidator {
             // Check the Spend consensus rules, and batch its proof and spend
             // authorization signature.
             let consensus_rules_passed = ctx.check_spend(
-                spend.cv,
-                spend.anchor,
-                &spend.nullifier.0,
-                spend.rk,
+                spend.cv(),
+                *spend.anchor(),
+                &spend.nullifier().0,
+                spend.rk(),
                 &sighash,
-                spend.spend_auth_sig,
+                spend.spend_auth_sig(),
                 zkproof,
                 self,
                 |this, rk, _, spend_auth_sig| {
@@ -88,23 +88,23 @@ impl BatchValidator {
             }
         }
 
-        for output in bundle.shielded_outputs {
+        for output in bundle.shielded_outputs() {
             // Deserialize the ephemeral key
-            let epk = match jubjub::ExtendedPoint::from_bytes(&output.ephemeral_key.0).into() {
+            let epk = match jubjub::ExtendedPoint::from_bytes(&output.ephemeral_key().0).into() {
                 Some(p) => p,
                 None => return false,
             };
 
             // Deserialize the proof
-            let zkproof = match groth16::Proof::read(&output.zkproof[..]) {
+            let zkproof = match groth16::Proof::read(&output.zkproof()[..]) {
                 Ok(p) => p,
                 Err(_) => return false,
             };
 
             // Check the Output consensus rules, and batch its proof.
             let consensus_rules_passed = ctx.check_output(
-                output.cv,
-                output.cmu,
+                output.cv(),
+                *output.cmu(),
                 epk,
                 zkproof,
                 |proof, public_inputs| {
@@ -119,9 +119,9 @@ impl BatchValidator {
 
         // Check the whole-bundle consensus rules, and batch the binding signature.
         ctx.final_check(
-            bundle.value_balance,
+            *bundle.value_balance(),
             &sighash,
-            bundle.authorization.binding_sig,
+            bundle.authorization().binding_sig,
             |bvk, _, binding_sig| {
                 let bvk =
                     redjubjub::VerificationKeyBytes::<redjubjub::Binding>::from(bvk.0.to_bytes());

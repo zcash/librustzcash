@@ -6,10 +6,11 @@ use crate::{
     legacy::{Script, TransparentAddress},
     transaction::{
         components::{
-            amount::Amount,
-            transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
+            amount::{Amount, BalanceError},
+            transparent::{self, fees, Authorization, Authorized, Bundle, TxIn, TxOut},
         },
         sighash::TransparentAuthorizingContext,
+        OutPoint,
     },
 };
 
@@ -17,12 +18,11 @@ use crate::{
 use {
     crate::transaction::{
         self as tx,
-        components::OutPoint,
         sighash::{signature_hash, SignableInput, SIGHASH_ALL},
         TransactionData, TxDigests,
     },
     blake2b_simd::Hash as Blake2bHash,
-    ripemd::Digest,
+    sha2::Digest,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -40,6 +40,21 @@ impl fmt::Display for Error {
     }
 }
 
+/// An uninhabited type that allows the type of [`TransparentBuilder::inputs`]
+/// to resolve when the transparent-inputs feature is not turned on.
+#[cfg(not(feature = "transparent-inputs"))]
+enum InvalidTransparentInput {}
+
+#[cfg(not(feature = "transparent-inputs"))]
+impl fees::InputView for InvalidTransparentInput {
+    fn outpoint(&self) -> &OutPoint {
+        panic!("transparent-inputs feature flag is not enabled.");
+    }
+    fn coin(&self) -> &TxOut {
+        panic!("transparent-inputs feature flag is not enabled.");
+    }
+}
+
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone)]
 struct TransparentInputInfo {
@@ -47,6 +62,17 @@ struct TransparentInputInfo {
     pubkey: [u8; secp256k1::constants::PUBLIC_KEY_SIZE],
     utxo: OutPoint,
     coin: TxOut,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl fees::InputView for TransparentInputInfo {
+    fn outpoint(&self) -> &OutPoint {
+        &self.utxo
+    }
+
+    fn coin(&self) -> &TxOut {
+        &self.coin
+    }
 }
 
 pub struct TransparentBuilder {
@@ -70,6 +96,7 @@ impl Authorization for Unauthorized {
 }
 
 impl TransparentBuilder {
+    /// Constructs a new TransparentBuilder
     pub fn empty() -> Self {
         TransparentBuilder {
             #[cfg(feature = "transparent-inputs")]
@@ -80,6 +107,25 @@ impl TransparentBuilder {
         }
     }
 
+    /// Returns the list of transparent inputs that will be consumed by the transaction being
+    /// constructed.
+    pub fn inputs(&self) -> &[impl fees::InputView] {
+        #[cfg(feature = "transparent-inputs")]
+        return &self.inputs;
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        {
+            let invalid: &[InvalidTransparentInput] = &[];
+            invalid
+        }
+    }
+
+    /// Returns the transparent outputs that will be produced by the transaction being constructed.
+    pub fn outputs(&self) -> &[impl fees::OutputView] {
+        &self.vout
+    }
+
+    /// Adds a coin (the output of a previous transaction) to be spent to the transaction.
     #[cfg(feature = "transparent-inputs")]
     pub fn add_input(
         &mut self,
@@ -98,9 +144,9 @@ impl TransparentBuilder {
         match coin.script_pubkey.address() {
             Some(TransparentAddress::PublicKey(hash)) => {
                 use ripemd::Ripemd160;
-                use sha2::{Digest, Sha256};
+                use sha2::Sha256;
 
-                if hash[..] != Ripemd160::digest(Sha256::digest(&pubkey))[..] {
+                if hash[..] != Ripemd160::digest(Sha256::digest(pubkey))[..] {
                     return Err(Error::InvalidAddress);
                 }
             }
@@ -130,23 +176,26 @@ impl TransparentBuilder {
         Ok(())
     }
 
-    pub fn value_balance(&self) -> Option<Amount> {
+    pub fn value_balance(&self) -> Result<Amount, BalanceError> {
         #[cfg(feature = "transparent-inputs")]
         let input_sum = self
             .inputs
             .iter()
             .map(|input| input.coin.value)
-            .sum::<Option<Amount>>()?;
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
 
         #[cfg(not(feature = "transparent-inputs"))]
         let input_sum = Amount::zero();
 
-        input_sum
-            - self
-                .vout
-                .iter()
-                .map(|vo| vo.value)
-                .sum::<Option<Amount>>()?
+        let output_sum = self
+            .vout
+            .iter()
+            .map(|vo| vo.value)
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
+
+        (input_sum - output_sum).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> Option<transparent::Bundle<Unauthorized>> {
@@ -245,7 +294,7 @@ impl Bundle<Unauthorized> {
 
                 // Signature has to have "SIGHASH_ALL" appended to it
                 let mut sig_bytes: Vec<u8> = sig.serialize_der()[..].to_vec();
-                sig_bytes.extend([SIGHASH_ALL as u8]);
+                sig_bytes.extend([SIGHASH_ALL]);
 
                 // P2PKH scriptSig
                 Script::default() << &sig_bytes[..] << &info.pubkey[..]

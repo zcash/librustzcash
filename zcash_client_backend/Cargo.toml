@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.5.0"
+version = "0.9.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -11,59 +11,91 @@ repository = "https://github.com/zcash/librustzcash"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 edition = "2021"
-rust-version = "1.56.1"
+rust-version = "1.65"
+
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
 
 [package.metadata.cargo-udeps.ignore]
 development = ["zcash_proofs"]
 
 [dependencies]
-base64 = "0.13"
-bech32 = "0.8"
-bls12_381 = "0.7"
-bs58 = { version = "0.4", features = ["check"] }
-byteorder = { version = "1", optional = true }
-crossbeam-channel = "0.5"
-group = "0.12"
-hex = "0.4"
-hdwallet = { version = "0.3.1", optional = true }
-jubjub = "0.9"
-memuse = "0.2"
-nom = "7"
-orchard = "0.3"
-percent-encoding = "2.1.0"
-proptest = { version = "1.0.0", optional = true }
-protobuf = "~2.27.1" # MSRV 1.52.1
-rand_core = "0.6"
-rayon = "1.5"
-ripemd = { version = "0.1", optional = true }
-secp256k1 = { version = "0.21", optional = true }
-secrecy = "0.8"
-sha2 = { version = "0.10.1", optional = true }
-subtle = "2.2.3"
-time = "0.2"
-tracing = "0.1"
-zcash_address = { version = "0.2", path = "../components/zcash_address" }
+incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
+zcash_address = { version = "0.3", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
-zcash_note_encryption = { version = "0.2", path = "../components/zcash_note_encryption" }
-zcash_primitives = { version = "0.8", path = "../zcash_primitives" }
+zcash_note_encryption = "0.4"
+zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
+
+# Dependencies exposed in a public API:
+# (Breaking upgrades to these require a breaking upgrade to this crate.)
+# - Data Access API
+time = "0.2"
+
+# - Encodings
+base64 = "0.21"
+bech32 = "0.9"
+bs58 = { version = "0.5", features = ["check"] }
+
+# - Errors
+hdwallet = { version = "0.4", optional = true }
+
+# - Logging and metrics
+memuse = "0.2"
+tracing = "0.1"
+
+# - Protobuf interfaces and gRPC bindings
+prost = "0.11"
+tonic = { version = "0.9", optional = true }
+
+# - Secret management
+secrecy = "0.8"
+subtle = "2.2.3"
+
+# - Shielded protocols
+bls12_381 = "0.8"
+group = "0.13"
+orchard = { version = "0.5", default-features = false }
+
+# - Test dependencies
+proptest = { version = "1.0.0", optional = true }
+
+# - ZIP 321
+nom = "7"
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Encodings
+byteorder = { version = "1", optional = true }
+percent-encoding = "2.1.0"
+
+# - Scanning
+crossbeam-channel = "0.5"
+rayon = "1.5"
 
 [build-dependencies]
-protobuf-codegen-pure = "~2.27.1" # MSRV 1.52.1
+tonic-build = "0.9"
+which = "4"
 
 [dev-dependencies]
+assert_matches = "1.5"
 gumdrop = "0.8"
+hex = "0.4"
+jubjub = "0.10"
 proptest = "1.0.0"
+rand_core = "0.6"
 rand_xorshift = "0.3"
-tempfile = "3.1.0"
-zcash_proofs = { version = "0.8", path = "../zcash_proofs" }
-zcash_address = { version = "0.2", path = "../components/zcash_address", features = ["test-dependencies"] }
+tempfile = "3.5.0"
+zcash_proofs = { version = "0.12", path = "../zcash_proofs", default-features = false }
+zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
-transparent-inputs = ["ripemd", "hdwallet", "sha2", "secp256k1", "zcash_primitives/transparent-inputs"]
+lightwalletd-tonic = ["tonic"]
+transparent-inputs = ["hdwallet", "zcash_primitives/transparent-inputs"]
 test-dependencies = [
     "proptest",
     "orchard/test-dependencies",
     "zcash_primitives/test-dependencies",
+    "incrementalmerkletree/test-dependencies"
 ]
 unstable = ["byteorder"]
 

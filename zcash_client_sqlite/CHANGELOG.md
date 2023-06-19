@@ -6,6 +6,116 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- MSRV is now 1.65.0.
+- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`,
+  `zcash_primitives 0.12`
+
+### Removed
+- The empty `wallet::transact` module has been removed.
+
+## [0.7.1] - 2023-05-17
+
+### Fixed
+- Fixes a potential crash that could occur when attempting to read a memo from
+  sqlite when the memo value is `NULL`. At present, we return the empty memo
+  in this case; in the future, the `get_memo` API will be updated to reflect
+  the potential absence of memo data.
+
+## [0.7.0] - 2023-04-28
+### Changed
+- Bumped dependencies to `zcash_client_backend 0.9`.
+
+### Removed
+- The following deprecated types and methods have been removed from the public API:
+  - `wallet::ShieldedOutput`
+  - `wallet::block_height_extrema`
+  - `wallet::get_address`
+  - `wallet::get_all_nullifiers`
+  - `wallet::get_balance`
+  - `wallet::get_balance_at`
+  - `wallet::get_block_hash`
+  - `wallet::get_commitment_tree`
+  - `wallet::get_nullifiers`
+  - `wallet::get_received_memo`
+  - `wallet::get_rewind_height`
+  - `wallet::get_sent_memo`
+  - `wallet::get_spendable_sapling_notes`
+  - `wallet::get_transaction`
+  - `wallet::get_tx_height`
+  - `wallet::get_unified_full_viewing_keys`
+  - `wallet::get_witnesses`
+  - `wallet::insert_block`
+  - `wallet::insert_witnesses`
+  - `wallet::is_valid_account_extfvk`
+  - `wallet::mark_sapling_note_spent`
+  - `wallet::put_tx_data`
+  - `wallet::put_tx_meta`
+  - `wallet::prune_witnesses`
+  - `wallet::select_spendable_sapling_notes`
+  - `wallet::update_expired_notes`
+  - `wallet::transact::get_spendable_sapling_notes`
+  - `wallet::transact::select_spendable_sapling_notes`
+
+## [0.6.0] - 2023-04-15
+### Added
+- SQLite view `v_tx_outputs`, exposing the history of transaction outputs sent
+  from and received by the wallet. See `zcash_client_sqlite::wallet` for view
+  documentation.
+
+### Fixed
+- In a previous crate release, `WalletDb` was modified to start tracking Sapling
+  change notes in both the `sent_notes` and `received_notes` tables, as a form
+  of double-entry accounting. This broke assumptions in the `v_transactions`
+  SQLite view, and also left the `sent_notes` table in an inconsistent state. A
+  migration has been added to this release which fixes the `sent_notes` table to
+  consistently store Sapling change notes.
+- The SQLite view `v_transactions` had several bugs independently from the above
+  issue, and has been rewritten. See `zcash_client_sqlite::wallet` for view
+  documentation.
+
+### Changed
+- Bumped dependencies to `group 0.13`, `jubjub 0.10`, `zcash_primitives 0.11`,
+  `zcash_client_backend 0.8`.
+- The dependency on `zcash_primitives` no longer enables the `multicore` feature
+  by default in order to support compilation under `wasm32-wasi`. Users of other
+  platforms may need to include an explicit dependency on `zcash_primitives`
+  without `default-features = false` or otherwise explicitly enable the
+  `zcash_primitives/multicore` feature if they did not already depend
+  upon `zcash_primitives` with default features enabled.
+
+### Removed
+- SQLite views `v_tx_received` and `v_tx_sent` (use `v_tx_outputs` instead).
+
+## [0.5.0] - 2023-02-01
+### Added
+- `zcash_client_sqlite::FsBlockDb::rewind_to_height` rewinds the BlockMeta Db
+ to the specified height following the same logic as homonymous functions on
+ `WalletDb`. This function does not delete the files referenced by the rows
+ that might be present and are deleted by this function call.
+- `zcash_client_sqlite::FsBlockDb::find_block`
+- `zcash_client_sqlite::chain`:
+  - `impl {Clone, Copy, Debug, PartialEq, Eq} for BlockMeta`
+
+### Changed
+- MSRV is now 1.60.0.
+- Bumped dependencies to `zcash_primitives 0.10`, `zcash_client_backend 0.7`.
+- `zcash_client_backend::FsBlockDbError`:
+  - Renamed `FsBlockDbError::{DbError, FsError}` to `FsBlockDbError::{Db, Fs}`.
+  - Added `FsBlockDbError::MissingBlockPath`.
+  - `impl fmt::Display for FsBlockDbError`
+
+## [0.4.2] - 2022-12-13
+### Fixed
+- `zcash_client_sqlite::WalletDb::get_transparent_balances` no longer returns an
+  error if the wallet has no UTXOs.
+
+## [0.4.1] - 2022-12-06
+### Added
+- `zcash_client_sqlite::DataConnStmtCache::advance_by_block` now generates a
+  `tracing` span, which can be used for profiling.
+
+## [0.4.0] - 2022-11-12
 ### Added
 - Implementations of `zcash_client_backend::data_api::WalletReadTransparent`
   and `WalletWriteTransparent` have been added. These implementations
@@ -22,6 +132,8 @@ and this library adheres to Rust's notion of
     to initialize the accounts table with a noncontiguous set of account identifiers.
   - `SqliteClientError::AccountIdOutOfRange`, to report when the maximum account
     identifier has been reached.
+  - `SqliteClientError::Protobuf`, to support handling of errors in serialized
+    protobuf data decoding.
 - An `unstable` feature flag; this is added to parts of the API that may change
   in any release. It enables `zcash_client_backend`'s `unstable` feature flag.
 - New summary views that may be directly accessed in the sqlite database.
@@ -40,6 +152,7 @@ and this library adheres to Rust's notion of
   this block source.
   - `zcash_client_sqlite::chain::init::init_blockmeta_db` creates the required
     metadata cache database.
+- Implementations of `PartialEq`, `Eq`, `PartialOrd`, and `Ord` for `NoteId`
 
 ### Changed
 - Various **BREAKING CHANGES** have been made to the database tables. These will
@@ -62,7 +175,8 @@ and this library adheres to Rust's notion of
     (and in the future, outputs to other pools). Values for this column should
     be assigned by inference from the address type in the stored data.
 - MSRV is now 1.56.1.
-- Bumped dependencies to `ff 0.12`, `group 0.12`, `jubjub 0.9`, `zcash_primitives 0.8`.
+- Bumped dependencies to `ff 0.12`, `group 0.12`, `jubjub 0.9`,
+  `zcash_primitives 0.9`, `zcash_client_backend 0.6`.
 - Renamed the following to use lower-case abbreviations (matching Rust
   naming conventions):
   - `zcash_client_sqlite::BlockDB` to `BlockDb`
@@ -72,29 +186,34 @@ and this library adheres to Rust's notion of
 - The SQLite implementations of `zcash_client_backend::data_api::WalletRead`
   and `WalletWrite` have been updated to reflect the changes to those
   traits.
-- Renamed the following to reflect their Sapling-specific nature:
-  - `zcash_client_sqlite::wallet`:
-    - `get_spendable_notes` to `get_spendable_sapling_notes`.
-    - `select_spendable_notes` to `select_spendable_sapling_notes`.
-- `zcash_client_sqlite::wallet::init_wallet_db` has been modified to
-  take the wallet seed as an argument so that it can correctly perform
-  migrations that require re-deriving key material. In particular for
-  this upgrade, the seed is used to derive UFVKs to replace the currently
-  stored Sapling extfvks (without loss of information) as part of the
-  migration process.
+- `zcash_client_sqlite::wallet`:
+  - `get_spendable_notes` has been renamed to `get_spendable_sapling_notes`.
+  - `select_spendable_notes` has been renamed to `select_spendable_sapling_notes`.
+  - `get_spendable_sapling_notes` and `select_spendable_sapling_notes` have also
+    been changed to take a parameter that permits the caller to specify a set of
+    notes to exclude from consideration.
+  - `init_wallet_db` has been modified to take the wallet seed as an argument so
+    that it can correctly perform migrations that require re-deriving key
+    material. In particular for this upgrade, the seed is used to derive UFVKs
+    to replace the currently stored Sapling ExtFVKs (without losing information)
+    as part of the migration process.
 
 ### Removed
 - The following functions have been removed from the public interface of
   `zcash_client_sqlite::wallet`. Prefer methods defined on
   `zcash_client_backend::data_api::{WalletRead, WalletWrite}` instead.
   - `get_extended_full_viewing_keys` (use `WalletRead::get_unified_full_viewing_keys` instead).
-  - `insert_sent_note` (use `WalletWrite::store_sent_tx` instead)
-  - `insert_sent_utxo` (use `WalletWrite::store_sent_tx` instead)
-  - `put_sent_note` (use `WalletWrite::store_decrypted_tx` instead)
-  - `put_sent_utxo` (use `WalletWrite::store_decrypted_tx` instead)
-  - `delete_utxos_above` (use `WalletWrite::rewind_to_height` instead)
+  - `insert_sent_note` (use `WalletWrite::store_sent_tx` instead).
+  - `insert_sent_utxo` (use `WalletWrite::store_sent_tx` instead).
+  - `put_sent_note` (use `WalletWrite::store_decrypted_tx` instead).
+  - `put_sent_utxo` (use `WalletWrite::store_decrypted_tx` instead).
+  - `delete_utxos_above` (use `WalletWrite::rewind_to_height` instead).
 - `zcash_client_sqlite::with_blocks` (use
-  `zcash_client_backend::data_api::BlockSource::with_blocks` instead)
+  `zcash_client_backend::data_api::BlockSource::with_blocks` instead).
+- `zcash_client_sqlite::error::SqliteClientError` variants:
+  - `SqliteClientError::IncorrectHrpExtFvk`
+  - `SqliteClientError::Base58`
+  - `SqliteClientError::BackendError`
 
 ### Fixed
 - The `zcash_client_backend::data_api::WalletRead::get_address` implementation

@@ -12,6 +12,7 @@ use super::amount::Amount;
 use crate::{extensions::transparent as tze, transaction::TxId};
 
 pub mod builder;
+pub mod fees;
 
 fn to_io_error(_: std::num::TryFromIntError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "value out of range")

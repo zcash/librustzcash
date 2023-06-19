@@ -6,15 +6,25 @@
 
 use std::io::{self, Read, Write};
 
+use super::{
+    address::PaymentAddress,
+    note_encryption::KDF_SAPLING_PERSONALIZATION,
+    spec::{
+        crh_ivk, diversify_hash, ka_sapling_agree, ka_sapling_agree_prepared,
+        ka_sapling_derive_public, ka_sapling_derive_public_subgroup_prepared, PreparedBase,
+        PreparedBaseSubgroup, PreparedScalar,
+    },
+};
 use crate::{
-    constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
+    constants::{self, PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
     keys::prf_expand,
 };
-use ff::PrimeField;
-use group::{Group, GroupEncoding};
-use subtle::CtOption;
 
-use super::{NullifierDerivingKey, ProofGenerationKey, ViewingKey};
+use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
+use ff::PrimeField;
+use group::{Curve, Group, GroupEncoding};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
+use zcash_note_encryption::EphemeralKeyBytes;
 
 /// Errors that can occur in the decoding of Sapling spending keys.
 pub enum DecodingError {
@@ -105,6 +115,45 @@ impl ExpandedSpendingKey {
     }
 }
 
+#[derive(Clone)]
+pub struct ProofGenerationKey {
+    pub ak: jubjub::SubgroupPoint,
+    pub nsk: jubjub::Fr,
+}
+
+impl ProofGenerationKey {
+    pub fn to_viewing_key(&self) -> ViewingKey {
+        ViewingKey {
+            ak: self.ak,
+            nk: NullifierDerivingKey(constants::PROOF_GENERATION_KEY_GENERATOR * self.nsk),
+        }
+    }
+}
+
+/// A key used to derive the nullifier for a Sapling note.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct NullifierDerivingKey(pub jubjub::SubgroupPoint);
+
+#[derive(Debug, Clone)]
+pub struct ViewingKey {
+    pub ak: jubjub::SubgroupPoint,
+    pub nk: NullifierDerivingKey,
+}
+
+impl ViewingKey {
+    pub fn rk(&self, ar: jubjub::Fr) -> jubjub::SubgroupPoint {
+        self.ak + constants::SPENDING_KEY_GENERATOR * ar
+    }
+
+    pub fn ivk(&self) -> SaplingIvk {
+        SaplingIvk(crh_ivk(self.ak.to_bytes(), self.nk.0.to_bytes()))
+    }
+
+    pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
+        self.ivk().to_payment_address(diversifier)
+    }
+}
+
 /// A Sapling key that provides the capability to view incoming and outgoing transactions.
 #[derive(Debug)]
 pub struct FullViewingKey {
@@ -186,13 +235,249 @@ impl FullViewingKey {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SaplingIvk(pub jubjub::Fr);
+
+impl SaplingIvk {
+    pub fn to_payment_address(&self, diversifier: Diversifier) -> Option<PaymentAddress> {
+        let prepared_ivk = PreparedIncomingViewingKey::new(self);
+        DiversifiedTransmissionKey::derive(&prepared_ivk, &diversifier)
+            .and_then(|pk_d| PaymentAddress::from_parts(diversifier, pk_d))
+    }
+
+    pub fn to_repr(&self) -> [u8; 32] {
+        self.0.to_repr()
+    }
+}
+
+/// A Sapling incoming viewing key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedIncomingViewingKey(PreparedScalar);
+
+impl memuse::DynamicUsage for PreparedIncomingViewingKey {
+    fn dynamic_usage(&self) -> usize {
+        self.0.dynamic_usage()
+    }
+
+    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
+        self.0.dynamic_usage_bounds()
+    }
+}
+
+impl PreparedIncomingViewingKey {
+    /// Performs the necessary precomputations to use a `SaplingIvk` for note decryption.
+    pub fn new(ivk: &SaplingIvk) -> Self {
+        Self(PreparedScalar::new(&ivk.0))
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Diversifier(pub [u8; 11]);
+
+impl Diversifier {
+    pub fn g_d(&self) -> Option<jubjub::SubgroupPoint> {
+        diversify_hash(&self.0)
+    }
+}
+
+/// The diversified transmission key for a given payment address.
+///
+/// Defined in [Zcash Protocol Spec § 4.2.2: Sapling Key Components][saplingkeycomponents].
+///
+/// Note that this type is allowed to be the identity in the protocol, but we reject this
+/// in [`PaymentAddress::from_parts`].
+///
+/// [saplingkeycomponents]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiversifiedTransmissionKey(jubjub::SubgroupPoint);
+
+impl DiversifiedTransmissionKey {
+    /// Defined in [Zcash Protocol Spec § 4.2.2: Sapling Key Components][saplingkeycomponents].
+    ///
+    /// Returns `None` if `d` is an invalid diversifier.
+    ///
+    /// [saplingkeycomponents]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+    pub(crate) fn derive(ivk: &PreparedIncomingViewingKey, d: &Diversifier) -> Option<Self> {
+        d.g_d()
+            .map(PreparedBaseSubgroup::new)
+            .map(|g_d| ka_sapling_derive_public_subgroup_prepared(&ivk.0, &g_d))
+            .map(DiversifiedTransmissionKey)
+    }
+
+    /// $abst_J(bytes)$
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
+        jubjub::SubgroupPoint::from_bytes(bytes).map(DiversifiedTransmissionKey)
+    }
+
+    /// $repr_J(self)$
+    pub(crate) fn to_bytes(self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+
+    /// Returns true if this is the identity.
+    pub(crate) fn is_identity(&self) -> bool {
+        self.0.is_identity().into()
+    }
+
+    /// Exposes the inner Jubjub point.
+    ///
+    /// This API is exposed for `zcash_proof` usage, and will be removed when this type is
+    /// refactored into the `sapling-crypto` crate.
+    pub fn inner(&self) -> jubjub::SubgroupPoint {
+        self.0
+    }
+}
+
+impl ConditionallySelectable for DiversifiedTransmissionKey {
+    fn conditional_select(a: &Self, b: &Self, choice: Choice) -> Self {
+        DiversifiedTransmissionKey(jubjub::SubgroupPoint::conditional_select(
+            &a.0, &b.0, choice,
+        ))
+    }
+}
+
+/// An ephemeral secret key used to encrypt an output note on-chain.
+///
+/// `esk` is "ephemeral" in the sense that each secret key is only used once. In
+/// practice, `esk` is derived deterministically from the note that it is encrypting.
+///
+/// $\mathsf{KA}^\mathsf{Sapling}.\mathsf{Private} := \mathbb{F}_{r_J}$
+///
+/// Defined in [section 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+#[derive(Debug)]
+pub struct EphemeralSecretKey(pub(crate) jubjub::Scalar);
+
+impl ConstantTimeEq for EphemeralSecretKey {
+    fn ct_eq(&self, other: &Self) -> subtle::Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl EphemeralSecretKey {
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
+        jubjub::Scalar::from_bytes(bytes).map(EphemeralSecretKey)
+    }
+
+    pub(crate) fn derive_public(&self, g_d: jubjub::ExtendedPoint) -> EphemeralPublicKey {
+        EphemeralPublicKey(ka_sapling_derive_public(&self.0, &g_d))
+    }
+
+    pub(crate) fn agree(&self, pk_d: &DiversifiedTransmissionKey) -> SharedSecret {
+        SharedSecret(ka_sapling_agree(&self.0, &pk_d.0.into()))
+    }
+}
+
+/// An ephemeral public key used to encrypt an output note on-chain.
+///
+/// `epk` is "ephemeral" in the sense that each public key is only used once. In practice,
+/// `epk` is derived deterministically from the note that it is encrypting.
+///
+/// $\mathsf{KA}^\mathsf{Sapling}.\mathsf{Public} := \mathbb{J}$
+///
+/// Defined in [section 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+#[derive(Debug)]
+pub struct EphemeralPublicKey(jubjub::ExtendedPoint);
+
+impl EphemeralPublicKey {
+    pub(crate) fn from_affine(epk: jubjub::AffinePoint) -> Self {
+        EphemeralPublicKey(epk.into())
+    }
+
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> CtOption<Self> {
+        jubjub::ExtendedPoint::from_bytes(bytes).map(EphemeralPublicKey)
+    }
+
+    pub(crate) fn to_bytes(&self) -> EphemeralKeyBytes {
+        EphemeralKeyBytes(self.0.to_bytes())
+    }
+}
+
+/// A Sapling ephemeral public key that has been precomputed for trial decryption.
+#[derive(Clone, Debug)]
+pub struct PreparedEphemeralPublicKey(PreparedBase);
+
+impl PreparedEphemeralPublicKey {
+    pub(crate) fn new(epk: EphemeralPublicKey) -> Self {
+        PreparedEphemeralPublicKey(PreparedBase::new(epk.0))
+    }
+
+    pub(crate) fn agree(&self, ivk: &PreparedIncomingViewingKey) -> SharedSecret {
+        SharedSecret(ka_sapling_agree_prepared(&ivk.0, &self.0))
+    }
+}
+
+/// $\mathsf{KA}^\mathsf{Sapling}.\mathsf{SharedSecret} := \mathbb{J}^{(r)}$
+///
+/// Defined in [section 5.4.5.3: Sapling Key Agreement][concretesaplingkeyagreement].
+///
+/// [concretesaplingkeyagreement]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
+#[derive(Debug)]
+pub struct SharedSecret(jubjub::SubgroupPoint);
+
+impl SharedSecret {
+    /// For checking test vectors only.
+    #[cfg(test)]
+    pub(crate) fn to_bytes(&self) -> [u8; 32] {
+        self.0.to_bytes()
+    }
+
+    /// Only for use in batched note encryption.
+    pub(crate) fn batch_to_affine(
+        shared_secrets: Vec<Option<Self>>,
+    ) -> impl Iterator<Item = Option<jubjub::AffinePoint>> {
+        // Filter out the positions for which ephemeral_key was not a valid encoding.
+        let secrets: Vec<_> = shared_secrets
+            .iter()
+            .filter_map(|s| s.as_ref().map(|s| jubjub::ExtendedPoint::from(s.0)))
+            .collect();
+
+        // Batch-normalize the shared secrets.
+        let mut secrets_affine = vec![jubjub::AffinePoint::identity(); secrets.len()];
+        group::Curve::batch_normalize(&secrets, &mut secrets_affine);
+
+        // Re-insert the invalid ephemeral_key positions.
+        let mut secrets_affine = secrets_affine.into_iter();
+        shared_secrets
+            .into_iter()
+            .map(move |s| s.and_then(|_| secrets_affine.next()))
+    }
+
+    /// Defined in [Zcash Protocol Spec § 5.4.5.4: Sapling Key Agreement][concretesaplingkdf].
+    ///
+    /// [concretesaplingkdf]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkdf
+    pub(crate) fn kdf_sapling(self, ephemeral_key: &EphemeralKeyBytes) -> Blake2bHash {
+        Self::kdf_sapling_inner(
+            jubjub::ExtendedPoint::from(self.0).to_affine(),
+            ephemeral_key,
+        )
+    }
+
+    /// Only for direct use in batched note encryption.
+    pub(crate) fn kdf_sapling_inner(
+        secret: jubjub::AffinePoint,
+        ephemeral_key: &EphemeralKeyBytes,
+    ) -> Blake2bHash {
+        Blake2bParams::new()
+            .hash_length(32)
+            .personal(KDF_SAPLING_PERSONALIZATION)
+            .to_state()
+            .update(&secret.to_bytes())
+            .update(ephemeral_key.as_ref())
+            .finalize()
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use std::fmt::{self, Debug, Formatter};
 
-    use super::{ExpandedSpendingKey, FullViewingKey};
+    use super::{ExpandedSpendingKey, FullViewingKey, SaplingIvk};
 
     impl Debug for ExpandedSpendingKey {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -209,6 +494,12 @@ pub mod testing {
     prop_compose! {
         pub fn arb_full_viewing_key()(sk in arb_expanded_spending_key()) -> FullViewingKey {
             FullViewingKey::from_expanded_spending_key(&sk)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_incoming_viewing_key()(fvk in arb_full_viewing_key()) -> SaplingIvk {
+            fvk.vk.ivk()
         }
     }
 }

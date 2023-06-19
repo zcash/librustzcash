@@ -33,6 +33,25 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
     fn map_authorization(&self, a: A) -> B;
 }
 
+/// The identity map.
+///
+/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// authorization of a subset of the transaction's bundles.
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+impl MapAuth<Authorized, Authorized> for () {
+    fn map_spend_auth(
+        &self,
+        s: <Authorized as Authorization>::SpendAuth,
+    ) -> <Authorized as Authorization>::SpendAuth {
+        s
+    }
+
+    fn map_authorization(&self, a: Authorized) -> Authorized {
+        a
+    }
+}
+
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(
     mut reader: R,

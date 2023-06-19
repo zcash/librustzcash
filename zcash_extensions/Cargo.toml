@@ -7,18 +7,18 @@ homepage = "https://github.com/zcash/librustzcash"
 repository = "https://github.com/zcash/librustzcash"
 license = "MIT OR Apache-2.0"
 edition = "2021"
-rust-version = "1.56.1"
+rust-version = "1.65"
 
 [dependencies]
 blake2b_simd = "1"
-zcash_primitives = { version = "0.8", path = "../zcash_primitives", features = ["zfuture" ] }
+zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false, features = ["zfuture" ] }
 
 [dev-dependencies]
-ff = "0.12"
-jubjub = "0.9"
+ff = "0.13"
+jubjub = "0.10"
 rand_core = "0.6"
-zcash_address = { version = "0.2", path = "../components/zcash_address" }
-zcash_proofs = { version = "0.8", path = "../zcash_proofs" }
+zcash_address = { version = "0.3", path = "../components/zcash_address" }
+zcash_proofs = { version = "0.12", path = "../zcash_proofs" }
 
 [features]
 transparent-inputs = []

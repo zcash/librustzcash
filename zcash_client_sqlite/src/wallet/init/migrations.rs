@@ -2,9 +2,11 @@ mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
 mod initial_setup;
+mod received_notes_nullable_nf;
 mod sent_notes_to_internal;
 mod ufvk_support;
 mod utxos_table;
+mod v_transactions_net;
 
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
@@ -25,6 +27,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //        add_utxo_account               /
     //                       \              /
     //                    add_transaction_views
+    //                       /
+    //        v_transactions_net
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -39,8 +43,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             _params: params.clone(),
         }),
         Box::new(sent_notes_to_internal::Migration {}),
-        Box::new(add_transaction_views::Migration {
-            params: params.clone(),
-        }),
+        Box::new(add_transaction_views::Migration),
+        Box::new(v_transactions_net::Migration),
+        Box::new(received_notes_nullable_nf::Migration),
     ]
 }

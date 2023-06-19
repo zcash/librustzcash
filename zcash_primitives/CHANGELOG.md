@@ -7,6 +7,296 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.12.0] - 2023-06-06
+### Added
+- `zcash_primitives::transaction`:
+  - `Transaction::temporary_zcashd_read_v5_sapling`
+  - `Transaction::temporary_zcashd_write_v5_sapling`
+- Implementations of `memuse::DynamicUsage` for the following types:
+  - `zcash_primitives::transaction::components::sapling`:
+    - `Bundle<Authorized>`
+    - `SpendDescription<Authorized>`
+
+### Changed
+- MSRV is now 1.65.0.
+- Bumped dependencies to `secp256k1 0.26`, `hdwallet 0.4`, `incrementalmerkletree 0.4`
+  `zcash_note_encryption 0.4`, `orchard 0.5`
+
+### Removed
+- `merkle_tree::Hashable` has been removed and its uses have been replaced by
+  `incrementalmerkletree::Hashable` and `merkle_tree::HashSer`.
+- The `Hashable` bound on the `Node` parameter to the `IncrementalWitness`
+  type has been removed.
+- `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
+  have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
+- `merkle_tree::{CommitmentTree, IncrementalWitness, MerklePath}` have been removed in
+  favor of versions of these types that are now provided by the
+  `incrementalmerkletree` crate. The replacement types now use const generic
+  parameters for enforcing the note commitment tree depth. Serialization
+  methods for these types that do not exist for the `incrementalmerkletree`
+  replacement types have been replaced by new methods in the `merkle_tree` module.
+- `merkle_tree::incremental::write_auth_fragment_v1` has been removed without replacement.
+- The `merkle_tree::incremental` module has been removed; its former contents
+  were either moved to the `merkle_tree` module or were `zcashd`-specific
+  serialization methods which have been removed entirely and moved into the
+  [zcashd](https://github.com/zcash/zcash) repository.
+- The dependency on the `bridgetree` crate has been removed from
+  `zcash_primitives` and the following zcashd-specific serialization methods
+  have been moved to the [zcashd](https://github.com/zcash/zcash) repository:
+  - `read_auth_fragment_v1`
+  - `read_bridge_v1`
+  - `read_bridge_v2`
+  - `write_bridge_v2`
+  - `write_bridge`
+  - `read_checkpoint_v1`
+  - `read_checkpoint_v2`
+  - `write_checkpoint_v2`
+  - `read_tree`
+  - `write_tree`
+- `merkle_tree::{SER_V1, SER_V2}` have been removed as they are now unused.
+
+### Moved
+- The following constants and methods have been moved from the
+  `merkle_tree::incremental` module into the `merkle_tree` module to
+  consolidate the serialization code for commitment tree frontiers:
+  - `write_usize_leu64`
+  - `read_leu64_usize`
+  - `write_position`
+  - `read_position`
+  - `write_address`
+  - `read_address`
+  - `read_frontier_v0`
+  - `write_nonempty_frontier`
+  - `read_nonempty_frontier_v1`
+  - `write_frontier_v1`
+  - `read_frontier_v1`
+
+### Added
+- `merkle_tree::incremental::{read_address, write_address}`
+- `merkle_tree::incremental::read_bridge_v2`
+- `merkle_tree::write_commitment_tree` replaces `merkle_tree::CommitmentTree::write`
+- `merkle_tree::read_commitment_tree` replaces `merkle_tree::CommitmentTree::read`
+- `merkle_tree::write_incremental_witness` replaces `merkle_tree::IncrementalWitness::write`
+- `merkle_tree::read_incremental_witness` replaces `merkle_tree::IncrementalWitness::read`
+- `merkle_tree::merkle_path_from_slice` replaces `merkle_tree::MerklePath::from_slice`
+- `sapling::{CommitmentTree, IncrementalWitness, MerklePath, NOTE_COMMITMENT_TREE_DEPTH}`
+- `transaction::fees::zip317::MINIMUM_FEE`, reflecting the minimum possible
+  [ZIP 317](https://zips.z.cash/zip-0317) conventional fee.
+- `transaction::components::amount::Amount::const_from_i64`, intended for constructing
+  a constant `Amount`.
+
+### Changed
+- The bounds on the `H` parameter to the following methods have changed:
+  - `merkle_tree::incremental::read_frontier_v0`
+  - `merkle_tree::incremental::read_auth_fragment_v1`
+- The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}` 
+  data types are now statically constrained using const generic type parameters.
+- `transaction::fees::fixed::FeeRule::standard()` now uses the ZIP 317 minimum fee
+  (10000 zatoshis rather than 1000 zatoshis) as the fixed fee. To be compliant with
+  ZIP 317, use `transaction::fees::zip317::FeeRule::standard()` instead.
+
+### Deprecated
+- `transaction::components::amount::DEFAULT_FEE` has been deprecated. Depending on
+  context, you may want to use `transaction::fees::zip317::MINIMUM_FEE`, or calculate
+  the ZIP 317 conventional fee using `transaction::fees::zip317::FeeRule` instead.
+- `transaction::fees::fixed::FeeRule::standard()` has been deprecated.
+  Use either `transaction::fees::zip317::FeeRule::standard()` or
+  `transaction::fees::fixed::FeeRule::non_standard`.
+
+## [0.11.0] - 2023-04-15
+### Added
+- `zcash_primitives::zip32::fingerprint` module, containing types for deriving
+  ZIP 32 Seed Fingerprints.
+
+### Changed
+- Bumped dependencies to `bls12_381 0.8`, `ff 0.13`, `group 0.13`,
+  `jubjub 0.10`, `orchard 0.4`, `sha2 0.10`, `bip0039 0.10`,
+  `zcash_note_encryption 0.3`.
+
+## [0.10.2] - 2023-03-16
+### Added
+- `zcash_primitives::sapling::note`:
+  - `NoteCommitment::temporary_zcashd_derive`
+- A new feature flag, `multicore`, has been added and is enabled by default.
+  This allows users to selectively disable multicore support for Orchard proof
+  creation by setting `default_features = false` on their `zcash_primitives`
+  dependency, such as is needed to enable `wasm32-wasi` compilation.
+
+## [0.10.1] - 2023-03-08
+### Added
+- Sapling bundle component constructors, behind the `temporary-zcashd` feature
+  flag. These temporarily re-expose the ability to construct invalid Sapling
+  bundles (that was removed in 0.10.0), and will be removed in a future release:
+  - `zcash_primitives::transaction::components::sapling`:
+    - `Bundle::temporary_zcashd_from_parts`
+    - `SpendDescription::temporary_zcashd_from_parts`
+    - `OutputDescription::temporary_zcashd_from_parts`
+
+## [0.10.0] - 2023-02-01
+### Added
+- `zcash_primitives::sapling`:
+  - `keys::DiversifiedTransmissionKey`
+  - `keys::{EphemeralSecretKey, EphemeralPublicKey, SharedSecret}`
+  - `keys::{PreparedIncomingViewingKey, PreparedEphemeralPublicKey}`
+    (re-exported from `note_encryption`).
+  - `note`, a module containing types related to Sapling notes. The existing
+    `Note` and `Rseed` types are re-exported here, and new types are added.
+  - `Node::from_cmu`
+  - `value`, containing types for handling Sapling note values and value
+    commitments.
+  - `Note::from_parts`
+  - `Note::{recipient, value, rseed}` getter methods.
+  - `impl Eq for Note`
+  - `impl Copy for PaymentAddress`
+
+### Changed
+- MSRV is now 1.60.0.
+- `zcash_primitives::transaction::components::sapling::builder`:
+  - `SaplingBuilder::add_output` now takes a
+    `zcash_primitives::sapling::value::NoteValue`.
+- `zcash_primitives::sapling`:
+  - `PaymentAddress::from_parts` now rejects invalid diversifiers.
+  - `PaymentAddress::create_note` is now infallible.
+  - `DiversifiedTransmissionKey` is now used instead of `jubjub::SubgroupPoint`
+    in the following places:
+    - `PaymentAddress::from_parts`
+    - `PaymentAddress::pk_d`
+    - `note_encryption::SaplingDomain::DiversifiedTransmissionKey`
+  - `EphemeralSecretKey` is now used instead of `jubjub::Scalar` in the
+    following places:
+    - `Note::generate_or_derive_esk`
+    - `note_encryption::SaplingDomain::EphemeralSecretKey`
+  - `note_encryption::SaplingDomain::EphemeralPublicKey` is now
+    `EphemeralPublicKey` instead of `jubjub::ExtendedPoint`.
+  - `note_encryption::SaplingDomain::SharedSecret` is now `SharedSecret` instead
+    of `jubjub::SubgroupPoint`.
+- Note commitments now use
+  `zcash_primitives::sapling::note::ExtractedNoteCommitment` instead of
+  `bls12_381::Scalar` in the following places:
+  - `zcash_primitives::sapling`:
+    - `Note::cmu`
+  - `zcash_primitives::sapling::note_encryption`:
+    - `SaplingDomain::ExtractedCommitment`
+  - `zcash_primitives::transaction::components::sapling`:
+    - `OutputDescription::cmu`
+    - The `cmu` field of `CompactOutputDescription`.
+- Value commitments now use `zcash_primitives::sapling::value::ValueCommitment`
+  instead of `jubjub::ExtendedPoint` in the following places:
+  - `zcash_primitives::sapling::note_encryption`:
+    - `prf_ock`
+    - `SaplingDomain::ValueCommitment`
+  - `zcash_primitives::sapling::prover`:
+    - `TxProver::{spend_proof, output_proof}` return type.
+  - `zcash_primitives::transaction::components`:
+    - `SpendDescription::cv`
+    - `OutputDescription::cv`
+- `zcash_primitives::transaction::components`:
+  - `sapling::{Bundle, SpendDescription, OutputDescription}` have had their
+    fields replaced by getter methods.
+  - The associated type `sapling::Authorization::Proof` has been replaced by
+    `Authorization::{SpendProof, OutputProof}`.
+  - `sapling::MapAuth::map_proof` has been replaced by
+    `MapAuth::{map_spend_proof, map_output_proof}`.
+
+### Removed
+- `zcash_primitives::sapling`:
+  - The fields of `Note` are now private (use the new getter methods instead).
+  - `Note::uncommitted` (use `Node::empty_leaf` instead).
+  - `Note::derive_esk` (use `SaplingDomain::derive_esk` instead).
+  - `Note::commitment` (use `Node::from_cmu` instead).
+  - `PaymentAddress::g_d`
+  - `NoteValue` (use `zcash_primitives::sapling::value::NoteValue` instead).
+  - `ValueCommitment` (use `zcash_primitives::sapling::value::ValueCommitment`
+    or `zcash_proofs::circuit::sapling::ValueCommitmentPreimage` instead).
+  - `note_encryption::sapling_ka_agree`
+  - `testing::{arb_note_value, arb_positive_note_value}` (use the methods in
+    `zcash_primitives::sapling::value::testing` instead).
+- `zcash_primitives::transaction::components`:
+  - The fields of `sapling::{SpendDescriptionV5, OutputDescriptionV5}` (they are
+    now opaque types; use `sapling::{SpendDescription, OutputDescription}`
+    instead).
+  - `sapling::read_point`
+
+## [0.9.1] - 2022-12-06
+### Fixed
+- `zcash_primitives::transaction::builder`:
+  - `Builder::build` was calling `FeeRule::fee_required` with the number of
+    Sapling outputs that have been added to the builder. It now instead provides
+    the number of outputs that will be in the final Sapling bundle, including
+    any padding.
+
+## [0.9.0] - 2022-11-12
+### Added
+- Added to `zcash_primitives::transaction::builder`:
+  - `Error::{InsufficientFunds, ChangeRequired, Balance, Fee}`
+  - `Builder` state accessor methods:
+    - `Builder::{params, target_height}`
+    - `Builder::{transparent_inputs, transparent_outputs}`
+    - `Builder::{sapling_inputs, sapling_outputs}`
+- `zcash_primitives::transaction::fees`, a new module containing abstractions
+  and types related to fee calculations.
+  - `FeeRule`, a trait that describes how to compute the fee required for a
+    transaction given inputs and outputs to the transaction.
+  - `fixed`, a module containing an implementation of the old fixed fee rule.
+  - `zip317`, a module containing an implementation of the ZIP 317 fee rules.
+- Added to `zcash_primitives::transaction::components`:
+  - `amount::NonNegativeAmount`
+  - Added to the `orchard` module:
+    - `impl MapAuth<orchard::bundle::Authorized, orchard::bundle::Authorized> for ()`
+      (the identity map).
+  - Added to the `sapling` module:
+    - `impl MapAuth<Authorized, Authorized> for ()` (the identity map).
+    - `builder::SaplingBuilder::{inputs, outputs}`: accessors for Sapling
+      builder state.
+    - `fees`, a module with Sapling-specific fee traits.
+  - Added to the `transparent` module:
+    - `impl {PartialOrd, Ord} for OutPoint`
+    - `builder::TransparentBuilder::{inputs, outputs}`: accessors for
+      transparent builder state.
+    - `fees`, a module with transparent-specific fee traits.
+- Added to `zcash_primitives::sapling`:
+  - `Note::commitment`
+  - `impl Eq for PaymentAddress`
+- Added to `zcash_primitives::zip32`:
+  - `impl TryFrom<DiversifierIndex> for u32`
+  - `sapling::DiversifiableFullViewingKey::{diversified_address, diversified_change_address}`
+
+### Changed
+- `zcash_primitives::transaction::builder`:
+  - `Builder::build` now takes a `FeeRule` argument which is used to compute the
+    fee for the transaction as part of the build process.
+  - `Builder::value_balance` now returns `Result<Amount, BalanceError>` instead
+    of `Option<Amount>`.
+  - `Builder::{new, new_with_rng}` no longer fixes the fee for transactions to
+    0.00001 ZEC; the builder instead computes the fee using a `FeeRule`
+    implementation at build time.
+  - `Error` now is parameterized by the types that can now be produced by fee
+    calculation.
+- `zcash_primitives::transaction::components::tze::builder::Builder::value_balance` now
+  returns `Result<Amount, BalanceError>` instead of `Option<Amount>`.
+
+### Deprecated
+- `zcash_primitives::zip32::sapling::to_extended_full_viewing_key` (use
+  `to_diversifiable_full_viewing_key` instead).
+
+### Removed
+- Removed from `zcash_primitives::transaction::builder`:
+  - `Builder::{new_with_fee, new_with_rng_and_fee`} (use `Builder::{new, new_with_rng}`
+    instead along with a `FeeRule` implementation passed to `Builder::build`.)
+  - `Builder::send_change_to` (change outputs must be added to the builder by
+    the caller, just like any other output).
+  - `Error::ChangeIsNegative`
+  - `Error::NoChangeAddress`
+  - `Error::InvalidAmount` (replaced by `Error::BalanceError`).
+- Removed from `zcash_primitives::transaction::components::sapling::builder`:
+  - `SaplingBuilder::get_candidate_change_address` (change outputs must now be
+    added by the caller).
+- Removed from `zcash_primitives::zip32::sapling`:
+  - `impl From<&ExtendedSpendingKey> for ExtendedFullViewingKey` (use
+    `ExtendedSpendingKey::to_diversifiable_full_viewing_key` instead).
+- `zcash_primitives::sapling::Node::new` (use `Node::from_scalar` or preferably
+  `Note::commitment` instead).
+
 ## [0.8.1] - 2022-10-19
 ### Added
 - `zcash_primitives::legacy`:
@@ -25,9 +315,9 @@ and this library adheres to Rust's notion of
   - `ChainCode::as_bytes`
   - `DiversifierIndex::{as_bytes}`
   - Implementations of `From<u32>` and `From<u64>` for `DiversifierIndex`
-- `zcash_primitives::zip32::sapling` has been added and now contains 
+- `zcash_primitives::zip32::sapling` has been added and now contains
   all of the Sapling zip32 key types that were previously located in
-  `zcash_primitives::zip32` directly. The base `zip32` module reexports 
+  `zcash_primitives::zip32` directly. The base `zip32` module reexports
   the moved types for backwards compatibility.
   - `DiversifierKey::{from_bytes, as_bytes}`
   - `ExtendedSpendingKey::{from_bytes, to_bytes}`

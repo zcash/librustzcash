@@ -6,7 +6,7 @@ use memuse::{self, DynamicUsage};
 use subtle::{Choice, ConditionallySelectable};
 
 use crate::sapling::{Diversifier, NullifierDerivingKey, PaymentAddress, ViewingKey};
-
+pub mod fingerprint;
 pub mod sapling;
 
 #[deprecated(note = "Please use the types exported from the `zip32::sapling` module instead.")]
@@ -105,6 +105,16 @@ impl From<u64> for DiversifierIndex {
     }
 }
 
+impl TryFrom<DiversifierIndex> for u32 {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(di: DiversifierIndex) -> Result<u32, Self::Error> {
+        let mut u128_bytes = [0u8; 16];
+        u128_bytes[0..11].copy_from_slice(&di.0[..]);
+        u128::from_le_bytes(u128_bytes).try_into()
+    }
+}
+
 impl DiversifierIndex {
     pub fn new() -> Self {
         DiversifierIndex([0; 11])
@@ -144,3 +154,27 @@ pub enum Scope {
 }
 
 memuse::impl_no_dynamic_usage!(Scope);
+
+#[cfg(test)]
+mod tests {
+    use super::DiversifierIndex;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn diversifier_index_to_u32() {
+        let two = DiversifierIndex([
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        assert_eq!(u32::try_from(two), Ok(2));
+
+        let max_u32 = DiversifierIndex([
+            0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        assert_eq!(u32::try_from(max_u32), Ok(u32::MAX));
+
+        let too_big = DiversifierIndex([
+            0xff, 0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        assert_matches!(u32::try_from(too_big), Err(_));
+    }
+}

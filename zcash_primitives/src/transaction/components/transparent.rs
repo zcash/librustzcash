@@ -10,6 +10,7 @@ use crate::legacy::{Script, TransparentAddress};
 use super::amount::{Amount, BalanceError};
 
 pub mod builder;
+pub mod fees;
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;
@@ -89,7 +90,7 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
