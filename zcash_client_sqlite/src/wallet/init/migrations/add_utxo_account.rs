@@ -67,7 +67,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             while let Some(row) = rows.next()? {
                 let account: u32 = row.get(0)?;
                 let taddrs =
-                    get_transparent_receivers(&self._params, transaction, AccountId::from(account))
+                    get_transparent_receivers(transaction, &self._params, AccountId::from(account))
                         .map_err(|e| match e {
                             SqliteClientError::DbError(e) => WalletMigrationError::DbError(e),
                             SqliteClientError::CorruptedData(s) => {
