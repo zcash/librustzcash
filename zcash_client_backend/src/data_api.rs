@@ -28,6 +28,8 @@ use crate::{
     wallet::{ReceivedSaplingNote, WalletTransparentOutput, WalletTx},
 };
 
+use self::chain::CommitmentTreeRoot;
+
 pub mod chain;
 pub mod error;
 pub mod wallet;
@@ -545,10 +547,18 @@ pub trait WalletCommitmentTrees {
             >,
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>;
+
+    /// Adds a sequence of note commitment tree subtree roots to the data store.
+    fn put_sapling_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<sapling::Node>],
+    ) -> Result<(), ShardTreeError<Self::Error>>;
 }
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
+    use incrementalmerkletree::Address;
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{MemoryShardStore, ShardTree, ShardTreeError};
     use std::{collections::HashMap, convert::Infallible, ops::Range};
@@ -573,8 +583,9 @@ pub mod testing {
     };
 
     use super::{
-        BlockMetadata, DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        chain::CommitmentTreeRoot, BlockMetadata, DecryptedTransaction, NullifierQuery,
+        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -804,6 +815,23 @@ pub mod testing {
             E: From<ShardTreeError<Infallible>>,
         {
             callback(&mut self.sapling_tree)
+        }
+
+        fn put_sapling_subtree_roots(
+            &mut self,
+            start_index: u64,
+            roots: &[CommitmentTreeRoot<sapling::Node>],
+        ) -> Result<(), ShardTreeError<Self::Error>> {
+            self.with_sapling_tree_mut(|t| {
+                for (root, i) in roots.iter().zip(0u64..) {
+                    let root_addr =
+                        Address::from_parts(SAPLING_SHARD_HEIGHT.into(), start_index + i);
+                    t.insert(root_addr, *root.root_hash())?;
+                }
+                Ok::<_, ShardTreeError<Self::Error>>(())
+            })?;
+
+            Ok(())
         }
     }
 }

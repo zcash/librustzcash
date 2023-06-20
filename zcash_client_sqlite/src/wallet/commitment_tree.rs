@@ -4,10 +4,15 @@ use std::{
     collections::BTreeSet,
     io::{self, Cursor},
     marker::PhantomData,
+    rc::Rc,
 };
+use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
 
-use incrementalmerkletree::{Address, Level, Position};
-use shardtree::{Checkpoint, LocatedPrunableTree, PrunableTree, ShardStore, TreeState};
+use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
+use shardtree::{
+    Checkpoint, LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags, ShardStore,
+    ShardTreeError, TreeState,
+};
 
 use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};
 
@@ -257,23 +262,29 @@ type Error = Either<io::Error, rusqlite::Error>;
 pub(crate) fn get_shard<H: HashSer>(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,
-    shard_root: Address,
+    shard_root_addr: Address,
 ) -> Result<Option<LocatedPrunableTree<H>>, Error> {
     conn.query_row(
         &format!(
-            "SELECT shard_data
+            "SELECT shard_data, root_hash
              FROM {}_tree_shards
              WHERE shard_index = :shard_index",
             table_prefix
         ),
-        named_params![":shard_index": shard_root.index()],
-        |row| row.get::<_, Vec<u8>>(0),
+        named_params![":shard_index": shard_root_addr.index()],
+        |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
     )
     .optional()
     .map_err(Either::Right)?
-    .map(|shard_data| {
+    .map(|(shard_data, root_hash)| {
         let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Either::Left)?;
-        Ok(LocatedPrunableTree::from_parts(shard_root, shard_tree))
+        let located_tree = LocatedPrunableTree::from_parts(shard_root_addr, shard_tree);
+        if let Some(root_hash_data) = root_hash {
+            let root_hash = H::read(Cursor::new(root_hash_data)).map_err(Either::Left)?;
+            Ok(located_tree.reannotate_root(Some(Rc::new(root_hash))))
+        } else {
+            Ok(located_tree)
+        }
     })
     .transpose()
 }
@@ -746,18 +757,102 @@ pub(crate) fn truncate_checkpoints(
     Ok(())
 }
 
+pub(crate) fn put_shard_roots<
+    H: Hashable + HashSer + Clone + Eq,
+    const DEPTH: u8,
+    const SHARD_HEIGHT: u8,
+>(
+    conn: &rusqlite::Transaction<'_>,
+    table_prefix: &'static str,
+    start_index: u64,
+    roots: &[CommitmentTreeRoot<H>],
+) -> Result<(), ShardTreeError<Error>> {
+    if roots.is_empty() {
+        // nothing to do
+        return Ok(());
+    }
+
+    // We treat the cap as a DEPTH-SHARD_HEIGHT tree so that we can make a batch insertion of
+    // root data using `Position::from(start_index)` as the starting position and treating the
+    // roots as level-0 leaves.
+    let cap = LocatedTree::from_parts(
+        Address::from_parts((DEPTH - SHARD_HEIGHT).into(), 0),
+        get_cap(conn, table_prefix).map_err(ShardTreeError::Storage)?,
+    );
+
+    let cap_result = cap
+        .batch_insert(
+            Position::from(start_index),
+            roots.iter().map(|r| {
+                (
+                    r.root_hash().clone(),
+                    Retention::Checkpoint {
+                        id: (),
+                        is_marked: false,
+                    },
+                )
+            }),
+        )
+        .map_err(ShardTreeError::Insert)?
+        .expect("slice of inserted roots was verified to be nonempty");
+
+    put_cap(conn, table_prefix, cap_result.subtree.take_root()).map_err(ShardTreeError::Storage)?;
+
+    for (root, i) in roots.iter().zip(0u64..) {
+        // We want to avoid deserializing the subtree just to annotate its root node, so we simply
+        // cache the downloaded root alongside of any already-persisted subtree. We will update the
+        // subtree data itself by reannotating the root node of the tree, handling conflicts, at
+        // the time that we deserialize the tree.
+        let mut stmt = conn
+            .prepare_cached(&format!(
+            "INSERT INTO {}_tree_shards (shard_index, subtree_end_height, root_hash, shard_data)
+            VALUES (:shard_index, :subtree_end_height, :root_hash, :shard_data)
+            ON CONFLICT (shard_index) DO UPDATE
+            SET subtree_end_height = :subtree_end_height, root_hash = :root_hash",
+            table_prefix
+        ))
+            .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
+
+        // The `shard_data` value will only be used in the case that no tree already exists.
+        let mut shard_data: Vec<u8> = vec![];
+        let tree = PrunableTree::leaf((root.root_hash().clone(), RetentionFlags::EPHEMERAL));
+        write_shard(&mut shard_data, &tree)
+            .map_err(|e| ShardTreeError::Storage(Either::Left(e)))?;
+
+        let mut root_hash_data: Vec<u8> = vec![];
+        root.root_hash()
+            .write(&mut root_hash_data)
+            .map_err(|e| ShardTreeError::Storage(Either::Left(e)))?;
+
+        stmt.execute(named_params![
+            ":shard_index": start_index + i,
+            ":subtree_end_height": u32::from(root.subtree_end_height()),
+            ":root_hash": root_hash_data,
+            ":shard_data": shard_data,
+        ])
+        .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::NamedTempFile;
 
-    use incrementalmerkletree::testing::{
-        check_append, check_checkpoint_rewind, check_remove_mark, check_rewind_remove_mark,
-        check_root_hashes, check_witness_consistency, check_witnesses,
+    use incrementalmerkletree::{
+        testing::{
+            check_append, check_checkpoint_rewind, check_remove_mark, check_rewind_remove_mark,
+            check_root_hashes, check_witness_consistency, check_witnesses,
+        },
+        Position, Retention,
     };
     use shardtree::ShardTree;
+    use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
+    use zcash_primitives::consensus::BlockHeight;
 
     use super::SqliteShardStore;
-    use crate::{tests, wallet::init::init_wallet_db, WalletDb};
+    use crate::{tests, wallet::init::init_wallet_db, WalletDb, SAPLING_TABLES_PREFIX};
 
     fn new_tree(m: usize) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
         let data_file = NamedTempFile::new().unwrap();
@@ -766,7 +861,8 @@ mod tests {
 
         init_wallet_db(&mut db_data, None).unwrap();
         let store =
-            SqliteShardStore::<_, String, 3>::from_connection(db_data.conn, "sapling").unwrap();
+            SqliteShardStore::<_, String, 3>::from_connection(db_data.conn, SAPLING_TABLES_PREFIX)
+                .unwrap();
         ShardTree::new(store, m)
     }
 
@@ -803,5 +899,67 @@ mod tests {
     #[test]
     fn rewind_remove_mark() {
         check_rewind_remove_mark(new_tree);
+    }
+
+    #[test]
+    fn put_shard_roots() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        data_file.keep().unwrap();
+
+        init_wallet_db(&mut db_data, None).unwrap();
+        let tx = db_data.conn.transaction().unwrap();
+        let store =
+            SqliteShardStore::<_, String, 3>::from_connection(&tx, SAPLING_TABLES_PREFIX).unwrap();
+
+        // introduce some roots
+        let roots = (0u32..4)
+            .into_iter()
+            .map(|idx| {
+                CommitmentTreeRoot::from_parts(
+                    BlockHeight::from((idx + 1) * 3),
+                    if idx == 3 {
+                        "abcdefgh".to_string()
+                    } else {
+                        idx.to_string()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        super::put_shard_roots::<_, 6, 3>(store.conn, SAPLING_TABLES_PREFIX, 0, &roots).unwrap();
+
+        // simulate discovery of a note
+        let mut tree = ShardTree::<_, 6, 3>::new(store, 10);
+        tree.batch_insert(
+            Position::from(24),
+            ('a'..='h').into_iter().map(|c| {
+                (
+                    c.to_string(),
+                    match c {
+                        'c' => Retention::Marked,
+                        'h' => Retention::Checkpoint {
+                            id: BlockHeight::from(3),
+                            is_marked: false,
+                        },
+                        _ => Retention::Ephemeral,
+                    },
+                )
+            }),
+        )
+        .unwrap();
+
+        // construct a witness for the note
+        let witness = tree.witness(Position::from(26), 0).unwrap();
+        assert_eq!(
+            witness.path_elems(),
+            &[
+                "d",
+                "ab",
+                "efgh",
+                "2",
+                "01",
+                "________________________________"
+            ]
+        );
     }
 }

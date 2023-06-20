@@ -36,6 +36,7 @@ use either::Either;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, io, ops::Range, path::Path};
+use wallet::commitment_tree::put_shard_roots;
 
 use incrementalmerkletree::Position;
 use shardtree::{ShardTree, ShardTreeError};
@@ -55,9 +56,10 @@ use zcash_primitives::{
 use zcash_client_backend::{
     address::{AddressMetadata, UnifiedAddress},
     data_api::{
-        self, chain::BlockSource, BlockMetadata, DecryptedTransaction, NullifierQuery, PoolType,
-        Recipient, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        self,
+        chain::{BlockSource, CommitmentTreeRoot},
+        BlockMetadata, DecryptedTransaction, NullifierQuery, PoolType, Recipient, ScannedBlock,
+        SentTransaction, WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -643,9 +645,30 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
             let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
             callback(&mut shardtree)?
         };
+
         tx.commit()
             .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
         Ok(result)
+    }
+
+    fn put_sapling_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<sapling::Node>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
+        put_shard_roots::<_, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>(
+            &tx,
+            SAPLING_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
+        Ok(())
     }
 }
 
@@ -673,6 +696,19 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
         let result = callback(&mut shardtree)?;
 
         Ok(result)
+    }
+
+    fn put_sapling_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<sapling::Node>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        put_shard_roots::<_, { sapling::NOTE_COMMITMENT_TREE_DEPTH }, SAPLING_SHARD_HEIGHT>(
+            self.conn.0,
+            SAPLING_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
     }
 }
 
