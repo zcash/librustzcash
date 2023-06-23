@@ -7,6 +7,33 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::builder`:
+  - `Builder::add_orchard_spend`
+  - `Builder::add_orchard_output`
+- `zcash_primitives::transaction::components::orchard::builder` module
+
+### Changed
+- `zcash_primitives::transaction`:
+  - `builder::Builder::{new, new_with_rng}` now take an optional `orchard_anchor` 
+    argument which must be provided in order to enable Orchard spends and recipients.
+  - All `builder::Builder` methods now require the bound `R: CryptoRng` on
+    `Builder<'a, P, R>`. A non-`CryptoRng` randomness source is still accepted
+    by `builder::Builder::test_only_new_with_rng`, which **MUST NOT** be used in
+    production.
+  - `builder::Error` has several additional variants for Orchard-related errors.
+  - `fees::FeeRule::fee_required` now takes an additional argument,
+    `orchard_action_count`
+  - `Unauthorized`'s associated type `OrchardAuth` is now 
+    `orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>`
+    instead of `zcash_primitives::transaction::components::orchard::Unauthorized`
+- `zcash_primitives::consensus::NetworkUpgrade` now implements `PartialEq`, `Eq`
+
+### Removed
+- `impl {PartialEq, Eq} for transaction::builder::Error` 
+  (use `assert_matches!` where error comparisons are required)
+- `zcash_primitives::transaction::components::orchard::Unauthorized`
+
 ## [0.12.0] - 2023-06-06
 ### Added
 - `zcash_primitives::transaction`:
@@ -27,7 +54,7 @@ and this library adheres to Rust's notion of
   `incrementalmerkletree::Hashable` and `merkle_tree::HashSer`.
 - The `Hashable` bound on the `Node` parameter to the `IncrementalWitness`
   type has been removed.
-- `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH` 
+- `sapling::SAPLING_COMMITMENT_TREE_DEPTH_U8` and `sapling::SAPLING_COMMITMENT_TREE_DEPTH`
   have been removed; use `sapling::NOTE_COMMITMENT_TREE_DEPTH` instead.
 - `merkle_tree::{CommitmentTree, IncrementalWitness, MerklePath}` have been removed in
   favor of versions of these types that are now provided by the
@@ -89,7 +116,7 @@ and this library adheres to Rust's notion of
 - The bounds on the `H` parameter to the following methods have changed:
   - `merkle_tree::incremental::read_frontier_v0`
   - `merkle_tree::incremental::read_auth_fragment_v1`
-- The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}` 
+- The depth of the `merkle_tree::{CommitmentTree, IncrementalWitness, and MerklePath}`
   data types are now statically constrained using const generic type parameters.
 - `transaction::fees::fixed::FeeRule::standard()` now uses the ZIP 317 minimum fee
   (10000 zatoshis rather than 1000 zatoshis) as the fixed fee. To be compliant with

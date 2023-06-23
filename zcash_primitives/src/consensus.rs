@@ -361,7 +361,7 @@ impl Parameters for Network {
 /// consensus rules enforced by the network are altered.
 ///
 /// See [ZIP 200](https://zips.z.cash/zip-0200) for more details.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NetworkUpgrade {
     /// The [Overwinter] network upgrade.
     ///

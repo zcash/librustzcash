@@ -167,6 +167,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 // add one for Sapling change, then account for Sapling output padding performed by
                 // the transaction builder
                 std::cmp::max(sapling_outputs.len() + 1, 2),
+                //Orchard is not yet supported in zcash_client_backend
+                0,
             )
             .map_err(ChangeError::StrategyError)?;
 
