@@ -15,11 +15,12 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_primitives::transaction`:
-  - `builder::Builder::{new, new_with_rng}` now takes an optional `orchard_anchor` 
+  - `builder::Builder::{new, new_with_rng}` now take an optional `orchard_anchor` 
     argument which must be provided in order to enable Orchard spends and recipients.
-  - `builder::Builder::test_only_new_with_rng`
-    now returns an existential type: `Builder<'a, P, impl RngCore + CryptoRng>` 
-    instead of `Builder<'a, P, R>`
+  - All `builder::Builder` methods now require the bound `R: CryptoRng` on
+    `Builder<'a, P, R>`. A non-`CryptoRng` randomness source is still accepted
+    by `builder::Builder::test_only_new_with_rng`, which **MUST NOT** be used in
+    production.
   - `builder::Error` has several additional variants for Orchard-related errors.
   - `fees::FeeRule::fee_required` now takes an additional argument,
     `orchard_action_count`

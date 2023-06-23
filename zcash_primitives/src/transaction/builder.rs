@@ -68,9 +68,9 @@ pub enum Error<FeeError> {
     SaplingBuild(sapling_builder::Error),
     /// An error occurred in constructing the Orchard parts of a transaction.
     OrchardBuild(orchard::builder::BuildError),
-    /// An error occurred in adding an Orchard Spend a transaction.
+    /// An error occurred in adding an Orchard Spend to a transaction.
     OrchardSpend(orchard::builder::SpendError),
-    /// An error occurred in adding an Orchard Output a transaction.
+    /// An error occurred in adding an Orchard Output to a transaction.
     OrchardRecipient(orchard::builder::OutputError),
     /// The builder was constructed either without an Orchard anchor or before NU5
     /// activation, but an Orchard spend or recipient was added.
@@ -98,11 +98,11 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::TransparentBuild(err) => err.fmt(f),
             Error::SaplingBuild(err) => err.fmt(f),
             Error::OrchardBuild(err) => write!(f, "{:?}", err),
-            Error::OrchardSpend(err) => write!(f, "Could not add orchard spend: {}", err),
-            Error::OrchardRecipient(err) => write!(f, "Could not add orchard recipient: {}", err),
+            Error::OrchardSpend(err) => write!(f, "Could not add Orchard spend: {}", err),
+            Error::OrchardRecipient(err) => write!(f, "Could not add Orchard recipient: {}", err),
             Error::OrchardAnchorNotAvailable => write!(
                 f,
-                "Cannot create orchard transactions without an Orchard anchor or before NU5 activation"
+                "Cannot create Orchard transactions without an Orchard anchor, or before NU5 activation"
             ),
             #[cfg(feature = "zfuture")]
             Error::TzeBuild(err) => err.fmt(f),
@@ -248,9 +248,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
 
         Self::new_internal(params, rng, target_height, orchard_builder)
     }
-}
 
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// Common utility function for builder construction.
     fn new_internal(
         params: P,
@@ -425,10 +423,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                 match std::cmp::max(
                     self.orchard_builder
                         .as_ref()
-                        .map_or_else(|| 0, |builder| builder.outputs().len()),
+                        .map_or(0, |builder| builder.outputs().len()),
                     self.orchard_builder
                         .as_ref()
-                        .map_or_else(|| 0, |builder| builder.spends().len()),
+                        .map_or(0, |builder| builder.spends().len()),
                 ) {
                     1 => 2,
                     n => n,
