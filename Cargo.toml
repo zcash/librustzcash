@@ -21,4 +21,4 @@ codegen-units = 1
 [patch.crates-io]
 zcash_encoding = { path = "components/zcash_encoding" }
 zcash_note_encryption = { path = "components/zcash_note_encryption" }
-orchard = { version = "0.5", git = "https://github.com/QED-it/orchard", branch = "upgrade_librustzcash_for_orchard_v05_new" }
+orchard = { version = "0.5", git = "https://github.com/QED-it/orchard", tag = "zsa_0.5.0" }
