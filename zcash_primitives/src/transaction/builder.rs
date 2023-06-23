@@ -72,8 +72,8 @@ pub enum Error<FeeError> {
     OrchardSpend(orchard::builder::SpendError),
     /// An error occurred in adding an Orchard Output a transaction.
     OrchardRecipient(orchard::builder::OutputError),
-    /// Orchard is not yet active on the network, and the user attempted to add
-    /// Orchard parts to a transaction.
+    /// The builder was constructed either without an Orchard anchor or before NU5
+    /// activation, but an Orchard spend or recipient was added.
     OrchardAnchorNotAvailable,
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(feature = "zfuture")]
