@@ -1,18 +1,25 @@
 //! Generated code for handling light client protobuf structs.
 
-use group::ff::PrimeField;
-
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
-    sapling::Nullifier,
+    sapling::{note::ExtractedNoteCommitment, Nullifier},
     transaction::{components::sapling, TxId},
 };
 
 use orchard::note_encryption_v3::COMPACT_NOTE_SIZE_V3 as COMPACT_NOTE_SIZE;
 use zcash_note_encryption::EphemeralKeyBytes;
 
+#[rustfmt::skip]
+#[allow(unknown_lints)]
+#[allow(clippy::derive_partial_eq_without_eq)]
 pub mod compact_formats;
+
+#[cfg(feature = "lightwalletd-tonic")]
+#[rustfmt::skip]
+#[allow(unknown_lints)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+pub mod service;
 
 impl compact_formats::CompactBlock {
     /// Returns the [`BlockHash`] for this block.
@@ -45,7 +52,7 @@ impl compact_formats::CompactBlock {
         if let Some(header) = self.header() {
             header.prev_block
         } else {
-            BlockHash::from_slice(&self.prevHash)
+            BlockHash::from_slice(&self.prev_hash)
         }
     }
 
@@ -88,10 +95,10 @@ impl compact_formats::CompactSaplingOutput {
     /// A convenience method that parses [`CompactOutput.cmu`].
     ///
     /// [`CompactOutput.cmu`]: #structfield.cmu
-    pub fn cmu(&self) -> Result<bls12_381::Scalar, ()> {
+    pub fn cmu(&self) -> Result<ExtractedNoteCommitment, ()> {
         let mut repr = [0; 32];
         repr.as_mut().copy_from_slice(&self.cmu[..]);
-        Option::from(bls12_381::Scalar::from_repr(repr)).ok_or(())
+        Option::from(ExtractedNoteCommitment::from_bytes(&repr)).ok_or(())
     }
 
     /// Returns the ephemeral public key for this output.
@@ -100,7 +107,7 @@ impl compact_formats::CompactSaplingOutput {
     ///
     /// [`CompactOutput.epk`]: #structfield.epk
     pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
-        self.ephemeralKey[..]
+        self.ephemeral_key[..]
             .try_into()
             .map(EphemeralKeyBytes)
             .map_err(|_| ())
@@ -111,11 +118,11 @@ impl<A: sapling::Authorization> From<sapling::OutputDescription<A>>
     for compact_formats::CompactSaplingOutput
 {
     fn from(out: sapling::OutputDescription<A>) -> compact_formats::CompactSaplingOutput {
-        let mut result = compact_formats::CompactSaplingOutput::new();
-        result.set_cmu(out.cmu.to_repr().to_vec());
-        result.set_ephemeralKey(out.ephemeral_key.as_ref().to_vec());
-        result.set_ciphertext(out.enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec());
-        result
+        compact_formats::CompactSaplingOutput {
+            cmu: out.cmu().to_bytes().to_vec(),
+            ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
+            ciphertext: out.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
+        }
     }
 }
 

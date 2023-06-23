@@ -363,9 +363,8 @@ pub fn parse_parameters<R: io::Read>(
     // We only deserialize the verifying key for the Sprout parameters, which
     // appears at the beginning of the parameter file. The rest is loaded
     // during proving time.
-    let sprout_vk = sprout_fs.as_mut().map(|mut fs| {
-        VerifyingKey::<Bls12>::read(&mut fs)
-            .expect("couldn't deserialize Sprout Groth16 verifying key")
+    let sprout_vk = sprout_fs.as_mut().map(|fs| {
+        VerifyingKey::<Bls12>::read(fs).expect("couldn't deserialize Sprout Groth16 verifying key")
     });
 
     // There is extra stuff (the transcript) at the end of the parameter file which is

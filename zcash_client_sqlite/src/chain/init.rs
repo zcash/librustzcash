@@ -37,6 +37,9 @@ pub fn init_cache_database(db_cache: &BlockDb) -> Result<(), rusqlite::Error> {
 
 /// Sets up the internal structure of the metadata cache database.
 ///
+/// This will automatically apply any available migrations that have not yet been applied to the
+/// database as part of its operation.
+///
 /// # Examples
 ///
 /// ```

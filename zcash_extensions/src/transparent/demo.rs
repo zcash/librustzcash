@@ -477,28 +477,27 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
 #[cfg(test)]
 mod tests {
     use blake2b_simd::Params;
-    use ff::{Field, PrimeField};
+    use ff::Field;
     use rand_core::OsRng;
-
-    use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
         consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
         constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
-        merkle_tree::{CommitmentTree, IncrementalWitness},
-        sapling::{Node, Rseed},
+        sapling::{self, Node, Rseed},
         transaction::{
             builder::Builder,
             components::{
-                amount::{Amount, DEFAULT_FEE},
+                amount::Amount,
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
+            fees::fixed,
             Transaction, TransactionData, TxVersion,
         },
         zip32::ExtendedSpendingKey,
     };
+    use zcash_proofs::prover::LocalTxProver;
 
     use super::{close, hash_1, open, Context, DemoBuilder, Precondition, Program, Witness};
 
@@ -809,18 +808,20 @@ mod tests {
 
         let mut rng = OsRng;
 
+        // FIXME: implement zcash_primitives::transaction::fees::FutureFeeRule for zip317::FeeRule.
+        #[allow(deprecated)]
+        let fee_rule = fixed::FeeRule::standard();
+
         // create some inputs to spend
         let extsk = ExtendedSpendingKey::master(&[]);
         let to = extsk.default_address().1;
-        let note1 = to
-            .create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)))
-            .unwrap();
-        let cm1 = Node::new(note1.cmu().to_repr());
-        let mut tree = CommitmentTree::empty();
+        let note1 = to.create_note(110000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let cm1 = Node::from_cmu(&note1.cmu());
+        let mut tree = sapling::CommitmentTree::empty();
         // fake that the note appears in some previous
         // shielded output
         tree.append(cm1).unwrap();
-        let witness1 = IncrementalWitness::from_tree(&tree);
+        let witness1 = sapling::IncrementalWitness::from_tree(tree);
 
         let mut builder_a = demo_builder(tx_height);
         builder_a
@@ -835,7 +836,7 @@ mod tests {
             .unwrap();
         let (tx_a, _) = builder_a
             .txn_builder
-            .build(&prover)
+            .build_zfuture(&prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_a = tx_a.tze_bundle().unwrap();
@@ -846,14 +847,14 @@ mod tests {
 
         let mut builder_b = demo_builder(tx_height + 1);
         let prevout_a = (OutPoint::new(tx_a.txid(), 0), tze_a.vout[0].clone());
-        let value_xfr = (value - DEFAULT_FEE).unwrap();
+        let value_xfr = (value - fee_rule.fixed_fee()).unwrap();
         builder_b
             .demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
         let (tx_b, _) = builder_b
             .txn_builder
-            .build(&prover)
+            .build_zfuture(&prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_b = tx_b.tze_bundle().unwrap();
@@ -872,13 +873,13 @@ mod tests {
         builder_c
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                (value_xfr - DEFAULT_FEE).unwrap(),
+                (value_xfr - fee_rule.fixed_fee()).unwrap(),
             )
             .unwrap();
 
         let (tx_c, _) = builder_c
             .txn_builder
-            .build(&prover)
+            .build_zfuture(&prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_c = tx_c.tze_bundle().unwrap();

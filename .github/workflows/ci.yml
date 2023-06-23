@@ -12,18 +12,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.61.0
-          override: true
-
       - name: Fetch path to Zcash parameters
         working-directory: ./zcash_proofs
         shell: bash
         run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v3.0.11
+        uses: actions/cache@v3.3.1
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-params
@@ -33,15 +28,11 @@ jobs:
         run: cargo run --release --example download-params --features download-params
 
       - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features --verbose --release --all
+        run: cargo test  --all-features --verbose --release --all
       - name: Run slow tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features --verbose --release --all -- --ignored
+        run: cargo test --all-features --verbose --release --all -- --ignored
+      - name: Verify working directory is clean
+        run: git diff --exit-code
 
   build:
     name: Build target ${{ matrix.target }}
@@ -53,16 +44,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.61.0
-          override: true
       - name: Add target
         run: rustup target add ${{ matrix.target }}
-      - name: cargo fetch
-        uses: actions-rs/cargo@v1
-        with:
-          command: fetch
+      - run: cargo fetch
       - name: Build zcash_proofs for target
         working-directory: ./zcash_proofs
         run: cargo build --verbose --no-default-features --target ${{ matrix.target }}
@@ -73,35 +57,22 @@ jobs:
   bitrot:
     name: Bitrot check
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.61.0
-          override: true
       # Build benchmarks to prevent bitrot
       - name: Build benchmarks
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all --benches
+        run: cargo build --all --benches
 
   clippy:
-    name: Clippy (1.61.0)
+    name: Clippy (MSRV)
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.61.0
-          components: clippy
-          override: true
       - name: Run clippy
         uses: actions-rs/clippy-check@v1
         with:
-          name: Clippy (1.61.0)
+          name: Clippy (MSRV)
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --all-targets -- -D warnings
 
@@ -112,11 +83,9 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: beta
-          components: clippy
-          override: true
+      - uses: dtolnay/rust-toolchain@beta
+        id: toolchain
+      - run: rustup override set ${{steps.toolchain.outputs.name}}
       - name: Run Clippy (beta)
         uses: actions-rs/clippy-check@v1
         continue-on-error: true
@@ -128,28 +97,19 @@ jobs:
   codecov:
     name: Code coverage
     runs-on: ubuntu-latest
+    container:
+      image: xd009642/tarpaulin:develop-nightly
+      options: --security-opt seccomp=unconfined
 
     steps:
       - uses: actions/checkout@v3
-      # Use stable for this to ensure that cargo-tarpaulin can be built and has the source
-      # coverage features released in 1.60.0.
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - name: Install cargo-tarpaulin
-        uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: cargo-tarpaulin
-
       - name: Fetch path to Zcash parameters
         working-directory: ./zcash_proofs
         shell: bash
         run: echo "ZCASH_PARAMS=$(cargo run --release --example get-params-path --features directories)" >> $GITHUB_ENV
       - name: Cache Zcash parameters
         id: cache-params
-        uses: actions/cache@v3.0.11
+        uses: actions/cache@v3.3.1
         with:
           path: ${{ env.ZCASH_PARAMS }}
           key: ${{ runner.os }}-params
@@ -159,35 +119,19 @@ jobs:
         run: cargo run --release --example download-params --features download-params
 
       - name: Generate coverage report
-        uses: actions-rs/cargo@v1
-        with:
-          command: tarpaulin
-          args: --engine llvm --all-features --release --timeout 600 --out Xml
+        run: cargo tarpaulin --engine llvm --all-features --release --timeout 600 --out Xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.1.1
+        uses: codecov/codecov-action@v3.1.3
 
   doc-links:
     name: Intra-doc links
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.61.0
-          override: true
-      - name: cargo fetch
-        uses: actions-rs/cargo@v1
-        with:
-          command: fetch
-
-      # Ensure intra-documentation links all resolve correctly
-      # Requires #![deny(intra_doc_link_resolution_failure)] in crates.
+      - run: cargo fetch
+      # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
       - name: Check intra-doc links
-        uses: actions-rs/cargo@v1
-        with:
-          command: doc
-          args: --all --document-private-items
+        run: cargo doc --all --document-private-items
 
   fmt:
     name: Rustfmt
@@ -195,23 +139,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 1.61.0
-          override: true
-
-      # cargo fmt does not build the code, and running it in a fresh clone of
-      # the codebase will fail because the protobuf code has not been generated.
-      - name: cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all
-
-      # Ensure all code has been formatted with rustfmt
-      - run: rustup component add rustfmt
       - name: Check formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check

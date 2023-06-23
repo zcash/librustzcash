@@ -88,7 +88,7 @@ impl BlockHeader {
         header
             .hash
             .0
-            .copy_from_slice(&Sha256::digest(&Sha256::digest(&raw)));
+            .copy_from_slice(&Sha256::digest(Sha256::digest(&raw)));
         Ok(header)
     }
 

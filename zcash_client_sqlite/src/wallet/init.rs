@@ -158,11 +158,11 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 /// [`WalletWrite::create_account`]: zcash_client_backend::data_api::WalletWrite::create_account
 ///
 /// The [`UnifiedFullViewingKey`]s are stored internally and used by other APIs such as
-/// [`get_address`], [`scan_cached_blocks`], and [`create_spend_to_address`]. Account identifiers
-/// in `keys` **MUST** form a consecutive sequence beginning at account 0, and the
-/// [`UnifiedFullViewingKey`] corresponding to a given account identifier **MUST** be derived from
-/// the wallet's mnemonic seed at the BIP-44 `account` path level as described by
-/// [ZIP 316](https://zips.z.cash/zip-0316)
+/// [`scan_cached_blocks`], and [`create_spend_to_address`]. Account identifiers in `keys` **MUST**
+/// form a consecutive sequence beginning at account 0, and the [`UnifiedFullViewingKey`]
+/// corresponding to a given account identifier **MUST** be derived from the wallet's mnemonic seed
+/// at the BIP-44 `account` path level as described by [ZIP
+/// 316](https://zips.z.cash/zip-0316)
 ///
 /// # Examples
 ///
@@ -175,7 +175,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 ///
 /// use zcash_primitives::{
 ///     consensus::{Network, Parameters},
-///     zip32::{AccountId, ExtendedFullViewingKey, ExtendedSpendingKey}
+///     zip32::{AccountId, ExtendedSpendingKey}
 /// };
 ///
 /// use zcash_client_backend::{
@@ -197,7 +197,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 /// let seed = [0u8; 32]; // insecure; replace with a strong random seed
 /// let account = AccountId::from(0);
 /// let extsk = sapling::spending_key(&seed, Network::TestNetwork.coin_type(), account);
-/// let dfvk = ExtendedFullViewingKey::from(&extsk).into();
+/// let dfvk = extsk.to_diversifiable_full_viewing_key();
 /// let ufvk = UnifiedFullViewingKey::new(None, Some(dfvk), None).unwrap();
 /// let ufvks = HashMap::from([(account, ufvk)]);
 /// init_accounts_table(&db_data, &ufvks).unwrap();
@@ -301,6 +301,7 @@ mod tests {
 
     use zcash_client_backend::{
         address::RecipientAddress,
+        data_api::WalletRead,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
@@ -309,13 +310,12 @@ mod tests {
         block::BlockHash,
         consensus::{BlockHeight, BranchId, Parameters},
         transaction::{TransactionData, TxVersion},
-        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+        zip32::sapling::ExtendedFullViewingKey,
     };
 
     use crate::{
         error::SqliteClientError,
         tests::{self, network},
-        wallet::get_address,
         AccountId, WalletDb,
     };
 
@@ -361,7 +361,7 @@ mod tests {
                 time INTEGER NOT NULL,
                 sapling_tree BLOB NOT NULL
             )",
-            "CREATE TABLE received_notes (
+            "CREATE TABLE sapling_received_notes (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
@@ -369,7 +369,7 @@ mod tests {
                 diversifier BLOB NOT NULL,
                 value INTEGER NOT NULL,
                 rcm BLOB NOT NULL,
-                nf BLOB NOT NULL UNIQUE,
+                nf BLOB UNIQUE,
                 is_change INTEGER NOT NULL,
                 memo BLOB,
                 spent INTEGER,
@@ -383,7 +383,7 @@ mod tests {
                 note INTEGER NOT NULL,
                 block INTEGER NOT NULL,
                 witness BLOB NOT NULL,
-                FOREIGN KEY (note) REFERENCES received_notes(id_note),
+                FOREIGN KEY (note) REFERENCES sapling_received_notes(id_note),
                 FOREIGN KEY (block) REFERENCES blocks(height),
                 CONSTRAINT witness_height UNIQUE (note, block)
             )",
@@ -453,119 +453,138 @@ mod tests {
         let expected_views = vec![
             // v_transactions
             "CREATE VIEW v_transactions AS
-            SELECT notes.id_tx,
-                   notes.mined_height,
-                   notes.tx_index,
-                   notes.txid,
-                   notes.expiry_height,
-                   notes.raw,
-                   SUM(notes.value) + MAX(notes.fee) AS net_value,
-                   MAX(notes.fee)                    AS fee_paid,
-                   SUM(notes.sent_count) == 0        AS is_wallet_internal,
-                   SUM(notes.is_change) > 0          AS has_change,
-                   SUM(notes.sent_count)             AS sent_note_count,
-                   SUM(notes.received_count)         AS received_note_count,
-                   SUM(notes.memo_present)           AS memo_count,
-                   blocks.time                       AS block_time
-            FROM (
-                SELECT transactions.id_tx            AS id_tx,
-                       transactions.block            AS mined_height,
-                       transactions.tx_index         AS tx_index,
-                       transactions.txid             AS txid,
-                       transactions.expiry_height    AS expiry_height,
-                       transactions.raw              AS raw,
-                       0                             AS fee,
+            WITH
+            notes AS (
+                SELECT sapling_received_notes.account        AS account_id,
+                       sapling_received_notes.tx             AS id_tx,
+                       2                             AS pool,
+                       sapling_received_notes.value          AS value,
                        CASE
-                            WHEN received_notes.is_change THEN 0
-                            ELSE value
-                       END AS value,
-                       0                             AS sent_count,
-                       CASE
-                            WHEN received_notes.is_change THEN 1
+                            WHEN sapling_received_notes.is_change THEN 1
                             ELSE 0
                        END AS is_change,
                        CASE
-                            WHEN received_notes.is_change THEN 0
+                            WHEN sapling_received_notes.is_change THEN 0
                             ELSE 1
                        END AS received_count,
                        CASE
-                           WHEN received_notes.memo IS NULL THEN 0
+                           WHEN sapling_received_notes.memo IS NULL THEN 0
                            ELSE 1
                        END AS memo_present
-                FROM   transactions
-                       JOIN received_notes ON transactions.id_tx = received_notes.tx
+                FROM   sapling_received_notes
                 UNION
-                SELECT transactions.id_tx            AS id_tx,
-                       transactions.block            AS mined_height,
-                       transactions.tx_index         AS tx_index,
-                       transactions.txid             AS txid,
-                       transactions.expiry_height    AS expiry_height,
-                       transactions.raw              AS raw,
-                       transactions.fee              AS fee,
-                       -sent_notes.value             AS value,
-                       CASE
-                           WHEN sent_notes.from_account = sent_notes.to_account THEN 0
-                           ELSE 1
-                       END AS sent_count,
+                SELECT utxos.received_by_account     AS account_id,
+                       transactions.id_tx            AS id_tx,
+                       0                             AS pool,
+                       utxos.value_zat               AS value,
+                       0                             AS is_change,
+                       1                             AS received_count,
+                       0                             AS memo_present
+                FROM utxos
+                JOIN transactions
+                     ON transactions.txid = utxos.prevout_txid
+                UNION
+                SELECT sapling_received_notes.account        AS account_id,
+                       sapling_received_notes.spent          AS id_tx,
+                       2                             AS pool,
+                       -sapling_received_notes.value         AS value,
                        0                             AS is_change,
                        0                             AS received_count,
-                       CASE
-                           WHEN sent_notes.memo IS NULL THEN 0
-                           ELSE 1
-                       END AS memo_present
-                FROM   transactions
-                       JOIN sent_notes ON transactions.id_tx = sent_notes.tx
-            ) AS notes
-            LEFT JOIN blocks ON notes.mined_height = blocks.height
-            GROUP BY notes.id_tx",
-            // v_tx_received
-            "CREATE VIEW v_tx_received AS
-            SELECT transactions.id_tx            AS id_tx,
-                   transactions.block            AS mined_height,
-                   transactions.tx_index         AS tx_index,
-                   transactions.txid             AS txid,
-                   transactions.expiry_height    AS expiry_height,
-                   transactions.raw              AS raw,
-                   MAX(received_notes.account)   AS received_by_account,
-                   SUM(received_notes.value)     AS received_total,
-                   COUNT(received_notes.id_note) AS received_note_count,
-                   SUM(
-                       CASE
-                           WHEN received_notes.memo IS NULL THEN 0
-                           ELSE 1
-                       END
-                   ) AS memo_count,
-                   blocks.time                   AS block_time
-            FROM   transactions
-                   JOIN received_notes
-                          ON transactions.id_tx = received_notes.tx
-                   LEFT JOIN blocks
-                          ON transactions.block = blocks.height
-            GROUP BY received_notes.tx, received_notes.account",
-            // v_tx_received
-            "CREATE VIEW v_tx_sent AS
-            SELECT transactions.id_tx           AS id_tx,
-                   transactions.block           AS mined_height,
-                   transactions.tx_index        AS tx_index,
-                   transactions.txid            AS txid,
-                   transactions.expiry_height   AS expiry_height,
-                   transactions.raw             AS raw,
-                   MAX(sent_notes.from_account) AS sent_from_account,
-                   SUM(sent_notes.value)        AS sent_total,
-                   COUNT(sent_notes.id_note)    AS sent_note_count,
-                   SUM(
-                       CASE
-                           WHEN sent_notes.memo IS NULL THEN 0
-                           ELSE 1
-                       END
-                   ) AS memo_count,
-                   blocks.time                  AS block_time
-            FROM   transactions
-                   JOIN sent_notes
-                          ON transactions.id_tx = sent_notes.tx
-                   LEFT JOIN blocks
-                          ON transactions.block = blocks.height
-            GROUP BY sent_notes.tx, sent_notes.from_account",
+                       0                             AS memo_present
+                FROM   sapling_received_notes
+                WHERE  sapling_received_notes.spent IS NOT NULL
+            ),
+            sent_note_counts AS (
+                SELECT sent_notes.from_account AS account_id,
+                       sent_notes.tx AS id_tx,
+                       COUNT(DISTINCT sent_notes.id_note) as sent_notes,
+                       SUM(
+                         CASE
+                             WHEN sent_notes.memo IS NULL THEN 0
+                             ELSE 1
+                         END
+                       ) AS memo_count
+                FROM sent_notes
+                LEFT JOIN sapling_received_notes
+                          ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                             (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+                WHERE  sapling_received_notes.is_change IS NULL
+                   OR  sapling_received_notes.is_change = 0
+                GROUP BY account_id, id_tx
+            ),
+            blocks_max_height AS (
+                SELECT MAX(blocks.height) as max_height FROM blocks
+            )
+            SELECT notes.account_id                  AS account_id,
+                   transactions.id_tx                AS id_tx,
+                   transactions.block                AS mined_height,
+                   transactions.tx_index             AS tx_index,
+                   transactions.txid                 AS txid,
+                   transactions.expiry_height        AS expiry_height,
+                   transactions.raw                  AS raw,
+                   SUM(notes.value)                  AS account_balance_delta,
+                   transactions.fee                  AS fee_paid,
+                   SUM(notes.is_change) > 0          AS has_change,
+                   MAX(COALESCE(sent_note_counts.sent_notes, 0))  AS sent_note_count,
+                   SUM(notes.received_count)         AS received_note_count,
+                   SUM(notes.memo_present) + MAX(COALESCE(sent_note_counts.memo_count, 0)) AS memo_count,
+                   blocks.time                       AS block_time,
+                   (
+                        blocks.height IS NULL
+                        AND transactions.expiry_height <= blocks_max_height.max_height
+                   ) AS expired_unmined
+            FROM transactions
+            JOIN notes ON notes.id_tx = transactions.id_tx
+            JOIN blocks_max_height
+            LEFT JOIN blocks ON blocks.height = transactions.block
+            LEFT JOIN sent_note_counts
+                      ON sent_note_counts.account_id = notes.account_id
+                      AND sent_note_counts.id_tx = notes.id_tx
+            GROUP BY notes.account_id, transactions.id_tx",
+            // v_tx_outputs
+            "CREATE VIEW v_tx_outputs AS
+            SELECT sapling_received_notes.tx           AS id_tx,
+                   2                                   AS output_pool,
+                   sapling_received_notes.output_index AS output_index,
+                   sent_notes.from_account             AS from_account,
+                   sapling_received_notes.account      AS to_account,
+                   NULL                                AS to_address,
+                   sapling_received_notes.value        AS value,
+                   sapling_received_notes.is_change    AS is_change,
+                   sapling_received_notes.memo         AS memo
+            FROM sapling_received_notes
+            LEFT JOIN sent_notes
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (sapling_received_notes.tx, 2, sent_notes.output_index)
+            UNION
+            SELECT transactions.id_tx          AS id_tx,
+                   0                           AS output_pool,
+                   utxos.prevout_idx           AS output_index,
+                   NULL                        AS from_account,
+                   utxos.received_by_account   AS to_account,
+                   utxos.address               AS to_address,
+                   utxos.value_zat             AS value,
+                   false                       AS is_change,
+                   NULL                        AS memo
+            FROM utxos
+            JOIN transactions
+                 ON transactions.txid = utxos.prevout_txid
+            UNION
+            SELECT sent_notes.tx                  AS id_tx,
+                   sent_notes.output_pool         AS output_pool,
+                   sent_notes.output_index        AS output_index,
+                   sent_notes.from_account        AS from_account,
+                   sapling_received_notes.account AS to_account,
+                   sent_notes.to_address          AS to_address,
+                   sent_notes.value               AS value,
+                   false                          AS is_change,
+                   sent_notes.memo                AS memo
+            FROM sent_notes
+            LEFT JOIN sapling_received_notes
+                      ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
+                         (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
+            WHERE  sapling_received_notes.is_change IS NULL
+               OR  sapling_received_notes.is_change = 0"
         ];
 
         let mut views_query = db_data
@@ -693,7 +712,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::from(0);
         let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
-        let extfvk = ExtendedFullViewingKey::from(&secret_key);
+        let extfvk = secret_key.to_extended_full_viewing_key();
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
@@ -856,7 +875,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::from(0);
         let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
-        let extfvk = ExtendedFullViewingKey::from(&secret_key);
+        let extfvk = secret_key.to_extended_full_viewing_key();
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_autoshielding(&db_data, &extfvk, account).unwrap();
@@ -1025,7 +1044,7 @@ mod tests {
 
         // First call with data should initialise the accounts table
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
 
         #[cfg(feature = "transparent-inputs")]
         let ufvk = UnifiedFullViewingKey::new(
@@ -1070,10 +1089,10 @@ mod tests {
         };
 
         // should fail if we have a gap
-        assert!(matches!(
+        assert_matches!(
             init_accounts_table(&db_data, &ufvks(&[0, 2])),
             Err(SqliteClientError::AccountIdDiscontinuity)
-        ));
+        );
 
         // should succeed if there are no gaps
         assert!(init_accounts_table(&db_data, &ufvks(&[0, 1, 2])).is_ok());
@@ -1123,8 +1142,8 @@ mod tests {
         init_accounts_table(&db_data, &ufvks).unwrap();
 
         // The account's address should be in the data DB
-        let pa = get_address(&db_data, AccountId::from(0)).unwrap();
-        assert_eq!(pa.unwrap(), expected_address);
+        let ua = db_data.get_current_address(AccountId::from(0)).unwrap();
+        assert_eq!(ua.unwrap().sapling().unwrap(), &expected_address);
     }
 
     #[test]

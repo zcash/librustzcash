@@ -217,7 +217,7 @@ pub fn decode_extended_spending_key(
 /// use zcash_primitives::zip32::ExtendedFullViewingKey;
 ///
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
-/// let extfvk = ExtendedFullViewingKey::from(&extsk);
+/// let extfvk = extsk.to_extended_full_viewing_key();
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
@@ -241,9 +241,6 @@ pub fn decode_extended_full_viewing_key(
 ///
 /// ```
 /// use group::Group;
-/// use jubjub::SubgroupPoint;
-/// use rand_core::SeedableRng;
-/// use rand_xorshift::XorShiftRng;
 /// use zcash_client_backend::{
 ///     encoding::encode_payment_address,
 /// };
@@ -252,15 +249,12 @@ pub fn decode_extended_full_viewing_key(
 ///     sapling::{Diversifier, PaymentAddress},
 /// };
 ///
-/// let rng = &mut XorShiftRng::from_seed([
-///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-///     0xbc, 0xe5,
-/// ]);
-///
-/// let pa = PaymentAddress::from_parts(
-///     Diversifier([0u8; 11]),
-///     SubgroupPoint::random(rng),
-/// )
+/// let pa = PaymentAddress::from_bytes(&[
+///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
+///     0x9d, 0x72, 0x99, 0x2b, 0x56, 0x0d, 0x26, 0x50, 0xff, 0xe0, 0xbe, 0x7f, 0x35, 0x42,
+///     0xfd, 0x97, 0x00, 0x3c, 0xb7, 0xcc, 0x3a, 0xbf, 0xf8, 0x1a, 0x7f, 0x90, 0x37, 0xf3,
+///     0xea,
+/// ])
 /// .unwrap();
 ///
 /// assert_eq!(
@@ -291,9 +285,6 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 ///
 /// ```
 /// use group::Group;
-/// use jubjub::SubgroupPoint;
-/// use rand_core::SeedableRng;
-/// use rand_xorshift::XorShiftRng;
 /// use zcash_client_backend::{
 ///     encoding::decode_payment_address,
 /// };
@@ -302,15 +293,12 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 ///     sapling::{Diversifier, PaymentAddress},
 /// };
 ///
-/// let rng = &mut XorShiftRng::from_seed([
-///     0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-///     0xbc, 0xe5,
-/// ]);
-///
-/// let pa = PaymentAddress::from_parts(
-///     Diversifier([0u8; 11]),
-///     SubgroupPoint::random(rng),
-/// )
+/// let pa = PaymentAddress::from_bytes(&[
+///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
+///     0x9d, 0x72, 0x99, 0x2b, 0x56, 0x0d, 0x26, 0x50, 0xff, 0xe0, 0xbe, 0x7f, 0x35, 0x42,
+///     0xfd, 0x97, 0x00, 0x3c, 0xb7, 0xcc, 0x3a, 0xbf, 0xf8, 0x1a, 0x7f, 0x90, 0x37, 0xf3,
+///     0xea,
+/// ])
 /// .unwrap();
 ///
 /// assert_eq!(
@@ -461,14 +449,7 @@ pub fn decode_transparent_address(
 
 #[cfg(test)]
 mod tests {
-    use group::Group;
-    use rand_core::SeedableRng;
-    use rand_xorshift::XorShiftRng;
-    use zcash_primitives::{
-        constants,
-        sapling::{Diversifier, PaymentAddress},
-        zip32::ExtendedSpendingKey,
-    };
+    use zcash_primitives::{constants, sapling::PaymentAddress, zip32::ExtendedSpendingKey};
 
     use super::{
         decode_extended_full_viewing_key, decode_extended_spending_key, decode_payment_address,
@@ -517,8 +498,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn extended_full_viewing_key() {
-        let extfvk = (&ExtendedSpendingKey::master(&[0; 32][..])).into();
+        let extfvk = ExtendedSpendingKey::master(&[0; 32][..]).to_extended_full_viewing_key();
 
         let encoded_main = "zxviews1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjsxmansf";
         let encoded_test = "zxviewtestsapling1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjs8evfkz";
@@ -558,14 +540,13 @@ mod tests {
 
     #[test]
     fn payment_address() {
-        let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
-        ]);
-
-        let addr =
-            PaymentAddress::from_parts(Diversifier([0u8; 11]), jubjub::SubgroupPoint::random(rng))
-                .unwrap();
+        let addr = PaymentAddress::from_bytes(&[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x8e, 0x11,
+            0x9d, 0x72, 0x99, 0x2b, 0x56, 0x0d, 0x26, 0x50, 0xff, 0xe0, 0xbe, 0x7f, 0x35, 0x42,
+            0xfd, 0x97, 0x00, 0x3c, 0xb7, 0xcc, 0x3a, 0xbf, 0xf8, 0x1a, 0x7f, 0x90, 0x37, 0xf3,
+            0xea,
+        ])
+        .unwrap();
 
         let encoded_main =
             "zs1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75c8v35z";
@@ -601,22 +582,14 @@ mod tests {
 
     #[test]
     fn invalid_diversifier() {
-        let rng = &mut XorShiftRng::from_seed([
-            0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06,
-            0xbc, 0xe5,
-        ]);
-
-        let addr =
-            PaymentAddress::from_parts(Diversifier([1u8; 11]), jubjub::SubgroupPoint::random(rng))
-                .unwrap();
-
+        // Has a diversifier of `[1u8; 11]`.
         let encoded_main =
-            encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr);
+            "zs1qyqszqgpqyqszqgpqycguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ugum9p";
 
         assert_eq!(
             decode_payment_address(
                 constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
-                &encoded_main
+                encoded_main,
             ),
             Err(Bech32DecodeError::ReadError)
         );

@@ -11,7 +11,7 @@ use blake2b_simd::State;
 pub struct HashReader<R: Read> {
     reader: R,
     hasher: State,
-    byte_count: usize,
+    byte_count: u64,
 }
 
 impl<R: Read> HashReader<R> {
@@ -37,7 +37,7 @@ impl<R: Read> HashReader<R> {
     }
 
     /// Return the number of bytes read so far.
-    pub fn byte_count(&self) -> usize {
+    pub fn byte_count(&self) -> u64 {
         self.byte_count
     }
 }
@@ -48,7 +48,13 @@ impl<R: Read> Read for HashReader<R> {
 
         if bytes > 0 {
             self.hasher.update(&buf[0..bytes]);
-            self.byte_count += bytes;
+            let byte_count = u64::try_from(bytes).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Could not fit the number of read bytes into u64.",
+                )
+            })?;
+            self.byte_count += byte_count;
         }
 
         Ok(bytes)

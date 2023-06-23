@@ -7,6 +7,25 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.4.0] - 2023-06-06
+### Changed
+- The `esk` and `ephemeral_key` arguments have been removed from 
+  `Domain::parse_note_plaintext_without_memo_ovk`. It is therefore no longer
+  necessary (or possible) to ensure that `ephemeral_key` is derived from `esk`
+  and the diversifier within the note plaintext. We have analyzed the safety of
+  this change in the context of callers within `zcash_note_encryption` and
+  `orchard`. See https://github.com/zcash/librustzcash/pull/848 and the
+  associated issue https://github.com/zcash/librustzcash/issues/802 for
+  additional detail.
+
+## [0.3.0] - 2023-03-22
+### Changed
+- The `recipient` parameter has been removed from `Domain::note_plaintext_bytes`.
+- The `recipient` parameter has been removed from `NoteEncryption::new`. Since 
+  the `Domain::Note` type is now expected to contain information about the
+  recipient of the note, there is no longer any need to pass this information
+  in via the encryption context.
+
 ## [0.2.0] - 2022-10-13
 ### Added
 - `zcash_note_encryption::Domain`:

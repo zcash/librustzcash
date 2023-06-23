@@ -7,6 +7,14 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.3.0] - 2023-06-06
+### Changed
+- Bumped bs58 dependency to `0.5`.
+
+## [0.2.1] - 2023-04-15
+### Changed
+- Bumped internal dependency to `bech32 0.9`.
+
 ## [0.2.0] - 2022-10-19
 ### Added
 - `zcash_address::ConversionError`

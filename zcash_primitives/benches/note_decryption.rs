@@ -2,23 +2,22 @@ use std::iter;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use ff::Field;
-use group::GroupEncoding;
 use rand_core::OsRng;
 use zcash_note_encryption::batch;
 use zcash_primitives::{
-    consensus::{NetworkUpgrade::Canopy, Parameters, TestNetwork, TEST_NETWORK},
+    consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
     memo::MemoBytes,
     sapling::{
         note_encryption::{
-            sapling_note_encryption, try_sapling_compact_note_decryption,
-            try_sapling_note_decryption, PreparedIncomingViewingKey, SaplingDomain,
+            try_sapling_compact_note_decryption, try_sapling_note_decryption,
+            PreparedIncomingViewingKey, SaplingDomain,
         },
-        util::generate_random_rseed,
-        Diversifier, PaymentAddress, SaplingIvk, ValueCommitment,
+        prover::mock::MockTxProver,
+        value::NoteValue,
+        Diversifier, SaplingIvk,
     },
-    transaction::components::{
-        sapling::{CompactOutputDescription, GrothProofBytes, OutputDescription},
-        GROTH_PROOF_SIZE,
+    transaction::components::sapling::{
+        builder::SaplingBuilder, CompactOutputDescription, GrothProofBytes, OutputDescription,
     },
 };
 
@@ -32,39 +31,26 @@ fn bench_note_decryption(c: &mut Criterion) {
     let valid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
     let invalid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
 
-    // Construct a fake Sapling output as if we had just deserialized a transaction.
+    // Construct a Sapling output.
     let output: OutputDescription<GrothProofBytes> = {
         let diversifier = Diversifier([0; 11]);
-        let pk_d = diversifier.g_d().unwrap() * valid_ivk.0;
-        let pa = PaymentAddress::from_parts(diversifier, pk_d).unwrap();
+        let pa = valid_ivk.to_payment_address(diversifier).unwrap();
 
-        let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
-
-        // Construct the value commitment for the proof instance
-        let value = 100;
-        let value_commitment = ValueCommitment {
-            value,
-            randomness: jubjub::Fr::random(&mut rng),
-        };
-        let cv = value_commitment.commitment().into();
-
-        let note = pa.create_note(value, rseed).unwrap();
-        let cmu = note.cmu();
-
-        let ne =
-            sapling_note_encryption::<_, TestNetwork>(None, note, pa, MemoBytes::empty(), &mut rng);
-        let ephemeral_key = ne.epk().to_bytes().into();
-        let enc_ciphertext = ne.encrypt_note_plaintext().0;
-        let out_ciphertext = ne.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
-
-        OutputDescription {
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-            zkproof: [0; GROTH_PROOF_SIZE],
-        }
+        let mut builder = SaplingBuilder::new(TEST_NETWORK, height);
+        builder
+            .add_output(
+                &mut rng,
+                None,
+                pa,
+                NoteValue::from_raw(100),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+        let bundle = builder
+            .build(&MockTxProver, &mut (), &mut rng, height, None)
+            .unwrap()
+            .unwrap();
+        bundle.shielded_outputs()[0].clone()
     };
 
     let valid_ivk = PreparedIncomingViewingKey::new(&valid_ivk);

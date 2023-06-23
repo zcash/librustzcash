@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
 use memuse::DynamicUsage;
 use orchard::value as orchard;
@@ -8,6 +8,12 @@ use orchard::value as orchard;
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
+#[deprecated(
+    since = "0.12.0",
+    note = "To calculate the ZIP 317 fee, use `transaction::fees::zip317::FeeRule`.
+For a constant representing the minimum ZIP 317 fee, use `transaction::fees::zip317::MINIMUM_FEE`.
+For the constant amount 1000 zatoshis, use `Amount::const_from_i64(1000)`."
+)]
 pub const DEFAULT_FEE: Amount = Amount(1000);
 
 /// A type-safe representation of some quantity of Zcash.
@@ -30,6 +36,14 @@ impl Amount {
     /// Returns a zero-valued Amount.
     pub const fn zero() -> Self {
         Amount(0)
+    }
+
+    /// Creates a constant Amount from an i64.
+    ///
+    /// Panics: if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    pub const fn const_from_i64(amount: i64) -> Self {
+        assert!(-MAX_MONEY <= amount && amount <= MAX_MONEY); // contains is not const
+        Amount(amount)
     }
 
     /// Creates an Amount from an i64.
@@ -205,11 +219,51 @@ impl Neg for Amount {
     }
 }
 
+impl Mul<usize> for Amount {
+    type Output = Option<Amount>;
+
+    fn mul(self, rhs: usize) -> Option<Amount> {
+        let rhs: i64 = rhs.try_into().ok()?;
+        self.0
+            .checked_mul(rhs)
+            .and_then(|i| Amount::try_from(i).ok())
+    }
+}
+
 impl TryFrom<orchard::ValueSum> for Amount {
     type Error = ();
 
     fn try_from(v: orchard::ValueSum) -> Result<Amount, Self::Error> {
         i64::try_from(v).map_err(|_| ()).and_then(Amount::try_from)
+    }
+}
+
+/// A type-safe representation of some nonnegative amount of Zcash.
+///
+/// A NonNegativeAmount can only be constructed from an integer that is within the valid monetary
+/// range of `{0..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
+pub struct NonNegativeAmount(Amount);
+
+impl NonNegativeAmount {
+    /// Creates a NonNegativeAmount from a u64.
+    ///
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    pub fn from_u64(amount: u64) -> Result<Self, ()> {
+        Amount::from_u64(amount).map(NonNegativeAmount)
+    }
+
+    /// Creates a NonNegativeAmount from an i64.
+    ///
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
+        Amount::from_nonnegative_i64(amount).map(NonNegativeAmount)
+    }
+}
+
+impl From<NonNegativeAmount> for Amount {
+    fn from(n: NonNegativeAmount) -> Self {
+        n.0
     }
 }
 
@@ -219,6 +273,23 @@ impl TryFrom<orchard::ValueSum> for Amount {
 pub enum BalanceError {
     Overflow,
     Underflow,
+}
+
+impl std::fmt::Display for BalanceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match &self {
+            BalanceError::Overflow => {
+                write!(
+                    f,
+                    "Amount addition resulted in a value outside the valid range."
+                )
+            }
+            BalanceError::Underflow => write!(
+                f,
+                "Amount subtraction resulted in a value outside the valid range."
+            ),
+        }
+    }
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

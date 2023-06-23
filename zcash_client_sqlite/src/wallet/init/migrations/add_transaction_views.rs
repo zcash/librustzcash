@@ -7,7 +7,7 @@ use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
 use zcash_primitives::{
-    consensus::{self, BlockHeight, BranchId},
+    consensus::BranchId,
     transaction::{
         components::amount::{Amount, BalanceError},
         Transaction,
@@ -24,11 +24,9 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
     b"\x8b\xed\x71\x82\x13\x20\x90\x9f",
 );
 
-pub(crate) struct Migration<P> {
-    pub(super) params: P,
-}
+pub(crate) struct Migration;
 
-impl<P> schemer::Migration for Migration<P> {
+impl schemer::Migration for Migration {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
@@ -47,7 +45,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 }
 
-impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
+impl RusqliteMigration for Migration {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
@@ -72,8 +70,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         transaction.execute_batch("ALTER TABLE transactions ADD COLUMN fee INTEGER;")?;
 
-        let mut stmt_list_txs =
-            transaction.prepare("SELECT id_tx, raw, block FROM transactions")?;
+        let mut stmt_list_txs = transaction.prepare("SELECT id_tx, raw FROM transactions")?;
 
         let mut stmt_set_fee =
             transaction.prepare("UPDATE transactions SET fee = ? WHERE id_tx = ?")?;
@@ -85,20 +82,23 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         while let Some(row) = tx_rows.next()? {
             let id_tx: i64 = row.get(0)?;
             let tx_bytes: Option<Vec<u8>> = row.get(1)?;
-            let h: u32 = row.get(2)?;
-            let block_height = BlockHeight::from(h);
 
             // If only transaction metadata has been stored, and not transaction data, the fee
             // information will eventually be set when the full transaction data is inserted.
-            if let Some(b) = tx_bytes {
-                let tx =
-                    Transaction::read(&b[..], BranchId::for_height(&self.params, block_height))
-                        .map_err(|e| {
-                            WalletMigrationError::CorruptedData(format!(
-                                "Parsing failed for transaction {:?}: {:?}",
-                                id_tx, e
-                            ))
-                        })?;
+            if let Some(tx_bytes) = tx_bytes {
+                let tx = Transaction::read(
+                    &tx_bytes[..],
+                    // The consensus branch ID is unused in determining the fee paid, so
+                    // just pass Nu5 as a dummy value since we know that parsing both v4
+                    // and v5 transactions is supported during the Nu5 epoch.
+                    BranchId::Nu5,
+                )
+                .map_err(|e| {
+                    WalletMigrationError::CorruptedData(format!(
+                        "Parsing failed for transaction {:?}: {:?}",
+                        id_tx, e
+                    ))
+                })?;
 
                 let fee_paid = tx.fee_paid(|op| {
                     let op_amount = stmt_find_utxo_value
@@ -287,7 +287,7 @@ mod tests {
 
     use crate::{
         tests,
-        wallet::init::{init_wallet_db, init_wallet_db_internal, migrations::addresses_table},
+        wallet::init::{init_wallet_db_internal, migrations::addresses_table},
         WalletDb,
     };
 
@@ -345,7 +345,7 @@ mod tests {
             VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');",
         ).unwrap();
 
-        init_wallet_db(&mut db_data, None).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
 
         let mut q = db_data
             .conn
@@ -476,7 +476,7 @@ mod tests {
             )
             .unwrap();
 
-        init_wallet_db(&mut db_data, None).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
 
         let fee = db_data
             .conn

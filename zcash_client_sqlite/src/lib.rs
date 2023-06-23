@@ -25,7 +25,7 @@
 //!
 //! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite
-//! [`BlockSource`]: zcash_client_backend::data_api::BlockSource
+//! [`BlockSource`]: zcash_client_backend::data_api::chain::BlockSource
 //! [`CompactBlock`]: zcash_client_backend::proto::compact_formats::CompactBlock
 //! [`init_cache_database`]: crate::chain::init::init_cache_database
 
@@ -34,7 +34,7 @@
 
 use rusqlite::Connection;
 use secrecy::{ExposeSecret, SecretVec};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
@@ -42,29 +42,28 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
-    memo::Memo,
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Node, Nullifier},
-    transaction::{components::Amount, Transaction, TxId},
+    memo::{Memo, MemoBytes},
+    sapling::{self},
+    transaction::{
+        components::{amount::Amount, OutPoint},
+        Transaction, TxId,
+    },
     zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
 };
 
 use zcash_client_backend::{
-    address::UnifiedAddress,
+    address::{AddressMetadata, UnifiedAddress},
     data_api::{
-        BlockSource, DecryptedTransaction, PoolType, PrunedBlock, Recipient, SentTransaction,
-        WalletRead, WalletWrite,
+        self, chain::BlockSource, DecryptedTransaction, NullifierQuery, PoolType, PrunedBlock,
+        Recipient, SentTransaction, WalletRead, WalletWrite,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::{SpendableNote, WalletTransparentOutput},
-    TransferType,
+    wallet::{ReceivedSaplingNote, WalletTransparentOutput},
+    DecryptedOutput, TransferType,
 };
 
 use crate::error::SqliteClientError;
-
-#[cfg(not(feature = "transparent-inputs"))]
-use zcash_client_backend::data_api::error::Error;
 
 #[cfg(feature = "unstable")]
 use {
@@ -87,7 +86,7 @@ pub(crate) const PRUNING_HEIGHT: u32 = 100;
 
 /// A newtype wrapper for sqlite primary key values for the notes
 /// table.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NoteId {
     SentNoteId(i64),
     ReceivedNoteId(i64),
@@ -116,7 +115,10 @@ pub struct WalletDb<P> {
 impl<P: consensus::Parameters> WalletDb<P> {
     /// Construct a connection to the wallet database stored at the specified path.
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
-        Connection::open(path).map(move |conn| WalletDb { conn, params })
+        Connection::open(path).and_then(move |conn| {
+            rusqlite::vtab::array::load_module(&conn)?;
+            Ok(WalletDb { conn, params })
+        })
     }
 
     /// Given a wallet database connection, obtain a handle for the write operations
@@ -133,24 +135,24 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     type TxRef = i64;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        #[allow(deprecated)]
         wallet::block_height_extrema(self).map_err(SqliteClientError::from)
     }
 
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::get_min_unspent_height(self).map_err(SqliteClientError::from)
+    }
+
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_block_hash(self, block_height).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_tx_height(self, txid).map_err(SqliteClientError::from)
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_unified_full_viewing_keys(self)
     }
 
@@ -173,7 +175,6 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error> {
-        #[allow(deprecated)]
         wallet::is_valid_account_extfvk(self, account, extfvk)
     }
 
@@ -182,17 +183,14 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         anchor_height: BlockHeight,
     ) -> Result<Amount, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_balance_at(self, account, anchor_height)
     }
 
     fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        #[allow(deprecated)]
         wallet::get_transaction(self, id_tx)
     }
 
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
-        #[allow(deprecated)]
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
         match id_note {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self, id_note),
             NoteId::ReceivedNoteId(id_note) => wallet::get_received_memo(self, id_note),
@@ -202,37 +200,35 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_commitment_tree(self, block_height)
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
+        wallet::sapling::get_sapling_commitment_tree(self, block_height)
     }
 
     #[allow(clippy::type_complexity)]
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_witnesses(self, block_height)
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
+        wallet::sapling::get_sapling_witnesses(self, block_height)
     }
 
-    fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_nullifiers(self)
-    }
-
-    fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::get_all_nullifiers(self)
+    fn get_sapling_nullifiers(
+        &self,
+        query: data_api::NullifierQuery,
+    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
+        match query {
+            NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self),
+            NullifierQuery::All => wallet::sapling::get_all_sapling_nullifiers(self),
+        }
     }
 
     fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::transact::get_spendable_sapling_notes(self, account, anchor_height)
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        wallet::sapling::get_spendable_sapling_notes(self, account, anchor_height, exclude)
     }
 
     fn select_spendable_sapling_notes(
@@ -240,36 +236,57 @@ impl<P: consensus::Parameters> WalletRead for WalletDb<P> {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
-        #[allow(deprecated)]
-        wallet::transact::select_spendable_sapling_notes(self, account, target_value, anchor_height)
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        wallet::sapling::select_spendable_sapling_notes(
+            self,
+            account,
+            target_value,
+            anchor_height,
+            exclude,
+        )
     }
 
     fn get_transparent_receivers(
         &self,
         _account: AccountId,
-    ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return wallet::get_transparent_receivers(&self.params, &self.conn, _account);
 
         #[cfg(not(feature = "transparent-inputs"))]
-        return Err(SqliteClientError::BackendError(
-            Error::TransparentInputsNotSupported,
-        ));
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 
     fn get_unspent_transparent_outputs(
         &self,
         _address: &TransparentAddress,
         _max_height: BlockHeight,
+        _exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
-        return wallet::get_unspent_transparent_outputs(self, _address, _max_height);
+        return wallet::get_unspent_transparent_outputs(self, _address, _max_height, _exclude);
 
         #[cfg(not(feature = "transparent-inputs"))]
-        return Err(SqliteClientError::BackendError(
-            Error::TransparentInputsNotSupported,
-        ));
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
+    }
+
+    fn get_transparent_balances(
+        &self,
+        _account: AccountId,
+        _max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::get_transparent_balances(self, _account, _max_height);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 }
 
@@ -280,6 +297,10 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         self.wallet_db.block_height_extrema()
+    }
+
+    fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        self.wallet_db.get_min_unspent_height()
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
@@ -330,14 +351,14 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         self.wallet_db.get_transaction(id_tx)
     }
 
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Memo, Self::Error> {
+    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
         self.wallet_db.get_memo(id_note)
     }
 
     fn get_commitment_tree(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Option<CommitmentTree<Node>>, Self::Error> {
+    ) -> Result<Option<sapling::CommitmentTree>, Self::Error> {
         self.wallet_db.get_commitment_tree(block_height)
     }
 
@@ -345,25 +366,25 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
     fn get_witnesses(
         &self,
         block_height: BlockHeight,
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
         self.wallet_db.get_witnesses(block_height)
     }
 
-    fn get_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        self.wallet_db.get_nullifiers()
-    }
-
-    fn get_all_nullifiers(&self) -> Result<Vec<(AccountId, Nullifier)>, Self::Error> {
-        self.wallet_db.get_all_nullifiers()
+    fn get_sapling_nullifiers(
+        &self,
+        query: data_api::NullifierQuery,
+    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
+        self.wallet_db.get_sapling_nullifiers(query)
     }
 
     fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
         self.wallet_db
-            .get_spendable_sapling_notes(account, anchor_height)
+            .get_spendable_sapling_notes(account, anchor_height, exclude)
     }
 
     fn select_spendable_sapling_notes(
@@ -371,15 +392,16 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         account: AccountId,
         target_value: Amount,
         anchor_height: BlockHeight,
-    ) -> Result<Vec<SpendableNote>, Self::Error> {
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
         self.wallet_db
-            .select_spendable_sapling_notes(account, target_value, anchor_height)
+            .select_spendable_sapling_notes(account, target_value, anchor_height, exclude)
     }
 
     fn get_transparent_receivers(
         &self,
         account: AccountId,
-    ) -> Result<HashSet<TransparentAddress>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
         self.wallet_db.get_transparent_receivers(account)
     }
 
@@ -387,9 +409,18 @@ impl<'a, P: consensus::Parameters> WalletRead for DataConnStmtCache<'a, P> {
         &self,
         address: &TransparentAddress,
         max_height: BlockHeight,
+        exclude: &[OutPoint],
     ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
         self.wallet_db
-            .get_unspent_transparent_outputs(address, max_height)
+            .get_unspent_transparent_outputs(address, max_height, exclude)
+    }
+
+    fn get_transparent_balances(
+        &self,
+        account: AccountId,
+        max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        self.wallet_db.get_transparent_balances(account, max_height)
     }
 }
 
@@ -421,7 +452,6 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
     }
 }
 
-#[allow(deprecated)]
 impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
     type UtxoRef = UtxoId;
 
@@ -480,12 +510,13 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(height = u32::from(block.block_height)))]
     #[allow(clippy::type_complexity)]
     fn advance_by_block(
         &mut self,
         block: &PrunedBlock,
-        updated_witnesses: &[(Self::NoteRef, IncrementalWitness<Node>)],
-    ) -> Result<Vec<(Self::NoteRef, IncrementalWitness<Node>)>, Self::Error> {
+        updated_witnesses: &[(Self::NoteRef, sapling::IncrementalWitness)],
+    ) -> Result<Vec<(Self::NoteRef, sapling::IncrementalWitness)>, Self::Error> {
         // database updates for each block are transactional
         self.transactionally(|up| {
             // Insert the block into the database.
@@ -502,15 +533,15 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 let tx_row = wallet::put_tx_meta(up, tx, block.block_height)?;
 
                 // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.shielded_spends {
-                    wallet::mark_sapling_note_spent(up, tx_row, &spend.nf)?;
+                for spend in &tx.sapling_spends {
+                    wallet::sapling::mark_sapling_note_spent(up, tx_row, spend.nf())?;
                 }
 
-                for output in &tx.shielded_outputs {
-                    let received_note_id = wallet::put_received_note(up, output, tx_row)?;
+                for output in &tx.sapling_outputs {
+                    let received_note_id = wallet::sapling::put_received_note(up, output, tx_row)?;
 
                     // Save witness for note.
-                    new_witnesses.push((received_note_id, output.witness.clone()));
+                    new_witnesses.push((received_note_id, output.witness().clone()));
                 }
             }
 
@@ -518,7 +549,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             for (received_note_id, witness) in updated_witnesses.iter().chain(new_witnesses.iter())
             {
                 if let NoteId::ReceivedNoteId(rnid) = *received_note_id {
-                    wallet::insert_witness(up, rnid, witness, block.block_height)?;
+                    wallet::sapling::insert_witness(up, rnid, witness, block.block_height)?;
                 } else {
                     return Err(SqliteClientError::InvalidNoteId);
                 }
@@ -536,7 +567,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
     fn store_decrypted_tx(
         &mut self,
-        d_tx: &DecryptedTransaction,
+        d_tx: DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error> {
         self.transactionally(|up| {
             let tx_ref = wallet::put_tx_data(up, d_tx.tx, None, None)?;
@@ -546,7 +577,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.to.clone())
+                            Recipient::Sapling(output.note.recipient())
                         } else {
                             Recipient::InternalAccount(output.account, PoolType::Sapling)
                         };
@@ -557,10 +588,14 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                             tx_ref,
                             output.index,
                             &recipient,
-                            Amount::from_u64(output.note.value).map_err(|_|
+                            Amount::from_u64(output.note.value().inner()).map_err(|_|
                                 SqliteClientError::CorruptedData("Note value is not a valid Zcash amount.".to_string()))?,
                             Some(&output.memo),
                         )?;
+
+                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            wallet::sapling::put_received_note(up, output, tx_ref)?;
+                        }
                     }
                     TransferType::Incoming => {
                         match spending_account_id {
@@ -573,7 +608,7 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
                             }
                         }
 
-                        wallet::put_received_note(up, output, tx_ref)?;
+                        wallet::sapling::put_received_note(up, output, tx_ref)?;
                     }
                 }
             }
@@ -586,14 +621,14 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             // If we have some transparent outputs:
             if !d_tx.tx.transparent_bundle().iter().any(|b| b.vout.is_empty()) {
-                let nullifiers = self.wallet_db.get_all_nullifiers()?;
+                let nullifiers = self.wallet_db.get_sapling_nullifiers(data_api::NullifierQuery::All)?;
                 // If the transaction contains shielded spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
-                // create_spend_to_address. 
+                // create_spend_to_address.
                 if let Some((account_id, _)) = nullifiers.iter().find(
                     |(_, nf)|
-                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends.iter())
-                        .any(|input| *nf == input.nullifier)
+                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
+                        .any(|input| nf == input.nullifier())
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
@@ -633,8 +668,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
             // Assumes that create_spend_to_address() will never be called in parallel, which is a
             // reasonable assumption for a light client such as a mobile phone.
             if let Some(bundle) = sent_tx.tx.sapling_bundle() {
-                for spend in &bundle.shielded_spends {
-                    wallet::mark_sapling_note_spent(up, tx_ref, &spend.nullifier)?;
+                for spend in bundle.shielded_spends() {
+                    wallet::sapling::mark_sapling_note_spent(up, tx_ref, spend.nullifier())?;
                 }
             }
 
@@ -645,6 +680,22 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
 
             for output in &sent_tx.outputs {
                 wallet::insert_sent_output(up, tx_ref, sent_tx.account, output)?;
+
+                if let Some((account, note)) = output.sapling_change_to() {
+                    wallet::sapling::put_received_note(
+                        up,
+                        &DecryptedOutput {
+                            index: output.output_index(),
+                            note: note.clone(),
+                            account: *account,
+                            memo: output
+                                .memo()
+                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                            transfer_type: TransferType::WalletInternal,
+                        },
+                        tx_ref,
+                    )?;
+                }
             }
 
             // Return the row number of the transaction, so the caller can fetch it for sending.
@@ -652,67 +703,8 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         })
     }
 
-    #[cfg(feature = "unstable")]
-    fn remove_unmined_tx(&mut self, txid: &TxId) -> Result<(), Self::Error> {
-        self.transactionally(|up| {
-            // Find the transaction to be deleted.
-            let tx_ref = up.stmt_select_tx_ref(txid)?;
-
-            // Check that the transaction has not been mined (otherwise deleting it would
-            // require deleting child transactions that we haven't been authorized to
-            // remove).
-            if up
-                .wallet_db
-                .conn
-                .query_row_named(
-                    "SELECT block FROM transactions WHERE id_tx = :tx",
-                    &[(":tx", &tx_ref)],
-                    |row| row.get::<_, Option<u32>>(0),
-                )?
-                .is_some()
-            {
-                return Err(SqliteClientError::TransactionIsMined(*txid));
-            }
-
-            // Delete received notes that were outputs of the given transaction.
-            up.wallet_db.conn.execute_named(
-                "DELETE FROM received_notes WHERE tx = :tx",
-                &[(":tx", &tx_ref)],
-            )?;
-
-            // Unmine received notes that were inputs to the given transaction.
-            up.wallet_db.conn.execute_named(
-                "UPDATE received_notes SET spent = null WHERE spent = :tx",
-                &[(":tx", &tx_ref)],
-            )?;
-
-            // We don't normally want to delete sent notes, as this can contain data that
-            // is not recoverable from the chain. However, given that the caller wants to
-            // delete the transaction in which these notes were sent, we cannot keep these
-            // database entries around.
-            up.wallet_db
-                .conn
-                .execute_named("DELETE FROM sent_notes WHERE tx = :tx", &[(":tx", &tx_ref)])?;
-
-            // Delete the UTXOs because these are effectively cached and we don't have a
-            // good way of knowing whether they're spent.
-            up.wallet_db.conn.execute_named(
-                "DELETE FROM utxos WHERE spent_in_tx = :tx",
-                &[(":tx", &tx_ref)],
-            )?;
-
-            // Now that it isn't depended on, delete the transaction.
-            up.wallet_db.conn.execute_named(
-                "DELETE FROM transactions WHERE id_tx = :tx",
-                &[(":tx", &tx_ref)],
-            )?;
-
-            Ok(())
-        })
-    }
-
-    fn rewind_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        wallet::rewind_to_height(self.wallet_db, block_height)
+    fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
+        wallet::truncate_to_height(self.wallet_db, block_height)
     }
 
     fn put_received_transparent_utxo(
@@ -723,9 +715,9 @@ impl<'a, P: consensus::Parameters> WalletWrite for DataConnStmtCache<'a, P> {
         return wallet::put_received_transparent_utxo(self, _output);
 
         #[cfg(not(feature = "transparent-inputs"))]
-        return Err(SqliteClientError::BackendError(
-            Error::TransparentInputsNotSupported,
-        ));
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 }
 
@@ -742,14 +734,17 @@ impl BlockDb {
 impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
-    fn with_blocks<F>(
+    fn with_blocks<F, DbErrT, NoteRef>(
         &self,
-        from_height: BlockHeight,
+        from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
-    ) -> Result<(), Self::Error>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
     where
-        F: FnMut(CompactBlock) -> Result<(), Self::Error>,
+        F: FnMut(
+            CompactBlock,
+        )
+            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
     {
         chain::blockdb_with_blocks(self, from_height, limit, with_row)
     }
@@ -766,7 +761,7 @@ impl BlockSource for BlockDb {
 ///
 /// where `<block_height>` is the decimal value of the height at which the block was mined, and
 /// `<block_hash>` is the hexadecimal representation of the block hash, as produced by the
-/// [`Display`] implementation for [`zcash_primitives::block::BlockHash`].
+/// [`fmt::Display`] implementation for [`zcash_primitives::block::BlockHash`].
 ///
 /// This block source is intended to be used with the following data flow:
 /// * When the cache is being filled:
@@ -804,8 +799,10 @@ pub struct FsBlockDb {
 #[derive(Debug)]
 #[cfg(feature = "unstable")]
 pub enum FsBlockDbError {
-    FsError(io::Error),
-    DbError(rusqlite::Error),
+    Fs(io::Error),
+    Db(rusqlite::Error),
+    Protobuf(prost::DecodeError),
+    MissingBlockPath(PathBuf),
     InvalidBlockstoreRoot(PathBuf),
     InvalidBlockPath(PathBuf),
     CorruptedData(String),
@@ -814,14 +811,21 @@ pub enum FsBlockDbError {
 #[cfg(feature = "unstable")]
 impl From<io::Error> for FsBlockDbError {
     fn from(err: io::Error) -> Self {
-        FsBlockDbError::FsError(err)
+        FsBlockDbError::Fs(err)
     }
 }
 
 #[cfg(feature = "unstable")]
 impl From<rusqlite::Error> for FsBlockDbError {
     fn from(err: rusqlite::Error) -> Self {
-        FsBlockDbError::DbError(err)
+        FsBlockDbError::Db(err)
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl From<prost::DecodeError> for FsBlockDbError {
+    fn from(e: prost::DecodeError) -> Self {
+        FsBlockDbError::Protobuf(e)
     }
 }
 
@@ -833,14 +837,19 @@ impl FsBlockDb {
     /// `<fsblockdb_root>/blockmeta.sqlite` and will ensure that a directory exists at
     /// `<fsblockdb_root>/blocks` where this block store will expect to find serialized block
     /// files as described for [`FsBlockDb`].
+    ///
+    /// An application using this constructor should ensure that they call
+    /// [`zcash_client_sqlite::chain::init::init_blockmetadb`] at application startup to ensure
+    /// that the resulting metadata database is properly initialized and has had all required
+    /// migrations applied before use.
     pub fn for_path<P: AsRef<Path>>(fsblockdb_root: P) -> Result<Self, FsBlockDbError> {
-        let meta = fs::metadata(&fsblockdb_root).map_err(FsBlockDbError::FsError)?;
+        let meta = fs::metadata(&fsblockdb_root).map_err(FsBlockDbError::Fs)?;
         if meta.is_dir() {
             let db_path = fsblockdb_root.as_ref().join("blockmeta.sqlite");
             let blocks_dir = fsblockdb_root.as_ref().join("blocks");
             fs::create_dir_all(&blocks_dir)?;
             Ok(FsBlockDb {
-                conn: Connection::open(db_path).map_err(FsBlockDbError::DbError)?,
+                conn: Connection::open(db_path).map_err(FsBlockDbError::Db)?,
                 blocks_dir,
             })
         } else {
@@ -862,56 +871,142 @@ impl FsBlockDb {
     pub fn write_block_metadata(&self, block_meta: &[BlockMeta]) -> Result<(), FsBlockDbError> {
         for m in block_meta {
             let block_path = m.block_file_path(&self.blocks_dir);
-            let meta = fs::metadata(&block_path)?;
-            if !meta.is_file() {
-                return Err(FsBlockDbError::InvalidBlockPath(block_path));
+            match fs::metadata(&block_path) {
+                Err(e) => {
+                    return Err(match e.kind() {
+                        io::ErrorKind::NotFound => FsBlockDbError::MissingBlockPath(block_path),
+                        _ => FsBlockDbError::Fs(e),
+                    });
+                }
+                Ok(meta) => {
+                    if !meta.is_file() {
+                        return Err(FsBlockDbError::InvalidBlockPath(block_path));
+                    }
+                }
             }
         }
 
         Ok(chain::blockmetadb_insert(&self.conn, block_meta)?)
     }
+
+    /// Returns the metadata for the block with the given height, if it exists in the
+    /// database.
+    pub fn find_block(&self, height: BlockHeight) -> Result<Option<BlockMeta>, FsBlockDbError> {
+        Ok(chain::blockmetadb_find_block(&self.conn, height)?)
+    }
+
+    /// Rewinds the BlockMeta Db to the `block_height` provided.
+    ///
+    /// This doesn't delete any files referenced by the records
+    /// stored in BlockMeta.
+    ///
+    /// If the requested height is greater than or equal to the height
+    /// of the last scanned block, or if the DB is empty, this function
+    /// does nothing.
+    pub fn truncate_to_height(&self, block_height: BlockHeight) -> Result<(), FsBlockDbError> {
+        Ok(chain::blockmetadb_truncate_to_height(
+            &self.conn,
+            block_height,
+        )?)
+    }
 }
 
 #[cfg(feature = "unstable")]
 impl BlockSource for FsBlockDb {
-    type Error = SqliteClientError;
+    type Error = FsBlockDbError;
 
-    fn with_blocks<F>(
+    fn with_blocks<F, DbErrT, NoteRef>(
         &self,
-        from_height: BlockHeight,
+        from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
-    ) -> Result<(), Self::Error>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
     where
-        F: FnMut(CompactBlock) -> Result<(), Self::Error>,
+        F: FnMut(
+            CompactBlock,
+        )
+            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
     {
         fsblockdb_with_blocks(self, from_height, limit, with_row)
     }
 }
 
+#[cfg(feature = "unstable")]
+impl std::fmt::Display for FsBlockDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            FsBlockDbError::Fs(io_error) => {
+                write!(f, "Failed to access the file system: {}", io_error)
+            }
+            FsBlockDbError::Db(e) => {
+                write!(f, "There was a problem with the sqlite db: {}", e)
+            }
+            FsBlockDbError::Protobuf(e) => {
+                write!(f, "Failed to parse protobuf-encoded record: {}", e)
+            }
+            FsBlockDbError::MissingBlockPath(block_path) => {
+                write!(
+                    f,
+                    "CompactBlock file expected but not found at {}",
+                    block_path.display(),
+                )
+            }
+            FsBlockDbError::InvalidBlockstoreRoot(fsblockdb_root) => {
+                write!(
+                    f,
+                    "The block storage root {} is not a directory",
+                    fsblockdb_root.display(),
+                )
+            }
+            FsBlockDbError::InvalidBlockPath(block_path) => {
+                write!(
+                    f,
+                    "CompactBlock path {} is not a file",
+                    block_path.display(),
+                )
+            }
+            FsBlockDbError::CorruptedData(e) => {
+                write!(
+                    f,
+                    "The block cache has corrupted data and this caused an error: {}",
+                    e,
+                )
+            }
+        }
+    }
+}
+
 #[cfg(test)]
-#[allow(deprecated)]
+#[macro_use]
+extern crate assert_matches;
+
+#[cfg(test)]
 mod tests {
-    use group::{ff::PrimeField, GroupEncoding};
-    use protobuf::Message;
+    use prost::Message;
     use rand_core::{OsRng, RngCore};
     use rusqlite::params;
     use std::collections::HashMap;
 
+    #[cfg(feature = "unstable")]
+    use std::{fs::File, path::Path};
+
     #[cfg(feature = "transparent-inputs")]
     use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
 
+    use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{
-            note_encryption::sapling_note_encryption, util::generate_random_rseed, Note, Nullifier,
-            PaymentAddress,
+            note_encryption::{sapling_note_encryption, SaplingDomain},
+            util::generate_random_rseed,
+            value::NoteValue,
+            Note, Nullifier, PaymentAddress,
         },
         transaction::components::Amount,
-        zip32::sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
+        zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
     };
 
     use zcash_client_backend::{
@@ -928,6 +1023,12 @@ mod tests {
     };
 
     use super::BlockDb;
+
+    #[cfg(feature = "unstable")]
+    use super::{
+        chain::{init::init_blockmeta_db, BlockMeta},
+        FsBlockDb,
+    };
 
     #[cfg(feature = "mainnet")]
     pub(crate) fn network() -> Network {
@@ -968,7 +1069,7 @@ mod tests {
         let seed = [0u8; 32];
         let account = AccountId::from(0);
         let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let dfvk = DiversifiableFullViewingKey::from(ExtendedFullViewingKey::from(&extsk));
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
 
         #[cfg(feature = "transparent-inputs")]
         let (tkey, taddr) = {
@@ -996,51 +1097,65 @@ mod tests {
         (ufvk, taddr)
     }
 
+    #[allow(dead_code)]
+    pub(crate) enum AddressType {
+        DefaultExternal,
+        DiversifiedExternal(DiversifierIndex),
+        Internal,
+    }
+
     /// Create a fake CompactBlock at the given height, containing a single output paying
-    /// the given address. Returns the CompactBlock and the nullifier for the new note.
+    /// an address. Returns the CompactBlock and the nullifier for the new note.
     pub(crate) fn fake_compact_block(
         height: BlockHeight,
         prev_hash: BlockHash,
         dfvk: &DiversifiableFullViewingKey,
+        req: AddressType,
         value: Amount,
     ) -> (CompactBlock, Nullifier) {
-        let to = dfvk.default_address().1;
+        let to = match req {
+            AddressType::DefaultExternal => dfvk.default_address().1,
+            AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
+            AddressType::Internal => dfvk.change_address().1,
+        };
 
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(&network(), height, &mut rng);
-        let note = Note {
-            g_d: to.diversifier().g_d().unwrap(),
-            pk_d: *to.pk_d(),
-            value: value.into(),
-            rseed,
-        };
+        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            to,
             MemoBytes::empty(),
             &mut rng,
         );
-        let cmu = note.cmu().to_repr().as_ref().to_vec();
-        let epk = encryptor.epk().to_bytes().to_vec();
+        let cmu = note.cmu().to_bytes().to_vec();
+        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+            .0
+            .to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note
-        let mut cout = CompactSaplingOutput::new();
-        cout.set_cmu(cmu);
-        cout.set_ephemeralKey(epk);
-        cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
-        let mut ctx = CompactTx::new();
+        let cout = CompactSaplingOutput {
+            cmu,
+            ephemeral_key,
+            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        };
+        let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.set_hash(txid);
+        ctx.hash = txid;
         ctx.outputs.push(cout);
-        let mut cb = CompactBlock::new();
-        cb.set_height(u64::from(height));
-        cb.hash.resize(32, 0);
-        rng.fill_bytes(&mut cb.hash);
-        cb.prevHash.extend_from_slice(&prev_hash.0);
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
         (cb, note.nf(&dfvk.fvk().vk.nk, 0))
     }
@@ -1059,86 +1174,112 @@ mod tests {
         let rseed = generate_random_rseed(&network(), height, &mut rng);
 
         // Create a fake CompactBlock containing the note
-        let mut cspend = CompactSaplingSpend::new();
-        cspend.set_nf(nf.to_vec());
-        let mut ctx = CompactTx::new();
+        let cspend = CompactSaplingSpend { nf: nf.to_vec() };
+        let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
         rng.fill_bytes(&mut txid);
-        ctx.set_hash(txid);
+        ctx.hash = txid;
         ctx.spends.push(cspend);
 
         // Create a fake Note for the payment
         ctx.outputs.push({
-            let note = Note {
-                g_d: to.diversifier().g_d().unwrap(),
-                pk_d: *to.pk_d(),
-                value: value.into(),
-                rseed,
-            };
+            let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
             let encryptor = sapling_note_encryption::<_, Network>(
                 Some(dfvk.fvk().ovk),
                 note.clone(),
-                to,
                 MemoBytes::empty(),
                 &mut rng,
             );
-            let cmu = note.cmu().to_repr().as_ref().to_vec();
-            let epk = encryptor.epk().to_bytes().to_vec();
+            let cmu = note.cmu().to_bytes().to_vec();
+            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+                .0
+                .to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-            let mut cout = CompactSaplingOutput::new();
-            cout.set_cmu(cmu);
-            cout.set_ephemeralKey(epk);
-            cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
-            cout
+            CompactSaplingOutput {
+                cmu,
+                ephemeral_key,
+                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            }
         });
 
         // Create a fake Note for the change
         ctx.outputs.push({
             let change_addr = dfvk.default_address().1;
             let rseed = generate_random_rseed(&network(), height, &mut rng);
-            let note = Note {
-                g_d: change_addr.diversifier().g_d().unwrap(),
-                pk_d: *change_addr.pk_d(),
-                value: (in_value - value).unwrap().into(),
+            let note = Note::from_parts(
+                change_addr,
+                NoteValue::from_raw((in_value - value).unwrap().into()),
                 rseed,
-            };
+            );
             let encryptor = sapling_note_encryption::<_, Network>(
                 Some(dfvk.fvk().ovk),
                 note.clone(),
-                change_addr,
                 MemoBytes::empty(),
                 &mut rng,
             );
-            let cmu = note.cmu().to_repr().as_ref().to_vec();
-            let epk = encryptor.epk().to_bytes().to_vec();
+            let cmu = note.cmu().to_bytes().to_vec();
+            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
+                .0
+                .to_vec();
             let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-            let mut cout = CompactSaplingOutput::new();
-            cout.set_cmu(cmu);
-            cout.set_ephemeralKey(epk);
-            cout.set_ciphertext(enc_ciphertext.as_ref()[..52].to_vec());
-            cout
+            CompactSaplingOutput {
+                cmu,
+                ephemeral_key,
+                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            }
         });
 
-        let mut cb = CompactBlock::new();
-        cb.set_height(u64::from(height));
-        cb.hash.resize(32, 0);
-        rng.fill_bytes(&mut cb.hash);
-        cb.prevHash.extend_from_slice(&prev_hash.0);
+        let mut cb = CompactBlock {
+            hash: {
+                let mut hash = vec![0; 32];
+                rng.fill_bytes(&mut hash);
+                hash
+            },
+            height: height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
         cb
     }
 
     /// Insert a fake CompactBlock into the cache DB.
     pub(crate) fn insert_into_cache(db_cache: &BlockDb, cb: &CompactBlock) {
-        let cb_bytes = cb.write_to_bytes().unwrap();
+        let cb_bytes = cb.encode_to_vec();
         db_cache
             .0
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(params![u32::from(cb.height()), cb_bytes,])
             .unwrap();
+    }
+
+    #[cfg(feature = "unstable")]
+    pub(crate) fn store_in_fsblockdb<P: AsRef<Path>>(
+        fsblockdb_root: P,
+        cb: &CompactBlock,
+    ) -> BlockMeta {
+        use std::io::Write;
+
+        let meta = BlockMeta {
+            height: cb.height(),
+            block_hash: cb.hash(),
+            block_time: cb.time,
+            sapling_outputs_count: cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum(),
+            orchard_actions_count: cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum(),
+        };
+
+        let blocks_dir = fsblockdb_root.as_ref().join("blocks");
+        let block_path = meta.block_file_path(&blocks_dir);
+
+        File::create(block_path)
+            .unwrap()
+            .write_all(&cb.encode_to_vec())
+            .unwrap();
+
+        meta
     }
 
     #[test]
@@ -1187,121 +1328,81 @@ mod tests {
         let receivers = db_data.get_transparent_receivers(0.into()).unwrap();
 
         // The receiver for the default UA should be in the set.
-        assert!(receivers.contains(ufvk.default_address().0.transparent().unwrap()));
+        assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
 
         // The default t-addr should be in the set.
-        assert!(receivers.contains(&taddr));
+        assert!(receivers.contains_key(&taddr));
     }
 
     #[cfg(feature = "unstable")]
     #[test]
-    fn remove_unmined_tx_reverts_balance() {
-        use secrecy::Secret;
-        use tempfile::NamedTempFile;
-        use zcash_client_backend::data_api::{chain::scan_cached_blocks, WalletWrite};
-        use zcash_primitives::zip32::ExtendedSpendingKey;
+    pub(crate) fn fsblockdb_api() {
+        // Initialise a BlockMeta DB in a new directory.
+        let fsblockdb_root = tempfile::tempdir().unwrap();
+        let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
+        init_blockmeta_db(&mut db_meta).unwrap();
 
-        use crate::{
-            chain::init::init_cache_database,
-            error::SqliteClientError,
-            wallet::{get_balance, init::init_wallet_db, rewind_to_height},
-        };
+        // The BlockMeta DB starts off empty.
+        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
 
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
-
-        // Add an account to the wallet.
-        let (dfvk, _taddr) = init_test_accounts_table(&db_data);
-
-        // Account balance should be zero.
-        assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
-
-        // Create a fake CompactBlock sending value to the address.
-        let value = Amount::from_u64(5).unwrap();
-        let (cb, nf) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
+        // Generate some fake CompactBlocks.
+        let seed = [0u8; 32];
+        let account = AccountId::from(0);
+        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
+        let dfvk = extsk.to_diversifiable_full_viewing_key();
+        let (cb1, _) = fake_compact_block(
+            BlockHeight::from_u32(1),
+            BlockHash([1; 32]),
             &dfvk,
-            value,
+            AddressType::DefaultExternal,
+            Amount::from_u64(5).unwrap(),
         );
-        insert_into_cache(&db_cache, &cb);
-
-        // Create a second fake CompactBlock spending value from the address.
-        let extsk2 = ExtendedSpendingKey::master(&[0]);
-        let to2 = extsk2.default_address().1;
-        let value2 = Amount::from_u64(2).unwrap();
-        let cb2 = fake_compact_block_spending(
-            sapling_activation_height() + 1,
-            cb.hash(),
-            (nf, value),
+        let (cb2, _) = fake_compact_block(
+            BlockHeight::from_u32(2),
+            BlockHash([2; 32]),
             &dfvk,
-            to2,
-            value2,
+            AddressType::DefaultExternal,
+            Amount::from_u64(10).unwrap(),
         );
-        insert_into_cache(&db_cache, &cb2);
 
-        // Scan the cache.
-        let mut db_write = db_data.get_update_ops().unwrap();
-        scan_cached_blocks(&network(), &db_cache, &mut db_write, None).unwrap();
+        // Write the CompactBlocks to the BlockMeta DB's corresponding disk storage.
+        let meta1 = store_in_fsblockdb(&fsblockdb_root, &cb1);
+        let meta2 = store_in_fsblockdb(&fsblockdb_root, &cb2);
 
-        // Account balance should equal the change.
+        // The BlockMeta DB is not updated until we do so explicitly.
+        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+
+        // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
+        db_meta.write_block_metadata(&[meta1, meta2]).unwrap();
+
+        // The BlockMeta DB now sees blocks up to height 2.
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
-            (value - value2).unwrap()
+            db_meta.get_max_cached_height().unwrap(),
+            Some(BlockHeight::from_u32(2)),
         );
-
-        // Attempting to remove the first transaction should fail because it is mined.
-        let mut db_ops = db_data.get_update_ops().unwrap();
-        let txid = cb.vtx.get(0).unwrap().txid();
-        assert!(matches!(
-            db_ops.remove_unmined_tx(&txid).unwrap_err(),
-            SqliteClientError::TransactionIsMined(x) if x == txid,
-        ));
-
-        // Attempting to remove the second transaction should fail because it is mined.
-        let txid2 = cb2.vtx.get(0).unwrap().txid();
-        assert!(matches!(
-            db_ops.remove_unmined_tx(&txid2).unwrap_err(),
-            SqliteClientError::TransactionIsMined(x) if x == txid2,
-        ));
-
-        // Rewind the wallet by one block, to unmine the second transaction.
-        rewind_to_height(&db_data, sapling_activation_height()).unwrap();
-
-        // Account balance should be zero: the first transaction is spent, but the second
-        // transaction is unmined.
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
-            Amount::zero()
+            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
+            Some(meta1),
         );
-
-        // Attempting to remove the first transaction should still fail.
-        assert!(matches!(
-            db_ops.remove_unmined_tx(&txid).unwrap_err(),
-            SqliteClientError::TransactionIsMined(x) if x == txid,
-        ));
-
-        // The second transaction can be removed.
-        db_ops.remove_unmined_tx(&txid2).unwrap();
-
-        // Account balance should now reflect the first received note.
-        assert_eq!(get_balance(&db_data, AccountId::from(0)).unwrap(), value);
-
-        // Scan the cache again.
-        scan_cached_blocks(&network(), &db_cache, &mut db_write, None).unwrap();
-
-        // Account balance should once again equal the change.
         assert_eq!(
-            get_balance(&db_data, AccountId::from(0)).unwrap(),
-            (value - value2).unwrap()
+            db_meta.find_block(BlockHeight::from_u32(2)).unwrap(),
+            Some(meta2),
         );
+        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+
+        // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
+        db_meta
+            .truncate_to_height(BlockHeight::from_u32(1))
+            .unwrap();
+        assert_eq!(
+            db_meta.get_max_cached_height().unwrap(),
+            Some(BlockHeight::from_u32(1)),
+        );
+        assert_eq!(
+            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
+            Some(meta1),
+        );
+        assert_eq!(db_meta.find_block(BlockHeight::from_u32(2)).unwrap(), None);
+        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
     }
 }

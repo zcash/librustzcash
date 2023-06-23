@@ -8,8 +8,8 @@ use crate::{
     transaction::{
         self as tx,
         components::{
-            amount::Amount,
-            tze::{Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
+            amount::{Amount, BalanceError},
+            tze::{fees, Authorization, Authorized, Bundle, OutPoint, TzeIn, TzeOut},
         },
     },
 };
@@ -32,13 +32,27 @@ impl fmt::Display for Error {
 
 #[allow(clippy::type_complexity)]
 pub struct TzeSigner<'a, BuildCtx> {
-    prevout: TzeOut,
     builder: Box<dyn FnOnce(&BuildCtx) -> Result<(u32, Vec<u8>), Error> + 'a>,
+}
+
+#[derive(Clone)]
+struct TzeBuildInput {
+    tzein: TzeIn<()>,
+    coin: TzeOut,
+}
+
+impl fees::InputView for TzeBuildInput {
+    fn outpoint(&self) -> &OutPoint {
+        &self.tzein.prevout
+    }
+    fn coin(&self) -> &TzeOut {
+        &self.coin
+    }
 }
 
 pub struct TzeBuilder<'a, BuildCtx> {
     signers: Vec<TzeSigner<'a, BuildCtx>>,
-    vin: Vec<TzeIn<()>>,
+    vin: Vec<TzeBuildInput>,
     vout: Vec<TzeOut>,
 }
 
@@ -58,18 +72,28 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         }
     }
 
+    pub fn inputs(&self) -> &[impl fees::InputView] {
+        &self.vin
+    }
+
+    pub fn outputs(&self) -> &[impl fees::OutputView] {
+        &self.vout
+    }
+
     pub fn add_input<WBuilder, W: ToPayload>(
         &mut self,
         extension_id: u32,
         mode: u32,
-        (outpoint, prevout): (OutPoint, TzeOut),
+        (outpoint, coin): (OutPoint, TzeOut),
         witness_builder: WBuilder,
     ) where
         WBuilder: 'a + FnOnce(&BuildCtx) -> Result<W, Error>,
     {
-        self.vin.push(TzeIn::new(outpoint, extension_id, mode));
+        self.vin.push(TzeBuildInput {
+            tzein: TzeIn::new(outpoint, extension_id, mode),
+            coin,
+        });
         self.signers.push(TzeSigner {
-            prevout,
             builder: Box::new(move |ctx| witness_builder(ctx).map(|x| x.to_payload())),
         });
     }
@@ -97,16 +121,22 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         Ok(())
     }
 
-    pub fn value_balance(&self) -> Option<Amount> {
-        self.signers
+    pub fn value_balance(&self) -> Result<Amount, BalanceError> {
+        let total_in = self
+            .vin
             .iter()
-            .map(|s| s.prevout.value)
-            .sum::<Option<Amount>>()?
-            - self
-                .vout
-                .iter()
-                .map(|tzo| tzo.value)
-                .sum::<Option<Amount>>()?
+            .map(|tzi| tzi.coin.value)
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
+
+        let total_out = self
+            .vout
+            .iter()
+            .map(|tzo| tzo.value)
+            .sum::<Option<Amount>>()
+            .ok_or(BalanceError::Overflow)?;
+
+        (total_in - total_out).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> (Option<Bundle<Unauthorized>>, Vec<TzeSigner<'a, BuildCtx>>) {
@@ -115,7 +145,7 @@ impl<'a, BuildCtx> TzeBuilder<'a, BuildCtx> {
         } else {
             (
                 Some(Bundle {
-                    vin: self.vin.clone(),
+                    vin: self.vin.iter().map(|vin| vin.tzein.clone()).collect(),
                     vout: self.vout.clone(),
                     authorization: Unauthorized,
                 }),

@@ -4,10 +4,10 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     sapling::{
+        self,
         note_encryption::{
             try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
         },
-        Note, PaymentAddress,
     },
     transaction::Transaction,
     zip32::{AccountId, Scope},
@@ -30,7 +30,7 @@ pub enum TransferType {
 }
 
 /// A decrypted shielded output.
-pub struct DecryptedOutput {
+pub struct DecryptedOutput<Note> {
     /// The index of the output within [`shielded_outputs`].
     ///
     /// [`shielded_outputs`]: zcash_primitives::transaction::TransactionData
@@ -39,8 +39,6 @@ pub struct DecryptedOutput {
     pub note: Note,
     /// The account that decrypted the note.
     pub account: AccountId,
-    /// The address the note was sent to.
-    pub to: PaymentAddress,
     /// The memo bytes included with the note.
     pub memo: MemoBytes,
     /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
@@ -57,7 +55,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     height: BlockHeight,
     tx: &Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
-) -> Vec<DecryptedOutput> {
+) -> Vec<DecryptedOutput<sapling::Note>> {
     tx.sapling_bundle()
         .iter()
         .flat_map(|bundle| {
@@ -74,7 +72,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                     let ovk = dfvk.fvk().ovk;
 
                     bundle
-                        .shielded_outputs
+                        .shielded_outputs()
                         .iter()
                         .enumerate()
                         .flat_map(move |(index, output)| {
@@ -94,11 +92,10 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                                         .map(|ret| (ret, TransferType::Outgoing))
                                 })
                                 .into_iter()
-                                .map(move |((note, to, memo), transfer_type)| DecryptedOutput {
+                                .map(move |((note, _, memo), transfer_type)| DecryptedOutput {
                                     index,
                                     note,
                                     account,
-                                    to,
                                     memo,
                                     transfer_type,
                                 })

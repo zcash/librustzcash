@@ -5,7 +5,6 @@ use std::io::Write;
 use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use group::GroupEncoding;
 use orchard::bundle::{self as orchard};
 
 use crate::consensus::{BlockHeight, BranchId};
@@ -146,11 +145,11 @@ pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
         let mut nh = hasher(ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION);
         for s_spend in shielded_spends {
             // we build the hash of nullifiers separately for compact blocks.
-            ch.write_all(s_spend.nullifier.as_ref()).unwrap();
+            ch.write_all(s_spend.nullifier().as_ref()).unwrap();
 
-            nh.write_all(&s_spend.cv.to_bytes()).unwrap();
-            nh.write_all(&s_spend.anchor.to_repr()).unwrap();
-            s_spend.rk.write(&mut nh).unwrap();
+            nh.write_all(&s_spend.cv().to_bytes()).unwrap();
+            nh.write_all(&s_spend.anchor().to_repr()).unwrap();
+            s_spend.rk().write(&mut nh).unwrap();
         }
 
         let compact_digest = ch.finalize();
@@ -176,15 +175,15 @@ pub(crate) fn hash_sapling_outputs<A>(shielded_outputs: &[OutputDescription<A>])
         let mut mh = hasher(ZCASH_SAPLING_OUTPUTS_MEMOS_HASH_PERSONALIZATION);
         let mut nh = hasher(ZCASH_SAPLING_OUTPUTS_NONCOMPACT_HASH_PERSONALIZATION);
         for s_out in shielded_outputs {
-            ch.write_all(s_out.cmu.to_repr().as_ref()).unwrap();
-            ch.write_all(s_out.ephemeral_key.as_ref()).unwrap();
-            ch.write_all(&s_out.enc_ciphertext[..52]).unwrap();
+            ch.write_all(s_out.cmu().to_bytes().as_ref()).unwrap();
+            ch.write_all(s_out.ephemeral_key().as_ref()).unwrap();
+            ch.write_all(&s_out.enc_ciphertext()[..52]).unwrap();
 
-            mh.write_all(&s_out.enc_ciphertext[52..564]).unwrap();
+            mh.write_all(&s_out.enc_ciphertext()[52..564]).unwrap();
 
-            nh.write_all(&s_out.cv.to_bytes()).unwrap();
-            nh.write_all(&s_out.enc_ciphertext[564..]).unwrap();
-            nh.write_all(&s_out.out_ciphertext).unwrap();
+            nh.write_all(&s_out.cv().to_bytes()).unwrap();
+            nh.write_all(&s_out.enc_ciphertext()[564..]).unwrap();
+            nh.write_all(&s_out.out_ciphertext()[..]).unwrap();
         }
 
         h.write_all(ch.finalize().as_bytes()).unwrap();
@@ -253,14 +252,14 @@ pub(crate) fn hash_transparent_txid_data(
 /// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
 fn hash_sapling_txid_data<A: sapling::Authorization>(bundle: &sapling::Bundle<A>) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
-    if !(bundle.shielded_spends.is_empty() && bundle.shielded_outputs.is_empty()) {
-        h.write_all(hash_sapling_spends(&bundle.shielded_spends).as_bytes())
+    if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+        h.write_all(hash_sapling_spends(bundle.shielded_spends()).as_bytes())
             .unwrap();
 
-        h.write_all(hash_sapling_outputs(&bundle.shielded_outputs).as_bytes())
+        h.write_all(hash_sapling_outputs(bundle.shielded_outputs()).as_bytes())
             .unwrap();
 
-        h.write_all(&bundle.value_balance.to_i64_le_bytes())
+        h.write_all(&bundle.value_balance().to_i64_le_bytes())
             .unwrap();
     }
     h.finalize()
@@ -465,19 +464,19 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
     ) -> Blake2bHash {
         let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
         if let Some(bundle) = sapling_bundle {
-            for spend in &bundle.shielded_spends {
-                h.write_all(&spend.zkproof).unwrap();
+            for spend in bundle.shielded_spends() {
+                h.write_all(spend.zkproof()).unwrap();
             }
 
-            for spend in &bundle.shielded_spends {
-                spend.spend_auth_sig.write(&mut h).unwrap();
+            for spend in bundle.shielded_spends() {
+                spend.spend_auth_sig().write(&mut h).unwrap();
             }
 
-            for output in &bundle.shielded_outputs {
-                h.write_all(&output.zkproof).unwrap();
+            for output in bundle.shielded_outputs() {
+                h.write_all(output.zkproof()).unwrap();
             }
 
-            bundle.authorization.binding_sig.write(&mut h).unwrap();
+            bundle.authorization().binding_sig.write(&mut h).unwrap();
         }
         h.finalize()
     }

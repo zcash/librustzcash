@@ -216,39 +216,57 @@ impl V2 {
     }
 }
 
-#[cfg(test)]
-impl quickcheck::Arbitrary for NodeData {
-    fn arbitrary<G: quickcheck::Gen>(gen: &mut G) -> Self {
-        let mut node_data = NodeData {
-            consensus_branch_id: 0,
-            ..Default::default()
-        };
-        gen.fill_bytes(&mut node_data.subtree_commitment[..]);
-        node_data.start_time = gen.next_u32();
-        node_data.end_time = gen.next_u32();
-        node_data.start_target = gen.next_u32();
-        node_data.end_target = gen.next_u32();
-        gen.fill_bytes(&mut node_data.start_sapling_root[..]);
-        gen.fill_bytes(&mut node_data.end_sapling_root[..]);
-        let mut number = [0u8; 32];
-        gen.fill_bytes(&mut number[..]);
-        node_data.subtree_total_work = U256::from_little_endian(&number[..]);
-        node_data.start_height = gen.next_u64();
-        node_data.end_height = gen.next_u64();
-        node_data.sapling_tx = gen.next_u64();
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use primitive_types::U256;
+    use proptest::array::uniform32;
+    use proptest::prelude::{any, prop_compose};
 
-        node_data
+    use super::NodeData;
+
+    prop_compose! {
+        pub fn arb_node_data()(
+            subtree_commitment in uniform32(any::<u8>()),
+            start_time in any::<u32>(),
+            end_time in any::<u32>(),
+            start_target in any::<u32>(),
+            end_target in any::<u32>(),
+            start_sapling_root in uniform32(any::<u8>()),
+            end_sapling_root in uniform32(any::<u8>()),
+            subtree_total_work in uniform32(any::<u8>()),
+            start_height in any::<u64>(),
+            end_height in any::<u64>(),
+            sapling_tx in any::<u64>(),
+        ) -> NodeData {
+            NodeData {
+                consensus_branch_id: 0,
+                subtree_commitment,
+                start_time,
+                end_time,
+                start_target,
+                end_target,
+                start_sapling_root,
+                end_sapling_root,
+                subtree_total_work: U256::from_little_endian(&subtree_total_work[..]),
+                start_height,
+                end_height,
+                sapling_tx
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::NodeData;
-    use quickcheck::{quickcheck, TestResult};
+    use super::testing::arb_node_data;
+    use proptest::prelude::*;
 
-    quickcheck! {
-        fn serialization_round_trip(node_data: NodeData) -> TestResult {
-            TestResult::from_bool(NodeData::from_bytes(0, &node_data.to_bytes()).unwrap() == node_data)
+    use super::NodeData;
+
+    proptest! {
+        #[test]
+        fn serialization_round_trip(node_data in arb_node_data()) {
+            assert_eq!(NodeData::from_bytes(0, node_data.to_bytes()).unwrap(), node_data);
         }
     }
 }

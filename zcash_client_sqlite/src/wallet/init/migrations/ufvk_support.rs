@@ -160,7 +160,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         )?;
 
         //
-        // Update the sent_notes table to inclue an output_pool column that
+        // Update the sent_notes table to include an output_pool column that
         // is respected by the uniqueness constraint
         //
 

@@ -264,7 +264,7 @@ impl NoteValue {
     fn lc<Scalar: PrimeField>(&self) -> LinearCombination<Scalar> {
         let mut tmp = LinearCombination::zero();
 
-        let mut coeff = Scalar::one();
+        let mut coeff = Scalar::ONE;
         for b in &self.bits {
             tmp = tmp + (coeff, b.get_variable());
             coeff = coeff.double();

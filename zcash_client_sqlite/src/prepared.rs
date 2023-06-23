@@ -12,8 +12,8 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    merkle_tree::{CommitmentTree, IncrementalWitness},
-    sapling::{Diversifier, Node, Nullifier},
+    merkle_tree::{write_commitment_tree, write_incremental_witness},
+    sapling::{self, Diversifier, Nullifier},
     transaction::{components::Amount, TxId},
     zip32::{AccountId, DiversifierIndex},
 };
@@ -106,6 +106,10 @@ pub struct DataConnStmtCache<'a, P> {
     stmt_insert_received_transparent_utxo: Statement<'a>,
     #[cfg(feature = "transparent-inputs")]
     stmt_update_received_transparent_utxo: Statement<'a>,
+    #[cfg(feature = "transparent-inputs")]
+    stmt_insert_legacy_transparent_utxo: Statement<'a>,
+    #[cfg(feature = "transparent-inputs")]
+    stmt_update_legacy_transparent_utxo: Statement<'a>,
     stmt_insert_received_note: Statement<'a>,
     stmt_update_received_note: Statement<'a>,
     stmt_select_received_note: Statement<'a>,
@@ -152,7 +156,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     "SELECT id_tx FROM transactions WHERE txid = ?",
                 )?,
                 stmt_mark_sapling_note_spent: wallet_db.conn.prepare(
-                    "UPDATE received_notes SET spent = ? WHERE nf = ?"
+                    "UPDATE sapling_received_notes SET spent = ? WHERE nf = ?"
                 )?,
                 #[cfg(feature = "transparent-inputs")]
                 stmt_mark_transparent_utxo_spent: wallet_db.conn.prepare(
@@ -188,12 +192,36 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                       AND addresses.cached_transparent_receiver_address = :address
                     RETURNING id_utxo"
                 )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_insert_legacy_transparent_utxo: wallet_db.conn.prepare(
+                    "INSERT INTO utxos (
+                        received_by_account, address,
+                        prevout_txid, prevout_idx, script,
+                        value_zat, height)
+                    VALUES
+                        (:received_by_account, :address,
+                        :prevout_txid, :prevout_idx, :script,
+                        :value_zat, :height)
+                    RETURNING id_utxo"
+                )?,
+                #[cfg(feature = "transparent-inputs")]
+                stmt_update_legacy_transparent_utxo: wallet_db.conn.prepare(
+                    "UPDATE utxos
+                    SET received_by_account = :received_by_account,
+                        height = :height,
+                        address = :address,
+                        script = :script,
+                        value_zat = :value_zat
+                    WHERE prevout_txid = :prevout_txid
+                      AND prevout_idx = :prevout_idx
+                    RETURNING id_utxo"
+                )?,
                 stmt_insert_received_note: wallet_db.conn.prepare(
-                    "INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
+                    "INSERT INTO sapling_received_notes (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change)
                     VALUES (:tx, :output_index, :account, :diversifier, :value, :rcm, :memo, :nf, :is_change)",
                 )?,
                 stmt_update_received_note: wallet_db.conn.prepare(
-                    "UPDATE received_notes
+                    "UPDATE sapling_received_notes
                     SET account = :account,
                         diversifier = :diversifier,
                         value = :value,
@@ -204,7 +232,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     WHERE tx = :tx AND output_index = :output_index",
                 )?,
                 stmt_select_received_note: wallet_db.conn.prepare(
-                    "SELECT id_note FROM received_notes WHERE tx = ? AND output_index = ?"
+                    "SELECT id_note FROM sapling_received_notes WHERE tx = ? AND output_index = ?"
                 )?,
                 stmt_update_sent_output: wallet_db.conn.prepare(
                     "UPDATE sent_notes
@@ -233,9 +261,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
                     "DELETE FROM sapling_witnesses WHERE block < ?"
                 )?,
                 stmt_update_expired: wallet_db.conn.prepare(
-                    "UPDATE received_notes SET spent = NULL WHERE EXISTS (
+                    "UPDATE sapling_received_notes SET spent = NULL WHERE EXISTS (
                         SELECT id_tx FROM transactions
-                        WHERE id_tx = received_notes.spent AND block IS NULL AND expiry_height < ?
+                        WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
                     )",
                 )?,
                 stmt_insert_address: InsertAddress::new(&wallet_db.conn)?
@@ -249,10 +277,10 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
-        commitment_tree: &CommitmentTree<Node>,
+        commitment_tree: &sapling::CommitmentTree,
     ) -> Result<(), SqliteClientError> {
         let mut encoded_tree = Vec::new();
-        commitment_tree.write(&mut encoded_tree).unwrap();
+        write_commitment_tree(commitment_tree, &mut encoded_tree).unwrap();
 
         self.stmt_insert_block.execute(params![
             u32::from(block_height),
@@ -503,13 +531,14 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
 
     /// Adds the given received UTXO to the datastore.
     ///
-    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
-    /// exists.
+    /// Returns the database identifier for the newly-inserted UTXO if the address to which the
+    /// UTXO was sent corresponds to a cached transparent receiver in the addresses table, or
+    /// Ok(None) if the address is unknown. Returns an error if the UTXO exists.
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn stmt_insert_received_transparent_utxo(
         &mut self,
         output: &WalletTransparentOutput,
-    ) -> Result<UtxoId, SqliteClientError> {
+    ) -> Result<Option<UtxoId>, SqliteClientError> {
         self.stmt_insert_received_transparent_utxo
             .query_row(
                 named_params![
@@ -525,13 +554,15 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
                     Ok(UtxoId(id))
                 },
             )
+            .optional()
             .map_err(SqliteClientError::from)
     }
 
     /// Adds the given received UTXO to the datastore.
     ///
-    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
-    /// exists.
+    /// Returns the database identifier for the updated UTXO if the address to which the UTXO was
+    /// sent corresponds to a cached transparent receiver in the addresses table, or Ok(None) if
+    /// the address is unknown.
     #[cfg(feature = "transparent-inputs")]
     pub(crate) fn stmt_update_received_transparent_utxo(
         &mut self,
@@ -540,6 +571,65 @@ impl<'a, P: consensus::Parameters> DataConnStmtCache<'a, P> {
         self.stmt_update_received_transparent_utxo
             .query_row(
                 named_params![
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .optional()
+            .map_err(SqliteClientError::from)
+    }
+
+    /// Adds the given legacy UTXO to the datastore.
+    ///
+    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
+    /// exists.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn stmt_insert_legacy_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+        received_by_account: AccountId,
+    ) -> Result<UtxoId, SqliteClientError> {
+        self.stmt_insert_legacy_transparent_utxo
+            .query_row(
+                named_params![
+                    ":received_by_account": &u32::from(received_by_account),
+                    ":address": &output.recipient_address().encode(&self.wallet_db.params),
+                    ":prevout_txid": &output.outpoint().hash().to_vec(),
+                    ":prevout_idx": &output.outpoint().n(),
+                    ":script": &output.txout().script_pubkey.0,
+                    ":value_zat": &i64::from(output.txout().value),
+                    ":height": &u32::from(output.height()),
+                ],
+                |row| {
+                    let id = row.get(0)?;
+                    Ok(UtxoId(id))
+                },
+            )
+            .map_err(SqliteClientError::from)
+    }
+
+    /// Adds the given legacy UTXO to the datastore.
+    ///
+    /// Returns the database row for the newly-inserted UTXO, or an error if the UTXO
+    /// exists.
+    #[cfg(feature = "transparent-inputs")]
+    pub(crate) fn stmt_update_legacy_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+        received_by_account: AccountId,
+    ) -> Result<Option<UtxoId>, SqliteClientError> {
+        self.stmt_update_legacy_transparent_utxo
+            .query_row(
+                named_params![
+                    ":received_by_account": &u32::from(received_by_account),
                     ":prevout_txid": &output.outpoint().hash().to_vec(),
                     ":prevout_idx": &output.outpoint().n(),
                     ":address": &output.recipient_address().encode(&self.wallet_db.params),
@@ -594,9 +684,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         diversifier: &Diversifier,
         value: u64,
         rcm: [u8; 32],
-        nf: &Option<Nullifier>,
+        nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
-        is_change: Option<bool>,
+        is_change: bool,
     ) -> Result<NoteId, SqliteClientError> {
         let sql_args: &[(&str, &dyn ToSql)] = &[
             (":tx", &tx_ref),
@@ -605,7 +695,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":diversifier", &diversifier.0.as_ref()),
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
-            (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
+            (":nf", &nf.map(|nf| nf.0.as_ref())),
             (
                 ":memo",
                 &memo
@@ -636,9 +726,9 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         diversifier: &Diversifier,
         value: u64,
         rcm: [u8; 32],
-        nf: &Option<Nullifier>,
+        nf: Option<&Nullifier>,
         memo: Option<&MemoBytes>,
-        is_change: Option<bool>,
+        is_change: bool,
         tx_ref: i64,
         output_index: usize,
     ) -> Result<bool, SqliteClientError> {
@@ -647,7 +737,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
             (":diversifier", &diversifier.0.as_ref()),
             (":value", &(value as i64)),
             (":rcm", &rcm.as_ref()),
-            (":nf", &nf.as_ref().map(|nf| nf.0.as_ref())),
+            (":nf", &nf.map(|nf| nf.0.as_ref())),
             (
                 ":memo",
                 &memo
@@ -687,7 +777,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         &mut self,
         note_id: NoteId,
         height: BlockHeight,
-        witness: &IncrementalWitness<Node>,
+        witness: &sapling::IncrementalWitness,
     ) -> Result<(), SqliteClientError> {
         let note_id = match note_id {
             NoteId::ReceivedNoteId(note_id) => Ok(note_id),
@@ -695,7 +785,7 @@ impl<'a, P> DataConnStmtCache<'a, P> {
         }?;
 
         let mut encoded = Vec::new();
-        witness.write(&mut encoded).unwrap();
+        write_incremental_witness(witness, &mut encoded).unwrap();
 
         self.stmt_insert_witness
             .execute(params![note_id, u32::from(height), encoded])?;
