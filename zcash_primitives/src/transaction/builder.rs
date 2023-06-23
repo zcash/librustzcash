@@ -277,12 +277,12 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
     /// the given note.
-    pub fn add_orchard_spend<FR: FeeRule>(
+    pub fn add_orchard_spend<FeeError>(
         &mut self,
         sk: orchard::keys::SpendingKey,
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
-    ) -> Result<(), Error<FR::Error>> {
+    ) -> Result<(), Error<FeeError>> {
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardAnchorNotAvailable)?
@@ -296,13 +296,13 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     }
 
     /// Adds an Orchard recipient to the transaction.
-    pub fn add_orchard_output<FR: FeeRule>(
+    pub fn add_orchard_output<FeeError>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
         recipient: orchard::Address,
         value: u64,
         memo: MemoBytes,
-    ) -> Result<(), Error<FR::Error>> {
+    ) -> Result<(), Error<FeeError>> {
         self.orchard_builder
             .as_mut()
             .ok_or(Error::OrchardAnchorNotAvailable)?
