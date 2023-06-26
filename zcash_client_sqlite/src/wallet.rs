@@ -66,8 +66,11 @@
 
 use rusqlite::{self, named_params, OptionalExtension, ToSql};
 use std::convert::TryFrom;
-use std::io::Cursor;
-use std::{collections::HashMap, io};
+use std::{
+    collections::HashMap,
+    io::{self, Cursor},
+};
+use zcash_client_backend::data_api::ShieldedProtocol;
 
 use zcash_primitives::{
     block::BlockHash,
@@ -116,7 +119,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // implementation detail.
     match pool_type {
         PoolType::Transparent => 0i64,
-        PoolType::Sapling => 2i64,
+        PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
     }
 }
 
@@ -1119,7 +1122,11 @@ fn recipient_params<P: consensus::Parameters>(
 ) -> (Option<String>, Option<u32>, PoolType) {
     match to {
         Recipient::Transparent(addr) => (Some(addr.encode(params)), None, PoolType::Transparent),
-        Recipient::Sapling(addr) => (Some(addr.encode(params)), None, PoolType::Sapling),
+        Recipient::Sapling(addr) => (
+            Some(addr.encode(params)),
+            None,
+            PoolType::Shielded(ShieldedProtocol::Sapling),
+        ),
         Recipient::Unified(addr, pool) => (Some(addr.encode(params)), None, *pool),
         Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
     }

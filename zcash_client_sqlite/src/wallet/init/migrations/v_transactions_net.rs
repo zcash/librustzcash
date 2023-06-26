@@ -6,9 +6,10 @@ use rusqlite::{self, named_params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
+use zcash_client_backend::data_api::{PoolType, ShieldedProtocol};
 
 use super::add_transaction_views;
-use crate::wallet::{init::WalletMigrationError, pool_code, PoolType};
+use crate::wallet::{init::WalletMigrationError, pool_code};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
     0x2aa4d24f,
@@ -48,7 +49,7 @@ impl RusqliteMigration for Migration {
              SELECT tx, :output_pool, output_index, from_account, from_account, value
              FROM sent_notes",
              named_params![
-                ":output_pool": &pool_code(PoolType::Sapling)
+                ":output_pool": &pool_code(PoolType::Shielded(ShieldedProtocol::Sapling))
              ]
         )?;
 

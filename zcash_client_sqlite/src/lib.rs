@@ -59,7 +59,8 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         BlockMetadata, DecryptedTransaction, NullifierQuery, PoolType, Recipient, ScannedBlock,
-        SentTransaction, WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        SentTransaction, ShieldedProtocol, WalletCommitmentTrees, WalletRead, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -459,7 +460,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         let recipient = if output.transfer_type == TransferType::Outgoing {
                             Recipient::Sapling(output.note.recipient())
                         } else {
-                            Recipient::InternalAccount(output.account, PoolType::Sapling)
+                            Recipient::InternalAccount(
+                                output.account,
+                                PoolType::Shielded(ShieldedProtocol::Sapling)
+                            )
                         };
 
                         wallet::put_sent_output(

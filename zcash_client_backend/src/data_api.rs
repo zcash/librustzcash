@@ -372,14 +372,21 @@ pub struct SentTransaction<'a> {
     pub utxos_spent: Vec<OutPoint>,
 }
 
+/// A shielded transfer protocol supported by the wallet.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ShieldedProtocol {
+    /// The Sapling protocol
+    Sapling,
+    // TODO: Orchard
+}
+
 /// A value pool to which the wallet supports sending transaction outputs.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PoolType {
     /// The transparent value pool
     Transparent,
-    /// The Sapling value pool
-    Sapling,
-    // TODO: Orchard
+    /// A shielded value pool.
+    Shielded(ShieldedProtocol),
 }
 
 /// A type that represents the recipient of a transaction output; a recipient address (and, for
