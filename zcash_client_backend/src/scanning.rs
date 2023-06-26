@@ -21,7 +21,7 @@ use zcash_primitives::{
     zip32::{sapling::DiversifiableFullViewingKey, AccountId, Scope},
 };
 
-use crate::data_api::{BlockMetadata, ScannedBlock};
+use crate::data_api::{BlockMetadata, ScannedBlock, ShieldedProtocol};
 use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, Tasks},
@@ -116,17 +116,29 @@ pub enum ScanError {
     /// the current chain tip.
     PrevHashMismatch { at_height: BlockHeight },
 
-    /// The block height field of the proposed new chain tip is not equal to the height of the
-    /// previous chain tip + 1. This variant stores a copy of the incorrect height value for
-    /// reporting purposes.
+    /// The block height field of the proposed new block is not equal to the height of the previous
+    /// block + 1.
     BlockHeightDiscontinuity {
-        previous_tip: BlockHeight,
+        prev_height: BlockHeight,
         new_height: BlockHeight,
     },
 
-    /// The size of the Sapling note commitment tree was not provided as part of a [`CompactBlock`]
-    /// being scanned, making it impossible to construct the nullifier for a detected note.
-    SaplingTreeSizeUnknown { at_height: BlockHeight },
+    /// The note commitment tree size for the given protocol at the proposed new block is not equal
+    /// to the size at the previous block plus the count of this block's outputs.
+    TreeSizeMismatch {
+        protocol: ShieldedProtocol,
+        at_height: BlockHeight,
+        given: u32,
+        computed: u32,
+    },
+
+    /// The size of the note commitment tree for the given protocol was not provided as part of a
+    /// [`CompactBlock`] being scanned, making it impossible to construct the nullifier for a
+    /// detected note.
+    TreeSizeUnknown {
+        protocol: ShieldedProtocol,
+        at_height: BlockHeight,
+    },
 }
 
 impl fmt::Display for ScanError {
@@ -137,11 +149,14 @@ impl fmt::Display for ScanError {
                 "The parent hash of proposed block does not correspond to the block hash at height {}.",
                 at_height
             ),
-            ScanError::BlockHeightDiscontinuity { previous_tip, new_height } => {
-                write!(f, "Block height discontinuity at height {}; next height is : {}", previous_tip, new_height)
+            ScanError::BlockHeightDiscontinuity { prev_height, new_height } => {
+                write!(f, "Block height discontinuity at height {}; next height is : {}", prev_height, new_height)
             }
-            ScanError::SaplingTreeSizeUnknown { at_height } => {
-                write!(f, "Unable to determine Sapling note commitment tree size at height {}", at_height)
+            ScanError::TreeSizeMismatch { protocol, at_height, given, computed } => {
+                write!(f, "The the {:?} note commitment tree size provided by a compact block did not match the expected size at height {}; given {}, expected {}", protocol, at_height, given, computed)
+            }
+            ScanError::TreeSizeUnknown { protocol, at_height } => {
+                write!(f, "Unable to determine {:?} note commitment tree size at height {}", protocol, at_height)
             }
         }
     }
@@ -224,6 +239,46 @@ pub(crate) fn add_block_to_runner<P, S, T>(
     }
 }
 
+pub(crate) fn check_continuity(
+    block: &CompactBlock,
+    prior_block_metadata: Option<&BlockMetadata>,
+) -> Option<ScanError> {
+    if let Some(prev) = prior_block_metadata {
+        if block.height() != prev.block_height() + 1 {
+            return Some(ScanError::BlockHeightDiscontinuity {
+                prev_height: prev.block_height(),
+                new_height: block.height(),
+            });
+        }
+
+        if block.prev_hash() != prev.block_hash() {
+            return Some(ScanError::PrevHashMismatch {
+                at_height: block.height(),
+            });
+        }
+
+        if let Some(given) = block
+            .chain_metadata
+            .as_ref()
+            .map(|m| m.sapling_commitment_tree_size)
+        {
+            let computed = prev.sapling_tree_size()
+                + u32::try_from(block.vtx.iter().map(|tx| tx.outputs.len()).sum::<usize>())
+                    .unwrap();
+            if given != computed {
+                return Some(ScanError::TreeSizeMismatch {
+                    protocol: ShieldedProtocol::Sapling,
+                    at_height: block.height(),
+                    given,
+                    computed,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 #[tracing::instrument(skip_all, fields(height = block.height))]
 pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
@@ -237,25 +292,12 @@ pub(crate) fn scan_block_with_runner<
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
-    let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
-    let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
+    if let Some(scan_error) = check_continuity(&block, prior_block_metadata) {
+        return Err(scan_error);
+    }
+
     let cur_height = block.height();
     let cur_hash = block.hash();
-
-    if let Some(prev) = prior_block_metadata {
-        if cur_height != prev.block_height() + 1 {
-            return Err(ScanError::BlockHeightDiscontinuity {
-                previous_tip: prev.block_height(),
-                new_height: cur_height,
-            });
-        }
-
-        if block.prev_hash() != prev.block_hash() {
-            return Err(ScanError::PrevHashMismatch {
-                at_height: cur_height,
-            });
-        }
-    }
 
     // It's possible to make progress without a Sapling tree position if we don't have any Sapling
     // notes in the block, since we only use the position for constructing nullifiers for our own
@@ -281,11 +323,14 @@ pub(crate) fn scan_block_with_runner<
             }
         })
         .or_else(|| prior_block_metadata.map(|m| m.sapling_tree_size()))
-        .ok_or(ScanError::SaplingTreeSizeUnknown {
+        .ok_or(ScanError::TreeSizeUnknown {
+            protocol: ShieldedProtocol::Sapling,
             at_height: cur_height,
         })?;
 
     let compact_block_tx_count = block.vtx.len();
+    let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
+    let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
         let txid = tx.txid();
 

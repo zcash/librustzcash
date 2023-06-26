@@ -36,7 +36,8 @@ and this library adheres to Rust's notion of
     and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
   - `WalletRead::get_target_and_anchor_heights` now takes its argument as a `NonZeroU32`
   - `chain::scan_cached_blocks` now takes a `from_height` argument that
-    permits the caller to control the starting position of the scan range.
+    permits the caller to control the starting position of the scan range
+    In addition, the `limit` parameter is now required.
   - A new `CommitmentTree` variant has been added to `data_api::error::Error`
   - `data_api::wallet::{create_spend_to_address, create_proposed_transaction,
     shield_transparent_funds}` all now require that `WalletCommitmentTrees` be

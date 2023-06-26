@@ -65,11 +65,9 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use rusqlite::{self, named_params, OptionalExtension, ToSql};
+use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::{
-    collections::HashMap,
-    io::{self, Cursor},
-};
+use std::io::{self, Cursor};
 use zcash_client_backend::data_api::ShieldedProtocol;
 
 use zcash_primitives::{
