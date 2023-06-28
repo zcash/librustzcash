@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.12.1] - 2023-06-28
+### Changed
+- Replaced internal `directories` dependency which now transitively depends on
+  MPL-licensed code.
+
 ## [0.12.0] - 2023-06-06
 ### Changed
 - Bumped dependencies to `incrementalmerkletree 0.4`, `zcash_primitives 0.12`

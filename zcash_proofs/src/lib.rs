@@ -16,8 +16,6 @@ use std::io::{self, BufReader};
 use std::path::Path;
 
 #[cfg(feature = "directories")]
-use directories::BaseDirs;
-#[cfg(feature = "directories")]
 use std::path::PathBuf;
 
 pub mod circuit;
@@ -77,13 +75,23 @@ pub struct SaplingParameterPaths {
 #[cfg(feature = "directories")]
 #[cfg_attr(docsrs, doc(cfg(feature = "directories")))]
 pub fn default_params_folder() -> Option<PathBuf> {
-    BaseDirs::new().map(|base_dirs| {
-        if cfg!(any(windows, target_os = "macos")) {
-            base_dirs.data_dir().join("ZcashParams")
-        } else {
-            base_dirs.home_dir().join(".zcash-params")
-        }
-    })
+    #[cfg(windows)]
+    {
+        use known_folders::{get_known_folder_path, KnownFolder};
+        get_known_folder_path(KnownFolder::RoamingAppData).map(|base| base.join("ZcashParams"))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        xdg::BaseDirectories::new()
+            .ok()
+            .map(|base_dirs| base_dirs.get_data_home().join("ZcashParams"))
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        home::home_dir().map(|base| base.join(".zcash-params"))
+    }
 }
 
 /// Download the Zcash Sapling parameters if needed, and store them in the default location.
