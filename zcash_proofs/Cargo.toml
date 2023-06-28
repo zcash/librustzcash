@@ -34,9 +34,11 @@ tracing = "0.1"
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 blake2b_simd = "1"
-directories = { version = "5", optional = true }
+home = { version = "0.5", optional = true }
+known-folders = { version = "1", optional = true }
 redjubjub = "0.7"
 wagyu-zcash-parameters = { version = "0.2", optional = true }
+xdg = { version = "2.5", optional = true }
 
 [dev-dependencies]
 byteorder = "1"
@@ -49,6 +51,7 @@ pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
 [features]
 default = ["local-prover", "multicore"]
 bundled-prover = ["wagyu-zcash-parameters"]
+directories = ["dep:home", "dep:known-folders", "dep:xdg"]
 download-params = ["minreq", "directories"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore", "zcash_primitives/multicore"]

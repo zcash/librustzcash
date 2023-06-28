@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- Replaced internal `directories` dependency which now transitively depends on
+  MPL-licensed code.
 
 ## [0.12.0] - 2023-06-06
 ### Changed
