@@ -218,16 +218,21 @@ pub(crate) fn scan_block_with_runner<
     // to use it. `block.sapling_commitment_tree_size` is expected to be correct as of the end of
     // the block, and we can't have a note of ours in a block with no outputs so treating the zero
     // default value from the protobuf as `None` is always correct.
-    let mut sapling_tree_position = if block.sapling_commitment_tree_size == 0 {
-        initial_commitment_tree_meta.map(|m| (m.sapling_tree_size() + 1).into())
-    } else {
-        let end_position_exclusive = Position::from(u64::from(block.sapling_commitment_tree_size));
+    let mut sapling_tree_position = if let Some(sapling_tree_size) = block
+        .block_metadata
+        .as_ref()
+        .map(|m| m.sapling_commitment_tree_size)
+        .filter(|s| *s != 0)
+    {
+        let end_position_exclusive = Position::from(u64::from(sapling_tree_size));
         let output_count = block
             .vtx
             .iter()
             .map(|tx| u64::try_from(tx.outputs.len()).unwrap())
             .sum();
         Some(end_position_exclusive - output_count)
+    } else {
+        initial_commitment_tree_meta.map(|m| (m.sapling_tree_size() + 1).into())
     };
 
     for tx in block.vtx.into_iter() {
@@ -404,11 +409,10 @@ pub(crate) fn scan_block_with_runner<
         block_hash,
         block_time: block.time,
         transactions: wtxs,
-        sapling_commitment_tree_size: if block.sapling_commitment_tree_size == 0 {
-            None
-        } else {
-            Some(block.sapling_commitment_tree_size)
-        },
+        sapling_commitment_tree_size: block
+            .block_metadata
+            .map(|m| m.sapling_commitment_tree_size)
+            .filter(|s| *s != 0),
         sapling_commitments: sapling_note_commitments,
     })
 }
@@ -439,7 +443,7 @@ mod tests {
     use crate::{
         data_api::chain::CommitmentTreeMeta,
         proto::compact_formats::{
-            CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+            BlockMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
         scan::BatchRunner,
     };
@@ -547,8 +551,11 @@ mod tests {
             cb.vtx.push(tx);
         }
 
-        cb.sapling_commitment_tree_size = initial_sapling_tree_size
-            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>();
+        cb.block_metadata = Some(BlockMetadata {
+            sapling_commitment_tree_size: initial_sapling_tree_size
+                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+            ..Default::default()
+        });
 
         cb
     }

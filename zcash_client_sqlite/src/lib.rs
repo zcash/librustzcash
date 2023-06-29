@@ -964,7 +964,7 @@ mod tests {
         data_api::{WalletRead, WalletWrite},
         keys::{sapling, UnifiedFullViewingKey},
         proto::compact_formats::{
-            CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+            BlockMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
     };
 
@@ -1109,8 +1109,11 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        cb.sapling_commitment_tree_size = initial_sapling_tree_size
-            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>();
+        cb.block_metadata = Some(BlockMetadata {
+            sapling_commitment_tree_size: initial_sapling_tree_size
+                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+            ..Default::default()
+        });
         (cb, note.nf(&dfvk.fvk().vk.nk, 0))
     }
 
@@ -1197,8 +1200,11 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        cb.sapling_commitment_tree_size = initial_sapling_tree_size
-            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>();
+        cb.block_metadata = Some(BlockMetadata {
+            sapling_commitment_tree_size: initial_sapling_tree_size
+                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+            ..Default::default()
+        });
         cb
     }
 
