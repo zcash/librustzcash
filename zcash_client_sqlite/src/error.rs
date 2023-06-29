@@ -78,7 +78,8 @@ pub enum SqliteClientError {
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 
-    /// An error occurred in inserting data into one of the wallet's note commitment trees.
+    /// An error occurred in inserting data into or accessing data from one of the wallet's note
+    /// commitment trees.
     CommitmentTree(ShardTreeError<Either<io::Error, rusqlite::Error>>),
 }
 

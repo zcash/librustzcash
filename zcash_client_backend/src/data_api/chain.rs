@@ -101,16 +101,20 @@ use crate::{
 pub mod error;
 use error::{ChainError, Error};
 
+/// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
 pub struct CommitmentTreeMeta {
     sapling_tree_size: u64,
     //TODO: orchard_tree_size: u64
 }
 
 impl CommitmentTreeMeta {
+    /// Constructs a new [`CommitmentTreeMeta`] value from its constituent parts.
     pub fn from_parts(sapling_tree_size: u64) -> Self {
         Self { sapling_tree_size }
     }
 
+    /// Returns the size of the Sapling note commitment tree as of the block that this
+    /// [`CommitmentTreeMeta`] describes.
     pub fn sapling_tree_size(&self) -> u64 {
         self.sapling_tree_size
     }
@@ -199,23 +203,19 @@ where
 /// Scans at most `limit` new blocks added to the block source for any transactions received by the
 /// tracked accounts.
 ///
+/// If the `from_height` argument is not `None`, then the block source will begin requesting blocks
+/// from the provided block source at the specified height; if `from_height` is `None then this
+/// will begin scanning at first block after the position to which the wallet has previously
+/// fully scanned the chain, thereby beginning or continuing a linear scan over all blocks.
+///
 /// This function will return without error after scanning at most `limit` new blocks, to enable
-/// the caller to update their UI with scanning progress. Repeatedly calling this function will
-/// process sequential ranges of blocks, and is equivalent to calling `scan_cached_blocks` and
-/// passing `None` for the optional `limit` value.
+/// the caller to update their UI with scanning progress. Repeatedly calling this function with
+/// `from_height == None` will process sequential ranges of blocks.
 ///
-/// This function pays attention only to cached blocks with heights greater than the highest
-/// scanned block in `data`. Cached blocks with lower heights are not verified against
-/// previously-scanned blocks. In particular, this function **assumes** that the caller is handling
-/// rollbacks.
-///
-/// For brand-new light client databases, this function starts scanning from the Sapling activation
-/// height. This height can be fast-forwarded to a more recent block by initializing the client
-/// database with a starting block (for example, calling `init_blocks_table` before this function
-/// if using `zcash_client_sqlite`).
-///
-/// Scanned blocks are required to be height-sequential. If a block is missing from the block
-/// source, an error will be returned with cause [`error::Cause::BlockHeightDiscontinuity`].
+/// For brand-new light client databases, if `from_height == None` this function starts scanning
+/// from the Sapling activation height. This height can be fast-forwarded to a more recent block by
+/// initializing the client database with a starting block (for example, calling
+/// `init_blocks_table` before this function if using `zcash_client_sqlite`).
 #[tracing::instrument(skip(params, block_source, data_db))]
 #[allow(clippy::type_complexity)]
 pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
@@ -260,7 +260,7 @@ where
     );
 
     // Start at either the provided height, or where we synced up to previously.
-    let (from_height, commitment_tree_meta) = from_height.map_or_else(
+    let (scan_from, commitment_tree_meta) = from_height.map_or_else(
         || {
             data_db.fully_scanned_height().map_or_else(
                 |e| Err(Error::Wallet(e)),
@@ -273,7 +273,7 @@ where
     )?;
 
     block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        from_height,
+        scan_from,
         limit,
         |block: CompactBlock| {
             add_block_to_runner(params, block, &mut batch_runner);
@@ -283,10 +283,22 @@ where
 
     batch_runner.flush();
 
+    let mut last_scanned = None;
     block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        from_height,
+        scan_from,
         limit,
         |block: CompactBlock| {
+            // block heights should be sequential within a single scan range
+            let block_height = block.height();
+            if let Some(h) = last_scanned {
+                if block_height != h + 1 {
+                    return Err(Error::Chain(ChainError::block_height_discontinuity(
+                        block.height(),
+                        h,
+                    )));
+                }
+            }
+
             let pruned_block = scan_block_with_runner(
                 params,
                 block,
@@ -312,6 +324,7 @@ where
 
             data_db.put_block(pruned_block).map_err(Error::Wallet)?;
 
+            last_scanned = Some(block_height);
             Ok(())
         },
     )?;

@@ -122,6 +122,10 @@ where
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
 ///
+/// # Panics
+///
+/// Panics if `min_confirmations == 0`; 0-conf transactions are not supported.
+///
 /// # Examples
 ///
 /// ```

@@ -14,10 +14,11 @@ const NIL_TAG: u8 = 0;
 const LEAF_TAG: u8 = 1;
 const PARENT_TAG: u8 = 2;
 
-pub fn write_shard_v1<H: HashSer, W: Write>(
-    writer: &mut W,
-    tree: &PrunableTree<H>,
-) -> io::Result<()> {
+/// Writes a [`PrunableTree`] to the provided [`Write`] instance.
+///
+/// This is the primary method used for ShardTree shard persistence. It writes a version identifier
+/// for the most-current serialized form, followed by the tree data.
+pub fn write_shard<H: HashSer, W: Write>(writer: &mut W, tree: &PrunableTree<H>) -> io::Result<()> {
     fn write_inner<H: HashSer, W: Write>(
         mut writer: &mut W,
         tree: &PrunableTree<H>,
@@ -80,6 +81,11 @@ fn read_shard_v1<H: HashSer, R: Read>(mut reader: &mut R) -> io::Result<Prunable
     }
 }
 
+/// Reads a [`PrunableTree`] from the provided [`Read`] instance.
+///
+/// This function operates by first parsing a 1-byte version identifier, and then dispatching to
+/// the correct deserialization function for the observed version, or returns an
+/// [`io::ErrorKind::InvalidData`] error in the case that the version is not recognized.
 pub fn read_shard<H: HashSer, R: Read>(mut reader: R) -> io::Result<PrunableTree<H>> {
     match reader.read_u8()? {
         SER_V1 => read_shard_v1(&mut reader),
@@ -97,7 +103,7 @@ mod tests {
     use shardtree::testing::arb_prunable_tree;
     use std::io::Cursor;
 
-    use super::{read_shard, write_shard_v1};
+    use super::{read_shard, write_shard};
 
     proptest! {
         #[test]
@@ -105,7 +111,7 @@ mod tests {
             tree in arb_prunable_tree(arb_test_node(), 8, 32)
         ) {
             let mut tree_data = vec![];
-            write_shard_v1(&mut tree_data, &tree).unwrap();
+            write_shard(&mut tree_data, &tree).unwrap();
             let cursor = Cursor::new(tree_data);
             let tree_result = read_shard::<TestNode, _>(cursor).unwrap();
             assert_eq!(tree, tree_result);

@@ -672,6 +672,22 @@ mod tests {
             assert_eq!(tx.sapling_outputs[0].index(), 0);
             assert_eq!(tx.sapling_outputs[0].account(), AccountId::from(0));
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
+
+            assert_eq!(
+                pruned_block
+                    .sapling_commitments
+                    .iter()
+                    .map(|(_, retention)| *retention)
+                    .collect::<Vec<_>>(),
+                vec![
+                    Retention::Ephemeral,
+                    Retention::Marked,
+                    Retention::Checkpoint {
+                        id: pruned_block.block_height,
+                        is_marked: false
+                    }
+                ]
+            );
         }
 
         go(false);
@@ -714,5 +730,20 @@ mod tests {
         assert_eq!(tx.sapling_spends[0].index(), 0);
         assert_eq!(tx.sapling_spends[0].nf(), &nf);
         assert_eq!(tx.sapling_spends[0].account(), account);
+
+        assert_eq!(
+            pruned_block
+                .sapling_commitments
+                .iter()
+                .map(|(_, retention)| *retention)
+                .collect::<Vec<_>>(),
+            vec![
+                Retention::Ephemeral,
+                Retention::Checkpoint {
+                    id: pruned_block.block_height,
+                    is_marked: false
+                }
+            ]
+        );
     }
 }

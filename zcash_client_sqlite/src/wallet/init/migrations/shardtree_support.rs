@@ -18,10 +18,10 @@ use zcash_primitives::{
     sapling,
 };
 
-use crate::wallet::{
+use crate::{wallet::{
     commitment_tree::SqliteShardStore,
     init::{migrations::received_notes_nullable_nf, WalletMigrationError},
-};
+}, SAPLING_TABLES_PREFIX};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
     0x7da6489d,
@@ -94,7 +94,7 @@ impl RusqliteMigration for Migration {
         let shard_store =
             SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
                 transaction,
-                "sapling",
+                SAPLING_TABLES_PREFIX,
             )?;
         let mut shard_tree: ShardTree<
             _,
@@ -187,14 +187,8 @@ impl RusqliteMigration for Migration {
         Ok(())
     }
 
-    fn down(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        transaction.execute_batch(
-            "DROP TABLE sapling_tree_checkpoint_marks_removed;
-            DROP TABLE sapling_tree_checkpoints;
-            DROP TABLE sapling_tree_cap;
-            DROP TABLE sapling_tree_shards;",
-        )?;
-
-        Ok(())
+    fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
+        // TODO: something better than just panic?
+        panic!("Cannot revert this migration.");
     }
 }

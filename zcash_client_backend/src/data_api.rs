@@ -438,6 +438,10 @@ pub trait WalletWrite: WalletRead {
     ) -> Result<Self::UtxoRef, Self::Error>;
 }
 
+/// This trait describes a capability for manipulating wallet note commitment trees.
+///
+/// At present, this only serves the Sapling protocol, but it will be modified to
+/// also provide operations related to Orchard note commitment trees in the future.
 pub trait WalletCommitmentTrees {
     type Error;
     type SaplingShardStore<'a>: ShardStore<

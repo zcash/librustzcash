@@ -425,7 +425,7 @@ pub(crate) mod tests {
         },
     };
 
-    pub fn test_prover() -> impl TxProver {
+    pub(crate) fn test_prover() -> impl TxProver {
         match LocalTxProver::with_default_location() {
             Some(tx_prover) => tx_prover,
             None => {

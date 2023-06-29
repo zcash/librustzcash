@@ -62,7 +62,9 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
                 i64::from(*available),
                 i64::from(*required)
             ),
-            InputSelectorError::SyncRequired => write!(f, "No chain data is available."),
+            InputSelectorError::SyncRequired => {
+                write!(f, "Insufficient chain data is available, sync required.")
+            }
         }
     }
 }
@@ -135,7 +137,7 @@ impl<FeeRuleT, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
             .field("min_target_height", &self.min_target_height)
             .field("min_anchor_height", &self.min_anchor_height)
             .field("is_shielding", &self.is_shielding)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

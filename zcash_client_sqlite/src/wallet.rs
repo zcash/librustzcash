@@ -640,7 +640,7 @@ pub(crate) fn get_min_unspent_height(
 /// block, this function does nothing.
 ///
 /// This should only be executed inside a transactional context.
-pub(crate) fn truncate_to_height<P: consensus::Parameters + Clone>(
+pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
     block_height: BlockHeight,

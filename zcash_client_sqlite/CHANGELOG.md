@@ -6,10 +6,19 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_client_sqlite::serialization` Serialization formats for data stored
+  as SQLite BLOBs in the wallet database.
+
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`,
   `zcash_primitives 0.12`
+- A `CommitmentTree` variant has been added to `zcash_client_sqlite::wallet::init::WalletMigrationError`
+- `min_confirmations` parameter values are now more strongly enforced. Previously,
+  a note could be spent with fewer than `min_confirmations` confirmations if the
+  wallet did not contain enough observed blocks to satisfy the `min_confirmations`
+  value specified; this situation is now treated as an error.
 
 ### Removed
 - The empty `wallet::transact` module has been removed.

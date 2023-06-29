@@ -11,7 +11,7 @@ use shardtree::{Checkpoint, LocatedPrunableTree, PrunableTree, ShardStore, TreeS
 
 use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};
 
-use crate::serialization::{read_shard, write_shard_v1};
+use crate::serialization::{read_shard, write_shard};
 
 pub struct SqliteShardStore<C, H, const SHARD_HEIGHT: u8> {
     pub(crate) conn: C,
@@ -327,7 +327,7 @@ pub(crate) fn put_shard<H: HashSer>(
         .map_err(Either::Left)?;
 
     let mut subtree_data = vec![];
-    write_shard_v1(&mut subtree_data, subtree.root()).map_err(Either::Left)?;
+    write_shard(&mut subtree_data, subtree.root()).map_err(Either::Left)?;
 
     let mut stmt_put_shard = conn
         .prepare_cached(&format!(
@@ -423,7 +423,7 @@ pub(crate) fn put_cap<H: HashSer>(
         .map_err(Either::Right)?;
 
     let mut cap_data = vec![];
-    write_shard_v1(&mut cap_data, &cap).map_err(Either::Left)?;
+    write_shard(&mut cap_data, &cap).map_err(Either::Left)?;
     stmt.execute([cap_data]).map_err(Either::Right)?;
 
     Ok(())
