@@ -447,50 +447,51 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         d_tx: DecryptedTransaction,
     ) -> Result<Self::TxRef, Self::Error> {
         self.transactionally(|wdb| {
-        let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None)?;
+            let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None)?;
 
-        let mut spending_account_id: Option<AccountId> = None;
-        for output in d_tx.sapling_outputs {
-            match output.transfer_type {
-                TransferType::Outgoing | TransferType::WalletInternal => {
-                    let recipient = if output.transfer_type == TransferType::Outgoing {
-                        Recipient::Sapling(output.note.recipient())
-                    } else {
-                        Recipient::InternalAccount(output.account, PoolType::Sapling)
-                    };
+            let mut spending_account_id: Option<AccountId> = None;
+            for output in d_tx.sapling_outputs {
+                match output.transfer_type {
+                    TransferType::Outgoing | TransferType::WalletInternal => {
+                        let recipient = if output.transfer_type == TransferType::Outgoing {
+                            Recipient::Sapling(output.note.recipient())
+                        } else {
+                            Recipient::InternalAccount(output.account, PoolType::Sapling)
+                        };
 
-                    wallet::put_sent_output(
-                        wdb.conn.0,
-                        &wdb.params,
-                        output.account,
-                        tx_ref,
-                        output.index,
-                        &recipient,
-                        Amount::from_u64(output.note.value().inner()).map_err(|_| {
-                            SqliteClientError::CorruptedData(
-                                "Note value is not a valid Zcash amount.".to_string(),
-                            )
-                        })?,
-                        Some(&output.memo),
-                    )?;
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            &wdb.params,
+                            output.account,
+                            tx_ref,
+                            output.index,
+                            &recipient,
+                            Amount::from_u64(output.note.value().inner()).map_err(|_| {
+                                SqliteClientError::CorruptedData(
+                                    "Note value is not a valid Zcash amount.".to_string(),
+                                )
+                            })?,
+                            Some(&output.memo),
+                        )?;
 
-                    if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref)?;
+                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref)?;
+                        }
                     }
-                }
-                TransferType::Incoming => {
-                    match spending_account_id {
-                        Some(id) => {
-                            if id != output.account {
-                                panic!("Unable to determine a unique account identifier for z->t spend.");
+                    TransferType::Incoming => {
+                        match spending_account_id {
+                            Some(id) => {
+                                if id != output.account {
+                                    panic!("Unable to determine a unique account identifier for z->t spend.");
+                                }
+                            }
+                            None => {
+                                spending_account_id = Some(output.account);
                             }
                         }
-                        None => {
-                            spending_account_id = Some(output.account);
-                        }
-                    }
 
-                    wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref)?;
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref)?;
+                    }
                 }
             }
 
@@ -527,8 +528,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     }
                 }
             }
-        }
-        Ok(tx_ref)
+
+            Ok(tx_ref)
         })
     }
 
