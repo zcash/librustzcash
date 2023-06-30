@@ -235,9 +235,9 @@ pub(crate) fn scan_block_with_runner<
         initial_commitment_tree_meta.map(|m| (m.sapling_tree_size() + 1).into())
     };
 
-    for tx in block.vtx.into_iter() {
+    let block_tx_count = block.vtx.len();
+    for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
         let txid = tx.txid();
-        let index = tx.index as usize;
 
         // Check for spent notes.  The only step that is not constant-time is
         // the filter() at the end.
@@ -338,9 +338,20 @@ pub(crate) fn scan_block_with_runner<
                     .collect()
             };
 
-            for (index, ((_, output), dec_output)) in decoded.iter().zip(decrypted).enumerate() {
+            for (output_idx, ((_, output), dec_output)) in decoded.iter().zip(decrypted).enumerate()
+            {
                 // Collect block note commitments
                 let node = sapling::Node::from_cmu(&output.cmu);
+                let is_checkpoint = output_idx + 1 == decoded.len() && tx_idx + 1 == block_tx_count;
+                let retention = match (dec_output.is_some(), is_checkpoint) {
+                    (is_marked, true) => Retention::Checkpoint {
+                        id: block_height,
+                        is_marked,
+                    },
+                    (true, false) => Retention::Marked,
+                    (false, false) => Retention::Ephemeral,
+                };
+
                 if let Some((note, account, nk)) = dec_output {
                     // A note is marked as "change" if the account that received it
                     // also spent notes in the same transaction. This will catch,
@@ -351,11 +362,11 @@ pub(crate) fn scan_block_with_runner<
                     let is_change = spent_from_accounts.contains(&account);
                     let note_commitment_tree_position = sapling_tree_position
                         .ok_or(SyncError::SaplingTreeSizeUnknown(block_height))?
-                        + index.try_into().unwrap();
+                        + output_idx.try_into().unwrap();
                     let nf = K::sapling_nf(&nk, &note, note_commitment_tree_position);
 
                     shielded_outputs.push(WalletSaplingOutput::from_parts(
-                        index,
+                        output_idx,
                         output.cmu,
                         output.ephemeral_key.clone(),
                         account,
@@ -364,38 +375,16 @@ pub(crate) fn scan_block_with_runner<
                         note_commitment_tree_position,
                         nf,
                     ));
-
-                    sapling_note_commitments.push((
-                        node,
-                        if index == decoded.len() - 1 {
-                            Retention::Checkpoint {
-                                id: block_height,
-                                is_marked: true,
-                            }
-                        } else {
-                            Retention::Marked
-                        },
-                    ));
-                } else {
-                    sapling_note_commitments.push((
-                        node,
-                        if index == decoded.len() - 1 {
-                            Retention::Checkpoint {
-                                id: block_height,
-                                is_marked: false,
-                            }
-                        } else {
-                            Retention::Ephemeral
-                        },
-                    ));
                 }
+
+                sapling_note_commitments.push((node, retention));
             }
         }
 
         if !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
             wtxs.push(WalletTx {
                 txid,
-                index,
+                index: tx.index as usize,
                 sapling_spends: shielded_spends,
                 sapling_outputs: shielded_outputs,
             });
@@ -423,6 +412,7 @@ mod tests {
         ff::{Field, PrimeField},
         GroupEncoding,
     };
+    use incrementalmerkletree::Retention;
     use rand_core::{OsRng, RngCore};
     use zcash_note_encryption::Domain;
     use zcash_primitives::{
@@ -613,6 +603,21 @@ mod tests {
             assert_eq!(tx.sapling_outputs[0].index(), 0);
             assert_eq!(tx.sapling_outputs[0].account(), account);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
+
+            assert_eq!(
+                pruned_block
+                    .sapling_commitments
+                    .iter()
+                    .map(|(_, retention)| *retention)
+                    .collect::<Vec<_>>(),
+                vec![
+                    Retention::Ephemeral,
+                    Retention::Checkpoint {
+                        id: pruned_block.block_height,
+                        is_marked: true
+                    }
+                ]
+            );
         }
 
         go(false);
