@@ -18,10 +18,13 @@ use zcash_primitives::{
     sapling,
 };
 
-use crate::{wallet::{
-    commitment_tree::SqliteShardStore,
-    init::{migrations::received_notes_nullable_nf, WalletMigrationError},
-}, SAPLING_TABLES_PREFIX};
+use crate::{
+    wallet::{
+        commitment_tree::SqliteShardStore,
+        init::{migrations::received_notes_nullable_nf, WalletMigrationError},
+    },
+    SAPLING_TABLES_PREFIX,
+};
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
     0x7da6489d,

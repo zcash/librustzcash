@@ -542,7 +542,6 @@ pub(crate) fn get_checkpoint(
 
     checkpoint_position
         .map(|pos_opt| {
-            let mut marks_removed = BTreeSet::new();
             let mut stmt = conn
                 .prepare_cached(&format!(
                     "SELECT mark_removed_position
@@ -551,17 +550,14 @@ pub(crate) fn get_checkpoint(
                     table_prefix
                 ))
                 .map_err(Either::Right)?;
-            let mut mark_removed_rows = stmt
+            let mark_removed_rows = stmt
                 .query([u32::from(checkpoint_id)])
                 .map_err(Either::Right)?;
 
-            while let Some(row) = mark_removed_rows.next().map_err(Either::Right)? {
-                marks_removed.insert(
-                    row.get::<_, u64>(0)
-                        .map(Position::from)
-                        .map_err(Either::Right)?,
-                );
-            }
+            let marks_removed = mark_removed_rows
+                .mapped(|row| row.get::<_, u64>(0).map(Position::from))
+                .collect::<Result<BTreeSet<_>, _>>()
+                .map_err(Either::Right)?;
 
             Ok(Checkpoint::from_parts(
                 pos_opt.map_or(TreeState::Empty, TreeState::AtPosition),
@@ -605,7 +601,6 @@ pub(crate) fn get_checkpoint_at_depth(
 
     checkpoint_parts
         .map(|(checkpoint_id, pos_opt)| {
-            let mut marks_removed = BTreeSet::new();
             let mut stmt = conn
                 .prepare_cached(&format!(
                     "SELECT mark_removed_position
@@ -614,17 +609,14 @@ pub(crate) fn get_checkpoint_at_depth(
                     table_prefix
                 ))
                 .map_err(Either::Right)?;
-            let mut mark_removed_rows = stmt
+            let mark_removed_rows = stmt
                 .query([u32::from(checkpoint_id)])
                 .map_err(Either::Right)?;
 
-            while let Some(row) = mark_removed_rows.next().map_err(Either::Right)? {
-                marks_removed.insert(
-                    row.get::<_, u64>(0)
-                        .map(Position::from)
-                        .map_err(Either::Right)?,
-                );
-            }
+            let marks_removed = mark_removed_rows
+                .mapped(|row| row.get::<_, u64>(0).map(Position::from))
+                .collect::<Result<BTreeSet<_>, _>>()
+                .map_err(Either::Right)?;
 
             Ok((
                 checkpoint_id,
@@ -675,17 +667,14 @@ where
             .map(|opt| opt.map_or_else(|| TreeState::Empty, |p| TreeState::AtPosition(p.into())))
             .map_err(Either::Right)?;
 
-        let mut mark_removed_rows = stmt_get_checkpoint_marks_removed
+        let mark_removed_rows = stmt_get_checkpoint_marks_removed
             .query(named_params![":checkpoint_id": checkpoint_id])
             .map_err(Either::Right)?;
-        let mut marks_removed = BTreeSet::new();
-        while let Some(mr_row) = mark_removed_rows.next().map_err(Either::Right)? {
-            let mark_removed_position = mr_row
-                .get::<_, u64>(0)
-                .map(Position::from)
-                .map_err(Either::Right)?;
-            marks_removed.insert(mark_removed_position);
-        }
+
+        let marks_removed = mark_removed_rows
+            .mapped(|row| row.get::<_, u64>(0).map(Position::from))
+            .collect::<Result<BTreeSet<_>, _>>()
+            .map_err(Either::Right)?;
 
         callback(
             &BlockHeight::from(checkpoint_id),
