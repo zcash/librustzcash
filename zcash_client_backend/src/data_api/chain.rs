@@ -103,19 +103,19 @@ use error::{ChainError, Error};
 
 /// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
 pub struct CommitmentTreeMeta {
-    sapling_tree_size: u64,
-    //TODO: orchard_tree_size: u64
+    sapling_tree_size: u32,
+    //TODO: orchard_tree_size: u32
 }
 
 impl CommitmentTreeMeta {
     /// Constructs a new [`CommitmentTreeMeta`] value from its constituent parts.
-    pub fn from_parts(sapling_tree_size: u64) -> Self {
+    pub fn from_parts(sapling_tree_size: u32) -> Self {
         Self { sapling_tree_size }
     }
 
     /// Returns the size of the Sapling note commitment tree as of the block that this
     /// [`CommitmentTreeMeta`] describes.
-    pub fn sapling_tree_size(&self) -> u64 {
+    pub fn sapling_tree_size(&self) -> u32 {
         self.sapling_tree_size
     }
 }

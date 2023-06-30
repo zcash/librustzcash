@@ -551,7 +551,7 @@ pub(crate) fn fully_scanned_height(
             [],
             |row| {
                 let max_height: u32 = row.get(0)?;
-                let sapling_tree_size: Option<u64> = row.get(1)?;
+                let sapling_tree_size: Option<u32> = row.get(1)?;
                 let sapling_tree: Vec<u8> = row.get(2)?;
                 Ok((
                     BlockHeight::from(max_height),

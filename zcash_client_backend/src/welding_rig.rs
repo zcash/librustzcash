@@ -218,22 +218,24 @@ pub(crate) fn scan_block_with_runner<
     // to use it. `block.sapling_commitment_tree_size` is expected to be correct as of the end of
     // the block, and we can't have a note of ours in a block with no outputs so treating the zero
     // default value from the protobuf as `None` is always correct.
-    let mut sapling_tree_position = if let Some(sapling_tree_size) = block
+    let mut sapling_commitment_tree_size = block
         .block_metadata
         .as_ref()
-        .map(|m| m.sapling_commitment_tree_size)
-        .filter(|s| *s != 0)
-    {
-        let end_position_exclusive = Position::from(u64::from(sapling_tree_size));
-        let output_count = block
-            .vtx
-            .iter()
-            .map(|tx| u64::try_from(tx.outputs.len()).unwrap())
-            .sum();
-        Some(end_position_exclusive - output_count)
-    } else {
-        initial_commitment_tree_meta.map(|m| (m.sapling_tree_size() + 1).into())
-    };
+        .and_then(|m| {
+            if m.sapling_commitment_tree_size == 0 {
+                None
+            } else {
+                let block_note_count: u32 = block
+                    .vtx
+                    .iter()
+                    .map(|tx| {
+                        u32::try_from(tx.outputs.len()).expect("output count cannot exceed a u32")
+                    })
+                    .sum();
+                Some(m.sapling_commitment_tree_size - block_note_count)
+            }
+        })
+        .or_else(|| initial_commitment_tree_meta.map(|m| m.sapling_tree_size()));
 
     let block_tx_count = block.vtx.len();
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
@@ -274,7 +276,7 @@ pub(crate) fn scan_block_with_runner<
 
         // Check for incoming notes while incrementing tree and witnesses
         let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf>> = vec![];
-        let tx_outputs_len = u64::try_from(tx.outputs.len()).unwrap();
+        let tx_outputs_len = u32::try_from(tx.outputs.len()).unwrap();
         {
             let decoded = &tx
                 .outputs
@@ -360,9 +362,9 @@ pub(crate) fn scan_block_with_runner<
                     // - Notes created by consolidation transactions.
                     // - Notes sent from one account to itself.
                     let is_change = spent_from_accounts.contains(&account);
-                    let note_commitment_tree_position = sapling_tree_position
-                        .ok_or(SyncError::SaplingTreeSizeUnknown(block_height))?
-                        + output_idx.try_into().unwrap();
+                    let note_commitment_tree_position = sapling_commitment_tree_size
+                        .map(|s| Position::from(u64::from(s + u32::try_from(output_idx).unwrap())))
+                        .ok_or(SyncError::SaplingTreeSizeUnknown(block_height))?;
                     let nf = K::sapling_nf(&nk, &note, note_commitment_tree_position);
 
                     shielded_outputs.push(WalletSaplingOutput::from_parts(
@@ -390,7 +392,7 @@ pub(crate) fn scan_block_with_runner<
             });
         }
 
-        sapling_tree_position = sapling_tree_position.map(|pos| pos + tx_outputs_len);
+        sapling_commitment_tree_size = sapling_commitment_tree_size.map(|s| s + tx_outputs_len);
     }
 
     Ok(PrunedBlock {
@@ -398,10 +400,7 @@ pub(crate) fn scan_block_with_runner<
         block_hash,
         block_time: block.time,
         transactions: wtxs,
-        sapling_commitment_tree_size: block
-            .block_metadata
-            .map(|m| m.sapling_commitment_tree_size)
-            .filter(|s| *s != 0),
+        sapling_commitment_tree_size,
         sapling_commitments: sapling_note_commitments,
     })
 }
@@ -412,7 +411,7 @@ mod tests {
         ff::{Field, PrimeField},
         GroupEncoding,
     };
-    use incrementalmerkletree::{Retention, Position};
+    use incrementalmerkletree::{Position, Retention};
     use rand_core::{OsRng, RngCore};
     use zcash_note_encryption::Domain;
     use zcash_primitives::{
