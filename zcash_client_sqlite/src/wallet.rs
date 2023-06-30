@@ -108,6 +108,8 @@ pub(crate) mod commitment_tree;
 pub mod init;
 pub(crate) mod sapling;
 
+pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
+
 pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // These constants are *incidentally* shared with the typecodes
     // for unified addresses, but this is exclusively an internal
@@ -563,23 +565,29 @@ pub(crate) fn fully_scanned_height(
         .optional()?;
 
     res_opt
-        .map(|(max_height, sapling_tree_size, sapling_tree)| {
-            let commitment_tree_meta =
-                CommitmentTreeMeta::from_parts(if let Some(known_size) = sapling_tree_size {
-                    known_size
-                } else {
-                    // parse the legacy commitment tree data
-                    read_commitment_tree::<
-                        zcash_primitives::sapling::Node,
-                        _,
-                        { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
-                    >(Cursor::new(sapling_tree))?
-                    .size()
-                    .try_into()
-                    .expect("usize values are convertible to u64 on all supported platforms.")
-                });
-
-            Ok((max_height, commitment_tree_meta))
+        .and_then(|(max_height, sapling_tree_size, sapling_tree)| {
+            sapling_tree_size
+                .map(|s| Ok(CommitmentTreeMeta::from_parts(s)))
+                .or_else(|| {
+                    if &sapling_tree == BLOCK_SAPLING_FRONTIER_ABSENT {
+                        None
+                    } else {
+                        // parse the legacy commitment tree data
+                        read_commitment_tree::<
+                            zcash_primitives::sapling::Node,
+                            _,
+                            { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                        >(Cursor::new(sapling_tree))
+                        .map(|tree| {
+                            Some(CommitmentTreeMeta::from_parts(
+                                tree.size().try_into().unwrap(),
+                            ))
+                        })
+                        .map_err(SqliteClientError::from)
+                        .transpose()
+                    }
+                })
+                .map(|meta_res| meta_res.map(|meta| (max_height, meta)))
         })
         .transpose()
 }
