@@ -412,7 +412,7 @@ mod tests {
         ff::{Field, PrimeField},
         GroupEncoding,
     };
-    use incrementalmerkletree::Retention;
+    use incrementalmerkletree::{Retention, Position};
     use rand_core::{OsRng, RngCore};
     use zcash_note_encryption::Domain;
     use zcash_primitives::{
@@ -475,13 +475,16 @@ mod tests {
     /// Create a fake CompactBlock at the given height, with a transaction containing a
     /// single spend of the given nullifier and a single output paying the given address.
     /// Returns the CompactBlock.
+    ///
+    /// Set `initial_sapling_tree_size` to `None` to simulate a `CompactBlock` retrieved
+    /// from a `lightwalletd` that is not currently tracking note commitment tree sizes.
     fn fake_compact_block(
         height: BlockHeight,
         nf: Nullifier,
         dfvk: &DiversifiableFullViewingKey,
         value: Amount,
         tx_after: bool,
-        initial_sapling_tree_size: u32,
+        initial_sapling_tree_size: Option<u32>,
     ) -> CompactBlock {
         let to = dfvk.default_address().1;
 
@@ -541,9 +544,12 @@ mod tests {
             cb.vtx.push(tx);
         }
 
-        cb.block_metadata = Some(BlockMetadata {
-            sapling_commitment_tree_size: initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+        cb.block_metadata = initial_sapling_tree_size.map(|s| BlockMetadata {
+            sapling_commitment_tree_size: s + cb
+                .vtx
+                .iter()
+                .map(|tx| tx.outputs.len() as u32)
+                .sum::<u32>(),
             ..Default::default()
         });
 
@@ -563,7 +569,7 @@ mod tests {
                 &dfvk,
                 Amount::from_u64(5).unwrap(),
                 false,
-                0,
+                None,
             );
             assert_eq!(cb.vtx.len(), 2);
 
@@ -603,7 +609,12 @@ mod tests {
             assert_eq!(tx.sapling_outputs[0].index(), 0);
             assert_eq!(tx.sapling_outputs[0].account(), account);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
+            assert_eq!(
+                tx.sapling_outputs[0].note_commitment_tree_position(),
+                Position::from(1)
+            );
 
+            assert_eq!(pruned_block.sapling_commitment_tree_size, Some(2));
             assert_eq!(
                 pruned_block
                     .sapling_commitments
@@ -637,7 +648,7 @@ mod tests {
                 &dfvk,
                 Amount::from_u64(5).unwrap(),
                 true,
-                0,
+                Some(0),
             );
             assert_eq!(cb.vtx.len(), 3);
 
@@ -663,7 +674,7 @@ mod tests {
                 cb,
                 &[(&AccountId::from(0), &dfvk)],
                 &[],
-                Some(&CommitmentTreeMeta::from_parts(0)),
+                None,
                 batch_runner.as_mut(),
             )
             .unwrap();
@@ -712,7 +723,7 @@ mod tests {
             &dfvk,
             Amount::from_u64(5).unwrap(),
             false,
-            0,
+            Some(0),
         );
         assert_eq!(cb.vtx.len(), 2);
         let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
