@@ -544,6 +544,8 @@ pub(crate) fn block_height_extrema(
 pub(crate) fn fully_scanned_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<(BlockHeight, CommitmentTreeMeta)>, SqliteClientError> {
+    // FIXME: this will need to be rewritten once out-of-order scan range suggestion
+    // is implemented.
     let res_opt = conn
         .query_row(
             "SELECT height, sapling_commitment_tree_size, sapling_tree
@@ -1155,6 +1157,8 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use secrecy::Secret;
     use tempfile::NamedTempFile;
 
@@ -1197,7 +1201,12 @@ mod tests {
         );
 
         // We can't get an anchor height, as we have not scanned any blocks.
-        assert_eq!(db_data.get_target_and_anchor_heights(10).unwrap(), None);
+        assert_eq!(
+            db_data
+                .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
+                .unwrap(),
+            None
+        );
 
         // An invalid account has zero balance
         assert_matches!(

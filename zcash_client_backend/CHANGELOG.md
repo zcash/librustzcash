@@ -30,6 +30,7 @@ and this library adheres to Rust's notion of
     wallet states where the full note plaintext is not available.
   - `WalletRead::get_nullifiers` has been renamed to `WalletRead::get_sapling_nullifiers`
     and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
+  - `WalletRead::get_target_and_anchor_heights` now takes its argument as a `NonZeroU32`
   - `chain::scan_cached_blocks` now takes a `from_height` argument that
     permits the caller to control the starting position of the scan range.
   - A new `CommitmentTree` variant has been added to `data_api::error::Error`
@@ -38,6 +39,11 @@ and this library adheres to Rust's notion of
     implemented for the type passed to them for the `wallet_db` parameter.
   - `data_api::wallet::create_proposed_transaction` now takes an additional 
     `min_confirmations` argument.
+  - `data_api::wallet::{spend, create_spend_to_address, shield_transparent_funds, 
+    propose_transfer, propose_shielding, create_proposed_transaction}` now take their
+    respective `min_confirmations` arguments as `NonZeroU32`
+  - `data_api::wallet::input_selection::InputSelector::{propose_transaction, propose_shielding}`
+    now take their respective `min_confirmations` arguments as `NonZeroU32`
   - A new `Sync` variant has been added to `data_api::chain::error::Error`.
   - A new `SyncRequired` variant has been added to `data_api::wallet::input_selection::InputSelectorError`.
 - `zcash_client_backend::wallet`:

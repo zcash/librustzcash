@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, num::NonZeroU32};
 use std::fmt::Debug;
 
 use shardtree::{ShardStore, ShardTree, ShardTreeError};
@@ -122,10 +122,6 @@ where
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
 ///
-/// # Panics
-///
-/// Panics if `min_confirmations == 0`; 0-conf transactions are not supported.
-///
 /// # Examples
 ///
 /// ```
@@ -203,7 +199,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     amount: Amount,
     memo: Option<MemoBytes>,
     ovk_policy: OvkPolicy,
-    min_confirmations: u32,
+    min_confirmations: NonZeroU32,
 ) -> Result<
     DbT::TxRef,
     Error<
@@ -292,7 +288,8 @@ where
 ///   can allow the sender to view the resulting notes on the blockchain.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
-///   spent. A value of 10 confirmations is recommended.
+///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
+///   not supported.
 ///
 /// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
 #[allow(clippy::too_many_arguments)]
@@ -305,7 +302,7 @@ pub fn spend<DbT, ParamsT, InputsT>(
     usk: &UnifiedSpendingKey,
     request: zip321::TransactionRequest,
     ovk_policy: OvkPolicy,
-    min_confirmations: u32,
+    min_confirmations: NonZeroU32,
 ) -> Result<
     DbT::TxRef,
     Error<
@@ -323,10 +320,6 @@ where
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<DataSource = DbT>,
 {
-    assert!(
-        min_confirmations > 0,
-        "zero-conf transactions are not supported"
-    );
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
         .map_err(Error::DataSource)?
@@ -364,7 +357,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     spend_from_account: AccountId,
     input_selector: &InputsT,
     request: zip321::TransactionRequest,
-    min_confirmations: u32,
+    min_confirmations: NonZeroU32,
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
     Error<
@@ -381,10 +374,6 @@ where
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<DataSource = DbT>,
 {
-    assert!(
-        min_confirmations > 0,
-        "zero-conf transactions are not supported"
-    );
     input_selector
         .propose_transaction(
             params,
@@ -405,7 +394,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     shielding_threshold: NonNegativeAmount,
     from_addrs: &[TransparentAddress],
-    min_confirmations: u32,
+    min_confirmations: NonZeroU32
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
     Error<
@@ -422,10 +411,6 @@ where
     DbT::NoteRef: Copy + Eq + Ord,
     InputsT: InputSelector<DataSource = DbT>,
 {
-    assert!(
-        min_confirmations > 0,
-        "zero-conf transactions are not supported"
-    );
     input_selector
         .propose_shielding(
             params,
@@ -451,7 +436,7 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
     proposal: Proposal<FeeRuleT, DbT::NoteRef>,
-    min_confirmations: u32,
+    min_confirmations: NonZeroU32,
     change_memo: Option<MemoBytes>,
 ) -> Result<
     DbT::TxRef,
@@ -470,10 +455,6 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
-    assert!(
-        min_confirmations > 0,
-        "zero-conf transactions are not supported"
-    );
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
         .map_err(Error::DataSource)?
@@ -516,8 +497,7 @@ where
                 selected,
                 usk.sapling(),
                 &dfvk,
-                usize::try_from(min_confirmations - 1)
-                    .expect("min_confirmations should never be anywhere close to usize::MAX"),
+                usize::try_from(u32::from(min_confirmations) - 1).unwrap()
             )?
             .ok_or(Error::NoteMismatch(selected.note_id))?;
 
@@ -711,8 +691,9 @@ where
 ///   to the wallet that the wallet can use to improve how it represents those
 ///   shielding transactions to the user.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
-///   received UTXO must have in the blockchain in order to be considered for being
-///   spent.
+///   received note must have in the blockchain in order to be considered for being
+///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
+///   not supported.
 ///
 /// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
 #[cfg(feature = "transparent-inputs")]
@@ -727,7 +708,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
     memo: &MemoBytes,
-    min_confirmations: u32,
+    min_confirmations: NonZeroU32,
 ) -> Result<
     DbT::TxRef,
     Error<

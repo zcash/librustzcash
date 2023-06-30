@@ -367,6 +367,8 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 #[cfg(test)]
 #[allow(deprecated)]
 pub(crate) mod tests {
+    use std::num::NonZeroU32;
+
     use rusqlite::Connection;
     use secrecy::Secret;
     use tempfile::NamedTempFile;
@@ -461,7 +463,7 @@ pub(crate) mod tests {
                 Amount::from_u64(1).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Err(data_api::error::Error::KeyNotRecognized)
         );
@@ -490,7 +492,7 @@ pub(crate) mod tests {
                 Amount::from_u64(1).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Err(data_api::error::Error::ScanRequired)
         );
@@ -533,7 +535,7 @@ pub(crate) mod tests {
                 Amount::from_u64(1).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -572,7 +574,10 @@ pub(crate) mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
+        let (_, anchor_height) = db_data
+            .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -595,7 +600,10 @@ pub(crate) mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance does not include the second note
-        let (_, anchor_height2) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
+        let (_, anchor_height2) = db_data
+            .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             (value + value).unwrap()
@@ -618,7 +626,7 @@ pub(crate) mod tests {
                 Amount::from_u64(70000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                NonZeroU32::new(10).unwrap(),
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -654,7 +662,7 @@ pub(crate) mod tests {
                 Amount::from_u64(70000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                NonZeroU32::new(10).unwrap(),
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -687,7 +695,7 @@ pub(crate) mod tests {
                 Amount::from_u64(70000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                10,
+                NonZeroU32::new(10).unwrap(),
             ),
             Ok(_)
         );
@@ -738,7 +746,7 @@ pub(crate) mod tests {
                 Amount::from_u64(15000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Ok(_)
         );
@@ -754,7 +762,7 @@ pub(crate) mod tests {
                 Amount::from_u64(2000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -789,7 +797,7 @@ pub(crate) mod tests {
                 Amount::from_u64(2000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -820,7 +828,7 @@ pub(crate) mod tests {
             Amount::from_u64(2000).unwrap(),
             None,
             OvkPolicy::Sender,
-            1,
+            NonZeroU32::new(1).unwrap(),
         )
         .unwrap();
     }
@@ -872,7 +880,7 @@ pub(crate) mod tests {
                 Amount::from_u64(15000).unwrap(),
                 None,
                 ovk_policy,
-                1,
+                NonZeroU32::new(1).unwrap(),
             )
             .unwrap();
 
@@ -960,7 +968,10 @@ pub(crate) mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data.get_target_and_anchor_heights(1).unwrap().unwrap();
+        let (_, anchor_height) = db_data
+            .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -981,7 +992,7 @@ pub(crate) mod tests {
                 Amount::from_u64(50000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Ok(_)
         );
@@ -1016,7 +1027,10 @@ pub(crate) mod tests {
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data.get_target_and_anchor_heights(10).unwrap().unwrap();
+        let (_, anchor_height) = db_data
+            .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -1037,7 +1051,7 @@ pub(crate) mod tests {
                 Amount::from_u64(50000).unwrap(),
                 None,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Ok(_)
         );
@@ -1086,7 +1100,10 @@ pub(crate) mod tests {
 
         // Verified balance matches total balance
         let total = Amount::from_u64(60000).unwrap();
-        let (_, anchor_height) = db_data.get_target_and_anchor_heights(1).unwrap().unwrap();
+        let (_, anchor_height) = db_data
+            .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             total
@@ -1121,7 +1138,7 @@ pub(crate) mod tests {
                 &usk,
                 req,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Err(Error::InsufficientFunds { available, required })
                 if available == Amount::from_u64(51000).unwrap()
@@ -1149,7 +1166,7 @@ pub(crate) mod tests {
                 &usk,
                 req,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Ok(_)
         );
@@ -1213,7 +1230,7 @@ pub(crate) mod tests {
                 &usk,
                 &[*taddr],
                 &MemoBytes::empty(),
-                1
+                NonZeroU32::new(1).unwrap()
             ),
             Ok(_)
         );

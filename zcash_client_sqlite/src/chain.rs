@@ -265,6 +265,8 @@ where
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use secrecy::Secret;
     use tempfile::NamedTempFile;
 
@@ -681,7 +683,7 @@ mod tests {
                 &usk,
                 req,
                 OvkPolicy::Sender,
-                1,
+                NonZeroU32::new(1).unwrap(),
             ),
             Ok(_)
         );

@@ -2,6 +2,7 @@
 
 use core::marker::PhantomData;
 use std::fmt;
+use std::num::NonZeroU32;
 use std::{collections::BTreeSet, fmt::Debug};
 
 use zcash_primitives::{
@@ -180,7 +181,7 @@ pub trait InputSelector {
         wallet_db: &Self::DataSource,
         account: AccountId,
         transaction_request: TransactionRequest,
-        min_confirmations: u32,
+        min_confirmations: NonZeroU32,
     ) -> Result<
         Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
         InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
@@ -204,7 +205,7 @@ pub trait InputSelector {
         wallet_db: &Self::DataSource,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
-        min_confirmations: u32,
+        min_confirmations: NonZeroU32,
     ) -> Result<
         Proposal<Self::FeeRule, <<Self as InputSelector>::DataSource as WalletRead>::NoteRef>,
         InputSelectorError<<<Self as InputSelector>::DataSource as WalletRead>::Error, Self::Error>,
@@ -324,7 +325,7 @@ where
         wallet_db: &Self::DataSource,
         account: AccountId,
         transaction_request: TransactionRequest,
-        min_confirmations: u32,
+        min_confirmations: NonZeroU32,
     ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
     where
         ParamsT: consensus::Parameters,
@@ -442,7 +443,7 @@ where
         wallet_db: &Self::DataSource,
         shielding_threshold: NonNegativeAmount,
         source_addrs: &[TransparentAddress],
-        min_confirmations: u32,
+        min_confirmations: NonZeroU32,
     ) -> Result<Proposal<Self::FeeRule, DbT::NoteRef>, InputSelectorError<DbT::Error, Self::Error>>
     where
         ParamsT: consensus::Parameters,
