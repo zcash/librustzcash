@@ -642,6 +642,7 @@ where
         .prepare_cached(&format!(
             "SELECT checkpoint_id, position
             FROM {}_tree_checkpoints
+            ORDER BY position
             LIMIT :limit",
             table_prefix
         ))
