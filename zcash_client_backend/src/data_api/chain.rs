@@ -36,43 +36,12 @@
 //! let mut db_data = testing::MockWalletDb::new(Network::TestNetwork);
 //!
 //! // 1) Download new CompactBlocks into block_source.
-//!
-//! // 2) Run the chain validator on the received blocks.
 //! //
-//! // Given that we assume the server always gives us correct-at-the-time blocks, any
-//! // errors are in the blocks we have previously cached or scanned.
-//! let max_height_hash = db_data.get_max_height_hash().map_err(Error::Wallet)?;
-//! if let Err(e) = validate_chain(&block_source, max_height_hash, None) {
-//!     match e {
-//!         Error::Chain(e) => {
-//!             // a) Pick a height to rewind to.
-//!             //
-//!             // This might be informed by some external chain reorg information, or
-//!             // heuristics such as the platform, available bandwidth, size of recent
-//!             // CompactBlocks, etc.
-//!             let rewind_height = e.at_height() - 10;
-//!
-//!             // b) Rewind scanned block information.
-//!             db_data.truncate_to_height(rewind_height);
-//!
-//!             // c) Delete cached blocks from rewind_height onwards.
-//!             //
-//!             // This does imply that assumed-valid blocks will be re-downloaded, but it
-//!             // is also possible that in the intervening time, a chain reorg has
-//!             // occurred that orphaned some of those blocks.
-//!
-//!             // d) If there is some separate thread or service downloading
-//!             // CompactBlocks, tell it to go back and download from rewind_height
-//!             // onwards.
-//!         },
-//!         e => {
-//!             // handle or return other errors
-//!
-//!         }
-//!     }
-//! }
-//!
-//! // 3) Scan (any remaining) cached blocks.
+//! // 2) FIXME: Obtain necessary block metadata for continuity checking?
+//! // 
+//! // 3) Scan cached blocks.
+//! //
+//! // FIXME: update documentation on how to detect when a rewind is required.
 //! //
 //! // At this point, the cache and scanned data are locally consistent (though not
 //! // necessarily consistent with the latest chain tip - this would be discovered the
@@ -82,10 +51,7 @@
 //! # }
 //! ```
 
-use std::convert::Infallible;
-
 use zcash_primitives::{
-    block::BlockHash,
     consensus::{self, BlockHeight},
     sapling::{self, note_encryption::PreparedIncomingViewingKey},
     zip32::Scope,
@@ -141,63 +107,6 @@ pub trait BlockSource {
     ) -> Result<(), error::Error<WalletErrT, Self::Error, NoteRefT>>
     where
         F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error, NoteRefT>>;
-}
-
-/// Checks that the scanned blocks in the data database, when combined with the recent
-/// `CompactBlock`s in the block_source database, form a valid chain.
-///
-/// This function is built on the core assumption that the information provided in the
-/// block source is more likely to be accurate than the previously-scanned information.
-/// This follows from the design (and trust) assumption that the `lightwalletd` server
-/// provides accurate block information as of the time it was requested.
-///
-/// Arguments:
-/// - `block_source` Source of compact blocks
-/// - `validate_from` Height & hash of last validated block;
-/// - `limit` specified number of blocks that will be valididated. Callers providing
-/// a `limit` argument are responsible of making subsequent calls to `validate_chain()`
-/// to complete validating the remaining blocks stored on the `block_source`. If `none`
-/// is provided, there will be no limit set to the validation and upper bound of the
-/// validation range will be the latest height present in the `block_source`.
-///
-/// Returns:
-/// - `Ok(())` if the combined chain is valid up to the given height
-/// and block hash.
-/// - `Err(Error::Chain(cause))` if the combined chain is invalid.
-/// - `Err(e)` if there was an error during validation unrelated to chain validity.
-pub fn validate_chain<BlockSourceT>(
-    block_source: &BlockSourceT,
-    mut validate_from: Option<(BlockHeight, BlockHash)>,
-    limit: Option<u32>,
-) -> Result<(), Error<Infallible, BlockSourceT::Error, Infallible>>
-where
-    BlockSourceT: BlockSource,
-{
-    // The block source will contain blocks above the `validate_from` height.  Validate from that
-    // maximum height up to the chain tip, returning the hash of the block found in the block
-    // source at the `validate_from` height, which can then be used to verify chain integrity by
-    // comparing against the `validate_from` hash.
-
-    block_source.with_blocks::<_, Infallible, Infallible>(
-        validate_from.map(|(h, _)| h + 1),
-        limit,
-        move |block| {
-            if let Some((valid_height, valid_hash)) = validate_from {
-                if block.height() != valid_height + 1 {
-                    return Err(ChainError::block_height_discontinuity(
-                        valid_height + 1,
-                        block.height(),
-                    )
-                    .into());
-                } else if block.prev_hash() != valid_hash {
-                    return Err(ChainError::prev_hash_mismatch(block.height()).into());
-                }
-            }
-
-            validate_from = Some((block.height(), block.hash()));
-            Ok(())
-        },
-    )
 }
 
 /// Scans at most `limit` new blocks added to the block source for any transactions received by the

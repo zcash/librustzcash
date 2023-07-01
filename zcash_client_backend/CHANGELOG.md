@@ -75,6 +75,8 @@ and this library adheres to Rust's notion of
     feature flag, has been modified by the addition of a `sapling_tree` property. 
   - `wallet::input_selection`:
     - `Proposal::target_height` (use `Proposal::min_target_height` instead).
+- `zcash_client_backend::data_api::chain::validate_chain` TODO: document how
+  to handle validation given out-of-order blocks.
 - `zcash_client_backend::wallet::WalletSaplingOutput::{witness, witness_mut}`
   have been removed as individual incremental witnesses are no longer tracked on a
   per-note basis. The global note commitment tree for the wallet should be used
