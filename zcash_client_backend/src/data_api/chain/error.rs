@@ -3,7 +3,7 @@
 use std::error;
 use std::fmt::{self, Debug, Display};
 
-use crate::welding_rig::ScanError;
+use crate::scanning::ScanError;
 
 /// Errors related to chain validation and scanning.
 #[derive(Debug)]

@@ -20,7 +20,7 @@ and this library adheres to Rust's notion of
   - `ScannedBlock`
   - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
 - `zcash_client_backend::wallet::WalletSaplingOutput::note_commitment_tree_position`
-- `zcash_client_backend::welding_rig::ScanError`
+- `zcash_client_backend::scanning::ScanError`
 
 ### Changed
 - MSRV is now 1.65.0.
@@ -55,9 +55,10 @@ and this library adheres to Rust's notion of
   - Arguments to `{propose_transaction, propose_shielding}` have changed. 
 - `zcash_client_backend::wallet::ReceivedSaplingNote::note_commitment_tree_position`
   has replaced the `witness` field in the same struct.
-- `zcash_client_backend::welding_rig::ScanningKey::sapling_nf` has been changed to
+- `zcash_client_backend::welding_rig` has been renamed to `zcash_client_backend::scanning`
+- `zcash_client_backend::scanning::ScanningKey::sapling_nf` has been changed to
   take a note position instead of an incremental witness for the note.
-- Arguments to `zcash_client_backend::welding_rig::scan_block` have changed. This
+- Arguments to `zcash_client_backend::scanning::scan_block` have changed. This
   method now takes an optional `BlockMetadata` argument instead of a base commitment
   tree and incremental witnesses for each previously-known note. In addition, the
   return type has now been updated to return a `Result<ScannedBlock, ScanError>` 
@@ -79,7 +80,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::chain::validate_chain` TODO: document how
   to handle validation given out-of-order blocks.
 - `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been 
-  replaced by `zcash_client_backend::welding_rig::ScanError`
+  replaced by `zcash_client_backend::scanning::ScanError`
 - `zcash_client_backend::wallet::WalletSaplingOutput::{witness, witness_mut}`
   have been removed as individual incremental witnesses are no longer tracked on a
   per-note basis. The global note commitment tree for the wallet should be used

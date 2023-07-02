@@ -60,7 +60,7 @@ use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
-    welding_rig::{add_block_to_runner, scan_block_with_runner},
+    scanning::{add_block_to_runner, scan_block_with_runner},
 };
 
 pub mod error;

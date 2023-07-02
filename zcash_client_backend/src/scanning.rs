@@ -40,7 +40,7 @@ use crate::{
 /// nullifier for the note can also be obtained.
 ///
 /// [`CompactSaplingOutput`]: crate::proto::compact_formats::CompactSaplingOutput
-/// [`scan_block`]: crate::welding_rig::scan_block
+/// [`scan_block`]: crate::scanning::scan_block
 pub trait ScanningKey {
     /// The type representing the scope of the scanning key.
     type Scope: Clone + Eq + std::hash::Hash + Send + 'static;
@@ -165,7 +165,7 @@ impl fmt::Display for ScanError {
 /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
 /// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-/// [`ScanningKey`]: crate::welding_rig::ScanningKey
+/// [`ScanningKey`]: crate::scanning::ScanningKey
 /// [`CommitmentTree`]: zcash_primitives::sapling::CommitmentTree
 /// [`IncrementalWitness`]: zcash_primitives::sapling::IncrementalWitness
 /// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
