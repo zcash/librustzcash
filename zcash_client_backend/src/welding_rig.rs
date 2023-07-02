@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt::{self, Debug};
 
 use incrementalmerkletree::{Position, Retention};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
@@ -20,8 +21,7 @@ use zcash_primitives::{
     zip32::{sapling::DiversifiableFullViewingKey, AccountId, Scope},
 };
 
-use crate::data_api::chain::CommitmentTreeMeta;
-use crate::data_api::PrunedBlock;
+use crate::data_api::{BlockMetadata, ScannedBlock};
 use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, Tasks},
@@ -109,12 +109,42 @@ impl ScanningKey for SaplingIvk {
     fn sapling_nf(_key: &Self::SaplingNk, _note: &sapling::Note, _position: Position) {}
 }
 
-/// Errors that can occur in block scanning.
-#[derive(Debug)]
-pub enum SyncError {
+/// Errors that may occur in chain scanning
+#[derive(Copy, Clone, Debug)]
+pub enum ScanError {
+    /// The hash of the parent block given by a proposed new chain tip does not match the hash of
+    /// the current chain tip.
+    PrevHashMismatch { at_height: BlockHeight },
+
+    /// The block height field of the proposed new chain tip is not equal to the height of the
+    /// previous chain tip + 1. This variant stores a copy of the incorrect height value for
+    /// reporting purposes.
+    BlockHeightDiscontinuity {
+        previous_tip: BlockHeight,
+        new_height: BlockHeight,
+    },
+
     /// The size of the Sapling note commitment tree was not provided as part of a [`CompactBlock`]
     /// being scanned, making it impossible to construct the nullifier for a detected note.
-    SaplingTreeSizeUnknown(BlockHeight),
+    SaplingTreeSizeUnknown { at_height: BlockHeight },
+}
+
+impl fmt::Display for ScanError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            ScanError::PrevHashMismatch { at_height } => write!(
+                f,
+                "The parent hash of proposed block does not correspond to the block hash at height {}.",
+                at_height
+            ),
+            ScanError::BlockHeightDiscontinuity { previous_tip, new_height } => {
+                write!(f, "Block height discontinuity at height {}; next height is : {}", previous_tip, new_height)
+            }
+            ScanError::SaplingTreeSizeUnknown { at_height } => {
+                write!(f, "Unable to determine Sapling note commitment tree size at height {}", at_height)
+            }
+        }
+    }
 }
 
 /// Scans a [`CompactBlock`] with a set of [`ScanningKey`]s.
@@ -145,14 +175,14 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
     sapling_nullifiers: &[(AccountId, sapling::Nullifier)],
-    initial_commitment_tree_meta: Option<&CommitmentTreeMeta>,
-) -> Result<PrunedBlock<K::Nf>, SyncError> {
+    prior_block_metadata: Option<&BlockMetadata>,
+) -> Result<ScannedBlock<K::Nf>, ScanError> {
     scan_block_with_runner::<_, _, ()>(
         params,
         block,
         vks,
         sapling_nullifiers,
-        initial_commitment_tree_meta,
+        prior_block_metadata,
         None,
     )
 }
@@ -204,13 +234,28 @@ pub(crate) fn scan_block_with_runner<
     block: CompactBlock,
     vks: &[(&AccountId, &K)],
     nullifiers: &[(AccountId, sapling::Nullifier)],
-    initial_commitment_tree_meta: Option<&CommitmentTreeMeta>,
+    prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,
-) -> Result<PrunedBlock<K::Nf>, SyncError> {
+) -> Result<ScannedBlock<K::Nf>, ScanError> {
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
-    let block_height = block.height();
-    let block_hash = block.hash();
+    let cur_height = block.height();
+    let cur_hash = block.hash();
+
+    if let Some(prev) = prior_block_metadata {
+        if cur_height != prev.block_height() + 1 {
+            return Err(ScanError::BlockHeightDiscontinuity {
+                previous_tip: prev.block_height(),
+                new_height: cur_height,
+            });
+        }
+
+        if block.prev_hash() != prev.block_hash() {
+            return Err(ScanError::PrevHashMismatch {
+                at_height: cur_height,
+            });
+        }
+    }
 
     // It's possible to make progress without a Sapling tree position if we don't have any Sapling
     // notes in the block, since we only use the position for constructing nullifiers for our own
@@ -235,7 +280,10 @@ pub(crate) fn scan_block_with_runner<
                 Some(m.sapling_commitment_tree_size - block_note_count)
             }
         })
-        .or_else(|| initial_commitment_tree_meta.map(|m| m.sapling_tree_size()));
+        .or_else(|| prior_block_metadata.map(|m| m.sapling_tree_size()))
+        .ok_or(ScanError::SaplingTreeSizeUnknown {
+            at_height: cur_height,
+        })?;
 
     let block_tx_count = block.vtx.len();
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
@@ -283,7 +331,7 @@ pub(crate) fn scan_block_with_runner<
                 .into_iter()
                 .map(|output| {
                     (
-                        SaplingDomain::for_height(params.clone(), block_height),
+                        SaplingDomain::for_height(params.clone(), cur_height),
                         CompactOutputDescription::try_from(output)
                             .expect("Invalid output found in compact block decoding."),
                     )
@@ -300,7 +348,7 @@ pub(crate) fn scan_block_with_runner<
                     })
                     .collect::<HashMap<_, _>>();
 
-                let mut decrypted = runner.collect_results(block_hash, txid);
+                let mut decrypted = runner.collect_results(cur_hash, txid);
                 (0..decoded.len())
                     .map(|i| {
                         decrypted.remove(&(txid, i)).map(|d_note| {
@@ -347,7 +395,7 @@ pub(crate) fn scan_block_with_runner<
                 let is_checkpoint = output_idx + 1 == decoded.len() && tx_idx + 1 == block_tx_count;
                 let retention = match (dec_output.is_some(), is_checkpoint) {
                     (is_marked, true) => Retention::Checkpoint {
-                        id: block_height,
+                        id: cur_height,
                         is_marked,
                     },
                     (true, false) => Retention::Marked,
@@ -362,9 +410,9 @@ pub(crate) fn scan_block_with_runner<
                     // - Notes created by consolidation transactions.
                     // - Notes sent from one account to itself.
                     let is_change = spent_from_accounts.contains(&account);
-                    let note_commitment_tree_position = sapling_commitment_tree_size
-                        .map(|s| Position::from(u64::from(s + u32::try_from(output_idx).unwrap())))
-                        .ok_or(SyncError::SaplingTreeSizeUnknown(block_height))?;
+                    let note_commitment_tree_position = Position::from(u64::from(
+                        sapling_commitment_tree_size + u32::try_from(output_idx).unwrap(),
+                    ));
                     let nf = K::sapling_nf(&nk, &note, note_commitment_tree_position);
 
                     shielded_outputs.push(WalletSaplingOutput::from_parts(
@@ -392,17 +440,15 @@ pub(crate) fn scan_block_with_runner<
             });
         }
 
-        sapling_commitment_tree_size = sapling_commitment_tree_size.map(|s| s + tx_outputs_len);
+        sapling_commitment_tree_size += tx_outputs_len;
     }
 
-    Ok(PrunedBlock {
-        block_height,
-        block_hash,
-        block_time: block.time,
-        transactions: wtxs,
-        sapling_commitment_tree_size,
-        sapling_commitments: sapling_note_commitments,
-    })
+    Ok(ScannedBlock::from_parts(
+        BlockMetadata::from_parts(cur_height, cur_hash, sapling_commitment_tree_size),
+        block.time,
+        wtxs,
+        sapling_note_commitments,
+    ))
 }
 
 #[cfg(test)]
@@ -415,6 +461,7 @@ mod tests {
     use rand_core::{OsRng, RngCore};
     use zcash_note_encryption::Domain;
     use zcash_primitives::{
+        block::BlockHash,
         consensus::{BlockHeight, Network},
         constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
@@ -430,9 +477,9 @@ mod tests {
     };
 
     use crate::{
-        data_api::chain::CommitmentTreeMeta,
+        data_api::BlockMetadata,
         proto::compact_formats::{
-            BlockMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+            self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
         scan::BatchRunner,
     };
@@ -479,6 +526,7 @@ mod tests {
     /// from a `lightwalletd` that is not currently tracking note commitment tree sizes.
     fn fake_compact_block(
         height: BlockHeight,
+        prev_hash: BlockHash,
         nf: Nullifier,
         dfvk: &DiversifiableFullViewingKey,
         value: Amount,
@@ -510,6 +558,7 @@ mod tests {
                 rng.fill_bytes(&mut hash);
                 hash
             },
+            prev_hash: prev_hash.0.to_vec(),
             height: height.into(),
             ..Default::default()
         };
@@ -543,7 +592,7 @@ mod tests {
             cb.vtx.push(tx);
         }
 
-        cb.block_metadata = initial_sapling_tree_size.map(|s| BlockMetadata {
+        cb.block_metadata = initial_sapling_tree_size.map(|s| compact::BlockMetadata {
             sapling_commitment_tree_size: s + cb
                 .vtx
                 .iter()
@@ -564,6 +613,7 @@ mod tests {
 
             let cb = fake_compact_block(
                 1u32.into(),
+                BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &dfvk,
                 Amount::from_u64(5).unwrap(),
@@ -589,16 +639,20 @@ mod tests {
                 None
             };
 
-            let pruned_block = scan_block_with_runner(
+            let scanned_block = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
                 &[(&account, &dfvk)],
                 &[],
-                Some(&CommitmentTreeMeta::from_parts(0)),
+                Some(&BlockMetadata::from_parts(
+                    BlockHeight::from(0),
+                    BlockHash([0u8; 32]),
+                    0,
+                )),
                 batch_runner.as_mut(),
             )
             .unwrap();
-            let txs = pruned_block.transactions;
+            let txs = scanned_block.transactions();
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
@@ -613,17 +667,17 @@ mod tests {
                 Position::from(1)
             );
 
-            assert_eq!(pruned_block.sapling_commitment_tree_size, Some(2));
+            assert_eq!(scanned_block.metadata().sapling_tree_size(), 2);
             assert_eq!(
-                pruned_block
-                    .sapling_commitments
+                scanned_block
+                    .sapling_commitments()
                     .iter()
                     .map(|(_, retention)| *retention)
                     .collect::<Vec<_>>(),
                 vec![
                     Retention::Ephemeral,
                     Retention::Checkpoint {
-                        id: pruned_block.block_height,
+                        id: scanned_block.height(),
                         is_marked: true
                     }
                 ]
@@ -643,6 +697,7 @@ mod tests {
 
             let cb = fake_compact_block(
                 1u32.into(),
+                BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &dfvk,
                 Amount::from_u64(5).unwrap(),
@@ -668,7 +723,7 @@ mod tests {
                 None
             };
 
-            let pruned_block = scan_block_with_runner(
+            let scanned_block = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
                 &[(&AccountId::from(0), &dfvk)],
@@ -677,7 +732,7 @@ mod tests {
                 batch_runner.as_mut(),
             )
             .unwrap();
-            let txs = pruned_block.transactions;
+            let txs = scanned_block.transactions();
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
@@ -689,8 +744,8 @@ mod tests {
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
 
             assert_eq!(
-                pruned_block
-                    .sapling_commitments
+                scanned_block
+                    .sapling_commitments()
                     .iter()
                     .map(|(_, retention)| *retention)
                     .collect::<Vec<_>>(),
@@ -698,7 +753,7 @@ mod tests {
                     Retention::Ephemeral,
                     Retention::Marked,
                     Retention::Checkpoint {
-                        id: pruned_block.block_height,
+                        id: scanned_block.height(),
                         is_marked: false
                     }
                 ]
@@ -718,6 +773,7 @@ mod tests {
 
         let cb = fake_compact_block(
             1u32.into(),
+            BlockHash([0; 32]),
             nf,
             &dfvk,
             Amount::from_u64(5).unwrap(),
@@ -727,15 +783,9 @@ mod tests {
         assert_eq!(cb.vtx.len(), 2);
         let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
 
-        let pruned_block = scan_block(
-            &Network::TestNetwork,
-            cb,
-            &vks[..],
-            &[(account, nf)],
-            Some(&CommitmentTreeMeta::from_parts(0)),
-        )
-        .unwrap();
-        let txs = pruned_block.transactions;
+        let scanned_block =
+            scan_block(&Network::TestNetwork, cb, &vks[..], &[(account, nf)], None).unwrap();
+        let txs = scanned_block.transactions();
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
@@ -747,15 +797,15 @@ mod tests {
         assert_eq!(tx.sapling_spends[0].account(), account);
 
         assert_eq!(
-            pruned_block
-                .sapling_commitments
+            scanned_block
+                .sapling_commitments()
                 .iter()
                 .map(|(_, retention)| *retention)
                 .collect::<Vec<_>>(),
             vec![
                 Retention::Ephemeral,
                 Retention::Checkpoint {
-                    id: pruned_block.block_height,
+                    id: scanned_block.height(),
                     is_marked: false
                 }
             ]

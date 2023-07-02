@@ -55,10 +55,9 @@ use zcash_primitives::{
 use zcash_client_backend::{
     address::{AddressMetadata, UnifiedAddress},
     data_api::{
-        self,
-        chain::{BlockSource, CommitmentTreeMeta},
-        DecryptedTransaction, NullifierQuery, PoolType, PrunedBlock, Recipient, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        self, chain::BlockSource, BlockMetadata, DecryptedTransaction, NullifierQuery, PoolType,
+        Recipient, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -85,7 +84,7 @@ pub mod wallet;
 /// this delta from the chain tip to be pruned.
 pub(crate) const PRUNING_HEIGHT: u32 = 100;
 
-pub(crate) const SAPLING_TABLES_PREFIX: &'static str = "sapling";
+pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
 /// A newtype wrapper for sqlite primary key values for the notes
 /// table.
@@ -157,10 +156,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::block_height_extrema(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
-    fn fully_scanned_height(
-        &self,
-    ) -> Result<Option<(BlockHeight, CommitmentTreeMeta)>, Self::Error> {
-        wallet::fully_scanned_height(self.conn.borrow())
+    fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
+        wallet::block_metadata(self.conn.borrow(), height)
+    }
+
+    fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+        wallet::block_fully_scanned(self.conn.borrow())
     }
 
     fn suggest_scan_ranges(
@@ -183,6 +184,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
     }
 
+    fn get_current_address(
+        &self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        wallet::get_current_address(self.conn.borrow(), &self.params, account)
+            .map(|res| res.map(|(addr, _)| addr))
+    }
+
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
@@ -194,14 +203,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<AccountId>, Self::Error> {
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
-    }
-
-    fn get_current_address(
-        &self,
-        account: AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_current_address(self.conn.borrow(), &self.params, account)
-            .map(|res| res.map(|(addr, _)| addr))
     }
 
     fn is_valid_account_extfvk(
@@ -220,10 +221,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_balance_at(self.conn.borrow(), account, anchor_height)
     }
 
-    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self.conn.borrow(), &self.params, id_tx)
-    }
-
     fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
         match id_note {
             NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self.conn.borrow(), id_note),
@@ -231,6 +228,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 wallet::get_received_memo(self.conn.borrow(), id_note)
             }
         }
+    }
+
+    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
+        wallet::get_transaction(self.conn.borrow(), &self.params, id_tx)
     }
 
     fn get_sapling_nullifiers(
@@ -390,25 +391,25 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         )
     }
 
-    #[tracing::instrument(skip_all, fields(height = u32::from(block.block_height)))]
+    #[tracing::instrument(skip_all, fields(height = u32::from(block.height())))]
     #[allow(clippy::type_complexity)]
     fn put_block(
         &mut self,
-        block: PrunedBlock<sapling::Nullifier>,
+        block: ScannedBlock<sapling::Nullifier>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error> {
         self.transactionally(|wdb| {
             // Insert the block into the database.
             wallet::put_block(
                 wdb.conn.0,
-                block.block_height,
-                block.block_hash,
-                block.block_time,
-                block.sapling_commitment_tree_size.map(|s| s.into()),
+                block.height(),
+                block.block_hash(),
+                block.block_time(),
+                block.metadata().sapling_tree_size(),
             )?;
 
             let mut wallet_note_ids = vec![];
-            for tx in &block.transactions {
-                let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.block_height)?;
+            for tx in block.transactions() {
+                let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
 
                 // Mark notes as spent and remove them from the scanning cache
                 for spend in &tx.sapling_spends {
@@ -424,19 +425,19 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }
             }
 
-            let sapling_commitments_len = block.sapling_commitments.len();
-            let mut sapling_commitments = block.sapling_commitments.into_iter();
+            let block_height = block.height();
+            let sapling_tree_size = block.metadata().sapling_tree_size();
+            let sapling_commitments_len = block.sapling_commitments().len();
+            let mut sapling_commitments = block.take_sapling_commitments().into_iter();
             wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
-                if let Some(sapling_tree_size) = block.sapling_commitment_tree_size {
-                    let start_position = Position::from(u64::from(sapling_tree_size))
-                        - u64::try_from(sapling_commitments_len).unwrap();
-                    sapling_tree.batch_insert(start_position, &mut sapling_commitments)?;
-                }
+                let start_position = Position::from(u64::from(sapling_tree_size))
+                    - u64::try_from(sapling_commitments_len).unwrap();
+                sapling_tree.batch_insert(start_position, &mut sapling_commitments)?;
                 Ok(())
             })?;
 
             // Update now-expired transactions that didn't get mined.
-            wallet::update_expired_notes(wdb.conn.0, block.block_height)?;
+            wallet::update_expired_notes(wdb.conn.0, block_height)?;
 
             Ok(wallet_note_ids)
         })
@@ -688,17 +689,14 @@ impl BlockDb {
 impl BlockSource for BlockDb {
     type Error = SqliteClientError;
 
-    fn with_blocks<F, DbErrT, NoteRef>(
+    fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
-    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(
-            CompactBlock,
-        )
-            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
     {
         chain::blockdb_with_blocks(self, from_height, limit, with_row)
     }
@@ -869,17 +867,14 @@ impl FsBlockDb {
 impl BlockSource for FsBlockDb {
     type Error = FsBlockDbError;
 
-    fn with_blocks<F, DbErrT, NoteRef>(
+    fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
-    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>
+    ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(
-            CompactBlock,
-        )
-            -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error, NoteRef>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
     {
         fsblockdb_with_blocks(self, from_height, limit, with_row)
     }
@@ -967,7 +962,7 @@ mod tests {
         data_api::{WalletRead, WalletWrite},
         keys::{sapling, UnifiedFullViewingKey},
         proto::compact_formats::{
-            BlockMetadata, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
+            self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
     };
 
@@ -1112,7 +1107,7 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        cb.block_metadata = Some(BlockMetadata {
+        cb.block_metadata = Some(compact::BlockMetadata {
             sapling_commitment_tree_size: initial_sapling_tree_size
                 + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
             ..Default::default()
@@ -1203,7 +1198,7 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        cb.block_metadata = Some(BlockMetadata {
+        cb.block_metadata = Some(compact::BlockMetadata {
             sapling_commitment_tree_size: initial_sapling_tree_size
                 + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
             ..Default::default()

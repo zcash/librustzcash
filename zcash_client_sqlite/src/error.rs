@@ -53,13 +53,15 @@ pub enum SqliteClientError {
     /// A received memo cannot be interpreted as a UTF-8 string.
     InvalidMemo(zcash_primitives::memo::Error),
 
-    /// A requested rewind would violate invariants of the
-    /// storage layer. The payload returned with this error is
-    /// (safe rewind height, requested height).
+    /// An attempt to update block data would overwrite the current hash for a block with a
+    /// different hash. This indicates that a required rewind was not performed.
+    BlockConflict(BlockHeight),
+
+    /// A requested rewind would violate invariants of the storage layer. The payload returned with
+    /// this error is (safe rewind height, requested height).
     RequestedRewindInvalid(BlockHeight, BlockHeight),
 
-    /// The space of allocatable diversifier indices has been exhausted for
-    /// the given account.
+    /// The space of allocatable diversifier indices has been exhausted for the given account.
     DiversifierIndexOutOfRange,
 
     /// An error occurred deriving a spending key from a seed and an account
@@ -115,6 +117,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::DbError(e) => write!(f, "{}", e),
             SqliteClientError::Io(e) => write!(f, "{}", e),
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
+            SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),

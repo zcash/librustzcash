@@ -17,7 +17,6 @@
 //!             BlockSource,
 //!             error::Error,
 //!             scan_cached_blocks,
-//!             validate_chain,
 //!             testing as chain_testing,
 //!         },
 //!         testing,
@@ -30,7 +29,7 @@
 //! #   test();
 //! # }
 //! #
-//! # fn test() -> Result<(), Error<(), Infallible, u32>> {
+//! # fn test() -> Result<(), Error<(), Infallible>> {
 //! let network = Network::TestNetwork;
 //! let block_source = chain_testing::MockBlockSource;
 //! let mut db_data = testing::MockWalletDb::new(Network::TestNetwork);
@@ -38,7 +37,7 @@
 //! // 1) Download new CompactBlocks into block_source.
 //! //
 //! // 2) FIXME: Obtain necessary block metadata for continuity checking?
-//! // 
+//! //
 //! // 3) Scan cached blocks.
 //! //
 //! // FIXME: update documentation on how to detect when a rewind is required.
@@ -65,26 +64,7 @@ use crate::{
 };
 
 pub mod error;
-use error::{ChainError, Error};
-
-/// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
-pub struct CommitmentTreeMeta {
-    sapling_tree_size: u32,
-    //TODO: orchard_tree_size: u32
-}
-
-impl CommitmentTreeMeta {
-    /// Constructs a new [`CommitmentTreeMeta`] value from its constituent parts.
-    pub fn from_parts(sapling_tree_size: u32) -> Self {
-        Self { sapling_tree_size }
-    }
-
-    /// Returns the size of the Sapling note commitment tree as of the block that this
-    /// [`CommitmentTreeMeta`] describes.
-    pub fn sapling_tree_size(&self) -> u32 {
-        self.sapling_tree_size
-    }
-}
+use error::Error;
 
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
 /// API.
@@ -99,14 +79,14 @@ pub trait BlockSource {
     ///   as part of processing each row.
     /// * `NoteRefT`: the type of note identifiers in the wallet data store, for use in
     ///   reporting errors related to specific notes.
-    fn with_blocks<F, WalletErrT, NoteRefT>(
+    fn with_blocks<F, WalletErrT>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<u32>,
         with_row: F,
-    ) -> Result<(), error::Error<WalletErrT, Self::Error, NoteRefT>>
+    ) -> Result<(), error::Error<WalletErrT, Self::Error>>
     where
-        F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error, NoteRefT>>;
+        F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
 }
 
 /// Scans at most `limit` new blocks added to the block source for any transactions received by the
@@ -133,7 +113,7 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     data_db: &mut DbT,
     from_height: Option<BlockHeight>,
     limit: Option<u32>,
-) -> Result<(), Error<DbT::Error, BlockSourceT::Error, DbT::NoteRef>>
+) -> Result<(), Error<DbT::Error, BlockSourceT::Error>>
 where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
@@ -169,74 +149,60 @@ where
     );
 
     // Start at either the provided height, or where we synced up to previously.
-    let (scan_from, commitment_tree_meta) = from_height.map_or_else(
-        || {
-            data_db.fully_scanned_height().map_or_else(
-                |e| Err(Error::Wallet(e)),
-                |last_scanned| {
-                    Ok(last_scanned.map_or_else(|| (None, None), |(h, m)| (Some(h + 1), Some(m))))
+    let (scan_from, mut prior_block_metadata) = match from_height {
+        Some(h) => {
+            // if we are provided with a starting height, obtain the metadata for the previous
+            // block (if any is available)
+            (
+                Some(h),
+                if h > BlockHeight::from(0) {
+                    data_db.block_metadata(h - 1).map_err(Error::Wallet)?
+                } else {
+                    None
                 },
             )
-        },
-        |h| Ok((Some(h), None)),
-    )?;
+        }
+        None => {
+            let last_scanned = data_db.block_fully_scanned().map_err(Error::Wallet)?;
+            last_scanned.map_or_else(|| (None, None), |m| (Some(m.block_height + 1), Some(m)))
+        }
+    };
 
-    block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        scan_from,
-        limit,
-        |block: CompactBlock| {
-            add_block_to_runner(params, block, &mut batch_runner);
-            Ok(())
-        },
-    )?;
+    block_source.with_blocks::<_, DbT::Error>(scan_from, limit, |block: CompactBlock| {
+        add_block_to_runner(params, block, &mut batch_runner);
+        Ok(())
+    })?;
 
     batch_runner.flush();
 
-    let mut last_scanned = None;
-    block_source.with_blocks::<_, DbT::Error, DbT::NoteRef>(
-        scan_from,
-        limit,
-        |block: CompactBlock| {
-            // block heights should be sequential within a single scan range
-            let block_height = block.height();
-            if let Some(h) = last_scanned {
-                if block_height != h + 1 {
-                    return Err(Error::Chain(ChainError::block_height_discontinuity(
-                        block.height(),
-                        h,
-                    )));
-                }
-            }
+    block_source.with_blocks::<_, DbT::Error>(scan_from, limit, |block: CompactBlock| {
+        let scanned_block = scan_block_with_runner(
+            params,
+            block,
+            &dfvks,
+            &sapling_nullifiers,
+            prior_block_metadata.as_ref(),
+            Some(&mut batch_runner),
+        )
+        .map_err(Error::Scan)?;
 
-            let pruned_block = scan_block_with_runner(
-                params,
-                block,
-                &dfvks,
-                &sapling_nullifiers,
-                commitment_tree_meta.as_ref(),
-                Some(&mut batch_runner),
-            )
-            .map_err(Error::Sync)?;
+        let spent_nf: Vec<&sapling::Nullifier> = scanned_block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf()))
+            .collect();
 
-            let spent_nf: Vec<&sapling::Nullifier> = pruned_block
-                .transactions
+        sapling_nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
+        sapling_nullifiers.extend(scanned_block.transactions.iter().flat_map(|tx| {
+            tx.sapling_outputs
                 .iter()
-                .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf()))
-                .collect();
+                .map(|out| (out.account(), *out.nf()))
+        }));
 
-            sapling_nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
-            sapling_nullifiers.extend(pruned_block.transactions.iter().flat_map(|tx| {
-                tx.sapling_outputs
-                    .iter()
-                    .map(|out| (out.account(), *out.nf()))
-            }));
-
-            data_db.put_block(pruned_block).map_err(Error::Wallet)?;
-
-            last_scanned = Some(block_height);
-            Ok(())
-        },
-    )?;
+        prior_block_metadata = Some(*scanned_block.metadata());
+        data_db.put_block(scanned_block).map_err(Error::Wallet)?;
+        Ok(())
+    })?;
 
     Ok(())
 }
@@ -255,14 +221,14 @@ pub mod testing {
     impl BlockSource for MockBlockSource {
         type Error = Infallible;
 
-        fn with_blocks<F, DbErrT, NoteRef>(
+        fn with_blocks<F, DbErrT>(
             &self,
             _from_height: Option<BlockHeight>,
             _limit: Option<u32>,
             _with_row: F,
-        ) -> Result<(), Error<DbErrT, Infallible, NoteRef>>
+        ) -> Result<(), Error<DbErrT, Infallible>>
         where
-            F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible, NoteRef>>,
+            F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>>,
         {
             Ok(())
         }

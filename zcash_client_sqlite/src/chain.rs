@@ -26,16 +26,16 @@ pub mod migrations;
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height.
-pub(crate) fn blockdb_with_blocks<F, DbErrT, NoteRef>(
+pub(crate) fn blockdb_with_blocks<F, DbErrT>(
     block_source: &BlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<u32>,
     mut with_row: F,
-) -> Result<(), Error<DbErrT, SqliteClientError, NoteRef>>
+) -> Result<(), Error<DbErrT, SqliteClientError>>
 where
-    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, SqliteClientError, NoteRef>>,
+    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, SqliteClientError>>,
 {
-    fn to_chain_error<D, E: Into<SqliteClientError>, N>(err: E) -> Error<D, SqliteClientError, N> {
+    fn to_chain_error<D, E: Into<SqliteClientError>>(err: E) -> Error<D, SqliteClientError> {
         Error::BlockSource(err.into())
     }
 
@@ -195,16 +195,16 @@ pub(crate) fn blockmetadb_find_block(
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height for which metadata is available.
 #[cfg(feature = "unstable")]
-pub(crate) fn fsblockdb_with_blocks<F, DbErrT, NoteRef>(
+pub(crate) fn fsblockdb_with_blocks<F, DbErrT>(
     cache: &FsBlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<u32>,
     mut with_block: F,
-) -> Result<(), Error<DbErrT, FsBlockDbError, NoteRef>>
+) -> Result<(), Error<DbErrT, FsBlockDbError>>
 where
-    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, FsBlockDbError, NoteRef>>,
+    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, FsBlockDbError>>,
 {
-    fn to_chain_error<D, E: Into<FsBlockDbError>, N>(err: E) -> Error<D, FsBlockDbError, N> {
+    fn to_chain_error<D, E: Into<FsBlockDbError>>(err: E) -> Error<D, FsBlockDbError> {
         Error::BlockSource(err.into())
     }
 

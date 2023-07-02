@@ -19,9 +19,15 @@ and this library adheres to Rust's notion of
   a note could be spent with fewer than `min_confirmations` confirmations if the
   wallet did not contain enough observed blocks to satisfy the `min_confirmations`
   value specified; this situation is now treated as an error.
+- A `BlockConflict` variant has been added to `zcash_client_sqlite::error::SqliteClientError`
 
 ### Removed
 - The empty `wallet::transact` module has been removed.
+
+### Fixed
+- Fixed an off-by-one error in the `BlockSource` implementation for the SQLite-backed
+ `BlockDb` block database which could result in blocks being skipped at the start of
+ scan ranges.
 
 ## [0.7.1] - 2023-05-17
 

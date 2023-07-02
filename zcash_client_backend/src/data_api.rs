@@ -66,15 +66,17 @@ pub trait WalletRead {
     /// This will return `Ok(None)` if no block data is present in the database.
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
-    /// Returns the height to which the wallet has been fully scanned.
+    /// Returns the available block metadata for the block at the specified height, if any.
+    fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error>;
+
+    /// Returns the metadata for the block at the height to which the wallet has been fully
+    /// scanned.
     ///
     /// This is the height for which the wallet has fully trial-decrypted this and all preceding
     /// blocks above the wallet's birthday height. Along with this height, this method returns
     /// metadata describing the state of the wallet's note commitment trees as of the end of that
     /// block.
-    fn fully_scanned_height(
-        &self,
-    ) -> Result<Option<(BlockHeight, chain::CommitmentTreeMeta)>, Self::Error>;
+    fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error>;
 
     /// Returns a vector of suggested scan ranges based upon the current wallet state.
     ///
@@ -248,17 +250,99 @@ pub trait WalletRead {
     ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error>;
 }
 
+/// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockMetadata {
+    block_height: BlockHeight,
+    block_hash: BlockHash,
+    sapling_tree_size: u32,
+    //TODO: orchard_tree_size: u32
+}
+
+impl BlockMetadata {
+    /// Constructs a new [`BlockMetadata`] value from its constituent parts.
+    pub fn from_parts(
+        block_height: BlockHeight,
+        block_hash: BlockHash,
+        sapling_tree_size: u32,
+    ) -> Self {
+        Self {
+            block_height,
+            block_hash,
+            sapling_tree_size,
+        }
+    }
+
+    /// Returns the block height.
+    pub fn block_height(&self) -> BlockHeight {
+        self.block_height
+    }
+
+    /// Returns the hash of the block
+    pub fn block_hash(&self) -> BlockHash {
+        self.block_hash
+    }
+
+    /// Returns the size of the Sapling note commitment tree as of the block that this
+    /// [`BlockMetadata`] describes.
+    pub fn sapling_tree_size(&self) -> u32 {
+        self.sapling_tree_size
+    }
+}
+
 /// The subset of information that is relevant to this wallet that has been
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct PrunedBlock<Nf> {
-    pub block_height: BlockHeight,
-    pub block_hash: BlockHash,
-    pub block_time: u32,
-    pub transactions: Vec<WalletTx<Nf>>,
-    pub sapling_commitment_tree_size: Option<u32>,
-    pub sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+pub struct ScannedBlock<Nf> {
+    metadata: BlockMetadata,
+    block_time: u32,
+    transactions: Vec<WalletTx<Nf>>,
+    sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+}
+
+impl<Nf> ScannedBlock<Nf> {
+    pub fn from_parts(
+        metadata: BlockMetadata,
+        block_time: u32,
+        transactions: Vec<WalletTx<Nf>>,
+        sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+    ) -> Self {
+        Self {
+            metadata,
+            block_time,
+            transactions,
+            sapling_commitments,
+        }
+    }
+
+    pub fn height(&self) -> BlockHeight {
+        self.metadata.block_height
+    }
+
+    pub fn block_hash(&self) -> BlockHash {
+        self.metadata.block_hash
+    }
+
+    pub fn block_time(&self) -> u32 {
+        self.block_time
+    }
+
+    pub fn metadata(&self) -> &BlockMetadata {
+        &self.metadata
+    }
+
+    pub fn transactions(&self) -> &[WalletTx<Nf>] {
+        &self.transactions
+    }
+
+    pub fn sapling_commitments(&self) -> &[(sapling::Node, Retention<BlockHeight>)] {
+        &self.sapling_commitments
+    }
+
+    pub fn take_sapling_commitments(self) -> Vec<(sapling::Node, Retention<BlockHeight>)> {
+        self.sapling_commitments
+    }
 }
 
 /// A transaction that was detected during scanning of the blockchain,
@@ -404,7 +488,7 @@ pub trait WalletWrite: WalletRead {
     #[allow(clippy::type_complexity)]
     fn put_block(
         &mut self,
-        block: PrunedBlock<sapling::Nullifier>,
+        block: ScannedBlock<sapling::Nullifier>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
@@ -489,7 +573,7 @@ pub mod testing {
     };
 
     use super::{
-        chain, DecryptedTransaction, NullifierQuery, PrunedBlock, SentTransaction,
+        BlockMetadata, DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction,
         WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
@@ -520,9 +604,14 @@ pub mod testing {
             Ok(None)
         }
 
-        fn fully_scanned_height(
+        fn block_metadata(
             &self,
-        ) -> Result<Option<(BlockHeight, chain::CommitmentTreeMeta)>, Self::Error> {
+            _height: BlockHeight,
+        ) -> Result<Option<BlockMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
             Ok(None)
         }
 
@@ -667,7 +756,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_block(
             &mut self,
-            _block: PrunedBlock<sapling::Nullifier>,
+            _block: ScannedBlock<sapling::Nullifier>,
         ) -> Result<Vec<Self::NoteRef>, Self::Error> {
             Ok(vec![])
         }

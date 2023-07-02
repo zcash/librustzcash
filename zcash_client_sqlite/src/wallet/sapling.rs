@@ -508,7 +508,7 @@ pub(crate) mod tests {
             BlockHeight::from(1u32),
             BlockHash([1; 32]),
             1,
-            &[],
+            &[0x0, 0x0, 0x0],
         )
         .unwrap();
 
@@ -562,7 +562,7 @@ pub(crate) mod tests {
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (cb, _) = fake_compact_block(
+        let (mut cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
@@ -588,14 +588,15 @@ pub(crate) mod tests {
         );
 
         // Add more funds to the wallet in a second note
-        let (cb, _) = fake_compact_block(
+        cb = fake_compact_block(
             sapling_activation_height() + 1,
             cb.hash(),
             &dfvk,
             AddressType::DefaultExternal,
             value,
             1,
-        );
+        )
+        .0;
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
@@ -639,14 +640,15 @@ pub(crate) mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
         for i in 2..10 {
-            let (cb, _) = fake_compact_block(
+            cb = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
                 &dfvk,
                 AddressType::DefaultExternal,
                 value,
                 i,
-            );
+            )
+            .0;
             insert_into_cache(&db_cache, &cb);
         }
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
@@ -673,14 +675,15 @@ pub(crate) mod tests {
         );
 
         // Mine block 11 so that the second note becomes verified
-        let (cb, _) = fake_compact_block(
+        cb = fake_compact_block(
             sapling_activation_height() + 10,
             cb.hash(),
             &dfvk,
             AddressType::DefaultExternal,
             value,
             11,
-        );
+        )
+        .0;
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
@@ -718,7 +721,7 @@ pub(crate) mod tests {
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (cb, _) = fake_compact_block(
+        let (mut cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
@@ -774,14 +777,15 @@ pub(crate) mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
         // until just before the first transaction expires
         for i in 1..42 {
-            let (cb, _) = fake_compact_block(
+            cb = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
                 value,
                 i,
-            );
+            )
+            .0;
             insert_into_cache(&db_cache, &cb);
         }
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
@@ -807,14 +811,15 @@ pub(crate) mod tests {
         );
 
         // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
-        let (cb, _) = fake_compact_block(
+        cb = fake_compact_block(
             sapling_activation_height() + 42,
             cb.hash(),
             &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
             value,
             42,
-        );
+        )
+        .0;
         insert_into_cache(&db_cache, &cb);
         scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
 
@@ -851,7 +856,7 @@ pub(crate) mod tests {
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (cb, _) = fake_compact_block(
+        let (mut cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
@@ -922,14 +927,15 @@ pub(crate) mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 42 (that don't send us funds)
         // so that the first transaction expires
         for i in 1..=42 {
-            let (cb, _) = fake_compact_block(
+            cb = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
                 value,
                 i,
-            );
+            )
+            .0;
             insert_into_cache(&db_cache, &cb);
         }
         scan_cached_blocks(&network, &db_cache, &mut db_data, None, None).unwrap();
@@ -1073,7 +1079,7 @@ pub(crate) mod tests {
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet
-        let (cb, _) = fake_compact_block(
+        let (mut cb, _) = fake_compact_block(
             sapling_activation_height(),
             BlockHash([0; 32]),
             &dfvk,
@@ -1085,14 +1091,15 @@ pub(crate) mod tests {
 
         // Add 10 dust notes to the wallet
         for i in 1..=10 {
-            let (cb, _) = fake_compact_block(
+            cb = fake_compact_block(
                 sapling_activation_height() + i,
                 cb.hash(),
                 &dfvk,
                 AddressType::DefaultExternal,
                 Amount::from_u64(1000).unwrap(),
                 i,
-            );
+            )
+            .0;
             insert_into_cache(&db_cache, &cb);
         }
 

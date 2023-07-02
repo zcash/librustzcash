@@ -16,8 +16,8 @@ pub mod fees;
 pub mod keys;
 pub mod proto;
 pub mod scan;
+pub mod scanning;
 pub mod wallet;
-pub mod welding_rig;
 pub mod zip321;
 
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};

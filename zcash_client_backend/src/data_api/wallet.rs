@@ -1,5 +1,5 @@
-use std::{convert::Infallible, num::NonZeroU32};
 use std::fmt::Debug;
+use std::{convert::Infallible, num::NonZeroU32};
 
 use shardtree::{ShardStore, ShardTree, ShardTreeError};
 use zcash_primitives::{
@@ -394,7 +394,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     shielding_threshold: NonNegativeAmount,
     from_addrs: &[TransparentAddress],
-    min_confirmations: NonZeroU32
+    min_confirmations: NonZeroU32,
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
     Error<
@@ -497,7 +497,7 @@ where
                 selected,
                 usk.sapling(),
                 &dfvk,
-                usize::try_from(u32::from(min_confirmations) - 1).unwrap()
+                usize::try_from(u32::from(min_confirmations) - 1).unwrap(),
             )?
             .ok_or(Error::NoteMismatch(selected.note_id))?;
 
