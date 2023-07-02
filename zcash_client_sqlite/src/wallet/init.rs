@@ -916,7 +916,7 @@ mod tests {
 
             // add a sapling sent note
             wdb.conn.execute(
-                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00')",
+                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
                 [],
             )?;
 
@@ -1080,7 +1080,7 @@ mod tests {
                     RecipientAddress::Transparent(*ufvk.default_address().0.transparent().unwrap())
                         .encode(&tests::network());
                 wdb.conn.execute(
-                    "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00')",
+                    "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
                     [],
                 )?;
                 wdb.conn.execute(

@@ -114,9 +114,6 @@ impl RusqliteMigration for Migration {
             while let Some(row) = block_rows.next()? {
                 let block_height: u32 = row.get(0)?;
                 let sapling_tree_data: Vec<u8> = row.get(1)?;
-                if sapling_tree_data == vec![0x00] {
-                    continue;
-                }
 
                 let block_end_tree = read_commitment_tree::<
                     sapling::Node,
