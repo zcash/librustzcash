@@ -264,7 +264,7 @@ pub(crate) fn scan_block_with_runner<
     // the block, and we can't have a note of ours in a block with no outputs so treating the zero
     // default value from the protobuf as `None` is always correct.
     let mut sapling_commitment_tree_size = block
-        .block_metadata
+        .chain_metadata
         .as_ref()
         .and_then(|m| {
             if m.sapling_commitment_tree_size == 0 {
@@ -592,7 +592,7 @@ mod tests {
             cb.vtx.push(tx);
         }
 
-        cb.block_metadata = initial_sapling_tree_size.map(|s| compact::BlockMetadata {
+        cb.chain_metadata = initial_sapling_tree_size.map(|s| compact::ChainMetadata {
             sapling_commitment_tree_size: s + cb
                 .vtx
                 .iter()

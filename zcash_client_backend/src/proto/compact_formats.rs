@@ -3,7 +3,7 @@
 /// data or other external sources.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BlockMetadata {
+pub struct ChainMetadata {
     /// the size of the Sapling note commitment tree as of the end of this block
     #[prost(uint32, tag = "1")]
     pub sapling_commitment_tree_size: u32,
@@ -39,9 +39,9 @@ pub struct CompactBlock {
     /// zero or more compact transactions from this block
     #[prost(message, repeated, tag = "7")]
     pub vtx: ::prost::alloc::vec::Vec<CompactTx>,
-    /// information about this block derived from the chain or other sources
+    /// information about the state of the chain as of this block
     #[prost(message, optional, tag = "8")]
-    pub block_metadata: ::core::option::Option<BlockMetadata>,
+    pub chain_metadata: ::core::option::Option<ChainMetadata>,
 }
 /// CompactTx contains the minimum information for a wallet to know if this transaction
 /// is relevant to it (either pays to it or spends from it) via shielded elements

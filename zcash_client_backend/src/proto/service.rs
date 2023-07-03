@@ -3,7 +3,7 @@
 /// data or other external sources.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct BlockMetadata {
+pub struct ChainMetadata {
     /// the size of the Sapling note commitment tree as of the end of this block
     #[prost(uint32, tag = "1")]
     pub sapling_commitment_tree_size: u32,

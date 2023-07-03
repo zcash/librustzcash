@@ -1107,7 +1107,7 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        cb.block_metadata = Some(compact::BlockMetadata {
+        cb.chain_metadata = Some(compact::ChainMetadata {
             sapling_commitment_tree_size: initial_sapling_tree_size
                 + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
             ..Default::default()
@@ -1198,7 +1198,7 @@ mod tests {
         };
         cb.prev_hash.extend_from_slice(&prev_hash.0);
         cb.vtx.push(ctx);
-        cb.block_metadata = Some(compact::BlockMetadata {
+        cb.chain_metadata = Some(compact::ChainMetadata {
             sapling_commitment_tree_size: initial_sapling_tree_size
                 + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
             ..Default::default()
