@@ -340,7 +340,7 @@ impl<Nf> ScannedBlock<Nf> {
         &self.sapling_commitments
     }
 
-    pub fn take_sapling_commitments(self) -> Vec<(sapling::Node, Retention<BlockHeight>)> {
+    pub fn into_sapling_commitments(self) -> Vec<(sapling::Node, Retention<BlockHeight>)> {
         self.sapling_commitments
     }
 }

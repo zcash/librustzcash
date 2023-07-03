@@ -90,7 +90,7 @@ use zcash_client_backend::{
 };
 
 use crate::{
-    error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_HEIGHT,
+    error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -543,11 +543,11 @@ pub(crate) fn block_height_extrema(
 
 fn parse_block_metadata(
     row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>),
-) -> Option<Result<BlockMetadata, SqliteClientError>> {
+) -> Result<BlockMetadata, SqliteClientError> {
     let (block_height, hash_data, sapling_tree_size_opt, sapling_tree) = row;
-    let sapling_tree_size = sapling_tree_size_opt.map(Ok).or_else(|| {
+    let sapling_tree_size = sapling_tree_size_opt.map_or_else(|| {
         if sapling_tree == BLOCK_SAPLING_FRONTIER_ABSENT {
-            None
+            Err(SqliteClientError::CorruptedData("One of either the Sapling tree size or the legacy Sapling commitment tree must be present.".to_owned()))
         } else {
             // parse the legacy commitment tree data
             read_commitment_tree::<
@@ -555,52 +555,50 @@ fn parse_block_metadata(
                 _,
                 { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
             >(Cursor::new(sapling_tree))
-            .map(|tree| Some(tree.size().try_into().unwrap()))
+            .map(|tree| tree.size().try_into().unwrap())
             .map_err(SqliteClientError::from)
-            .transpose()
         }
-    })?;
+    }, Ok)?;
 
     let block_hash = BlockHash::try_from_slice(&hash_data).ok_or_else(|| {
         SqliteClientError::from(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Invalid block hash length: {}", hash_data.len()),
         ))
-    });
+    })?;
 
-    Some(sapling_tree_size.and_then(|sapling_tree_size| {
-        block_hash.map(|block_hash| {
-            BlockMetadata::from_parts(block_height, block_hash, sapling_tree_size)
-        })
-    }))
+    Ok(BlockMetadata::from_parts(
+        block_height,
+        block_hash,
+        sapling_tree_size,
+    ))
 }
 
 pub(crate) fn block_metadata(
     conn: &rusqlite::Connection,
     block_height: BlockHeight,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
-    let res_opt = conn
-        .query_row(
-            "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
+    conn.query_row(
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
             FROM blocks
             WHERE height = :block_height",
-            named_params![":block_height": u32::from(block_height)],
-            |row| {
-                let height: u32 = row.get(0)?;
-                let block_hash: Vec<u8> = row.get(1)?;
-                let sapling_tree_size: Option<u32> = row.get(2)?;
-                let sapling_tree: Vec<u8> = row.get(3)?;
-                Ok((
-                    BlockHeight::from(height),
-                    block_hash,
-                    sapling_tree_size,
-                    sapling_tree,
-                ))
-            },
-        )
-        .optional()?;
-
-    res_opt.and_then(parse_block_metadata).transpose()
+        named_params![":block_height": u32::from(block_height)],
+        |row| {
+            let height: u32 = row.get(0)?;
+            let block_hash: Vec<u8> = row.get(1)?;
+            let sapling_tree_size: Option<u32> = row.get(2)?;
+            let sapling_tree: Vec<u8> = row.get(3)?;
+            Ok((
+                BlockHeight::from(height),
+                block_hash,
+                sapling_tree_size,
+                sapling_tree,
+            ))
+        },
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
 }
 
 pub(crate) fn block_fully_scanned(
@@ -608,29 +606,28 @@ pub(crate) fn block_fully_scanned(
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     // FIXME: this will need to be rewritten once out-of-order scan range suggestion
     // is implemented.
-    let res_opt = conn
-        .query_row(
-            "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
+    conn.query_row(
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
             FROM blocks
             ORDER BY height DESC
             LIMIT 1",
-            [],
-            |row| {
-                let height: u32 = row.get(0)?;
-                let block_hash: Vec<u8> = row.get(1)?;
-                let sapling_tree_size: Option<u32> = row.get(2)?;
-                let sapling_tree: Vec<u8> = row.get(3)?;
-                Ok((
-                    BlockHeight::from(height),
-                    block_hash,
-                    sapling_tree_size,
-                    sapling_tree,
-                ))
-            },
-        )
-        .optional()?;
-
-    res_opt.and_then(parse_block_metadata).transpose()
+        [],
+        |row| {
+            let height: u32 = row.get(0)?;
+            let block_hash: Vec<u8> = row.get(1)?;
+            let sapling_tree_size: Option<u32> = row.get(2)?;
+            let sapling_tree: Vec<u8> = row.get(3)?;
+            Ok((
+                BlockHeight::from(height),
+                block_hash,
+                sapling_tree_size,
+                sapling_tree,
+            ))
+        },
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
 }
 
 /// Returns the block height at which the specified transaction was mined,
@@ -704,7 +701,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             .map(|opt| opt.map_or_else(|| sapling_activation_height - 1, BlockHeight::from))
     })?;
 
-    if block_height < last_scanned_height - PRUNING_HEIGHT {
+    if block_height < last_scanned_height - PRUNING_DEPTH {
         if let Some(h) = get_min_unspent_height(conn)? {
             if block_height > h {
                 return Err(SqliteClientError::RequestedRewindInvalid(h, block_height));

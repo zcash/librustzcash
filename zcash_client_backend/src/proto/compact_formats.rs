@@ -1,6 +1,4 @@
-/// BlockMetadata represents information about a block that may not be
-/// represented directly in the block data, but is instead derived from chain
-/// data or other external sources.
+/// ChainMetadata represents information about the state of the chain as of a given block.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChainMetadata {

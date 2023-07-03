@@ -82,7 +82,7 @@ pub mod wallet;
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
 /// this delta from the chain tip to be pruned.
-pub(crate) const PRUNING_HEIGHT: u32 = 100;
+pub(crate) const PRUNING_DEPTH: u32 = 100;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
@@ -428,7 +428,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let block_height = block.height();
             let sapling_tree_size = block.metadata().sapling_tree_size();
             let sapling_commitments_len = block.sapling_commitments().len();
-            let mut sapling_commitments = block.take_sapling_commitments().into_iter();
+            let mut sapling_commitments = block.into_sapling_commitments().into_iter();
             wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
                 let start_position = Position::from(u64::from(sapling_tree_size))
                     - u64::try_from(sapling_commitments_len).unwrap();
@@ -640,7 +640,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
         let shard_store = SqliteShardStore::from_connection(&tx, SAPLING_TABLES_PREFIX)
             .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
         let result = {
-            let mut shardtree = ShardTree::new(shard_store, PRUNING_HEIGHT.try_into().unwrap());
+            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
             callback(&mut shardtree)?
         };
         tx.commit()
@@ -668,7 +668,7 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
         let mut shardtree = ShardTree::new(
             SqliteShardStore::from_connection(self.conn.0, SAPLING_TABLES_PREFIX)
                 .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?,
-            PRUNING_HEIGHT.try_into().unwrap(),
+            PRUNING_DEPTH.try_into().unwrap(),
         );
         let result = callback(&mut shardtree)?;
 

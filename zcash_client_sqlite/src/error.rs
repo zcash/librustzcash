@@ -9,7 +9,7 @@ use shardtree::ShardTreeError;
 use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
 use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
-use crate::PRUNING_HEIGHT;
+use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::TransparentAddress;
@@ -108,7 +108,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidNoteId =>
                 write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::RequestedRewindInvalid(h, r) =>
-                write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_HEIGHT, h, r),
+                write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
             SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),

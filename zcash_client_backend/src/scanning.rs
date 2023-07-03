@@ -285,7 +285,7 @@ pub(crate) fn scan_block_with_runner<
             at_height: cur_height,
         })?;
 
-    let block_tx_count = block.vtx.len();
+    let compact_block_tx_count = block.vtx.len();
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
         let txid = tx.txid();
 
@@ -392,7 +392,8 @@ pub(crate) fn scan_block_with_runner<
             {
                 // Collect block note commitments
                 let node = sapling::Node::from_cmu(&output.cmu);
-                let is_checkpoint = output_idx + 1 == decoded.len() && tx_idx + 1 == block_tx_count;
+                let is_checkpoint =
+                    output_idx + 1 == decoded.len() && tx_idx + 1 == compact_block_tx_count;
                 let retention = match (dec_output.is_some(), is_checkpoint) {
                     (is_marked, true) => Retention::Checkpoint {
                         id: cur_height,

@@ -23,7 +23,7 @@ use crate::{
         commitment_tree::SqliteShardStore,
         init::{migrations::received_notes_nullable_nf, WalletMigrationError},
     },
-    SAPLING_TABLES_PREFIX,
+    PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
@@ -103,7 +103,7 @@ impl RusqliteMigration for Migration {
             _,
             { sapling::NOTE_COMMITMENT_TREE_DEPTH },
             SAPLING_SHARD_HEIGHT,
-        > = ShardTree::new(shard_store, 100);
+        > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
         // Insert all the tree information that we can get from block-end commitment trees
         {
             let mut stmt_blocks = transaction.prepare("SELECT height, sapling_tree FROM blocks")?;

@@ -10,9 +10,7 @@ option swift_prefix = "";
 // Remember that proto3 fields are all optional. A field that is not present will be set to its zero value.
 // bytes fields of hashes are in canonical little-endian format.
 
-// BlockMetadata represents information about a block that may not be
-// represented directly in the block data, but is instead derived from chain
-// data or other external sources.
+// ChainMetadata represents information about the state of the chain as of a given block.
 message ChainMetadata {
     uint32 saplingCommitmentTreeSize = 1; // the size of the Sapling note commitment tree as of the end of this block
     uint32 orchardCommitmentTreeSize = 2; // the size of the Orchard note commitment tree as of the end of this block

@@ -46,6 +46,10 @@ fn build() -> io::Result<()> {
         tonic_build::configure()
             .build_server(false)
             .extern_path(
+                ".cash.z.wallet.sdk.rpc.ChainMetadata",
+                "crate::proto::compact_formats::ChainMetadata",
+            )
+            .extern_path(
                 ".cash.z.wallet.sdk.rpc.CompactBlock",
                 "crate::proto::compact_formats::CompactBlock",
             )

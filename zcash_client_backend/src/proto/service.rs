@@ -1,16 +1,3 @@
-/// BlockMetadata represents information about a block that may not be
-/// represented directly in the block data, but is instead derived from chain
-/// data or other external sources.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ChainMetadata {
-    /// the size of the Sapling note commitment tree as of the end of this block
-    #[prost(uint32, tag = "1")]
-    pub sapling_commitment_tree_size: u32,
-    /// the size of the Orchard note commitment tree as of the end of this block
-    #[prost(uint32, tag = "2")]
-    pub orchard_commitment_tree_size: u32,
-}
 /// A BlockID message contains identifiers to select a block: a height or a
 /// hash. Specification by hash is not implemented, but may be in the future.
 #[allow(clippy::derive_partial_eq_without_eq)]

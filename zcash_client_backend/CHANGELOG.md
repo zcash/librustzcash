@@ -46,7 +46,7 @@ and this library adheres to Rust's notion of
     respective `min_confirmations` arguments as `NonZeroU32`
   - `data_api::wallet::input_selection::InputSelector::{propose_transaction, propose_shielding}`
     now take their respective `min_confirmations` arguments as `NonZeroU32`
-  - A new `Sync` variant has been added to `data_api::chain::error::Error`.
+  - A new `Scan` variant has been added to `data_api::chain::error::Error`.
   - A new `SyncRequired` variant has been added to `data_api::wallet::input_selection::InputSelectorError`.
 - `zcash_client_backend::wallet`:
   - `SpendableNote` has been renamed to `ReceivedSaplingNote`.
@@ -61,8 +61,7 @@ and this library adheres to Rust's notion of
 - Arguments to `zcash_client_backend::scanning::scan_block` have changed. This
   method now takes an optional `BlockMetadata` argument instead of a base commitment
   tree and incremental witnesses for each previously-known note. In addition, the
-  return type has now been updated to return a `Result<ScannedBlock, ScanError>` 
-  in the case of scan failure.
+  return type has now been updated to return a `Result<ScannedBlock, ScanError>`.
 
 
 ### Removed

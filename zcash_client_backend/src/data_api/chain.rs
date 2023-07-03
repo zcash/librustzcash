@@ -92,10 +92,11 @@ pub trait BlockSource {
 /// Scans at most `limit` new blocks added to the block source for any transactions received by the
 /// tracked accounts.
 ///
-/// If the `from_height` argument is not `None`, then the block source will begin requesting blocks
-/// from the provided block source at the specified height; if `from_height` is `None then this
-/// will begin scanning at first block after the position to which the wallet has previously
-/// fully scanned the chain, thereby beginning or continuing a linear scan over all blocks.
+/// If the `from_height` argument is not `None`, then this method block source will begin
+/// requesting blocks from the provided block source at the specified height; if `from_height` is
+/// `None then this will begin scanning at first block after the position to which the wallet has
+/// previously fully scanned the chain, thereby beginning or continuing a linear scan over all
+/// blocks.
 ///
 /// This function will return without error after scanning at most `limit` new blocks, to enable
 /// the caller to update their UI with scanning progress. Repeatedly calling this function with

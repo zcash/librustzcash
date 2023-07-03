@@ -21,7 +21,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullViewingKey};
 
-use crate::{error::SqliteClientError, wallet, WalletDb, SAPLING_TABLES_PREFIX};
+use crate::{error::SqliteClientError, wallet, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX};
 
 use super::commitment_tree::SqliteShardStore;
 
@@ -327,7 +327,7 @@ pub fn init_blocks_table<P: consensus::Parameters>(
                 _,
                 { sapling::NOTE_COMMITMENT_TREE_DEPTH },
                 SAPLING_SHARD_HEIGHT,
-            > = ShardTree::new(shard_store, 100);
+            > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
             shard_tree.insert_frontier_nodes(
                 nonempty_frontier.clone(),
                 Retention::Checkpoint {
