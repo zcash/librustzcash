@@ -9,21 +9,82 @@ and this library adheres to Rust's notion of
 ### Added
 - `impl Eq for zcash_client_backend::address::RecipientAddress`
 - `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
-- `data_api::NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
+- `impl Debug` for `zcash_client_backend::{data_api::wallet::input_selection::Proposal, wallet::ReceivedSaplingNote}`
+- `zcash_client_backend::data_api`:
+  - `WalletRead::{block_metadata, block_fully_scanned, suggest_scan_ranges}`
+  - `WalletWrite::put_block`
+  - `WalletCommitmentTrees`
+  - `testing::MockWalletDb::new`
+  - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
+  - `BlockMetadata`
+  - `ScannedBlock`
+  - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
+- `zcash_client_backend::wallet::WalletSaplingOutput::note_commitment_tree_position`
+- `zcash_client_backend::scanning::ScanError`
 
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.12`, `zcash_note_encryption 0.4`,
   `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`
-- `WalletRead::get_memo` now returns `Result<Option<Memo>, Self::Error>`
-  instead of `Result<Memo, Self::Error>` in order to make representable
-  wallet states where the full note plaintext is not available.
-- `WalletRead::get_nullifiers` has been renamed to `WalletRead::get_sapling_nullifiers`
-  and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
-- `wallet::SpendableNote` has been renamed to `wallet::ReceivedSaplingNote`.
+- `zcash_client_backend::data_api`:
+  - `WalletRead::get_memo` now returns `Result<Option<Memo>, Self::Error>`
+    instead of `Result<Memo, Self::Error>` in order to make representable
+    wallet states where the full note plaintext is not available.
+  - `WalletRead::get_nullifiers` has been renamed to `WalletRead::get_sapling_nullifiers`
+    and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
+  - `WalletRead::get_target_and_anchor_heights` now takes its argument as a `NonZeroU32`
+  - `chain::scan_cached_blocks` now takes a `from_height` argument that
+    permits the caller to control the starting position of the scan range.
+  - A new `CommitmentTree` variant has been added to `data_api::error::Error`
+  - `data_api::wallet::{create_spend_to_address, create_proposed_transaction,
+    shield_transparent_funds}` all now require that `WalletCommitmentTrees` be
+    implemented for the type passed to them for the `wallet_db` parameter.
+  - `data_api::wallet::create_proposed_transaction` now takes an additional 
+    `min_confirmations` argument.
+  - `data_api::wallet::{spend, create_spend_to_address, shield_transparent_funds, 
+    propose_transfer, propose_shielding, create_proposed_transaction}` now take their
+    respective `min_confirmations` arguments as `NonZeroU32`
+  - `data_api::wallet::input_selection::InputSelector::{propose_transaction, propose_shielding}`
+    now take their respective `min_confirmations` arguments as `NonZeroU32`
+  - A new `Scan` variant has been added to `data_api::chain::error::Error`.
+  - A new `SyncRequired` variant has been added to `data_api::wallet::input_selection::InputSelectorError`.
+- `zcash_client_backend::wallet`:
+  - `SpendableNote` has been renamed to `ReceivedSaplingNote`.
+  - Arguments to `WalletSaplingOutput::from_parts` have changed.
+- `zcash_client_backend::data_api::wallet::input_selection::InputSelector`:
+  - Arguments to `{propose_transaction, propose_shielding}` have changed. 
+- `zcash_client_backend::wallet::ReceivedSaplingNote::note_commitment_tree_position`
+  has replaced the `witness` field in the same struct.
+- `zcash_client_backend::welding_rig` has been renamed to `zcash_client_backend::scanning`
+- `zcash_client_backend::scanning::ScanningKey::sapling_nf` has been changed to
+  take a note position instead of an incremental witness for the note.
+- Arguments to `zcash_client_backend::scanning::scan_block` have changed. This
+  method now takes an optional `BlockMetadata` argument instead of a base commitment
+  tree and incremental witnesses for each previously-known note. In addition, the
+  return type has now been updated to return a `Result<ScannedBlock, ScanError>`.
+
 
 ### Removed
-- `WalletRead::get_all_nullifiers`
+- `zcash_client_backend::data_api`:
+  - `WalletRead::get_all_nullifiers`
+  - `WalletRead::{get_commitment_tree, get_witnesses}` have been removed 
+    without replacement. The utility of these methods is now subsumed
+    by those available from the `WalletCommitmentTrees` trait.
+  - `WalletWrite::advance_by_block` (use `WalletWrite::put_block` instead).
+  - `PrunedBlock` has been replaced by `ScannedBlock`
+  - `testing::MockWalletDb`, which is available under the `test-dependencies`
+    feature flag, has been modified by the addition of a `sapling_tree` property. 
+  - `wallet::input_selection`:
+    - `Proposal::target_height` (use `Proposal::min_target_height` instead).
+- `zcash_client_backend::data_api::chain::validate_chain` TODO: document how
+  to handle validation given out-of-order blocks.
+- `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been 
+  replaced by `zcash_client_backend::scanning::ScanError`
+- `zcash_client_backend::wallet::WalletSaplingOutput::{witness, witness_mut}`
+  have been removed as individual incremental witnesses are no longer tracked on a
+  per-note basis. The global note commitment tree for the wallet should be used
+  to obtain witnesses for spend operations instead.
+
 
 ## [0.9.0] - 2023-04-28
 ### Added

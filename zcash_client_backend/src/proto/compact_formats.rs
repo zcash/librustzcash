@@ -1,3 +1,14 @@
+/// ChainMetadata represents information about the state of the chain as of a given block.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ChainMetadata {
+    /// the size of the Sapling note commitment tree as of the end of this block
+    #[prost(uint32, tag = "1")]
+    pub sapling_commitment_tree_size: u32,
+    /// the size of the Orchard note commitment tree as of the end of this block
+    #[prost(uint32, tag = "2")]
+    pub orchard_commitment_tree_size: u32,
+}
 /// CompactBlock is a packaging of ONLY the data from a block that's needed to:
 ///    1. Detect a payment to your shielded Sapling address
 ///    2. Detect a spend of your shielded Sapling notes
@@ -26,6 +37,9 @@ pub struct CompactBlock {
     /// zero or more compact transactions from this block
     #[prost(message, repeated, tag = "7")]
     pub vtx: ::prost::alloc::vec::Vec<CompactTx>,
+    /// information about the state of the chain as of this block
+    #[prost(message, optional, tag = "8")]
+    pub chain_metadata: ::core::option::Option<ChainMetadata>,
 }
 /// CompactTx contains the minimum information for a wallet to know if this transaction
 /// is relevant to it (either pays to it or spends from it) via shielded elements

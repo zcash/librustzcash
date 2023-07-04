@@ -253,7 +253,7 @@ mod tests {
 
         // - Tx 0 contains two received notes of 2 and 5 zatoshis that are controlled by account 0.
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
 
             INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
@@ -265,7 +265,7 @@ mod tests {
         //   of 2 zatoshis. This is representative of a historic transaction where no `sent_notes`
         //   entry was created for the change value.
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (1, 1, 1, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (1, 1, 1, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (1, 1, 'tx1');
             UPDATE received_notes SET spent = 1 WHERE tx = 0;
             INSERT INTO sent_notes (tx, output_pool, output_index, from_account, to_account, to_address, value)
@@ -279,7 +279,7 @@ mod tests {
         //   other half to the sending account as change. Also there's a random transparent utxo,
         //   received, who knows where it came from but it's for account 0.
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (2, 2, 2, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (2, 2, 2, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (2, 2, 'tx2');
             UPDATE received_notes SET spent = 2 WHERE tx = 1;
             INSERT INTO utxos (received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height)
@@ -297,7 +297,7 @@ mod tests {
         // - Tx 3 just receives transparent funds and does nothing else. For this to work, the
         //   transaction must be retrieved by the wallet.
         db_data.conn.execute_batch(
-            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (3, 3, 3, '');
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (3, 3, 3, x'00');
             INSERT INTO transactions (block, id_tx, txid) VALUES (3, 3, 'tx3');
 
             INSERT INTO utxos (received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height)

@@ -1,23 +1,29 @@
 //! Functions for initializing the various databases.
-use std::collections::HashMap;
-use std::fmt;
+use either::Either;
+use incrementalmerkletree::Retention;
+use std::{collections::HashMap, fmt, io};
 
 use rusqlite::{self, types::ToSql};
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
+use shardtree::{ShardTree, ShardTreeError};
 use uuid::Uuid;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    merkle_tree::read_commitment_tree,
+    sapling,
     transaction::components::amount::BalanceError,
     zip32::AccountId,
 };
 
-use zcash_client_backend::keys::UnifiedFullViewingKey;
+use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullViewingKey};
 
-use crate::{error::SqliteClientError, wallet, WalletDb};
+use crate::{error::SqliteClientError, wallet, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX};
+
+use super::commitment_tree::SqliteShardStore;
 
 mod migrations;
 
@@ -34,6 +40,9 @@ pub enum WalletMigrationError {
 
     /// Wrapper for amount balance violations
     BalanceError(BalanceError),
+
+    /// Wrapper for commitment tree invariant violations
+    CommitmentTree(ShardTreeError<Either<io::Error, rusqlite::Error>>),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -45,6 +54,12 @@ impl From<rusqlite::Error> for WalletMigrationError {
 impl From<BalanceError> for WalletMigrationError {
     fn from(e: BalanceError) -> Self {
         WalletMigrationError::BalanceError(e)
+    }
+}
+
+impl From<ShardTreeError<Either<io::Error, rusqlite::Error>>> for WalletMigrationError {
+    fn from(e: ShardTreeError<Either<io::Error, rusqlite::Error>>) -> Self {
+        WalletMigrationError::CommitmentTree(e)
     }
 }
 
@@ -62,6 +77,7 @@ impl fmt::Display for WalletMigrationError {
             }
             WalletMigrationError::DbError(e) => write!(f, "{}", e),
             WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
+            WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {:?}", e),
         }
     }
 }
@@ -226,7 +242,7 @@ pub fn init_accounts_table<P: consensus::Parameters>(
 
         // Insert accounts atomically
         for (account, key) in keys.iter() {
-            wallet::add_account(&wdb.conn.0, &wdb.params, *account, key)?;
+            wallet::add_account(wdb.conn.0, &wdb.params, *account, key)?;
         }
 
         Ok(())
@@ -278,9 +294,21 @@ pub fn init_blocks_table<P: consensus::Parameters>(
             return Err(SqliteClientError::TableNotEmpty);
         }
 
+        let block_end_tree =
+            read_commitment_tree::<sapling::Node, _, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(
+                sapling_tree,
+            )
+            .map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    sapling_tree.len(),
+                    rusqlite::types::Type::Blob,
+                    Box::new(e),
+                )
+            })?;
+
         wdb.conn.0.execute(
             "INSERT INTO blocks (height, hash, time, sapling_tree)
-        VALUES (?, ?, ?, ?)",
+            VALUES (?, ?, ?, ?)",
             [
                 u32::from(height).to_sql()?,
                 hash.0.to_sql()?,
@@ -288,6 +316,26 @@ pub fn init_blocks_table<P: consensus::Parameters>(
                 sapling_tree.to_sql()?,
             ],
         )?;
+
+        if let Some(nonempty_frontier) = block_end_tree.to_frontier().value() {
+            let shard_store =
+                SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+                    wdb.conn.0,
+                    SAPLING_TABLES_PREFIX,
+                )?;
+            let mut shard_tree: ShardTree<
+                _,
+                { sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                SAPLING_SHARD_HEIGHT,
+            > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            shard_tree.insert_frontier_nodes(
+                nonempty_frontier.clone(),
+                Retention::Checkpoint {
+                    id: height,
+                    is_marked: false,
+                },
+            )?;
+        }
 
         Ok(())
     })
@@ -361,8 +409,9 @@ mod tests {
                 height INTEGER PRIMARY KEY,
                 hash BLOB NOT NULL,
                 time INTEGER NOT NULL,
-                sapling_tree BLOB NOT NULL
-            )",
+                sapling_tree BLOB NOT NULL ,
+                sapling_commitment_tree_size INTEGER,
+                orchard_commitment_tree_size INTEGER)",
             "CREATE TABLE sapling_received_notes (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -375,10 +424,35 @@ mod tests {
                 is_change INTEGER NOT NULL,
                 memo BLOB,
                 spent INTEGER,
+                commitment_tree_position INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
+            )",
+            "CREATE TABLE sapling_tree_cap (
+                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
+                -- upsert functionality; the table will only ever contain one row
+                cap_id INTEGER PRIMARY KEY,
+                cap_data BLOB NOT NULL
+            )",
+            "CREATE TABLE sapling_tree_checkpoint_marks_removed (
+                checkpoint_id INTEGER NOT NULL,
+                mark_removed_position INTEGER NOT NULL,
+                FOREIGN KEY (checkpoint_id) REFERENCES sapling_tree_checkpoints(checkpoint_id)
+                ON DELETE CASCADE
+            )",
+            "CREATE TABLE sapling_tree_checkpoints (
+                checkpoint_id INTEGER PRIMARY KEY,
+                position INTEGER
+            )",
+            "CREATE TABLE sapling_tree_shards (
+                shard_index INTEGER PRIMARY KEY,
+                subtree_end_height INTEGER,
+                root_hash BLOB,
+                shard_data BLOB,
+                contains_marked INTEGER,
+                CONSTRAINT root_unique UNIQUE (root_hash)
             )",
             "CREATE TABLE sapling_witnesses (
                 id_witness INTEGER PRIMARY KEY,
@@ -842,7 +916,7 @@ mod tests {
 
             // add a sapling sent note
             wdb.conn.execute(
-                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
+                "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
                 [],
             )?;
 
@@ -1006,7 +1080,7 @@ mod tests {
                     RecipientAddress::Transparent(*ufvk.default_address().0.transparent().unwrap())
                         .encode(&tests::network());
                 wdb.conn.execute(
-                    "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, '')",
+                    "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
                     [],
                 )?;
                 wdb.conn.execute(
@@ -1117,7 +1191,7 @@ mod tests {
             BlockHeight::from(1u32),
             BlockHash([1; 32]),
             1,
-            &[],
+            &[0x0, 0x0, 0x0],
         )
         .unwrap();
 
@@ -1127,7 +1201,7 @@ mod tests {
             BlockHeight::from(2u32),
             BlockHash([2; 32]),
             2,
-            &[],
+            &[0x0, 0x0, 0x0],
         )
         .unwrap_err();
     }

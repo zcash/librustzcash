@@ -64,16 +64,16 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
-use rusqlite::{self, named_params, params, OptionalExtension, ToSql};
-use std::collections::HashMap;
+use rusqlite::{self, named_params, OptionalExtension, ToSql};
 use std::convert::TryFrom;
+use std::io::Cursor;
+use std::{collections::HashMap, io};
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    merkle_tree::write_commitment_tree,
-    sapling::CommitmentTree,
+    merkle_tree::read_commitment_tree,
     transaction::{components::Amount, Transaction, TxId},
     zip32::{
         sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
@@ -83,13 +83,15 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
-    data_api::{PoolType, Recipient, SentTransactionOutput},
+    data_api::{BlockMetadata, PoolType, Recipient, SentTransactionOutput},
     encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
     wallet::WalletTx,
 };
 
-use crate::{error::SqliteClientError, PRUNING_HEIGHT};
+use crate::{
+    error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -102,8 +104,11 @@ use {
     },
 };
 
+pub(crate) mod commitment_tree;
 pub mod init;
 pub(crate) mod sapling;
+
+pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
 pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // These constants are *incidentally* shared with the typecodes
@@ -536,6 +541,95 @@ pub(crate) fn block_height_extrema(
     })
 }
 
+fn parse_block_metadata(
+    row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>),
+) -> Result<BlockMetadata, SqliteClientError> {
+    let (block_height, hash_data, sapling_tree_size_opt, sapling_tree) = row;
+    let sapling_tree_size = sapling_tree_size_opt.map_or_else(|| {
+        if sapling_tree == BLOCK_SAPLING_FRONTIER_ABSENT {
+            Err(SqliteClientError::CorruptedData("One of either the Sapling tree size or the legacy Sapling commitment tree must be present.".to_owned()))
+        } else {
+            // parse the legacy commitment tree data
+            read_commitment_tree::<
+                zcash_primitives::sapling::Node,
+                _,
+                { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
+            >(Cursor::new(sapling_tree))
+            .map(|tree| tree.size().try_into().unwrap())
+            .map_err(SqliteClientError::from)
+        }
+    }, Ok)?;
+
+    let block_hash = BlockHash::try_from_slice(&hash_data).ok_or_else(|| {
+        SqliteClientError::from(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Invalid block hash length: {}", hash_data.len()),
+        ))
+    })?;
+
+    Ok(BlockMetadata::from_parts(
+        block_height,
+        block_hash,
+        sapling_tree_size,
+    ))
+}
+
+pub(crate) fn block_metadata(
+    conn: &rusqlite::Connection,
+    block_height: BlockHeight,
+) -> Result<Option<BlockMetadata>, SqliteClientError> {
+    conn.query_row(
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
+            FROM blocks
+            WHERE height = :block_height",
+        named_params![":block_height": u32::from(block_height)],
+        |row| {
+            let height: u32 = row.get(0)?;
+            let block_hash: Vec<u8> = row.get(1)?;
+            let sapling_tree_size: Option<u32> = row.get(2)?;
+            let sapling_tree: Vec<u8> = row.get(3)?;
+            Ok((
+                BlockHeight::from(height),
+                block_hash,
+                sapling_tree_size,
+                sapling_tree,
+            ))
+        },
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
+}
+
+pub(crate) fn block_fully_scanned(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockMetadata>, SqliteClientError> {
+    // FIXME: this will need to be rewritten once out-of-order scan range suggestion
+    // is implemented.
+    conn.query_row(
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1",
+        [],
+        |row| {
+            let height: u32 = row.get(0)?;
+            let block_hash: Vec<u8> = row.get(1)?;
+            let sapling_tree_size: Option<u32> = row.get(2)?;
+            let sapling_tree: Vec<u8> = row.get(3)?;
+            Ok((
+                BlockHeight::from(height),
+                block_hash,
+                sapling_tree_size,
+                sapling_tree,
+            ))
+        },
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
+}
+
 /// Returns the block height at which the specified transaction was mined,
 /// if any.
 pub(crate) fn get_tx_height(
@@ -607,7 +701,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             .map(|opt| opt.map_or_else(|| sapling_activation_height - 1, BlockHeight::from))
     })?;
 
-    if block_height < last_scanned_height - PRUNING_HEIGHT {
+    if block_height < last_scanned_height - PRUNING_DEPTH {
         if let Some(h) = get_min_unspent_height(conn)? {
             if block_height > h {
                 return Err(SqliteClientError::RequestedRewindInvalid(h, block_height));
@@ -617,7 +711,16 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 
     // nothing to do if we're deleting back down to the max height
     if block_height < last_scanned_height {
-        // Decrement witnesses.
+        // Truncate the note commitment trees
+        let mut wdb = WalletDb {
+            conn: SqlTransaction(conn),
+            params: params.clone(),
+        };
+        wdb.with_sapling_tree_mut(|tree| {
+            tree.truncate_removing_checkpoint(&block_height).map(|_| ())
+        })?;
+
+        // Remove any legacy Sapling witnesses
         conn.execute(
             "DELETE FROM sapling_witnesses WHERE block > ?",
             [u32::from(block_height)],
@@ -679,15 +782,18 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
-         WHERE u.address = ?
-         AND u.height <= ?
+         WHERE u.address = :address
+         AND u.height <= :max_height
          AND tx.block IS NULL",
     )?;
 
     let addr_str = address.encode(params);
 
     let mut utxos = Vec::<WalletTransparentOutput>::new();
-    let mut rows = stmt_blocks.query(params![addr_str, u32::from(max_height)])?;
+    let mut rows = stmt_blocks.query(named_params![
+        ":address": addr_str,
+        ":max_height": u32::from(max_height)
+    ])?;
     let excluded: BTreeSet<OutPoint> = exclude.iter().cloned().collect();
     while let Some(row) = rows.next()? {
         let txid: Vec<u8> = row.get(0)?;
@@ -740,14 +846,17 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
-         WHERE u.received_by_account = ?
-         AND u.height <= ?
+         WHERE u.received_by_account = :account_id
+         AND u.height <= :max_height
          AND tx.block IS NULL
          GROUP BY u.address",
     )?;
 
     let mut res = HashMap::new();
-    let mut rows = stmt_blocks.query(params![u32::from(account), u32::from(max_height)])?;
+    let mut rows = stmt_blocks.query(named_params![
+        ":account_id": u32::from(account),
+        ":max_height": u32::from(max_height)
+    ])?;
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get(0)?;
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
@@ -760,26 +869,61 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 }
 
 /// Inserts information about a scanned block into the database.
-pub(crate) fn insert_block(
-    conn: &rusqlite::Connection,
+pub(crate) fn put_block(
+    conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
-    commitment_tree: &CommitmentTree,
+    sapling_commitment_tree_size: u32,
 ) -> Result<(), SqliteClientError> {
-    let mut encoded_tree = Vec::new();
-    write_commitment_tree(commitment_tree, &mut encoded_tree).unwrap();
+    let block_hash_data = conn
+        .query_row(
+            "SELECT hash FROM blocks WHERE height = ?",
+            [u32::from(block_height)],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()?;
 
-    let mut stmt_insert_block = conn.prepare_cached(
-        "INSERT INTO blocks (height, hash, time, sapling_tree)
-            VALUES (?, ?, ?, ?)",
+    // Ensure that in the case of an upsert, we don't overwrite block data
+    // with information for a block with a different hash.
+    if let Some(bytes) = block_hash_data {
+        let expected_hash = BlockHash::try_from_slice(&bytes).ok_or_else(|| {
+            SqliteClientError::CorruptedData(format!(
+                "Invalid block hash at height {}",
+                u32::from(block_height)
+            ))
+        })?;
+        if expected_hash != block_hash {
+            return Err(SqliteClientError::BlockConflict(block_height));
+        }
+    }
+
+    let mut stmt_upsert_block = conn.prepare_cached(
+        "INSERT INTO blocks (
+            height,
+            hash,
+            time,
+            sapling_commitment_tree_size,
+            sapling_tree
+        )
+        VALUES (
+            :height,
+            :hash,
+            :block_time,
+            :sapling_commitment_tree_size,
+            x'00'
+        )
+        ON CONFLICT (height) DO UPDATE
+        SET hash = :hash,
+            time = :block_time,
+            sapling_commitment_tree_size = :sapling_commitment_tree_size",
     )?;
 
-    stmt_insert_block.execute(params![
-        u32::from(block_height),
-        &block_hash.0[..],
-        block_time,
-        encoded_tree
+    stmt_upsert_block.execute(named_params![
+        ":height": u32::from(block_height),
+        ":hash": &block_hash.0[..],
+        ":block_time": block_time,
+        ":sapling_commitment_tree_size": sapling_commitment_tree_size
     ])?;
 
     Ok(())
@@ -922,7 +1066,7 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
     #[cfg(feature = "transparent-inputs")]
     let mut stmt_upsert_legacy_transparent_utxo = conn.prepare_cached(
         "INSERT INTO utxos (
-            prevout_txid, prevout_idx, 
+            prevout_txid, prevout_idx,
             received_by_account, address, script,
             value_zat, height)
         VALUES
@@ -949,17 +1093,6 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
     ];
 
     stmt_upsert_legacy_transparent_utxo.query_row(sql_args, |row| row.get::<_, i64>(0).map(UtxoId))
-}
-
-/// Removes old incremental witnesses up to the given block height.
-pub(crate) fn prune_witnesses(
-    conn: &rusqlite::Connection,
-    below_height: BlockHeight,
-) -> Result<(), SqliteClientError> {
-    let mut stmt_prune_witnesses =
-        conn.prepare_cached("DELETE FROM sapling_witnesses WHERE block < ?")?;
-    stmt_prune_witnesses.execute([u32::from(below_height)])?;
-    Ok(())
 }
 
 /// Marks notes that have not been mined in transactions
@@ -1082,6 +1215,8 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use secrecy::Secret;
     use tempfile::NamedTempFile;
 
@@ -1124,7 +1259,12 @@ mod tests {
         );
 
         // We can't get an anchor height, as we have not scanned any blocks.
-        assert_eq!(db_data.get_target_and_anchor_heights(10).unwrap(), None);
+        assert_eq!(
+            db_data
+                .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
+                .unwrap(),
+            None
+        );
 
         // An invalid account has zero balance
         assert_matches!(

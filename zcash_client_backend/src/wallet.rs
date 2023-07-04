@@ -1,6 +1,7 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
+use incrementalmerkletree::Position;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
@@ -117,7 +118,7 @@ pub struct WalletSaplingOutput<N> {
     account: AccountId,
     note: sapling::Note,
     is_change: bool,
-    witness: sapling::IncrementalWitness,
+    note_commitment_tree_position: Position,
     nf: N,
 }
 
@@ -131,7 +132,7 @@ impl<N> WalletSaplingOutput<N> {
         account: AccountId,
         note: sapling::Note,
         is_change: bool,
-        witness: sapling::IncrementalWitness,
+        note_commitment_tree_position: Position,
         nf: N,
     ) -> Self {
         Self {
@@ -141,7 +142,7 @@ impl<N> WalletSaplingOutput<N> {
             account,
             note,
             is_change,
-            witness,
+            note_commitment_tree_position,
             nf,
         }
     }
@@ -164,11 +165,8 @@ impl<N> WalletSaplingOutput<N> {
     pub fn is_change(&self) -> bool {
         self.is_change
     }
-    pub fn witness(&self) -> &sapling::IncrementalWitness {
-        &self.witness
-    }
-    pub fn witness_mut(&mut self) -> &mut sapling::IncrementalWitness {
-        &mut self.witness
+    pub fn note_commitment_tree_position(&self) -> Position {
+        self.note_commitment_tree_position
     }
     pub fn nf(&self) -> &N {
         &self.nf
@@ -177,12 +175,13 @@ impl<N> WalletSaplingOutput<N> {
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
+#[derive(Debug)]
 pub struct ReceivedSaplingNote<NoteRef> {
     pub note_id: NoteRef,
     pub diversifier: sapling::Diversifier,
     pub note_value: Amount,
     pub rseed: sapling::Rseed,
-    pub witness: sapling::IncrementalWitness,
+    pub note_commitment_tree_position: Position,
 }
 
 impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedSaplingNote<NoteRef> {

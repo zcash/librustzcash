@@ -39,10 +39,20 @@ impl BlockHash {
     ///
     /// This function will panic if the slice is not exactly 32 bytes.
     pub fn from_slice(bytes: &[u8]) -> Self {
-        assert_eq!(bytes.len(), 32);
-        let mut hash = [0; 32];
-        hash.copy_from_slice(bytes);
-        BlockHash(hash)
+        Self::try_from_slice(bytes).unwrap()
+    }
+
+    /// Constructs a [`BlockHash`] from the given slice.
+    ///
+    /// Returns `None` if `bytes` has any length other than 32
+    pub fn try_from_slice(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() == 32 {
+            let mut hash = [0; 32];
+            hash.copy_from_slice(bytes);
+            Some(BlockHash(hash))
+        } else {
+            None
+        }
     }
 }
 
