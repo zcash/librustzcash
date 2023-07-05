@@ -35,8 +35,9 @@
 //! let mut db_data = testing::MockWalletDb::new(Network::TestNetwork);
 //!
 //! // 1) Download new CompactBlocks into block_source.
-//! //
-//! // 2) FIXME: Obtain necessary block metadata for continuity checking?
+//!
+//! // 2) If the chain tip has changed, run the chain validator on the blocks
+//! //    leading up to the chain tip.
 //! //
 //! // 3) Scan cached blocks.
 //! //
@@ -61,10 +62,10 @@ use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
-    scanning::{add_block_to_runner, check_continuity, scan_block_with_runner},
+    scanning::{add_block_to_runner, check_continuity, scan_block_with_runner, ScanError},
 };
 
-use super::BlockMetadata;
+use super::{BlockMetadata, WalletRead};
 
 pub mod error;
 use error::Error;
@@ -114,11 +115,69 @@ pub trait BlockSource {
     fn with_blocks<F, WalletErrT>(
         &self,
         from_height: Option<BlockHeight>,
-        limit: Option<u32>,
+        limit: Option<usize>,
         with_row: F,
     ) -> Result<(), error::Error<WalletErrT, Self::Error>>
     where
         F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
+}
+
+/// Verifies that the blocks at the wallet database's view of the chain tip correspond to
+/// blocks available from the block source and form a valid chain that connects to the
+/// `CompactBlock`s in the block_source database.
+///
+/// This function is built on the core assumption that the information provided in the
+/// block source is more likely to be accurate than the previously-scanned information.
+/// This follows from the design (and trust) assumption that the `lightwalletd` server
+/// provides accurate block information as of the time it was requested.
+///
+/// Arguments:
+/// - `block_source` Source of compact blocks
+/// - `data_db` Source of wallet chain tip data
+/// - `validation_depth` the number of blocks prior to the chain tip to validate against
+///   blocks available from the block source.
+/// - `limit` the maximum number of blocks that will be valididated. If `None`
+///   is provided, there will be no limit set to the validation and upper bound of the
+///   validation range will be the latest height present in the `block_source`.
+///
+/// Returns:
+/// - `Ok(())` if the combined chain is valid up to the given height and block hash.
+/// - `Err(Error::Scan(cause))` if the combined chain is invalid.
+/// - `Err(e)` if there was an error during validation unrelated to chain validity.
+pub fn validate_chain<DbT, BlockSourceT>(
+    block_source: &BlockSourceT,
+    data_db: &DbT,
+    validation_depth: usize,
+    limit: Option<usize>,
+) -> Result<(), Error<DbT::Error, BlockSourceT::Error>>
+where
+    BlockSourceT: BlockSource,
+    DbT: WalletRead,
+{
+    let tip_meta = data_db.chain_tip(validation_depth).map_err(Error::Wallet)?;
+
+    let mut tip_iter = tip_meta.iter().map(|m| (m.block_height(), m.block_hash()));
+    let mut validate_from = tip_iter.next();
+    block_source.with_blocks(validate_from.map(|(h, _)| h + 1), limit, move |block| {
+        if let Some((prev_height, prev_hash)) = validate_from {
+            if block.height() != prev_height + 1 {
+                return Err(Error::Scan(ScanError::BlockHeightDiscontinuity {
+                    prev_height,
+                    new_height: block.height(),
+                }));
+            } else if block.prev_hash() != prev_hash {
+                return Err(Error::Scan(ScanError::PrevHashMismatch {
+                    at_height: block.height(),
+                }));
+            }
+        }
+
+        validate_from = tip_iter
+            .next()
+            .or_else(|| Some((block.height(), block.hash())));
+
+        Ok(())
+    })
 }
 
 /// Scans at most `limit` new blocks added to the block source for any transactions received by the
@@ -145,7 +204,7 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     block_source: &BlockSourceT,
     data_db: &mut DbT,
     from_height: BlockHeight,
-    limit: u32,
+    limit: usize,
 ) -> Result<(), Error<DbT::Error, BlockSourceT::Error>>
 where
     ParamsT: consensus::Parameters + Send + 'static,
@@ -290,7 +349,7 @@ pub mod testing {
         fn with_blocks<F, DbErrT>(
             &self,
             _from_height: Option<BlockHeight>,
-            _limit: Option<u32>,
+            _limit: Option<usize>,
             _with_row: F,
         ) -> Result<(), Error<DbErrT, Infallible>>
         where

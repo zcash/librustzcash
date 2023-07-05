@@ -26,10 +26,14 @@ pub mod migrations;
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height.
+///
+/// # Panics
+///
+/// Panics if the provided `limit` value exceeds the range of a u32
 pub(crate) fn blockdb_with_blocks<F, DbErrT>(
     block_source: &BlockDb,
     from_height: Option<BlockHeight>,
-    limit: Option<u32>,
+    limit: Option<usize>,
     mut with_row: F,
 ) -> Result<(), Error<DbErrT, SqliteClientError>>
 where
@@ -52,7 +56,7 @@ where
     let mut rows = stmt_blocks
         .query(params![
             from_height.map_or(0u32, u32::from),
-            limit.unwrap_or(u32::max_value()),
+            limit.map_or(u32::max_value(), |l| u32::try_from(l).unwrap())
         ])
         .map_err(to_chain_error)?;
 
@@ -194,11 +198,15 @@ pub(crate) fn blockmetadb_find_block(
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height for which metadata is available.
+///
+/// # Panics
+///
+/// Panics if the provided `limit` value exceeds the range of a u32
 #[cfg(feature = "unstable")]
 pub(crate) fn fsblockdb_with_blocks<F, DbErrT>(
     cache: &FsBlockDb,
     from_height: Option<BlockHeight>,
-    limit: Option<u32>,
+    limit: Option<usize>,
     mut with_block: F,
 ) -> Result<(), Error<DbErrT, FsBlockDbError>>
 where
@@ -223,7 +231,7 @@ where
         .query_map(
             params![
                 from_height.map_or(0u32, u32::from),
-                limit.unwrap_or(u32::max_value()),
+                limit.map_or(u32::max_value(), |l| u32::try_from(l).unwrap()),
             ],
             |row| {
                 Ok(BlockMeta {
@@ -279,7 +287,7 @@ mod tests {
     use zcash_client_backend::{
         address::RecipientAddress,
         data_api::{
-            chain::scan_cached_blocks,
+            chain::{error::Error, scan_cached_blocks, validate_chain},
             wallet::{input_selection::GreedyInputSelector, spend},
             WalletRead, WalletWrite,
         },
@@ -329,6 +337,11 @@ mod tests {
 
         insert_into_cache(&db_cache, &cb);
 
+        // Cache-only chain should be valid
+        let validate_chain_result = validate_chain(&db_cache, &db_data, 1, Some(1));
+
+        assert_matches!(validate_chain_result, Ok(()));
+
         // Scan the cache
         scan_cached_blocks(
             &tests::network(),
@@ -338,6 +351,9 @@ mod tests {
             1,
         )
         .unwrap();
+
+        // Data-only chain should be valid
+        validate_chain(&db_cache, &db_data, 1, None).unwrap();
 
         // Create a second fake CompactBlock sending more value to the address
         let (cb2, _) = fake_compact_block(
@@ -350,6 +366,9 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb2);
 
+        // Data+cache chain should be valid
+        validate_chain(&db_cache, &db_data, 1, None).unwrap();
+
         // Scan the cache again
         scan_cached_blocks(
             &tests::network(),
@@ -359,6 +378,9 @@ mod tests {
             1,
         )
         .unwrap();
+
+        // Data-only chain should be valid
+        validate_chain(&db_cache, &db_data, 1, None).unwrap();
     }
 
     #[test]
@@ -404,6 +426,9 @@ mod tests {
         )
         .unwrap();
 
+        // Data-only chain should be valid
+        validate_chain(&db_cache, &db_data, 1, None).unwrap();
+
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let (cb3, _) = fake_compact_block(
             sapling_activation_height() + 2,
@@ -423,6 +448,9 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb3);
         insert_into_cache(&db_cache, &cb4);
+
+        let val_result = validate_chain(&db_cache, &db_data, 1, None);
+        assert_matches!(val_result, Err(Error::Scan(e)) if e.at_height() == sapling_activation_height() + 2);
 
         // Data+cache chain should be invalid at the data/cache boundary
         assert_matches!(
@@ -480,6 +508,9 @@ mod tests {
         )
         .unwrap();
 
+        // Data-only chain should be valid
+        validate_chain(&db_cache, &db_data, 1, None).unwrap();
+
         // Create more fake CompactBlocks that contain a reorg
         let (cb3, _) = fake_compact_block(
             sapling_activation_height() + 2,
@@ -499,6 +530,10 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb3);
         insert_into_cache(&db_cache, &cb4);
+
+        // Data+cache chain should be invalid inside the cache
+        let val_result = validate_chain(&db_cache, &db_data, 1, None);
+        assert_matches!(val_result, Err(Error::Scan(e)) if e.at_height() == sapling_activation_height() + 3);
 
         // Data+cache chain should be invalid inside the cache
         assert_matches!(

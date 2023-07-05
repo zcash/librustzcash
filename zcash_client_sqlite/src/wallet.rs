@@ -529,6 +529,62 @@ pub(crate) fn get_sent_memo(
         .transpose()
 }
 
+pub(crate) fn chain_tip(
+    conn: &rusqlite::Connection,
+    depth: usize,
+) -> Result<Vec<BlockMetadata>, SqliteClientError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
+        FROM blocks
+        ORDER BY height DESC
+        LIMIT :depth",
+    )?;
+
+    let rows = stmt.query(named_params![":depth": depth])?;
+    rows.mapped(|row| {
+        let height: u32 = row.get(0)?;
+        let block_hash: Vec<u8> = row.get(1)?;
+        let sapling_tree_size: Option<u32> = row.get(2)?;
+        let sapling_tree: Vec<u8> = row.get(3)?;
+        Ok((
+            BlockHeight::from(height),
+            block_hash,
+            sapling_tree_size,
+            sapling_tree,
+        ))
+    })
+    .map(|row| {
+        row.map_err(SqliteClientError::from)
+            .and_then(parse_block_metadata)
+    })
+    .scan(None, |prev: &mut Option<BlockMetadata>, res| {
+        if let Some(successor) = prev {
+            // we need to avoid swallowing parse errors, so we continue the scan if we hit one, and
+            // only stop if we successfully find a discontinuity
+            match res {
+                Ok(m) => {
+                    if m.block_height() + 1 == successor.block_height() {
+                        *prev = Some(m);
+                        Some(res)
+                    } else {
+                        // terminate if we hit a gap in the range
+                        None
+                    }
+                }
+                err => Some(err),
+            }
+        } else {
+            Some(res)
+        }
+    })
+    .collect::<Result<Vec<BlockMetadata>, _>>()
+    .map(|mut chain_tip| {
+        // return in increasing block height order
+        chain_tip.reverse();
+        chain_tip
+    })
+}
+
 /// Returns the minimum and maximum heights for blocks stored in the wallet database.
 pub(crate) fn block_height_extrema(
     conn: &rusqlite::Connection,
@@ -581,8 +637,8 @@ pub(crate) fn block_metadata(
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
         "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
-            FROM blocks
-            WHERE height = :block_height",
+        FROM blocks
+        WHERE height = :block_height",
         named_params![":block_height": u32::from(block_height)],
         |row| {
             let height: u32 = row.get(0)?;

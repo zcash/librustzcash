@@ -63,6 +63,13 @@ pub trait WalletRead {
     /// directly.
     type TxRef: Copy + Debug + Eq + Ord;
 
+    /// Returns the wallet's view of the chain tip to the given depth.
+    ///
+    /// This may return fewer than `depth` blocks worth of data if insufficient block data is
+    /// available in the wallet database to provide metadata contiguous blocks to the requested
+    /// depth. Metadata values for returned blocks are sequential and in height order.
+    fn chain_tip(&self, depth: usize) -> Result<Vec<BlockMetadata>, Self::Error>;
+
     /// Returns the minimum and maximum block heights for stored blocks.
     ///
     /// This will return `Ok(None)` if no block data is present in the database.
@@ -616,6 +623,10 @@ pub mod testing {
         type Error = ();
         type NoteRef = u32;
         type TxRef = TxId;
+
+        fn chain_tip(&self, _depth: usize) -> Result<Vec<BlockMetadata>, Self::Error> {
+            Ok(vec![])
+        }
 
         fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
             Ok(None)

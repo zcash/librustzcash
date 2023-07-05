@@ -15,9 +15,9 @@ and this library adheres to Rust's notion of
   - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
   - `ScannedBlock`
   - `ShieldedProtocol`
-  - `WalletRead::{block_metadata, block_fully_scanned, suggest_scan_ranges}`
-  - `WalletWrite::put_block`
   - `WalletCommitmentTrees`
+  - `WalletRead::{chain_tip, block_metadata, block_fully_scanned, suggest_scan_ranges}`
+  - `WalletWrite::put_block`
   - `chain::CommitmentTreeRoot`
   - `testing::MockWalletDb::new`
   - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
@@ -36,8 +36,13 @@ and this library adheres to Rust's notion of
     and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
   - `WalletRead::get_target_and_anchor_heights` now takes its argument as a `NonZeroU32`
   - `chain::scan_cached_blocks` now takes a `from_height` argument that
-    permits the caller to control the starting position of the scan range
+    permits the caller to control the starting position of the scan range.
     In addition, the `limit` parameter is now required.
+  - `chain::validate_chain` now takes a `validation_depth` parameter instead
+    of an explicit block height and block hash to begin validating from. It will
+    now internally always validate starting at the wallet's view of the chain tip.
+  - `chain::BlockSource::with_blocks` now takes its limit as an `Option<usize>`
+    instead of `Option<u32>`.
   - A new `CommitmentTree` variant has been added to `data_api::error::Error`
   - `data_api::wallet::{create_spend_to_address, create_proposed_transaction,
     shield_transparent_funds}` all now require that `WalletCommitmentTrees` be
@@ -81,8 +86,6 @@ and this library adheres to Rust's notion of
     feature flag, has been modified by the addition of a `sapling_tree` property. 
   - `wallet::input_selection`:
     - `Proposal::target_height` (use `Proposal::min_target_height` instead).
-- `zcash_client_backend::data_api::chain::validate_chain` TODO: document how
-  to handle validation given out-of-order blocks.
 - `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been 
   replaced by `zcash_client_backend::scanning::ScanError`
 - `zcash_client_backend::wallet::WalletSaplingOutput::{witness, witness_mut}`

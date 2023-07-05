@@ -141,6 +141,18 @@ pub enum ScanError {
     },
 }
 
+impl ScanError {
+    /// Returns the block height at which the scan error occurred
+    pub fn at_height(&self) -> BlockHeight {
+        match self {
+            ScanError::PrevHashMismatch { at_height } => *at_height,
+            ScanError::BlockHeightDiscontinuity { new_height, .. } => *new_height,
+            ScanError::TreeSizeMismatch { at_height, .. } => *at_height,
+            ScanError::TreeSizeUnknown { at_height, .. } => *at_height,
+        }
+    }
+}
+
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {

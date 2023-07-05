@@ -155,6 +155,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     type NoteRef = NoteId;
     type TxRef = i64;
 
+    fn chain_tip(&self, depth: usize) -> Result<Vec<BlockMetadata>, Self::Error> {
+        wallet::chain_tip(self.conn.borrow(), depth).map_err(SqliteClientError::from)
+    }
+
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         wallet::block_height_extrema(self.conn.borrow()).map_err(SqliteClientError::from)
     }
@@ -732,7 +736,7 @@ impl BlockSource for BlockDb {
     fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
-        limit: Option<u32>,
+        limit: Option<usize>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
@@ -910,7 +914,7 @@ impl BlockSource for FsBlockDb {
     fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
-        limit: Option<u32>,
+        limit: Option<usize>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
