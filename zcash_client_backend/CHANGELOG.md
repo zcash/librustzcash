@@ -17,8 +17,9 @@ and this library adheres to Rust's notion of
   - `ShieldedProtocol`
   - `WalletCommitmentTrees`
   - `WalletRead::{block_metadata, block_fully_scanned, suggest_scan_ranges}`
-  - `WalletWrite::put_blocks`
+  - `WalletWrite::{put_blocks, update_chain_tip}`
   - `chain::CommitmentTreeRoot`
+  - `scanning` A new module containing types required for `suggest_scan_ranges`
   - `testing::MockWalletDb::new`
   - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
 - `zcash_client_backend::wallet::WalletSaplingOutput::note_commitment_tree_position`
@@ -36,8 +37,10 @@ and this library adheres to Rust's notion of
     and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
   - `WalletRead::get_target_and_anchor_heights` now takes its argument as a `NonZeroU32`
   - `chain::scan_cached_blocks` now takes a `from_height` argument that
-    permits the caller to control the starting position of the scan range
-    In addition, the `limit` parameter is now required.
+    permits the caller to control the starting position of the scan range.
+    In addition, the `limit` parameter is now required and has type `usize`.
+  - `chain::BlockSource::with_blocks` now takes its limit as an `Option<usize>`
+    instead of `Option<u32>`.
   - A new `CommitmentTree` variant has been added to `data_api::error::Error`
   - `data_api::wallet::{create_spend_to_address, create_proposed_transaction,
     shield_transparent_funds}` all now require that `WalletCommitmentTrees` be
@@ -67,7 +70,8 @@ and this library adheres to Rust's notion of
   method now takes an optional `BlockMetadata` argument instead of a base commitment
   tree and incremental witnesses for each previously-known note. In addition, the
   return type has now been updated to return a `Result<ScannedBlock, ScanError>`.
-
+- `proto/service.proto` has been updated to include the new GRPC endpoints
+  supported by lightwalletd v0.4.15 
 
 ### Removed
 - `zcash_client_backend::data_api`:
@@ -81,8 +85,6 @@ and this library adheres to Rust's notion of
     feature flag, has been modified by the addition of a `sapling_tree` property. 
   - `wallet::input_selection`:
     - `Proposal::target_height` (use `Proposal::min_target_height` instead).
-- `zcash_client_backend::data_api::chain::validate_chain` TODO: document how
-  to handle validation given out-of-order blocks.
 - `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been 
   replaced by `zcash_client_backend::scanning::ScanError`
 - `zcash_client_backend::wallet::WalletSaplingOutput::{witness, witness_mut}`

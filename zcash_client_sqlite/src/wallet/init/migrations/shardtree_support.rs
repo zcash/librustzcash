@@ -11,7 +11,10 @@ use schemer_rusqlite::RusqliteMigration;
 use shardtree::ShardTree;
 use uuid::Uuid;
 
-use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+use zcash_client_backend::data_api::{
+    scanning::{ScanPriority, ScanRange},
+    SAPLING_SHARD_HEIGHT,
+};
 use zcash_primitives::{
     consensus::BlockHeight,
     merkle_tree::{read_commitment_tree, read_incremental_witness},
@@ -20,8 +23,10 @@ use zcash_primitives::{
 
 use crate::{
     wallet::{
+        block_height_extrema,
         commitment_tree::SqliteShardStore,
         init::{migrations::received_notes_nullable_nf, WalletMigrationError},
+        scanning::insert_queue_entries,
     },
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
@@ -182,6 +187,27 @@ impl RusqliteMigration for Migration {
 
                 shard_tree.insert_witness_nodes(witness, BlockHeight::from(block_height))?;
             }
+        }
+
+        // Establish the scan queue & wallet history table
+        transaction.execute_batch(
+            "CREATE TABLE scan_queue (
+                block_range_start INTEGER NOT NULL,
+                block_range_end INTEGER NOT NULL,
+                priority INTEGER NOT NULL,
+                CONSTRAINT range_start_uniq UNIQUE (block_range_start),
+                CONSTRAINT range_end_uniq UNIQUE (block_range_end),
+                CONSTRAINT range_bounds_order CHECK (
+                    block_range_start < block_range_end
+                )
+            );",
+        )?;
+
+        if let Some((start, end)) = block_height_extrema(transaction)? {
+            insert_queue_entries(
+                transaction,
+                Some(ScanRange::from_parts(start..end, ScanPriority::Historic)).iter(),
+            )?;
         }
 
         Ok(())

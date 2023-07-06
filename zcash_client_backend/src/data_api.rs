@@ -1,9 +1,9 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
+use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
-use std::{cmp, ops::Range};
 
 use incrementalmerkletree::Retention;
 use secrecy::SecretVec;
@@ -29,9 +29,11 @@ use crate::{
 };
 
 use self::chain::CommitmentTreeRoot;
+use self::scanning::ScanRange;
 
 pub mod chain;
 pub mod error;
+pub mod scanning;
 pub mod wallet;
 
 pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
@@ -88,11 +90,7 @@ pub trait WalletRead {
     /// to the wallet are detected.
     ///
     /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-    fn suggest_scan_ranges(
-        &self,
-        batch_size: usize,
-        limit: usize,
-    ) -> Result<Vec<Range<BlockHeight>>, Self::Error>;
+    fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error>;
 
     /// Returns the default target height (for the block in which a new
     /// transaction would be mined) and anchor height (to use for a new
@@ -501,6 +499,15 @@ pub trait WalletWrite: WalletRead {
         block: Vec<ScannedBlock<sapling::Nullifier>>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error>;
 
+    /// Updates the wallet's view of the blockchain.
+    ///
+    /// This method is used to provide the wallet with information about the state of the
+    /// blockchain, and detect any previously scanned that needs to be re-validated before
+    /// proceeding with scanning. It should be called at wallet startup prior to calling
+    /// [`WalletRead::suggest_scan_ranges`] in order to provide the wallet with the information it
+    /// needs to correctly prioritize scanning operations.
+    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error>;
+
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
         &mut self,
@@ -569,7 +576,7 @@ pub mod testing {
     use incrementalmerkletree::Address;
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{memory::MemoryShardStore, ShardTree, ShardTreeError};
-    use std::{collections::HashMap, convert::Infallible, ops::Range};
+    use std::{collections::HashMap, convert::Infallible};
 
     use zcash_primitives::{
         block::BlockHash,
@@ -591,9 +598,9 @@ pub mod testing {
     };
 
     use super::{
-        chain::CommitmentTreeRoot, BlockMetadata, DecryptedTransaction, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        chain::CommitmentTreeRoot, scanning::ScanRange, BlockMetadata, DecryptedTransaction,
+        NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -634,11 +641,7 @@ pub mod testing {
             Ok(None)
         }
 
-        fn suggest_scan_ranges(
-            &self,
-            _batch_size: usize,
-            _limit: usize,
-        ) -> Result<Vec<Range<BlockHeight>>, Self::Error> {
+        fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
             Ok(vec![])
         }
 
@@ -778,6 +781,10 @@ pub mod testing {
             _blocks: Vec<ScannedBlock<sapling::Nullifier>>,
         ) -> Result<Vec<Self::NoteRef>, Self::Error> {
             Ok(vec![])
+        }
+
+        fn update_chain_tip(&mut self, _tip_height: BlockHeight) -> Result<(), Self::Error> {
+            Ok(())
         }
 
         fn store_decrypted_tx(

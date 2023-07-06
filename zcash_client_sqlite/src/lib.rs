@@ -36,7 +36,6 @@ use either::Either;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, io, ops::Range, path::Path};
-use wallet::commitment_tree::put_shard_roots;
 
 use incrementalmerkletree::Position;
 use shardtree::{ShardTree, ShardTreeError};
@@ -58,6 +57,7 @@ use zcash_client_backend::{
     data_api::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
+        scanning::ScanRange,
         BlockMetadata, DecryptedTransaction, NullifierQuery, PoolType, Recipient, ScannedBlock,
         SentTransaction, ShieldedProtocol, WalletCommitmentTrees, WalletRead, WalletWrite,
         SAPLING_SHARD_HEIGHT,
@@ -80,12 +80,17 @@ use {
 pub mod chain;
 pub mod error;
 pub mod serialization;
+
 pub mod wallet;
+use wallet::commitment_tree::put_shard_roots;
 
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
 /// this delta from the chain tip to be pruned.
 pub(crate) const PRUNING_DEPTH: u32 = 100;
+
+/// The number of blocks to re-verify when the chain tip is updated.
+pub(crate) const VALIDATION_DEPTH: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
@@ -167,12 +172,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::block_fully_scanned(self.conn.borrow())
     }
 
-    fn suggest_scan_ranges(
-        &self,
-        _batch_size: usize,
-        _limit: usize,
-    ) -> Result<Vec<Range<BlockHeight>>, Self::Error> {
-        todo!()
+    fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
+        wallet::scanning::suggest_scan_ranges(self.conn.borrow(), None)
+            .map_err(SqliteClientError::from)
     }
 
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
@@ -401,16 +403,19 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         blocks: Vec<ScannedBlock<sapling::Nullifier>>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error> {
         self.transactionally(|wdb| {
-            let start_position = blocks.first().map(|block| {
-                Position::from(
-                    u64::from(block.metadata().sapling_tree_size())
-                        - u64::try_from(block.sapling_commitments().len()).unwrap(),
+            let start_positions = blocks.first().map(|block| {
+                (
+                    block.height(),
+                    Position::from(
+                        u64::from(block.metadata().sapling_tree_size())
+                            - u64::try_from(block.sapling_commitments().len()).unwrap(),
+                    ),
                 )
             });
             let mut wallet_note_ids = vec![];
             let mut sapling_commitments = vec![];
             let mut end_height = None;
-
+            let mut note_positions = vec![];
             for block in blocks.into_iter() {
                 if end_height.iter().any(|prev| block.height() != *prev + 1) {
                     return Err(SqliteClientError::NonSequentialBlocks);
@@ -442,13 +447,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     }
                 }
 
+                note_positions.extend(block.transactions().iter().flat_map(|wtx| {
+                    wtx.sapling_outputs
+                        .iter()
+                        .map(|out| out.note_commitment_tree_position())
+                }));
+
                 end_height = Some(block.height());
                 sapling_commitments.extend(block.into_sapling_commitments().into_iter());
             }
 
             // We will have a start position and an end height in all cases where `blocks` is
             // non-empty.
-            if let Some((start_position, end_height)) = start_position.zip(end_height) {
+            if let Some(((start_height, start_position), end_height)) =
+                start_positions.zip(end_height)
+            {
                 // Update the Sapling note commitment tree with all newly read note commitments
                 let mut sapling_commitments = sapling_commitments.into_iter();
                 wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
@@ -458,10 +471,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                 // Update now-expired transactions that didn't get mined.
                 wallet::update_expired_notes(wdb.conn.0, end_height)?;
+
+                wallet::scanning::scan_complete(
+                    wdb.conn.0,
+                    &wdb.params,
+                    Range {
+                        start: start_height,
+                        end: end_height + 1,
+                    },
+                    &note_positions,
+                )?;
             }
 
             Ok(wallet_note_ids)
         })
+    }
+
+    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+        let tx = self.conn.transaction()?;
+        wallet::scanning::update_chain_tip(&tx, &self.params, tip_height)?;
+        tx.commit()?;
+        Ok(())
     }
 
     fn store_decrypted_tx(
@@ -750,7 +780,7 @@ impl BlockSource for BlockDb {
     fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
-        limit: Option<u32>,
+        limit: Option<usize>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
@@ -928,7 +958,7 @@ impl BlockSource for FsBlockDb {
     fn with_blocks<F, DbErrT>(
         &self,
         from_height: Option<BlockHeight>,
-        limit: Option<u32>,
+        limit: Option<usize>,
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where

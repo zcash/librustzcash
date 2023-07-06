@@ -463,6 +463,16 @@ mod tests {
                 FOREIGN KEY (block) REFERENCES blocks(height),
                 CONSTRAINT witness_height UNIQUE (note, block)
             )",
+            "CREATE TABLE scan_queue (
+                block_range_start INTEGER NOT NULL,
+                block_range_end INTEGER NOT NULL,
+                priority INTEGER NOT NULL,
+                CONSTRAINT range_start_uniq UNIQUE (block_range_start),
+                CONSTRAINT range_end_uniq UNIQUE (block_range_end),
+                CONSTRAINT range_bounds_order CHECK (
+                    block_range_start < block_range_end
+                )
+            )",
             "CREATE TABLE schemer_migrations (
                 id blob PRIMARY KEY
             )",

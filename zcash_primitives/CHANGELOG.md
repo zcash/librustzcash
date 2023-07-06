@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_primitives::consensus::BlockHeight::saturating_sub`
 - `zcash_primitives::transaction::builder`:
   - `Builder::add_orchard_spend`
   - `Builder::add_orchard_output`

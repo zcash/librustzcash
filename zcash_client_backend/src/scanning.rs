@@ -110,7 +110,7 @@ impl ScanningKey for SaplingIvk {
 }
 
 /// Errors that may occur in chain scanning
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum ScanError {
     /// The hash of the parent block given by a proposed new chain tip does not match the hash of
     /// the current chain tip.
@@ -141,21 +141,46 @@ pub enum ScanError {
     },
 }
 
+impl ScanError {
+    /// Returns whether this error is the result of a failed continuity check
+    pub fn is_continuity_error(&self) -> bool {
+        use ScanError::*;
+        match self {
+            PrevHashMismatch { .. } => true,
+            BlockHeightDiscontinuity { .. } => true,
+            TreeSizeMismatch { .. } => true,
+            TreeSizeUnknown { .. } => false,
+        }
+    }
+
+    /// Returns the block height at which the scan error occurred
+    pub fn at_height(&self) -> BlockHeight {
+        use ScanError::*;
+        match self {
+            PrevHashMismatch { at_height } => *at_height,
+            BlockHeightDiscontinuity { new_height, .. } => *new_height,
+            TreeSizeMismatch { at_height, .. } => *at_height,
+            TreeSizeUnknown { at_height, .. } => *at_height,
+        }
+    }
+}
+
 impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use ScanError::*;
         match &self {
-            ScanError::PrevHashMismatch { at_height } => write!(
+            PrevHashMismatch { at_height } => write!(
                 f,
                 "The parent hash of proposed block does not correspond to the block hash at height {}.",
                 at_height
             ),
-            ScanError::BlockHeightDiscontinuity { prev_height, new_height } => {
+            BlockHeightDiscontinuity { prev_height, new_height } => {
                 write!(f, "Block height discontinuity at height {}; next height is : {}", prev_height, new_height)
             }
-            ScanError::TreeSizeMismatch { protocol, at_height, given, computed } => {
+            TreeSizeMismatch { protocol, at_height, given, computed } => {
                 write!(f, "The {:?} note commitment tree size provided by a compact block did not match the expected size at height {}; given {}, expected {}", protocol, at_height, given, computed)
             }
-            ScanError::TreeSizeUnknown { protocol, at_height } => {
+            TreeSizeUnknown { protocol, at_height } => {
                 write!(f, "Unable to determine {:?} note commitment tree size at height {}", protocol, at_height)
             }
         }
