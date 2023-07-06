@@ -153,7 +153,7 @@ impl fmt::Display for ScanError {
                 write!(f, "Block height discontinuity at height {}; next height is : {}", prev_height, new_height)
             }
             ScanError::TreeSizeMismatch { protocol, at_height, given, computed } => {
-                write!(f, "The the {:?} note commitment tree size provided by a compact block did not match the expected size at height {}; given {}, expected {}", protocol, at_height, given, computed)
+                write!(f, "The {:?} note commitment tree size provided by a compact block did not match the expected size at height {}; given {}, expected {}", protocol, at_height, given, computed)
             }
             ScanError::TreeSizeUnknown { protocol, at_height } => {
                 write!(f, "Unable to determine {:?} note commitment tree size at height {}", protocol, at_height)

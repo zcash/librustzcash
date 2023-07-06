@@ -51,6 +51,7 @@
 //! ```
 
 use zcash_primitives::{
+    block::BlockHash,
     consensus::{self, BlockHeight},
     sapling::{self, note_encryption::PreparedIncomingViewingKey},
     zip32::Scope,
@@ -196,6 +197,19 @@ where
             // check block continuity
             if let Some(scan_error) = check_continuity(&block, continuity_check_metadata.as_ref()) {
                 return Err(Error::Scan(scan_error));
+            }
+
+            if from_height == BlockHeight::from(0) {
+                // We can always derive a valid `continuity_check_metadata` for the
+                // genesis block, even if the block source doesn't have
+                // `sapling_commitment_tree_size`. So briefly set it to a dummy value that
+                // ensures the `map` below produces the correct genesis block value.
+                assert!(continuity_check_metadata.is_none());
+                continuity_check_metadata = Some(BlockMetadata::from_parts(
+                    BlockHeight::from(0),
+                    BlockHash([0; 32]),
+                    0,
+                ));
             }
             continuity_check_metadata = continuity_check_metadata.as_ref().map(|m| {
                 BlockMetadata::from_parts(
