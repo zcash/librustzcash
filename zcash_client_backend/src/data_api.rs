@@ -568,7 +568,7 @@ pub trait WalletCommitmentTrees {
 pub mod testing {
     use incrementalmerkletree::Address;
     use secrecy::{ExposeSecret, SecretVec};
-    use shardtree::{MemoryShardStore, ShardTree, ShardTreeError};
+    use shardtree::{memory::MemoryShardStore, ShardTree, ShardTreeError};
     use std::{collections::HashMap, convert::Infallible, ops::Range};
 
     use zcash_primitives::{
