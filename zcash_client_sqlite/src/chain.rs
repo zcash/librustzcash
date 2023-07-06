@@ -56,7 +56,7 @@ where
     let mut rows = stmt_blocks
         .query(params![
             from_height.map_or(0u32, u32::from),
-            limit.map_or(u32::max_value(), |l| u32::try_from(l).unwrap())
+            limit.and_then(|l| u32::try_from(l).ok()).unwrap_or(u32::MAX)
         ])
         .map_err(to_chain_error)?;
 

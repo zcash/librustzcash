@@ -136,7 +136,7 @@ pub trait BlockSource {
 /// - `data_db` Source of wallet chain tip data
 /// - `validation_depth` the number of blocks prior to the chain tip to validate against
 ///   blocks available from the block source.
-/// - `limit` the maximum number of blocks that will be valididated. If `None`
+/// - `limit` the maximum number of blocks that will be validated. If `None`
 ///   is provided, there will be no limit set to the validation and upper bound of the
 ///   validation range will be the latest height present in the `block_source`.
 ///

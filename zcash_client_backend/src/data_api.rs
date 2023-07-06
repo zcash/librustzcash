@@ -63,7 +63,8 @@ pub trait WalletRead {
     /// directly.
     type TxRef: Copy + Debug + Eq + Ord;
 
-    /// Returns the wallet's view of the chain tip to the given depth.
+    /// Returns the wallet's view of the chain tip to the given depth, in ascending
+    /// block height order.
     ///
     /// This may return fewer than `depth` blocks worth of data if insufficient block data is
     /// available in the wallet database to provide metadata contiguous blocks to the requested
