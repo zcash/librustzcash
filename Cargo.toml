@@ -19,6 +19,6 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "082109deacf8611ee7917732e19b56158bda96d5" }
-shardtree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "082109deacf8611ee7917732e19b56158bda96d5" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "5da41a6bbb44290e353ee4b38bcafe37ffe79ce8" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "67111e29403c33f2e36d6924167f1d5f04ad0fc2" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "67111e29403c33f2e36d6924167f1d5f04ad0fc2" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "6ef89d5f154de2cf7b7dd87edb8d8c49158beebb" }
