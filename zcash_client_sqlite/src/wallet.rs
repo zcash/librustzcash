@@ -1100,7 +1100,7 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
 /// as expired, up to the given block height.
 pub(crate) fn update_expired_notes(
     conn: &rusqlite::Connection,
-    height: BlockHeight,
+    expiry_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_update_expired = conn.prepare_cached(
         "UPDATE sapling_received_notes SET spent = NULL WHERE EXISTS (
@@ -1108,7 +1108,7 @@ pub(crate) fn update_expired_notes(
             WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
         )",
     )?;
-    stmt_update_expired.execute([u32::from(height)])?;
+    stmt_update_expired.execute([u32::from(expiry_height)])?;
     Ok(())
 }
 

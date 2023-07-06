@@ -394,53 +394,71 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         )
     }
 
-    #[tracing::instrument(skip_all, fields(height = u32::from(block.height())))]
+    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height()))))]
     #[allow(clippy::type_complexity)]
-    fn put_block(
+    fn put_blocks(
         &mut self,
-        block: ScannedBlock<sapling::Nullifier>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier>>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error> {
         self.transactionally(|wdb| {
-            // Insert the block into the database.
-            wallet::put_block(
-                wdb.conn.0,
-                block.height(),
-                block.block_hash(),
-                block.block_time(),
-                block.metadata().sapling_tree_size(),
-            )?;
-
+            let start_position = blocks.first().map(|block| {
+                Position::from(
+                    u64::from(block.metadata().sapling_tree_size())
+                        - u64::try_from(block.sapling_commitments().len()).unwrap(),
+                )
+            });
             let mut wallet_note_ids = vec![];
-            for tx in block.transactions() {
-                let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
+            let mut sapling_commitments = vec![];
+            let mut end_height = None;
 
-                // Mark notes as spent and remove them from the scanning cache
-                for spend in &tx.sapling_spends {
-                    wallet::sapling::mark_sapling_note_spent(wdb.conn.0, tx_row, spend.nf())?;
+            for block in blocks.into_iter() {
+                if end_height.iter().any(|prev| block.height() != *prev + 1) {
+                    return Err(SqliteClientError::NonSequentialBlocks);
                 }
 
-                for output in &tx.sapling_outputs {
-                    let received_note_id =
-                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_row)?;
+                // Insert the block into the database.
+                wallet::put_block(
+                    wdb.conn.0,
+                    block.height(),
+                    block.block_hash(),
+                    block.block_time(),
+                    block.metadata().sapling_tree_size(),
+                )?;
 
-                    // Save witness for note.
-                    wallet_note_ids.push(received_note_id);
+                for tx in block.transactions() {
+                    let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
+
+                    // Mark notes as spent and remove them from the scanning cache
+                    for spend in &tx.sapling_spends {
+                        wallet::sapling::mark_sapling_note_spent(wdb.conn.0, tx_row, spend.nf())?;
+                    }
+
+                    for output in &tx.sapling_outputs {
+                        let received_note_id =
+                            wallet::sapling::put_received_note(wdb.conn.0, output, tx_row)?;
+
+                        // Save witness for note.
+                        wallet_note_ids.push(received_note_id);
+                    }
                 }
+
+                end_height = Some(block.height());
+                sapling_commitments.extend(block.into_sapling_commitments().into_iter());
             }
 
-            let block_height = block.height();
-            let sapling_tree_size = block.metadata().sapling_tree_size();
-            let sapling_commitments_len = block.sapling_commitments().len();
-            let mut sapling_commitments = block.into_sapling_commitments().into_iter();
-            wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
-                let start_position = Position::from(u64::from(sapling_tree_size))
-                    - u64::try_from(sapling_commitments_len).unwrap();
-                sapling_tree.batch_insert(start_position, &mut sapling_commitments)?;
-                Ok(())
-            })?;
+            // We will have a start position and an end height in all cases where `blocks` is
+            // non-empty.
+            if let Some((start_position, end_height)) = start_position.zip(end_height) {
+                // Update the Sapling note commitment tree with all newly read note commitments
+                let mut sapling_commitments = sapling_commitments.into_iter();
+                wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
+                    sapling_tree.batch_insert(start_position, &mut sapling_commitments)?;
+                    Ok(())
+                })?;
 
-            // Update now-expired transactions that didn't get mined.
-            wallet::update_expired_notes(wdb.conn.0, block_height)?;
+                // Update now-expired transactions that didn't get mined.
+                wallet::update_expired_notes(wdb.conn.0, end_height)?;
+            }
 
             Ok(wallet_note_ids)
         })

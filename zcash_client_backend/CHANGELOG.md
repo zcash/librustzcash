@@ -15,9 +15,9 @@ and this library adheres to Rust's notion of
   - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
   - `ScannedBlock`
   - `ShieldedProtocol`
-  - `WalletRead::{block_metadata, block_fully_scanned, suggest_scan_ranges}`
-  - `WalletWrite::put_block`
   - `WalletCommitmentTrees`
+  - `WalletRead::{block_metadata, block_fully_scanned, suggest_scan_ranges}`
+  - `WalletWrite::put_blocks`
   - `chain::CommitmentTreeRoot`
   - `testing::MockWalletDb::new`
   - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
@@ -75,7 +75,7 @@ and this library adheres to Rust's notion of
   - `WalletRead::{get_commitment_tree, get_witnesses}` have been removed 
     without replacement. The utility of these methods is now subsumed
     by those available from the `WalletCommitmentTrees` trait.
-  - `WalletWrite::advance_by_block` (use `WalletWrite::put_block` instead).
+  - `WalletWrite::advance_by_block` (use `WalletWrite::put_blocks` instead).
   - `PrunedBlock` has been replaced by `ScannedBlock`
   - `testing::MockWalletDb`, which is available under the `test-dependencies`
     feature flag, has been modified by the addition of a `sapling_tree` property. 
