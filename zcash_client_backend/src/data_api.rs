@@ -494,6 +494,8 @@ pub trait WalletWrite: WalletRead {
     /// Updates the state of the wallet database by persisting the provided block information,
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
+    ///
+    /// `blocks` must be sequential, in order of increasing block height
     fn put_blocks(
         &mut self,
         block: Vec<ScannedBlock<sapling::Nullifier>>,

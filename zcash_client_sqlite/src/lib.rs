@@ -412,6 +412,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let mut end_height = None;
 
             for block in blocks.into_iter() {
+                if end_height.iter().any(|prev| block.height() != *prev + 1) {
+                    return Err(SqliteClientError::NonSequentialBlocks);
+                }
+
                 // Insert the block into the database.
                 wallet::put_block(
                     wdb.conn.0,

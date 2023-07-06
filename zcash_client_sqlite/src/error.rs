@@ -57,6 +57,9 @@ pub enum SqliteClientError {
     /// different hash. This indicates that a required rewind was not performed.
     BlockConflict(BlockHeight),
 
+    /// A range of blocks provided to the database as a unit was non-sequential
+    NonSequentialBlocks,
+
     /// A requested rewind would violate invariants of the storage layer. The payload returned with
     /// this error is (safe rewind height, requested height).
     RequestedRewindInvalid(BlockHeight, BlockHeight),
@@ -118,6 +121,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::Io(e) => write!(f, "{}", e),
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
+            SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
