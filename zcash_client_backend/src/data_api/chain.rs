@@ -237,6 +237,7 @@ where
 
     batch_runner.flush();
 
+    let mut scanned_blocks = vec![];
     block_source.with_blocks::<_, DbT::Error>(
         Some(from_height),
         Some(limit),
@@ -265,11 +266,12 @@ where
             }));
 
             prior_block_metadata = Some(*scanned_block.metadata());
-            data_db.put_block(scanned_block).map_err(Error::Wallet)?;
+            scanned_blocks.push(scanned_block);
             Ok(())
         },
     )?;
 
+    data_db.put_blocks(scanned_blocks).map_err(Error::Wallet)?;
     Ok(())
 }
 

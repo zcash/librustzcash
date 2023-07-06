@@ -494,9 +494,9 @@ pub trait WalletWrite: WalletRead {
     /// Updates the state of the wallet database by persisting the provided block information,
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
-    fn put_block(
+    fn put_blocks(
         &mut self,
-        block: ScannedBlock<sapling::Nullifier>,
+        block: Vec<ScannedBlock<sapling::Nullifier>>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
@@ -771,9 +771,9 @@ pub mod testing {
         }
 
         #[allow(clippy::type_complexity)]
-        fn put_block(
+        fn put_blocks(
             &mut self,
-            _block: ScannedBlock<sapling::Nullifier>,
+            _blocks: Vec<ScannedBlock<sapling::Nullifier>>,
         ) -> Result<Vec<Self::NoteRef>, Self::Error> {
             Ok(vec![])
         }
