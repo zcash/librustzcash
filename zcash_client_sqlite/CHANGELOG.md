@@ -28,6 +28,9 @@ and this library adheres to Rust's notion of
 - Fixed an off-by-one error in the `BlockSource` implementation for the SQLite-backed
  `BlockDb` block database which could result in blocks being skipped at the start of
  scan ranges.
+- `WalletDb::get_transaction` no longer returns an error when called on a transaction
+  that has not yet been mined, unless the transaction's consensus branch ID cannot be
+  determined by other means.
 
 ## [0.7.1] - 2023-05-17
 
