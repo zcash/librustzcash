@@ -66,6 +66,35 @@ use crate::{
 pub mod error;
 use error::Error;
 
+/// A struct containing metadata about a subtree root of the note commitment tree.
+///
+/// This stores the block height at which the leaf that completed the subtree was
+/// added, and the root hash of the complete subtree.
+pub struct CommitmentTreeRoot<H> {
+    subtree_end_height: BlockHeight,
+    root_hash: H,
+}
+
+impl<H> CommitmentTreeRoot<H> {
+    /// Construct a new `CommitmentTreeRoot` from its constituent parts.
+    pub fn from_parts(subtree_end_height: BlockHeight, root_hash: H) -> Self {
+        Self {
+            subtree_end_height,
+            root_hash,
+        }
+    }
+
+    /// Returns the block height at which the leaf that completed the subtree was added.
+    pub fn subtree_end_height(&self) -> BlockHeight {
+        self.subtree_end_height
+    }
+
+    /// Returns the root of the complete subtree.
+    pub fn root_hash(&self) -> &H {
+        &self.root_hash
+    }
+}
+
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
 /// API.
 pub trait BlockSource {
