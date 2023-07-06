@@ -37,6 +37,8 @@ use crate::{
 pub mod input_selection;
 use input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector};
 
+use super::ShieldedProtocol;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::WalletTransparentOutput,
@@ -550,7 +552,7 @@ where
                     payment.memo.clone().unwrap_or_else(MemoBytes::empty),
                 )?;
                 sapling_output_meta.push((
-                    Recipient::Unified(ua.clone(), PoolType::Sapling),
+                    Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),
                     payment.amount,
                     payment.memo.clone(),
                 ));
@@ -589,7 +591,10 @@ where
                     MemoBytes::empty(),
                 )?;
                 sapling_output_meta.push((
-                    Recipient::InternalAccount(account, PoolType::Sapling),
+                    Recipient::InternalAccount(
+                        account,
+                        PoolType::Shielded(ShieldedProtocol::Sapling),
+                    ),
                     *amount,
                     change_memo.clone(),
                 ))
@@ -610,20 +615,23 @@ where
                     .output_index(i)
                     .expect("An output should exist in the transaction for each shielded payment.");
 
-                let received_as =
-                    if let Recipient::InternalAccount(account, PoolType::Sapling) = recipient {
-                        tx.sapling_bundle().and_then(|bundle| {
-                            try_sapling_note_decryption(
-                                params,
-                                proposal.min_target_height(),
-                                &internal_ivk,
-                                &bundle.shielded_outputs()[output_index],
-                            )
-                            .map(|(note, _, _)| (account, note))
-                        })
-                    } else {
-                        None
-                    };
+                let received_as = if let Recipient::InternalAccount(
+                    account,
+                    PoolType::Shielded(ShieldedProtocol::Sapling),
+                ) = recipient
+                {
+                    tx.sapling_bundle().and_then(|bundle| {
+                        try_sapling_note_decryption(
+                            params,
+                            proposal.min_target_height(),
+                            &internal_ivk,
+                            &bundle.shielded_outputs()[output_index],
+                        )
+                        .map(|(note, _, _)| (account, note))
+                    })
+                } else {
+                    None
+                };
 
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo, received_as)
             });

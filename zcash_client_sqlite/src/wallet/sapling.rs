@@ -571,7 +571,14 @@ pub(crate) mod tests {
             0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
 
         // Verified balance matches total balance
         let (_, anchor_height) = db_data
@@ -598,7 +605,14 @@ pub(crate) mod tests {
         )
         .0;
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 1,
+            1,
+        )
+        .unwrap();
 
         // Verified balance does not include the second note
         let (_, anchor_height2) = db_data
@@ -651,7 +665,14 @@ pub(crate) mod tests {
             .0;
             insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 2,
+            8,
+        )
+        .unwrap();
 
         // Second spend still fails
         assert_matches!(
@@ -681,11 +702,18 @@ pub(crate) mod tests {
             &dfvk,
             AddressType::DefaultExternal,
             value,
-            11,
+            10,
         )
         .0;
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 10,
+            1,
+        )
+        .unwrap();
 
         // Second spend should now succeed
         assert_matches!(
@@ -730,7 +758,14 @@ pub(crate) mod tests {
             0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -788,7 +823,14 @@ pub(crate) mod tests {
             .0;
             insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 1,
+            41,
+        )
+        .unwrap();
 
         // Second spend still fails
         assert_matches!(
@@ -821,7 +863,14 @@ pub(crate) mod tests {
         )
         .0;
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 42,
+            1,
+        )
+        .unwrap();
 
         // Second spend should now succeed
         create_spend_to_address(
@@ -865,7 +914,14 @@ pub(crate) mod tests {
             0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -938,7 +994,14 @@ pub(crate) mod tests {
             .0;
             insert_into_cache(&db_cache, &cb);
         }
-        scan_cached_blocks(&network, &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &network,
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 1,
+            42,
+        )
+        .unwrap();
 
         // Send the funds again, discarding history.
         // Neither transaction output is decryptable by the sender.
@@ -971,7 +1034,14 @@ pub(crate) mod tests {
             0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
 
         // Verified balance matches total balance
         let (_, anchor_height) = db_data
@@ -1030,7 +1100,14 @@ pub(crate) mod tests {
             0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
 
         // Verified balance matches total balance
         let (_, anchor_height) = db_data
@@ -1103,7 +1180,14 @@ pub(crate) mod tests {
             insert_into_cache(&db_cache, &cb);
         }
 
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            11,
+        )
+        .unwrap();
 
         // Verified balance matches total balance
         let total = Amount::from_u64(60000).unwrap();
@@ -1225,7 +1309,14 @@ pub(crate) mod tests {
             0,
         );
         insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
 
         assert_matches!(
             shield_transparent_funds(

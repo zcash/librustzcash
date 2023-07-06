@@ -11,14 +11,15 @@ and this library adheres to Rust's notion of
 - `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
 - `impl Debug` for `zcash_client_backend::{data_api::wallet::input_selection::Proposal, wallet::ReceivedSaplingNote}`
 - `zcash_client_backend::data_api`:
+  - `BlockMetadata`
+  - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
+  - `ScannedBlock`
+  - `ShieldedProtocol`
   - `WalletRead::{block_metadata, block_fully_scanned, suggest_scan_ranges}`
   - `WalletWrite::put_block`
   - `WalletCommitmentTrees`
-  - `testing::MockWalletDb::new`
-  - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
-  - `BlockMetadata`
-  - `ScannedBlock`
   - `chain::CommitmentTreeRoot`
+  - `testing::MockWalletDb::new`
   - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
 - `zcash_client_backend::wallet::WalletSaplingOutput::note_commitment_tree_position`
 - `zcash_client_backend::scanning::ScanError`
@@ -35,7 +36,8 @@ and this library adheres to Rust's notion of
     and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
   - `WalletRead::get_target_and_anchor_heights` now takes its argument as a `NonZeroU32`
   - `chain::scan_cached_blocks` now takes a `from_height` argument that
-    permits the caller to control the starting position of the scan range.
+    permits the caller to control the starting position of the scan range
+    In addition, the `limit` parameter is now required.
   - A new `CommitmentTree` variant has been added to `data_api::error::Error`
   - `data_api::wallet::{create_spend_to_address, create_proposed_transaction,
     shield_transparent_funds}` all now require that `WalletCommitmentTrees` be
@@ -49,6 +51,8 @@ and this library adheres to Rust's notion of
     now take their respective `min_confirmations` arguments as `NonZeroU32`
   - A new `Scan` variant has been added to `data_api::chain::error::Error`.
   - A new `SyncRequired` variant has been added to `data_api::wallet::input_selection::InputSelectorError`.
+  - The variants of the `PoolType` enum have changed; the `PoolType::Sapling` variant has been 
+    removed in favor of a `PoolType::Shielded` variant that wraps a `ShieldedProtocol` value.
 - `zcash_client_backend::wallet`:
   - `SpendableNote` has been renamed to `ReceivedSaplingNote`.
   - Arguments to `WalletSaplingOutput::from_parts` have changed.

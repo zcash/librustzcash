@@ -330,7 +330,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
 
         // Create a second fake CompactBlock sending more value to the address
         let (cb2, _) = fake_compact_block(
@@ -344,7 +351,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 1,
+            1,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -381,7 +395,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            2,
+        )
+        .unwrap();
 
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let (cb3, _) = fake_compact_block(
@@ -405,7 +426,13 @@ mod tests {
 
         // Data+cache chain should be invalid at the data/cache boundary
         assert_matches!(
-            scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None),
+            scan_cached_blocks(
+                &tests::network(),
+                &db_cache,
+                &mut db_data,
+                sapling_activation_height() + 2,
+                2
+            ),
             Err(_) // FIXME: check error result more closely
         );
     }
@@ -444,7 +471,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            2,
+        )
+        .unwrap();
 
         // Create more fake CompactBlocks that contain a reorg
         let (cb3, _) = fake_compact_block(
@@ -468,7 +502,13 @@ mod tests {
 
         // Data+cache chain should be invalid inside the cache
         assert_matches!(
-            scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None),
+            scan_cached_blocks(
+                &tests::network(),
+                &db_cache,
+                &mut db_data,
+                sapling_activation_height() + 2,
+                2
+            ),
             Err(_) // FIXME: check error result more closely
         );
     }
@@ -516,7 +556,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            2,
+        )
+        .unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(
@@ -551,7 +598,14 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            2,
+        )
+        .unwrap();
 
         // Account balance should again reflect both received notes
         assert_eq!(
@@ -586,7 +640,14 @@ mod tests {
             0,
         );
         insert_into_cache(&db_cache, &cb1);
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
         assert_eq!(
             get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
             value
@@ -617,8 +678,8 @@ mod tests {
                 &tests::network(),
                 &db_cache,
                 &mut db_data,
-                Some(sapling_activation_height() + 2),
-                None
+                sapling_activation_height() + 2,
+                1
             ),
             Ok(_)
         );
@@ -629,8 +690,8 @@ mod tests {
             &tests::network(),
             &db_cache,
             &mut db_data,
-            Some(sapling_activation_height() + 1),
-            Some(1),
+            sapling_activation_height() + 1,
+            1,
         )
         .unwrap();
         assert_eq!(
@@ -699,7 +760,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(
@@ -720,7 +788,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb2);
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 1,
+            1,
+        )
+        .unwrap();
 
         // Account balance should reflect both received notes
         assert_eq!(
@@ -761,7 +836,14 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
 
         // Scan the cache
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
 
         // Account balance should reflect the received note
         assert_eq!(
@@ -787,7 +869,14 @@ mod tests {
         );
 
         // Scan the cache again
-        scan_cached_blocks(&tests::network(), &db_cache, &mut db_data, None, None).unwrap();
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 1,
+            1,
+        )
+        .unwrap();
 
         // Account balance should equal the change
         assert_eq!(

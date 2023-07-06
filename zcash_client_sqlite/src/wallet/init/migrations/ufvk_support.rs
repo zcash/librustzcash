@@ -8,7 +8,9 @@ use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 
 use zcash_client_backend::{
-    address::RecipientAddress, data_api::PoolType, keys::UnifiedSpendingKey,
+    address::RecipientAddress,
+    data_api::{PoolType, ShieldedProtocol},
+    keys::UnifiedSpendingKey,
 };
 use zcash_primitives::{consensus, zip32::AccountId};
 
@@ -229,7 +231,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         ))
                     })?;
                 let output_pool = match decoded_address {
-                    RecipientAddress::Shielded(_) => Ok(pool_code(PoolType::Sapling)),
+                    RecipientAddress::Shielded(_) => {
+                        Ok(pool_code(PoolType::Shielded(ShieldedProtocol::Sapling)))
+                    }
                     RecipientAddress::Transparent(_) => Ok(pool_code(PoolType::Transparent)),
                     RecipientAddress::Unified(_) => Err(WalletMigrationError::CorruptedData(
                         "Unified addresses should not yet appear in the sent_notes table."

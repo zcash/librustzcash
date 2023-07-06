@@ -45,12 +45,13 @@
 //! // At this point, the cache and scanned data are locally consistent (though not
 //! // necessarily consistent with the latest chain tip - this would be discovered the
 //! // next time this codepath is executed after new blocks are received).
-//! scan_cached_blocks(&network, &block_source, &mut db_data, None, None)
+//! scan_cached_blocks(&network, &block_source, &mut db_data, BlockHeight::from(0), 10)
 //! # }
 //! # }
 //! ```
 
 use zcash_primitives::{
+    block::BlockHash,
     consensus::{self, BlockHeight},
     sapling::{self, note_encryption::PreparedIncomingViewingKey},
     zip32::Scope,
@@ -60,8 +61,10 @@ use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
-    scanning::{add_block_to_runner, scan_block_with_runner},
+    scanning::{add_block_to_runner, check_continuity, scan_block_with_runner},
 };
+
+use super::BlockMetadata;
 
 pub mod error;
 use error::Error;
@@ -141,8 +144,8 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,
     block_source: &BlockSourceT,
     data_db: &mut DbT,
-    from_height: Option<BlockHeight>,
-    limit: Option<u32>,
+    from_height: BlockHeight,
+    limit: u32,
 ) -> Result<(), Error<DbT::Error, BlockSourceT::Error>>
 where
     ParamsT: consensus::Parameters + Send + 'static,
@@ -178,61 +181,94 @@ where
             .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(&ivk))),
     );
 
-    // Start at either the provided height, or where we synced up to previously.
-    let (scan_from, mut prior_block_metadata) = match from_height {
-        Some(h) => {
-            // if we are provided with a starting height, obtain the metadata for the previous
-            // block (if any is available)
-            (
-                Some(h),
-                if h > BlockHeight::from(0) {
-                    data_db.block_metadata(h - 1).map_err(Error::Wallet)?
-                } else {
-                    None
-                },
-            )
-        }
-        None => {
-            let last_scanned = data_db.block_fully_scanned().map_err(Error::Wallet)?;
-            last_scanned.map_or_else(|| (None, None), |m| (Some(m.block_height + 1), Some(m)))
-        }
+    let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
+        data_db
+            .block_metadata(from_height - 1)
+            .map_err(Error::Wallet)?
+    } else {
+        None
     };
 
-    block_source.with_blocks::<_, DbT::Error>(scan_from, limit, |block: CompactBlock| {
-        add_block_to_runner(params, block, &mut batch_runner);
-        Ok(())
-    })?;
+    let mut continuity_check_metadata = prior_block_metadata;
+    block_source.with_blocks::<_, DbT::Error>(
+        Some(from_height),
+        Some(limit),
+        |block: CompactBlock| {
+            // check block continuity
+            if let Some(scan_error) = check_continuity(&block, continuity_check_metadata.as_ref()) {
+                return Err(Error::Scan(scan_error));
+            }
+
+            if from_height == BlockHeight::from(0) {
+                // We can always derive a valid `continuity_check_metadata` for the
+                // genesis block, even if the block source doesn't have
+                // `sapling_commitment_tree_size`. So briefly set it to a dummy value that
+                // ensures the `map` below produces the correct genesis block value.
+                assert!(continuity_check_metadata.is_none());
+                continuity_check_metadata = Some(BlockMetadata::from_parts(
+                    BlockHeight::from(0),
+                    BlockHash([0; 32]),
+                    0,
+                ));
+            }
+            continuity_check_metadata = continuity_check_metadata.as_ref().map(|m| {
+                BlockMetadata::from_parts(
+                    block.height(),
+                    block.hash(),
+                    block
+                        .chain_metadata
+                        .as_ref()
+                        .map(|m| m.sapling_commitment_tree_size)
+                        .unwrap_or_else(|| {
+                            m.sapling_tree_size()
+                                + u32::try_from(
+                                    block.vtx.iter().map(|tx| tx.outputs.len()).sum::<usize>(),
+                                )
+                                .unwrap()
+                        }),
+                )
+            });
+
+            add_block_to_runner(params, block, &mut batch_runner);
+
+            Ok(())
+        },
+    )?;
 
     batch_runner.flush();
 
-    block_source.with_blocks::<_, DbT::Error>(scan_from, limit, |block: CompactBlock| {
-        let scanned_block = scan_block_with_runner(
-            params,
-            block,
-            &dfvks,
-            &sapling_nullifiers,
-            prior_block_metadata.as_ref(),
-            Some(&mut batch_runner),
-        )
-        .map_err(Error::Scan)?;
+    block_source.with_blocks::<_, DbT::Error>(
+        Some(from_height),
+        Some(limit),
+        |block: CompactBlock| {
+            let scanned_block = scan_block_with_runner(
+                params,
+                block,
+                &dfvks,
+                &sapling_nullifiers,
+                prior_block_metadata.as_ref(),
+                Some(&mut batch_runner),
+            )
+            .map_err(Error::Scan)?;
 
-        let spent_nf: Vec<&sapling::Nullifier> = scanned_block
-            .transactions
-            .iter()
-            .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf()))
-            .collect();
-
-        sapling_nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
-        sapling_nullifiers.extend(scanned_block.transactions.iter().flat_map(|tx| {
-            tx.sapling_outputs
+            let spent_nf: Vec<&sapling::Nullifier> = scanned_block
+                .transactions
                 .iter()
-                .map(|out| (out.account(), *out.nf()))
-        }));
+                .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf()))
+                .collect();
 
-        prior_block_metadata = Some(*scanned_block.metadata());
-        data_db.put_block(scanned_block).map_err(Error::Wallet)?;
-        Ok(())
-    })?;
+            sapling_nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
+            sapling_nullifiers.extend(scanned_block.transactions.iter().flat_map(|tx| {
+                tx.sapling_outputs
+                    .iter()
+                    .map(|out| (out.account(), *out.nf()))
+            }));
+
+            prior_block_metadata = Some(*scanned_block.metadata());
+            data_db.put_block(scanned_block).map_err(Error::Wallet)?;
+            Ok(())
+        },
+    )?;
 
     Ok(())
 }
