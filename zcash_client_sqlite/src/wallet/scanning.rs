@@ -1,7 +1,7 @@
 use rusqlite::{self, named_params, types::Value, OptionalExtension};
 use std::cmp::{max, min, Ordering};
 use std::collections::BTreeSet;
-use std::ops::Range;
+use std::ops::{Not, Range};
 use std::rc::Rc;
 use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 
@@ -15,11 +15,37 @@ use crate::{PRUNING_DEPTH, VALIDATION_DEPTH};
 
 use super::block_height_extrema;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
+enum Insert {
+    Left,
+    Right,
+}
+
+impl Not for Insert {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Insert::Left => Insert::Right,
+            Insert::Right => Insert::Left,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Dominance {
     Left,
     Right,
     Equal,
+}
+
+impl From<Insert> for Dominance {
+    fn from(value: Insert) -> Self {
+        match value {
+            Insert::Left => Dominance::Left,
+            Insert::Right => Dominance::Right,
+        }
+    }
 }
 
 pub(crate) fn parse_priority_code(code: i64) -> Option<ScanPriority> {
@@ -91,14 +117,14 @@ fn update_priority(current: ScanPriority, inserted: ScanPriority) -> ScanPriorit
     }
 }
 
-fn dominance(current: &ScanPriority, inserted: &ScanPriority) -> Dominance {
+fn dominance(current: &ScanPriority, inserted: &ScanPriority, insert: Insert) -> Dominance {
     match (current, inserted) {
-        (_, ScanPriority::Verify) | (_, ScanPriority::Scanned) => Dominance::Right,
-        (ScanPriority::Scanned, _) => Dominance::Left,
+        (_, ScanPriority::Verify | ScanPriority::Scanned) => Dominance::from(insert),
+        (ScanPriority::Scanned, _) => Dominance::from(!insert),
         (a, b) => match a.cmp(b) {
-            Ordering::Less => Dominance::Right,
+            Ordering::Less => Dominance::from(insert),
             Ordering::Equal => Dominance::Equal,
-            Ordering::Greater => Dominance::Left,
+            Ordering::Greater => Dominance::from(!insert),
         },
     }
 }
@@ -183,11 +209,6 @@ fn join_nonoverlapping(left: ScanRange, right: ScanRange) -> Joined {
 }
 
 fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
-    enum Insert {
-        Left,
-        Right,
-    }
-
     fn join_overlapping(left: ScanRange, right: ScanRange, insert: Insert) -> Joined {
         assert!(
             left.block_range().start <= right.block_range().start
@@ -196,8 +217,8 @@ fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
 
         // recompute the range dominance based upon the queue entry priorities
         let dominance = match insert {
-            Insert::Left => dominance(&right.priority(), &left.priority()),
-            Insert::Right => dominance(&left.priority(), &right.priority()),
+            Insert::Left => dominance(&right.priority(), &left.priority(), insert),
+            Insert::Right => dominance(&left.priority(), &right.priority(), insert),
         };
 
         match dominance {
@@ -535,13 +556,15 @@ pub(crate) fn replace_queue_entries(
 
         // Update the tree that we read from the database, or if we didn't find any ranges
         // start with the scanned range.
-        let mut to_create = match existing_ranges {
-            Some(cur) => entries.next().map(|entry| cur.insert(entry)),
-            None => entries.next().map(SpanningTree::Leaf),
+        let mut to_create = match (existing_ranges, entries.next()) {
+            (Some(cur), Some(entry)) => Some(cur.insert(entry)),
+            (None, Some(entry)) => Some(SpanningTree::Leaf(entry)),
+            (Some(cur), None) => Some(cur),
+            (None, None) => None,
         };
 
         for entry in entries {
-            to_create = to_create.map(|cur| cur.insert(entry))
+            to_create = to_create.map(|cur| cur.insert(entry));
         }
 
         (to_create, to_delete_ends)
@@ -841,7 +864,6 @@ mod tests {
         use ScanPriority::*;
 
         let t = spanning_tree(&[(0..3, Verify), (2..8, Scanned), (6..10, Verify)]).unwrap();
-
         assert_eq!(
             t.into_vec(),
             vec![
@@ -852,7 +874,6 @@ mod tests {
         );
 
         let t = spanning_tree(&[(0..3, Verify), (2..8, Historic), (6..10, Verify)]).unwrap();
-
         assert_eq!(
             t.into_vec(),
             vec![
@@ -863,7 +884,6 @@ mod tests {
         );
 
         let t = spanning_tree(&[(0..3, Scanned), (2..8, Verify), (6..10, Scanned)]).unwrap();
-
         assert_eq!(
             t.into_vec(),
             vec![
@@ -874,13 +894,43 @@ mod tests {
         );
 
         let t = spanning_tree(&[(0..3, Scanned), (2..8, Historic), (6..10, Scanned)]).unwrap();
-
         assert_eq!(
             t.into_vec(),
             vec![
                 scan_range(0..3, Scanned),
                 scan_range(3..6, Historic),
                 scan_range(6..10, Scanned),
+            ]
+        );
+
+        // a `ChainTip` insertion should not overwrite a scanned range.
+        let mut t = spanning_tree(&[(0..3, ChainTip), (3..5, Scanned), (5..7, ChainTip)]).unwrap();
+        t = t.insert(scan_range(0..7, ChainTip));
+        assert_eq!(
+            t.into_vec(),
+            vec![
+                scan_range(0..3, ChainTip),
+                scan_range(3..5, Scanned),
+                scan_range(5..7, ChainTip),
+            ]
+        );
+
+        let mut t =
+            spanning_tree(&[(280300..280310, FoundNote), (280310..280320, Scanned)]).unwrap();
+        assert_eq!(
+            t.clone().into_vec(),
+            vec![
+                scan_range(280300..280310, FoundNote),
+                scan_range(280310..280320, Scanned)
+            ]
+        );
+        t = t.insert(scan_range(280300..280340, ChainTip));
+        assert_eq!(
+            t.into_vec(),
+            vec![
+                scan_range(280300..280310, ChainTip),
+                scan_range(280310..280320, Scanned),
+                scan_range(280320..280340, ChainTip)
             ]
         );
     }
