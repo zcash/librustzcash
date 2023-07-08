@@ -725,7 +725,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
                 // and advance it up to at most the stable height. The shard entry will then cover
                 // the range to the new tip at the lower `ChainTip` priority.
                 ScanRange::from_parts(
-                    prior_tip..max(stable_height, prior_tip + VALIDATION_DEPTH),
+                    prior_tip..min(stable_height, prior_tip + VALIDATION_DEPTH),
                     ScanPriority::Verify,
                 )
             }
@@ -766,8 +766,28 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 mod tests {
     use std::ops::Range;
 
-    use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
-    use zcash_primitives::consensus::BlockHeight;
+    use incrementalmerkletree::{Hashable, Level};
+    use rusqlite::Connection;
+    use secrecy::Secret;
+    use tempfile::NamedTempFile;
+    use zcash_client_backend::data_api::{
+        chain::{scan_cached_blocks, CommitmentTreeRoot},
+        scanning::{ScanPriority, ScanRange},
+        WalletCommitmentTrees, WalletRead, WalletWrite,
+    };
+    use zcash_primitives::{
+        block::BlockHash, consensus::BlockHeight, sapling::Node, transaction::components::Amount,
+    };
+
+    use crate::{
+        chain::init::init_cache_database,
+        tests::{
+            self, fake_compact_block, init_test_accounts_table, insert_into_cache,
+            sapling_activation_height, AddressType,
+        },
+        wallet::{init::init_wallet_db, scanning::suggest_scan_ranges},
+        BlockDb, WalletDb,
+    };
 
     use super::{RangeOrdering, SpanningTree};
 
@@ -951,5 +971,137 @@ mod tests {
         t = t.insert(scan_range(5..8, Scanned));
 
         assert_eq!(t.into_vec(), vec![scan_range(0..10, Scanned)]);
+    }
+
+    #[test]
+    fn scan_complete() {
+        use ScanPriority::*;
+
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+
+        // Add an account to the wallet
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
+
+        assert_matches!(
+            // in the following, we don't care what the root hashes are, they just need to be
+            // distinct
+            db_data.put_sapling_subtree_roots(
+                0,
+                &[
+                    CommitmentTreeRoot::from_parts(
+                        sapling_activation_height() + 100,
+                        Node::empty_root(Level::from(0))
+                    ),
+                    CommitmentTreeRoot::from_parts(
+                        sapling_activation_height() + 200,
+                        Node::empty_root(Level::from(1))
+                    ),
+                    CommitmentTreeRoot::from_parts(
+                        sapling_activation_height() + 300,
+                        Node::empty_root(Level::from(2))
+                    ),
+                ]
+            ),
+            Ok(())
+        );
+
+        // We'll start inserting leaf notes 5 notes after the end of the third subtree, with a gap
+        // of 10 blocks. After `scan_cached_blocks`, the scan queue should have a requested scan
+        // range of 300..310 with `FoundNote` priority, 310..320 with `Scanned` priority.
+        let initial_sapling_tree_size = (0x1 << 16) * 3 + 5;
+        let initial_height = sapling_activation_height() + 310;
+
+        let value = Amount::from_u64(50000).unwrap();
+        let (mut cb, _) = fake_compact_block(
+            initial_height,
+            BlockHash([0; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value,
+            initial_sapling_tree_size,
+        );
+        insert_into_cache(&db_cache, &cb);
+
+        for i in 1..=10 {
+            cb = fake_compact_block(
+                initial_height + i,
+                cb.hash(),
+                &dfvk,
+                AddressType::DefaultExternal,
+                Amount::from_u64(10000).unwrap(),
+                initial_sapling_tree_size + i,
+            )
+            .0;
+            insert_into_cache(&db_cache, &cb);
+        }
+
+        assert_matches!(
+            scan_cached_blocks(
+                &tests::network(),
+                &db_cache,
+                &mut db_data,
+                initial_height,
+                10,
+            ),
+            Ok(())
+        );
+
+        // Verify the that adjacent range needed to make the note spendable has been prioritized
+        let sap_active = u32::from(sapling_activation_height());
+        assert_matches!(
+            db_data.suggest_scan_ranges(),
+            Ok(scan_ranges) if scan_ranges == vec![
+                scan_range((sap_active + 300)..(sap_active + 310), FoundNote)
+            ]
+        );
+
+        // Check that the scanned range has been properly persisted
+        assert_matches!(
+            suggest_scan_ranges(&db_data.conn, Some(Scanned)),
+            Ok(scan_ranges) if scan_ranges == vec![
+                scan_range((sap_active + 300)..(sap_active + 310), FoundNote),
+                scan_range((sap_active + 310)..(sap_active + 320), Scanned)
+            ]
+        );
+
+        // simulate the wallet going offline for a bit, update the chain tip to 30 blocks in the
+        // future
+        assert_matches!(
+            db_data.update_chain_tip(sapling_activation_height() + 340),
+            Ok(())
+        );
+
+        // Check the scan range again, we should see a `ChainTip` range for the period we've been
+        // offline.
+        assert_matches!(
+            db_data.suggest_scan_ranges(),
+            Ok(scan_ranges) if scan_ranges == vec![
+                scan_range((sap_active + 320)..(sap_active + 340), ChainTip),
+                scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
+            ]
+        );
+
+        // Now simulate a jump ahead more than 100 blocks
+        assert_matches!(
+            db_data.update_chain_tip(sapling_activation_height() + 450),
+            Ok(())
+        );
+
+        // Check the scan range again, we should see a `Validate` range for the previous wallet
+        // tip, and then a `ChainTip` for the remaining range.
+        assert_matches!(
+            db_data.suggest_scan_ranges(),
+            Ok(scan_ranges) if scan_ranges == vec![
+                scan_range((sap_active + 319)..(sap_active + 329), Verify),
+                scan_range((sap_active + 329)..(sap_active + 450), ChainTip),
+                scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
+            ]
+        );
     }
 }
