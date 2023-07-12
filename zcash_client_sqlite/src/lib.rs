@@ -57,7 +57,7 @@ use zcash_client_backend::{
     data_api::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
-        scanning::ScanRange,
+        scanning::{ScanPriority, ScanRange},
         BlockMetadata, DecryptedTransaction, NullifierQuery, PoolType, Recipient, ScannedBlock,
         SentTransaction, ShieldedProtocol, WalletCommitmentTrees, WalletRead, WalletWrite,
         SAPLING_SHARD_HEIGHT,
@@ -173,7 +173,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     }
 
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
-        wallet::scanning::suggest_scan_ranges(self.conn.borrow(), None)
+        wallet::scanning::suggest_scan_ranges(self.conn.borrow(), ScanPriority::Historic)
             .map_err(SqliteClientError::from)
     }
 

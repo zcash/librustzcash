@@ -75,7 +75,7 @@ pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
 
 pub(crate) fn suggest_scan_ranges(
     conn: &rusqlite::Connection,
-    min_priority: Option<ScanPriority>,
+    min_priority: ScanPriority,
 ) -> Result<Vec<ScanRange>, SqliteClientError> {
     let mut stmt_scan_ranges = conn.prepare_cached(
         "SELECT block_range_start, block_range_end, priority
@@ -84,9 +84,8 @@ pub(crate) fn suggest_scan_ranges(
          ORDER BY priority DESC, block_range_end DESC",
     )?;
 
-    let mut rows = stmt_scan_ranges.query(named_params![
-        ":min_priority": priority_code(&min_priority.unwrap_or(ScanPriority::Historic))
-    ])?;
+    let mut rows =
+        stmt_scan_ranges.query(named_params![":min_priority": priority_code(&min_priority)])?;
 
     let mut result = vec![];
     while let Some(row) = rows.next()? {
@@ -1066,7 +1065,7 @@ mod tests {
 
         // Check that the scanned range has been properly persisted
         assert_matches!(
-            suggest_scan_ranges(&db_data.conn, Some(Scanned)),
+            suggest_scan_ranges(&db_data.conn, Scanned),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 300)..(sap_active + 310), FoundNote),
                 scan_range((sap_active + 310)..(sap_active + 320), Scanned)
