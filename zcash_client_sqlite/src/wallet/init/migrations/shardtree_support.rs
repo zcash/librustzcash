@@ -204,9 +204,15 @@ impl RusqliteMigration for Migration {
         )?;
 
         if let Some((start, end)) = block_height_extrema(transaction)? {
+            // `ScanRange` uses an exclusive upper bound.
+            let chain_end = end + 1;
             insert_queue_entries(
                 transaction,
-                Some(ScanRange::from_parts(start..end, ScanPriority::Historic)).iter(),
+                Some(ScanRange::from_parts(
+                    start..chain_end,
+                    ScanPriority::Historic,
+                ))
+                .iter(),
             )?;
         }
 

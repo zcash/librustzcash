@@ -817,20 +817,20 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             [u32::from(block_height)],
         )?;
 
-        // Delete from the scanning queue any range with a start height greater than or equal to
-        // the truncation height, and truncate any remaining range by setting the end equal to
-        // the truncation height.
+        // Delete from the scanning queue any range with a start height greater than the
+        // truncation height, and then truncate any remaining range by setting the end
+        // equal to the truncation height + 1.
         conn.execute(
             "DELETE FROM scan_queue
-            WHERE block_range_start >= :block_height",
+            WHERE block_range_start > :block_height",
             named_params![":block_height": u32::from(block_height)],
         )?;
 
         conn.execute(
             "UPDATE scan_queue
-            SET block_range_end = :block_height
-            WHERE block_range_end > :block_height",
-            named_params![":block_height": u32::from(block_height)],
+            SET block_range_end = :end_height
+            WHERE block_range_end > :end_height",
+            named_params![":end_height": u32::from(block_height + 1)],
         )?;
 
         // Prioritize the range starting at the height we just rewound to for verification

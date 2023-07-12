@@ -683,6 +683,9 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     params: &P,
     new_tip: BlockHeight,
 ) -> Result<(), SqliteClientError> {
+    // `ScanRange` uses an exclusive upper bound.
+    let chain_end = new_tip + 1;
+
     // Read the maximum height from the shards table.
     let shard_start_height = conn.query_row(
         "SELECT MAX(subtree_end_height)
@@ -694,8 +697,8 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // Create a scanning range for the fragment of the last shard leading up to new tip.
     // However, only do so if the start of the shard is at a stable height.
     let shard_entry = shard_start_height
-        .filter(|h| h < &new_tip)
-        .map(|h| ScanRange::from_parts(h..new_tip, ScanPriority::ChainTip));
+        .filter(|h| h < &chain_end)
+        .map(|h| ScanRange::from_parts(h..chain_end, ScanPriority::ChainTip));
 
     // Create scanning ranges to either validate potentially invalid blocks at the wallet's view
     // of the chain tip,
@@ -703,7 +706,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
         // If we don't have shard metadata, this means we're doing linear scanning, so create a
         // scan range from the prior tip to the current tip with `Historic` priority.
         if shard_entry.is_none() {
-            ScanRange::from_parts(prior_tip..new_tip, ScanPriority::Historic)
+            ScanRange::from_parts(prior_tip..chain_end, ScanPriority::Historic)
         } else {
             // Determine the height to which we expect blocks retrieved from the block source to be stable
             // and not subject to being reorg'ed.
@@ -719,7 +722,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
             // tip range has been completely checked and any required rewinds have been performed.
             if prior_tip >= stable_height {
                 // This may overlap the `shard_entry` range and if so will be coalesced with it.
-                ScanRange::from_parts(prior_tip..new_tip, ScanPriority::ChainTip)
+                ScanRange::from_parts(prior_tip..chain_end, ScanPriority::ChainTip)
             } else {
                 // The prior tip is in the range that we now expect to be stable, so we need to verify
                 // and advance it up to at most the stable height. The shard entry will then cover
@@ -754,7 +757,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
         // activation.
         if let Some(sapling_activation) = params.activation_height(NetworkUpgrade::Sapling) {
             let scan_range =
-                ScanRange::from_parts(sapling_activation..new_tip, ScanPriority::Historic);
+                ScanRange::from_parts(sapling_activation..chain_end, ScanPriority::Historic);
             insert_queue_entries(conn, Some(scan_range).iter())?;
         }
     }
@@ -1082,7 +1085,7 @@ mod tests {
         assert_matches!(
             db_data.suggest_scan_ranges(),
             Ok(scan_ranges) if scan_ranges == vec![
-                scan_range((sap_active + 320)..(sap_active + 340), ChainTip),
+                scan_range((sap_active + 320)..(sap_active + 341), ChainTip),
                 scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
             ]
         );
@@ -1099,7 +1102,7 @@ mod tests {
             db_data.suggest_scan_ranges(),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 319)..(sap_active + 329), Verify),
-                scan_range((sap_active + 329)..(sap_active + 450), ChainTip),
+                scan_range((sap_active + 329)..(sap_active + 451), ChainTip),
                 scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
             ]
         );
