@@ -429,7 +429,7 @@ impl SpanningTree {
                     RightFirstDisjoint => {
                         // extend the left-hand branch
                         SpanningTree::Parent {
-                            span: to_insert.block_range().start..left.span().end,
+                            span: to_insert.block_range().start..right.span().end,
                             left: Box::new(left.insert(to_insert)),
                             right,
                         }
@@ -877,6 +877,40 @@ mod tests {
                 scan_range(5..6, Historic),
                 scan_range(6..7, ChainTip),
                 scan_range(7..10, Scanned),
+            ]
+        );
+    }
+
+    #[test]
+    fn spanning_tree_insert_rfd_span() {
+        use ScanPriority::*;
+
+        // This sequence of insertions causes a RightFirstDisjoint on the last insertion,
+        // which originally had a bug that caused the parent's span to only cover its left
+        // child. The bug was otherwise unobservable as the insertion logic was able to
+        // heal this specific kind of bug.
+        let t = spanning_tree(&[
+            // 6..8
+            (6..8, Scanned),
+            //       6..12
+            // 6..8        8..12
+            //         8..10  10..12
+            (10..12, ChainTip),
+            //          3..12
+            //    3..8        8..12
+            // 3..6  6..8  8..10  10..12
+            (3..6, Historic),
+        ])
+        .unwrap();
+
+        assert_eq!(t.span(), (3.into())..(12.into()));
+        assert_eq!(
+            t.into_vec(),
+            vec![
+                scan_range(3..6, Historic),
+                scan_range(6..8, Scanned),
+                scan_range(8..10, Historic),
+                scan_range(10..12, ChainTip),
             ]
         );
     }
