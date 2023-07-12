@@ -59,13 +59,13 @@ impl ScanRange {
 
     /// Shifts the start of the block range to the right if `block_height >
     /// self.block_range().start`. Returns `None` if the resulting range would
-    /// be empty.
+    /// be empty (or the range was already empty).
     pub fn truncate_start(&self, block_height: BlockHeight) -> Option<Self> {
-        if block_height >= self.block_range.end {
+        if block_height >= self.block_range.end || self.is_empty() {
             None
         } else {
             Some(ScanRange {
-                block_range: block_height..self.block_range.end,
+                block_range: self.block_range.start.max(block_height)..self.block_range.end,
                 priority: self.priority,
             })
         }
@@ -73,13 +73,13 @@ impl ScanRange {
 
     /// Shifts the end of the block range to the left if `block_height <
     /// self.block_range().end`. Returns `None` if the resulting range would
-    /// be empty.
+    /// be empty (or the range was already empty).
     pub fn truncate_end(&self, block_height: BlockHeight) -> Option<Self> {
-        if block_height <= self.block_range.start {
+        if block_height <= self.block_range.start || self.is_empty() {
             None
         } else {
             Some(ScanRange {
-                block_range: self.block_range.start..block_height,
+                block_range: self.block_range.start..self.block_range.end.min(block_height),
                 priority: self.priority,
             })
         }
@@ -103,5 +103,71 @@ impl ScanRange {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ScanPriority, ScanRange};
+
+    fn scan_range(start: u32, end: u32) -> ScanRange {
+        ScanRange::from_parts((start.into())..(end.into()), ScanPriority::Scanned)
+    }
+
+    #[test]
+    fn truncate_start() {
+        let r = scan_range(5, 8);
+
+        assert_eq!(r.truncate_start(4.into()), Some(scan_range(5, 8)));
+        assert_eq!(r.truncate_start(5.into()), Some(scan_range(5, 8)));
+        assert_eq!(r.truncate_start(6.into()), Some(scan_range(6, 8)));
+        assert_eq!(r.truncate_start(7.into()), Some(scan_range(7, 8)));
+        assert_eq!(r.truncate_start(8.into()), None);
+        assert_eq!(r.truncate_start(9.into()), None);
+
+        let empty = scan_range(5, 5);
+        assert_eq!(empty.truncate_start(4.into()), None);
+        assert_eq!(empty.truncate_start(5.into()), None);
+        assert_eq!(empty.truncate_start(6.into()), None);
+    }
+
+    #[test]
+    fn truncate_end() {
+        let r = scan_range(5, 8);
+
+        assert_eq!(r.truncate_end(9.into()), Some(scan_range(5, 8)));
+        assert_eq!(r.truncate_end(8.into()), Some(scan_range(5, 8)));
+        assert_eq!(r.truncate_end(7.into()), Some(scan_range(5, 7)));
+        assert_eq!(r.truncate_end(6.into()), Some(scan_range(5, 6)));
+        assert_eq!(r.truncate_end(5.into()), None);
+        assert_eq!(r.truncate_end(4.into()), None);
+
+        let empty = scan_range(5, 5);
+        assert_eq!(empty.truncate_end(4.into()), None);
+        assert_eq!(empty.truncate_end(5.into()), None);
+        assert_eq!(empty.truncate_end(6.into()), None);
+    }
+
+    #[test]
+    fn split_at() {
+        let r = scan_range(5, 8);
+
+        assert_eq!(r.split_at(4.into()), None);
+        assert_eq!(r.split_at(5.into()), None);
+        assert_eq!(
+            r.split_at(6.into()),
+            Some((scan_range(5, 6), scan_range(6, 8)))
+        );
+        assert_eq!(
+            r.split_at(7.into()),
+            Some((scan_range(5, 7), scan_range(7, 8)))
+        );
+        assert_eq!(r.split_at(8.into()), None);
+        assert_eq!(r.split_at(9.into()), None);
+
+        let empty = scan_range(5, 5);
+        assert_eq!(empty.split_at(4.into()), None);
+        assert_eq!(empty.split_at(5.into()), None);
+        assert_eq!(empty.split_at(6.into()), None);
     }
 }
