@@ -48,7 +48,7 @@ impl ScanRange {
 
     /// Returns whether or not the scan range is empty.
     pub fn is_empty(&self) -> bool {
-        self.block_range.end == self.block_range.start
+        self.block_range.is_empty()
     }
 
     /// Returns the number of blocks in the scan range.
@@ -89,20 +89,16 @@ impl ScanRange {
     /// end of the first range returned and the start of the second. Returns `None` if
     /// `p <= self.block_range().start || p >= self.block_range().end`.
     pub fn split_at(&self, p: BlockHeight) -> Option<(Self, Self)> {
-        if p > self.block_range.start && p < self.block_range.end {
-            Some((
-                ScanRange {
-                    block_range: self.block_range.start..p,
-                    priority: self.priority,
-                },
-                ScanRange {
-                    block_range: p..self.block_range.end,
-                    priority: self.priority,
-                },
-            ))
-        } else {
-            None
-        }
+        (p > self.block_range.start && p < self.block_range.end).then_some((
+            ScanRange {
+                block_range: self.block_range.start..p,
+                priority: self.priority,
+            },
+            ScanRange {
+                block_range: p..self.block_range.end,
+                priority: self.priority,
+            },
+        ))
     }
 }
 

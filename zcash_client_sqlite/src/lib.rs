@@ -414,10 +414,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             });
             let mut wallet_note_ids = vec![];
             let mut sapling_commitments = vec![];
-            let mut end_height = None;
+            let mut last_scanned_height = None;
             let mut note_positions = vec![];
             for block in blocks.into_iter() {
-                if end_height.iter().any(|prev| block.height() != *prev + 1) {
+                if last_scanned_height
+                    .iter()
+                    .any(|prev| block.height() != *prev + 1)
+                {
                     return Err(SqliteClientError::NonSequentialBlocks);
                 }
 
@@ -453,14 +456,14 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         .map(|out| out.note_commitment_tree_position())
                 }));
 
-                end_height = Some(block.height());
+                last_scanned_height = Some(block.height());
                 sapling_commitments.extend(block.into_sapling_commitments().into_iter());
             }
 
-            // We will have a start position and an end height in all cases where `blocks` is
-            // non-empty.
-            if let Some(((start_height, start_position), end_height)) =
-                start_positions.zip(end_height)
+            // We will have a start position and a last scanned height in all cases where
+            // `blocks` is non-empty.
+            if let Some(((start_height, start_position), last_scanned_height)) =
+                start_positions.zip(last_scanned_height)
             {
                 // Update the Sapling note commitment tree with all newly read note commitments
                 let mut sapling_commitments = sapling_commitments.into_iter();
@@ -470,14 +473,14 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 })?;
 
                 // Update now-expired transactions that didn't get mined.
-                wallet::update_expired_notes(wdb.conn.0, end_height)?;
+                wallet::update_expired_notes(wdb.conn.0, last_scanned_height)?;
 
                 wallet::scanning::scan_complete(
                     wdb.conn.0,
                     &wdb.params,
                     Range {
                         start: start_height,
-                        end: end_height + 1,
+                        end: last_scanned_height + 1,
                     },
                     &note_positions,
                 )?;
