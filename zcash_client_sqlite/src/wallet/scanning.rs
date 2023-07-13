@@ -426,7 +426,7 @@ pub(crate) fn insert_queue_entries<'a>(
 }
 
 pub(crate) fn replace_queue_entries(
-    conn: &rusqlite::Connection,
+    conn: &rusqlite::Transaction<'_>,
     query_range: &Range<BlockHeight>,
     entries: impl Iterator<Item = ScanRange>,
 ) -> Result<(), SqliteClientError> {
