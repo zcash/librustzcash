@@ -775,9 +775,41 @@ pub(crate) fn put_shard_roots<
     // We treat the cap as a DEPTH-SHARD_HEIGHT tree so that we can make a batch insertion of
     // root data using `Position::from(start_index)` as the starting position and treating the
     // roots as level-0 leaves.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct LevelShifter<H, const SHARD_HEIGHT: u8>(H);
+    impl<H: Hashable, const SHARD_HEIGHT: u8> Hashable for LevelShifter<H, SHARD_HEIGHT> {
+        fn empty_leaf() -> Self {
+            Self(H::empty_root(SHARD_HEIGHT.into()))
+        }
+
+        fn combine(level: Level, a: &Self, b: &Self) -> Self {
+            Self(H::combine(level + SHARD_HEIGHT, &a.0, &b.0))
+        }
+
+        fn empty_root(level: Level) -> Self
+        where
+            Self: Sized,
+        {
+            Self(H::empty_root(level + SHARD_HEIGHT))
+        }
+    }
+    impl<H: HashSer, const SHARD_HEIGHT: u8> HashSer for LevelShifter<H, SHARD_HEIGHT> {
+        fn read<R: io::Read>(reader: R) -> io::Result<Self>
+        where
+            Self: Sized,
+        {
+            H::read(reader).map(Self)
+        }
+
+        fn write<W: io::Write>(&self, writer: W) -> io::Result<()> {
+            self.0.write(writer)
+        }
+    }
+
     let cap = LocatedTree::from_parts(
         Address::from_parts((DEPTH - SHARD_HEIGHT).into(), 0),
-        get_cap(conn, table_prefix).map_err(ShardTreeError::Storage)?,
+        get_cap::<LevelShifter<H, SHARD_HEIGHT>>(conn, table_prefix)
+            .map_err(ShardTreeError::Storage)?,
     );
 
     let cap_result = cap
@@ -785,7 +817,7 @@ pub(crate) fn put_shard_roots<
             Position::from(start_index),
             roots.iter().map(|r| {
                 (
-                    r.root_hash().clone(),
+                    LevelShifter(r.root_hash().clone()),
                     Retention::Checkpoint {
                         id: (),
                         is_marked: false,
