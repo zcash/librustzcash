@@ -89,6 +89,8 @@ pub trait WalletRead {
     /// tree size information for each block; or else the scan is likely to fail if notes belonging
     /// to the wallet are detected.
     ///
+    /// The returned range(s) may include block heights beyond the current chain tip.
+    ///
     /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error>;
 
@@ -502,8 +504,8 @@ pub trait WalletWrite: WalletRead {
     /// Updates the wallet's view of the blockchain.
     ///
     /// This method is used to provide the wallet with information about the state of the
-    /// blockchain, and detect any previously scanned that needs to be re-validated before
-    /// proceeding with scanning. It should be called at wallet startup prior to calling
+    /// blockchain, and detect any previously scanned data that needs to be re-validated
+    /// before proceeding with scanning. It should be called at wallet startup prior to calling
     /// [`WalletRead::suggest_scan_ranges`] in order to provide the wallet with the information it
     /// needs to correctly prioritize scanning operations.
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error>;

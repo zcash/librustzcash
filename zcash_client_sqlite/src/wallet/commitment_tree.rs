@@ -772,9 +772,9 @@ pub(crate) fn put_shard_roots<
         return Ok(());
     }
 
-    // We treat the cap as a DEPTH-SHARD_HEIGHT tree so that we can make a batch insertion of
-    // root data using `Position::from(start_index)` as the starting position and treating the
-    // roots as level-0 leaves.
+    // We treat the cap as a tree with `DEPTH - SHARD_HEIGHT` levels, so that we can make a
+    // batch insertion of root data using `Position::from(start_index)` as the starting position
+    // and treating the roots as level-0 leaves.
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct LevelShifter<H, const SHARD_HEIGHT: u8>(H);
     impl<H: Hashable, const SHARD_HEIGHT: u8> Hashable for LevelShifter<H, SHARD_HEIGHT> {

@@ -107,7 +107,8 @@ pub(crate) fn suggest_scan_ranges(
 
 // This implements the dominance rule for range priority. If the inserted range's priority is
 // `Verify`, this replaces any existing priority. Otherwise, if the current priority is
-// `Scanned`, this overwrites any priority
+// `Scanned`, it remains as `Scanned`; and if the new priority is `Scanned`, it
+// overrides any existing priority.
 fn dominance(current: &ScanPriority, inserted: &ScanPriority, insert: Insert) -> Dominance {
     match (current.cmp(inserted), (current, inserted)) {
         (Ordering::Equal, _) => Dominance::Equal,
@@ -118,14 +119,25 @@ fn dominance(current: &ScanPriority, inserted: &ScanPriority, insert: Insert) ->
     }
 }
 
+/// In the comments for each alternative, `()` represents the left range and `[]` represents the right range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RangeOrdering {
+    /// `(   ) [   ]`
     LeftFirstDisjoint,
+    /// `( [   ) ]`
     LeftFirstOverlap,
+    /// `[ (   ) ]`
     LeftContained,
+    /// ```text
+    /// (   )
+    /// [   ]
+    /// ```
     Equal,
+    /// `( [   ] )`
     RightContained,
+    /// `[ (   ] )`
     RightFirstOverlap,
+    /// `[   ] (   )`
     RightFirstDisjoint,
 }
 
@@ -307,10 +319,11 @@ impl SpanningTree {
         match self {
             SpanningTree::Leaf(cur) => Self::from_joined(insert(cur, to_insert)),
             SpanningTree::Parent { span, left, right } => {
-                // TODO: this algorithm always preserves the existing partition point, and does not
-                // do any rebalancing or unification of ranges within the tree; `into_vec`
-                // performes such unification and the tree being unbalanced should be fine given
-                // the relatively small number of ranges we should ordinarily be concerned with.
+                // This algorithm always preserves the existing partition point, and does not do
+                // any rebalancing or unification of ranges within the tree. This should be okay
+                // because `into_vec` performs such unification, and the tree being unbalanced
+                // should be fine given the relatively small number of ranges we should ordinarily
+                // be concerned with.
                 use RangeOrdering::*;
                 match RangeOrdering::cmp(&span, to_insert.block_range()) {
                     LeftFirstDisjoint => {
@@ -417,7 +430,7 @@ pub(crate) fn insert_queue_entries<'a>(
         trace!("Inserting queue entry {}", entry);
         if !entry.is_empty() {
             stmt.execute(named_params![
-                ":block_range_start": u32::from(entry.block_range().start) ,
+                ":block_range_start": u32::from(entry.block_range().start),
                 ":block_range_end": u32::from(entry.block_range().end),
                 ":priority": priority_code(&entry.priority())
             ])?;
@@ -459,7 +472,7 @@ pub(crate) fn replace_queue_entries(
             ":end": u32::from(query_range.end),
         ])?;
 
-        // Iterate over the ranges in the scan queue that overlaps the range that we have
+        // Iterate over the ranges in the scan queue that overlap the range that we have
         // identified as needing to be fully scanned. For each such range add it to the
         // spanning tree (these should all be nonoverlapping ranges, but we might coalesce
         // some in the process).
@@ -554,9 +567,9 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                 .flatten())
         };
 
-        // if no notes belonging to the wallet were found, so don't need to extend the scanning
+        // If no notes belonging to the wallet were found, we don't need to extend the scanning
         // range suggestions to include the associated subtrees, and our bounds are just the
-        // scanned range
+        // scanned range.
         subtree_bounds
             .map(|(min_idx, max_idx)| {
                 let range_min = if *min_idx > 0 {
@@ -617,13 +630,12 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     )?;
 
     // Create a scanning range for the fragment of the last shard leading up to new tip.
-    // However, only do so if the start of the shard is at a stable height.
     let shard_entry = shard_start_height
         .filter(|h| h < &chain_end)
         .map(|h| ScanRange::from_parts(h..chain_end, ScanPriority::ChainTip));
 
     // Create scanning ranges to either validate potentially invalid blocks at the wallet's view
-    // of the chain tip,
+    // of the chain tip, or connect the prior tip to the new tip.
     let tip_entry = block_height_extrema(conn)?.map(|(_, prior_tip)| {
         // If we don't have shard metadata, this means we're doing linear scanning, so create a
         // scan range from the prior tip to the current tip with `Historic` priority.
@@ -634,7 +646,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
             // and not subject to being reorg'ed.
             let stable_height = new_tip.saturating_sub(PRUNING_DEPTH);
 
-            // if the wallet's prior tip is above the stable height, prioritize the range between
+            // If the wallet's prior tip is above the stable height, prioritize the range between
             // it and the new tip as `ChainTip`. Otherwise, prioritize the `VALIDATION_DEPTH`
             // blocks above the wallet's prior tip as `Verify`. Since `scan_cached_blocks`
             // retrieves the metadata for the block being connected to, the connectivity to the
@@ -954,12 +966,12 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
-        // Add an account to the wallet
+        // Add an account to the wallet.
         let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         assert_matches!(
-            // in the following, we don't care what the root hashes are, they just need to be
-            // distinct
+            // In the following, we don't care what the root hashes are, they just need to be
+            // distinct.
             db_data.put_sapling_subtree_roots(
                 0,
                 &[
@@ -1021,7 +1033,7 @@ mod tests {
             Ok(())
         );
 
-        // Verify the that adjacent range needed to make the note spendable has been prioritized
+        // Verify the that adjacent range needed to make the note spendable has been prioritized.
         let sap_active = u32::from(sapling_activation_height());
         assert_matches!(
             db_data.suggest_scan_ranges(),
@@ -1030,7 +1042,7 @@ mod tests {
             ]
         );
 
-        // Check that the scanned range has been properly persisted
+        // Check that the scanned range has been properly persisted.
         assert_matches!(
             suggest_scan_ranges(&db_data.conn, Scanned),
             Ok(scan_ranges) if scan_ranges == vec![
@@ -1039,8 +1051,8 @@ mod tests {
             ]
         );
 
-        // simulate the wallet going offline for a bit, update the chain tip to 30 blocks in the
-        // future
+        // Simulate the wallet going offline for a bit, update the chain tip to 20 blocks in the
+        // future.
         assert_matches!(
             db_data.update_chain_tip(sapling_activation_height() + 340),
             Ok(())
@@ -1056,7 +1068,7 @@ mod tests {
             ]
         );
 
-        // Now simulate a jump ahead more than 100 blocks
+        // Now simulate a jump ahead more than 100 blocks.
         assert_matches!(
             db_data.update_chain_tip(sapling_activation_height() + 450),
             Ok(())

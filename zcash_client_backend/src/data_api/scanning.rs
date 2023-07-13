@@ -10,13 +10,14 @@ pub enum ScanPriority {
     Scanned,
     /// Block ranges to be scanned to advance the fully-scanned height.
     Historic,
-    /// Block ranges adjacent to wallet open heights.
+    /// Block ranges adjacent to heights at which the user opened the wallet.
     OpenAdjacent,
     /// Blocks that must be scanned to complete note commitment tree shards adjacent to found notes.
     FoundNote,
     /// Blocks that must be scanned to complete the latest note commitment tree shard.
     ChainTip,
-    /// A previously-scanned range that must be verified has highest priority.
+    /// A previously scanned range that must be verified to check it is still in the
+    /// main chain, has highest priority.
     Verify,
 }
 

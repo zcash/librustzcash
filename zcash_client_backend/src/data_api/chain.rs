@@ -104,8 +104,7 @@
 //!                 }
 //!             }
 //!
-//!             // Truncation will have updated the suggested scan ranges, so we now
-//!             // re_request
+//!             // In case we updated the suggested scan ranges, now re-request.
 //!             scan_ranges = wallet_db.suggest_scan_ranges().map_err(Error::Wallet)?;
 //!         }
 //!         _ => {
@@ -123,10 +122,13 @@
 //!     // Download the blocks in `scan_range` into the block source. While in this example this
 //!     // step is performed in-line, it's fine for the download of scan ranges to be asynchronous
 //!     // and for the scanner to process the downloaded ranges as they become available in a
-//!     // separate thread.
+//!     // separate thread. The scan ranges should also be broken down into smaller chunks as
+//!     // appropriate, and for ranges with priority `Historic` it can be useful to download and
+//!     // scan the range in reverse order (to discover more recent unspent notes sooner), or from
+//!     // the start and end of the range inwards.
 //!     unimplemented!();
 //!
-//!     // Scan the downloaded blocks,
+//!     // Scan the downloaded blocks.
 //!     let scan_result = scan_cached_blocks(
 //!         &network,
 //!         &block_source,

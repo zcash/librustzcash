@@ -26,10 +26,6 @@ pub mod migrations;
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height.
-///
-/// # Panics
-///
-/// Panics if the provided `limit` value exceeds the range of a u32
 pub(crate) fn blockdb_with_blocks<F, DbErrT>(
     block_source: &BlockDb,
     from_height: Option<BlockHeight>,
@@ -200,10 +196,6 @@ pub(crate) fn blockmetadb_find_block(
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height for which metadata is available.
-///
-/// # Panics
-///
-/// Panics if the provided `limit` value exceeds the range of a u32
 #[cfg(feature = "unstable")]
 pub(crate) fn fsblockdb_with_blocks<F, DbErrT>(
     cache: &FsBlockDb,

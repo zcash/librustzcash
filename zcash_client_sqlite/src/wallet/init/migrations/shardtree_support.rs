@@ -207,7 +207,8 @@ impl RusqliteMigration for Migration {
             }
         }
 
-        // Establish the scan queue & wallet history table
+        // Establish the scan queue & wallet history table.
+        // block_range_end is exclusive.
         debug!("Creating table for scan queue");
         transaction.execute_batch(
             "CREATE TABLE scan_queue (

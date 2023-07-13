@@ -748,7 +748,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let sapling_activation_height = params
         .activation_height(NetworkUpgrade::Sapling)
-        .expect("Sapling activation height mutst be available.");
+        .expect("Sapling activation height must be available.");
 
     // Recall where we synced up to previously.
     let last_scanned_height = conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
