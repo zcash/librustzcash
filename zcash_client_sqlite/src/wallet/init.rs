@@ -2,6 +2,7 @@
 use either::Either;
 use incrementalmerkletree::Retention;
 use std::{collections::HashMap, fmt, io};
+use tracing::debug;
 
 use rusqlite::{self, types::ToSql};
 use schemer::{Migrator, MigratorError};
@@ -318,6 +319,7 @@ pub fn init_blocks_table<P: consensus::Parameters>(
         )?;
 
         if let Some(nonempty_frontier) = block_end_tree.to_frontier().value() {
+            debug!("Inserting frontier into ShardTree: {:?}", nonempty_frontier);
             let shard_store =
                 SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
                     wdb.conn.0,

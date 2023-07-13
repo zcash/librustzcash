@@ -1,3 +1,4 @@
+use std::fmt;
 use std::ops::Range;
 
 use zcash_primitives::consensus::BlockHeight;
@@ -26,10 +27,25 @@ pub struct ScanRange {
     priority: ScanPriority,
 }
 
+impl fmt::Display for ScanRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:?}({}..{})",
+            self.priority, self.block_range.start, self.block_range.end,
+        )
+    }
+}
+
 impl ScanRange {
     /// Constructs a scan range from its constituent parts.
     pub fn from_parts(block_range: Range<BlockHeight>, priority: ScanPriority) -> Self {
-        assert!(block_range.end >= block_range.start);
+        assert!(
+            block_range.end >= block_range.start,
+            "{:?} is invalid for ScanRange({:?})",
+            block_range,
+            priority,
+        );
         ScanRange {
             block_range,
             priority,

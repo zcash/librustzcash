@@ -9,6 +9,7 @@ use rusqlite::{self, named_params, params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use shardtree::ShardTree;
+use tracing::{debug, trace};
 use uuid::Uuid;
 
 use zcash_client_backend::data_api::{
@@ -61,6 +62,7 @@ impl RusqliteMigration for Migration {
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // Add commitment tree sizes to block metadata.
+        debug!("Adding new columns");
         transaction.execute_batch(
             "ALTER TABLE blocks ADD COLUMN sapling_commitment_tree_size INTEGER;
              ALTER TABLE blocks ADD COLUMN orchard_commitment_tree_size INTEGER;
@@ -68,6 +70,7 @@ impl RusqliteMigration for Migration {
         )?;
 
         // Add shard persistence
+        debug!("Creating tables for shard persistence");
         transaction.execute_batch(
             "CREATE TABLE sapling_tree_shards (
                 shard_index INTEGER PRIMARY KEY,
@@ -86,6 +89,7 @@ impl RusqliteMigration for Migration {
         )?;
 
         // Add checkpoint persistence
+        debug!("Creating tables for checkpoint persistence");
         transaction.execute_batch(
             "CREATE TABLE sapling_tree_checkpoints (
                 checkpoint_id INTEGER PRIMARY KEY,
@@ -133,10 +137,23 @@ impl RusqliteMigration for Migration {
                     )
                 })?;
 
+                if block_height % 1000 == 0 {
+                    debug!(height = block_height, "Migrating tree data to shardtree");
+                }
+                trace!(
+                    height = block_height,
+                    size = block_end_tree.size(),
+                    "Storing Sapling commitment tree size"
+                );
                 stmt_update_block_sapling_tree_size
                     .execute(params![block_end_tree.size(), block_height])?;
 
                 if let Some(nonempty_frontier) = block_end_tree.to_frontier().value() {
+                    trace!(
+                        height = block_height,
+                        frontier = ?nonempty_frontier,
+                        "Inserting frontier nodes",
+                    );
                     shard_tree.insert_frontier_nodes(
                         nonempty_frontier.clone(),
                         Retention::Checkpoint {
@@ -149,6 +166,7 @@ impl RusqliteMigration for Migration {
         }
 
         // Insert all the tree information that we can get from existing incremental witnesses
+        debug!("Migrating witness data to shardtree");
         {
             let mut stmt_blocks =
                 transaction.prepare("SELECT note, block, witness FROM sapling_witnesses")?;
@@ -190,6 +208,7 @@ impl RusqliteMigration for Migration {
         }
 
         // Establish the scan queue & wallet history table
+        debug!("Creating table for scan queue");
         transaction.execute_batch(
             "CREATE TABLE scan_queue (
                 block_range_start INTEGER NOT NULL,

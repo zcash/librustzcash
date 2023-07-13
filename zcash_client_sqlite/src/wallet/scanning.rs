@@ -3,6 +3,7 @@ use std::cmp::{max, min, Ordering};
 use std::collections::BTreeSet;
 use std::ops::{Not, Range};
 use std::rc::Rc;
+use tracing::{debug, trace};
 use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 
 use incrementalmerkletree::{Address, Position};
@@ -413,6 +414,7 @@ pub(crate) fn insert_queue_entries<'a>(
     )?;
 
     for entry in entries {
+        trace!("Inserting queue entry {}", entry);
         if !entry.is_empty() {
             stmt.execute(named_params![
                 ":block_range_start": u32::from(entry.block_range().start) ,
@@ -654,6 +656,12 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
             }
         }
     });
+    if let Some(entry) = &shard_entry {
+        debug!("{} will update latest shard", entry);
+    }
+    if let Some(entry) = &tip_entry {
+        debug!("{} will connect prior tip to new tip", entry);
+    }
 
     let query_range = match (shard_entry.as_ref(), tip_entry.as_ref()) {
         (Some(se), Some(te)) => Some(Range {
