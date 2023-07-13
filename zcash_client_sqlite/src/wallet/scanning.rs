@@ -569,8 +569,8 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                 let range_max = sapling_shard_end(*max_idx)?;
 
                 Ok::<Range<BlockHeight>, rusqlite::Error>(Range {
-                    start: range_min.unwrap_or(range.start),
-                    end: range_max.unwrap_or(range.end),
+                    start: range.start.min(range_min.unwrap_or(range.start)),
+                    end: range.end.max(range_max.unwrap_or(range.end)),
                 })
             })
             .transpose()
