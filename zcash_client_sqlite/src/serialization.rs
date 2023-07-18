@@ -4,7 +4,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt};
 use core::ops::Deref;
 use shardtree::{Node, PrunableTree, RetentionFlags, Tree};
 use std::io::{self, Read, Write};
-use std::rc::Rc;
+use std::sync::Arc;
 use zcash_encoding::Optional;
 use zcash_primitives::merkle_tree::HashSer;
 
@@ -53,7 +53,7 @@ pub fn write_shard<H: HashSer, W: Write>(writer: &mut W, tree: &PrunableTree<H>)
 fn read_shard_v1<H: HashSer, R: Read>(mut reader: &mut R) -> io::Result<PrunableTree<H>> {
     match reader.read_u8()? {
         PARENT_TAG => {
-            let ann = Optional::read(&mut reader, <H as HashSer>::read)?.map(Rc::new);
+            let ann = Optional::read(&mut reader, <H as HashSer>::read)?.map(Arc::new);
             let left = read_shard_v1(reader)?;
             let right = read_shard_v1(reader)?;
             Ok(Tree::parent(ann, left, right))

@@ -8,7 +8,7 @@ use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
-use shardtree::ShardTree;
+use shardtree::{caching::CachingShardStore, ShardTree, ShardTreeError};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
@@ -108,6 +108,7 @@ impl RusqliteMigration for Migration {
                 transaction,
                 SAPLING_TABLES_PREFIX,
             )?;
+        let shard_store = CachingShardStore::load(shard_store).map_err(ShardTreeError::Storage)?;
         let mut shard_tree: ShardTree<
             _,
             { sapling::NOTE_COMMITMENT_TREE_DEPTH },
@@ -154,13 +155,19 @@ impl RusqliteMigration for Migration {
                         frontier = ?nonempty_frontier,
                         "Inserting frontier nodes",
                     );
-                    shard_tree.insert_frontier_nodes(
-                        nonempty_frontier.clone(),
-                        Retention::Checkpoint {
-                            id: BlockHeight::from(block_height),
-                            is_marked: false,
-                        },
-                    )?;
+                    shard_tree
+                        .insert_frontier_nodes(
+                            nonempty_frontier.clone(),
+                            Retention::Checkpoint {
+                                id: BlockHeight::from(block_height),
+                                is_marked: false,
+                            },
+                        )
+                        .map_err(|e| match e {
+                            ShardTreeError::Query(e) => ShardTreeError::Query(e),
+                            ShardTreeError::Insert(e) => ShardTreeError::Insert(e),
+                            ShardTreeError::Storage(_) => unreachable!(),
+                        })?
                 }
             }
         }
@@ -203,9 +210,20 @@ impl RusqliteMigration for Migration {
                     updated_note_positions.insert(witnessed_position);
                 }
 
-                shard_tree.insert_witness_nodes(witness, BlockHeight::from(block_height))?;
+                shard_tree
+                    .insert_witness_nodes(witness, BlockHeight::from(block_height))
+                    .map_err(|e| match e {
+                        ShardTreeError::Query(e) => ShardTreeError::Query(e),
+                        ShardTreeError::Insert(e) => ShardTreeError::Insert(e),
+                        ShardTreeError::Storage(_) => unreachable!(),
+                    })?;
             }
         }
+
+        shard_tree
+            .into_store()
+            .flush()
+            .map_err(ShardTreeError::Storage)?;
 
         // Establish the scan queue & wallet history table.
         // block_range_end is exclusive.
