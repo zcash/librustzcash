@@ -618,6 +618,27 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     params: &P,
     new_tip: BlockHeight,
 ) -> Result<(), SqliteClientError> {
+    // Read the previous tip height from the blocks table.
+    let prior_tip = block_height_extrema(conn)?.map(|(_, prior_tip)| prior_tip);
+
+    // If the chain tip is below the prior tip height, then the caller has caught the
+    // chain in the middle of a reorg. Do nothing; the caller will continue using the old
+    // scan ranges and either:
+    // - encounter an error trying to fetch the blocks (and thus trigger the same handling
+    //   logic as if this happened with the old linear scanning code); or
+    // - encounter a discontinuity error in `scan_cached_blocks`, at which point they will
+    //   call `WalletDb::truncate_to_height` as part of their reorg handling which will
+    //   resolve the problem.
+    //
+    // We don't check the shard height, as normal usage would have the caller update the
+    // shard state prior to this call, so it is possible and expected to be in a situation
+    // where we should update the tip-related scan ranges but not the shard-related ones.
+    if let Some(h) = prior_tip {
+        if new_tip < h {
+            return Ok(());
+        }
+    }
+
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
@@ -636,7 +657,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 
     // Create scanning ranges to either validate potentially invalid blocks at the wallet's view
     // of the chain tip, or connect the prior tip to the new tip.
-    let tip_entry = block_height_extrema(conn)?.map(|(_, prior_tip)| {
+    let tip_entry = prior_tip.map(|prior_tip| {
         // If we don't have shard metadata, this means we're doing linear scanning, so create a
         // scan range from the prior tip to the current tip with `Historic` priority.
         if shard_entry.is_none() {
@@ -696,9 +717,13 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
         // have no existing scan queue entries and can fall back to linear scanning from Sapling
         // activation.
         if let Some(sapling_activation) = params.activation_height(NetworkUpgrade::Sapling) {
-            let scan_range =
-                ScanRange::from_parts(sapling_activation..chain_end, ScanPriority::Historic);
-            insert_queue_entries(conn, Some(scan_range).iter())?;
+            // If the caller provided a chain tip that is before Sapling activation, do
+            // nothing.
+            if sapling_activation < chain_end {
+                let scan_range =
+                    ScanRange::from_parts(sapling_activation..chain_end, ScanPriority::Historic);
+                insert_queue_entries(conn, Some(scan_range).iter())?;
+            }
         }
     }
 
