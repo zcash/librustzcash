@@ -157,6 +157,7 @@ impl RangeOrdering {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Joined {
     One(ScanRange),
     Two(ScanRange, ScanRange),
@@ -757,7 +758,108 @@ mod tests {
         BlockDb, WalletDb,
     };
 
-    use super::{RangeOrdering, SpanningTree};
+    use super::{join_nonoverlapping, Joined, RangeOrdering, SpanningTree};
+
+    #[test]
+    fn test_join_nonoverlapping() {
+        fn test_range(left: ScanRange, right: ScanRange, expected_joined: Joined) {
+            let joined = join_nonoverlapping(left, right);
+
+            assert_eq!(joined, expected_joined);
+        }
+
+        macro_rules! range {
+            ( $start:expr, $end:expr; $priority:ident ) => {
+                ScanRange::from_parts(
+                    BlockHeight::from($start)..BlockHeight::from($end),
+                    ScanPriority::$priority,
+                )
+            };
+        }
+
+        macro_rules! joined {
+            (
+                ($a_start:expr, $a_end:expr; $a_priority:ident)
+            ) => {
+                Joined::One(
+                    range!($a_start, $a_end; $a_priority)
+                )
+            };
+            (
+                ($a_start:expr, $a_end:expr; $a_priority:ident),
+                ($b_start:expr, $b_end:expr; $b_priority:ident)
+            ) => {
+                Joined::Two(
+                    range!($a_start, $a_end; $a_priority),
+                    range!($b_start, $b_end; $b_priority)
+                )
+            };
+            (
+                ($a_start:expr, $a_end:expr; $a_priority:ident),
+                ($b_start:expr, $b_end:expr; $b_priority:ident),
+                ($c_start:expr, $c_end:expr; $c_priority:ident)
+
+            ) => {
+                Joined::Three(
+                    range!($a_start, $a_end; $a_priority),
+                    range!($b_start, $b_end; $b_priority),
+                    range!($c_start, $c_end; $c_priority)
+                )
+            };
+        }
+
+        // Scan ranges have the same priority and
+        // line up.
+        test_range(
+            range!(1, 9; OpenAdjacent),
+            range!(9, 15; OpenAdjacent),
+            joined!(
+                (1, 15; OpenAdjacent)
+            ),
+        );
+
+        // Scan ranges have different priorities,
+        // so we cannot merge them even though they
+        // line up.
+        test_range(
+            range!(1, 9; OpenAdjacent),
+            range!(9, 15; ChainTip),
+            joined!(
+                (1, 9; OpenAdjacent),
+                (9, 15; ChainTip)
+            ),
+        );
+
+        // Scan ranges have the same priority but
+        // do not line up.
+        test_range(
+            range!(1, 9; OpenAdjacent),
+            range!(13, 15; OpenAdjacent),
+            joined!(
+                (1, 9; OpenAdjacent),
+                (9, 13; Historic),
+                (13, 15; OpenAdjacent)
+            ),
+        );
+
+        test_range(
+            range!(1, 9; Historic),
+            range!(13, 15; OpenAdjacent),
+            joined!(
+                (1, 13; Historic),
+                (13, 15; OpenAdjacent)
+            ),
+        );
+
+        test_range(
+            range!(1, 9; OpenAdjacent),
+            range!(13, 15; Historic),
+            joined!(
+                (1, 9; OpenAdjacent),
+                (9, 15; Historic)
+            ),
+        );
+    }
 
     #[test]
     fn range_ordering() {
