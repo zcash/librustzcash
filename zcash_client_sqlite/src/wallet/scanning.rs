@@ -12,7 +12,7 @@ use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 
 use crate::error::SqliteClientError;
-use crate::{PRUNING_DEPTH, VALIDATION_DEPTH};
+use crate::{PRUNING_DEPTH, VERIFY_LOOKAHEAD};
 
 use super::block_height_extrema;
 
@@ -669,7 +669,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
             let stable_height = new_tip.saturating_sub(PRUNING_DEPTH);
 
             // If the wallet's prior tip is above the stable height, prioritize the range between
-            // it and the new tip as `ChainTip`. Otherwise, prioritize the `VALIDATION_DEPTH`
+            // it and the new tip as `ChainTip`. Otherwise, prioritize the `VERIFY_LOOKAHEAD`
             // blocks above the wallet's prior tip as `Verify`. Since `scan_cached_blocks`
             // retrieves the metadata for the block being connected to, the connectivity to the
             // prior tip will always be checked. Since `Verify` ranges have maximum priority, even
@@ -684,7 +684,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
                 // and advance it up to at most the stable height. The shard entry will then cover
                 // the range to the new tip at the lower `ChainTip` priority.
                 ScanRange::from_parts(
-                    prior_tip..min(stable_height, prior_tip + VALIDATION_DEPTH),
+                    prior_tip..min(stable_height, prior_tip + VERIFY_LOOKAHEAD),
                     ScanPriority::Verify,
                 )
             }

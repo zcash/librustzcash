@@ -89,8 +89,8 @@ use wallet::commitment_tree::put_shard_roots;
 /// this delta from the chain tip to be pruned.
 pub(crate) const PRUNING_DEPTH: u32 = 100;
 
-/// The number of blocks to re-verify when the chain tip is updated.
-pub(crate) const VALIDATION_DEPTH: u32 = 10;
+/// The number of blocks to verify ahead when the chain tip is updated.
+pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
