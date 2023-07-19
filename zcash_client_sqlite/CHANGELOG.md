@@ -20,6 +20,8 @@ and this library adheres to Rust's notion of
   wallet did not contain enough observed blocks to satisfy the `min_confirmations`
   value specified; this situation is now treated as an error.
 - A `BlockConflict` variant has been added to `zcash_client_sqlite::error::SqliteClientError`
+- `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
+  existing metadata entries that have the same height as a new entry.
 
 ### Removed
 - The empty `wallet::transact` module has been removed.

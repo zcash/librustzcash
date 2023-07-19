@@ -103,21 +103,40 @@ pub(crate) fn blockmetadb_insert(
     conn: &Connection,
     block_meta: &[BlockMeta],
 ) -> Result<(), rusqlite::Error> {
+    use rusqlite::named_params;
+
     let mut stmt_insert = conn.prepare(
-        "INSERT INTO compactblocks_meta (height, blockhash, time, sapling_outputs_count, orchard_actions_count)
-        VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO compactblocks_meta (
+            height,
+            blockhash,
+            time,
+            sapling_outputs_count,
+            orchard_actions_count
+        )
+        VALUES (
+            :height,
+            :blockhash,
+            :time,
+            :sapling_outputs_count,
+            :orchard_actions_count
+        )
+        ON CONFLICT (height) DO UPDATE
+        SET blockhash = :blockhash,
+            time = :time,
+            sapling_outputs_count = :sapling_outputs_count,
+            orchard_actions_count = :orchard_actions_count",
     )?;
 
     conn.execute("BEGIN IMMEDIATE", [])?;
     let result = block_meta
         .iter()
         .map(|m| {
-            stmt_insert.execute(params![
-                u32::from(m.height),
-                &m.block_hash.0[..],
-                m.block_time,
-                m.sapling_outputs_count,
-                m.orchard_actions_count,
+            stmt_insert.execute(named_params![
+                ":height": u32::from(m.height),
+                ":blockhash": &m.block_hash.0[..],
+                ":time": m.block_time,
+                ":sapling_outputs_count": m.sapling_outputs_count,
+                ":orchard_actions_count": m.orchard_actions_count,
             ])
         })
         .collect::<Result<Vec<_>, _>>();
