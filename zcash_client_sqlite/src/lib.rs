@@ -907,7 +907,8 @@ impl FsBlockDb {
         Ok(chain::blockmetadb_get_max_cached_height(&self.conn)?)
     }
 
-    /// Adds a set of block metadata entries to the metadata database.
+    /// Adds a set of block metadata entries to the metadata database, overwriting any
+    /// existing entries at the given block heights.
     ///
     /// This will return an error if any block file corresponding to one of these metadata records
     /// is absent from the blocks directory.
