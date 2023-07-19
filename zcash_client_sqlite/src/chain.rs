@@ -29,7 +29,7 @@ pub mod migrations;
 pub(crate) fn blockdb_with_blocks<F, DbErrT>(
     block_source: &BlockDb,
     from_height: Option<BlockHeight>,
-    limit: Option<u32>,
+    limit: Option<usize>,
     mut with_row: F,
 ) -> Result<(), Error<DbErrT, SqliteClientError>>
 where
@@ -52,7 +52,9 @@ where
     let mut rows = stmt_blocks
         .query(params![
             from_height.map_or(0u32, u32::from),
-            limit.unwrap_or(u32::max_value()),
+            limit
+                .and_then(|l| u32::try_from(l).ok())
+                .unwrap_or(u32::MAX)
         ])
         .map_err(to_chain_error)?;
 
@@ -198,7 +200,7 @@ pub(crate) fn blockmetadb_find_block(
 pub(crate) fn fsblockdb_with_blocks<F, DbErrT>(
     cache: &FsBlockDb,
     from_height: Option<BlockHeight>,
-    limit: Option<u32>,
+    limit: Option<usize>,
     mut with_block: F,
 ) -> Result<(), Error<DbErrT, FsBlockDbError>>
 where
@@ -223,7 +225,9 @@ where
         .query_map(
             params![
                 from_height.map_or(0u32, u32::from),
-                limit.unwrap_or(u32::max_value()),
+                limit
+                    .and_then(|l| u32::try_from(l).ok())
+                    .unwrap_or(u32::MAX)
             ],
             |row| {
                 Ok(BlockMeta {
@@ -279,11 +283,12 @@ mod tests {
     use zcash_client_backend::{
         address::RecipientAddress,
         data_api::{
-            chain::scan_cached_blocks,
+            chain::{error::Error, scan_cached_blocks},
             wallet::{input_selection::GreedyInputSelector, spend},
             WalletRead, WalletWrite,
         },
         fees::{zip317::SingleOutputChangeStrategy, DustOutputPolicy},
+        scanning::ScanError,
         wallet::OvkPolicy,
         zip321::{Payment, TransactionRequest},
     };
@@ -315,12 +320,9 @@ mod tests {
         assert_matches!(db_data.get_max_height_hash(), Ok(None));
 
         // Create a fake CompactBlock sending value to the address
-        let fake_block_hash = BlockHash([0; 32]);
-        let fake_block_height = sapling_activation_height();
-
         let (cb, _) = fake_compact_block(
-            fake_block_height,
-            fake_block_hash,
+            sapling_activation_height(),
+            BlockHash([0; 32]),
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
@@ -348,17 +350,20 @@ mod tests {
             Amount::from_u64(7).unwrap(),
             1,
         );
+
         insert_into_cache(&db_cache, &cb2);
 
-        // Scan the cache again
-        scan_cached_blocks(
-            &tests::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height() + 1,
-            1,
-        )
-        .unwrap();
+        // Scanning should detect no inconsistencies
+        assert_matches!(
+            scan_cached_blocks(
+                &tests::network(),
+                &db_cache,
+                &mut db_data,
+                sapling_activation_height() + 1,
+                1,
+            ),
+            Ok(())
+        );
     }
 
     #[test]
@@ -394,15 +399,17 @@ mod tests {
         insert_into_cache(&db_cache, &cb);
         insert_into_cache(&db_cache, &cb2);
 
-        // Scan the cache
-        scan_cached_blocks(
-            &tests::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            2,
-        )
-        .unwrap();
+        // Scanning the cache should find no inconsistencies
+        assert_matches!(
+            scan_cached_blocks(
+                &tests::network(),
+                &db_cache,
+                &mut db_data,
+                sapling_activation_height(),
+                2,
+            ),
+            Ok(())
+        );
 
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let (cb3, _) = fake_compact_block(
@@ -433,83 +440,8 @@ mod tests {
                 sapling_activation_height() + 2,
                 2
             ),
-            Err(_) // FIXME: check error result more closely
-        );
-    }
-
-    #[test]
-    fn invalid_chain_cache_reorg() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
-
-        // Add an account to the wallet
-        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
-
-        // Create some fake CompactBlocks
-        let (cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            Amount::from_u64(5).unwrap(),
-            0,
-        );
-        let (cb2, _) = fake_compact_block(
-            sapling_activation_height() + 1,
-            cb.hash(),
-            &dfvk,
-            AddressType::DefaultExternal,
-            Amount::from_u64(7).unwrap(),
-            1,
-        );
-        insert_into_cache(&db_cache, &cb);
-        insert_into_cache(&db_cache, &cb2);
-
-        // Scan the cache
-        scan_cached_blocks(
-            &tests::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            2,
-        )
-        .unwrap();
-
-        // Create more fake CompactBlocks that contain a reorg
-        let (cb3, _) = fake_compact_block(
-            sapling_activation_height() + 2,
-            cb2.hash(),
-            &dfvk,
-            AddressType::DefaultExternal,
-            Amount::from_u64(8).unwrap(),
-            2,
-        );
-        let (cb4, _) = fake_compact_block(
-            sapling_activation_height() + 3,
-            BlockHash([1; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            Amount::from_u64(3).unwrap(),
-            3,
-        );
-        insert_into_cache(&db_cache, &cb3);
-        insert_into_cache(&db_cache, &cb4);
-
-        // Data+cache chain should be invalid inside the cache
-        assert_matches!(
-            scan_cached_blocks(
-                &tests::network(),
-                &db_cache,
-                &mut db_data,
-                sapling_activation_height() + 2,
-                2
-            ),
-            Err(_) // FIXME: check error result more closely
+            Err(Error::Scan(ScanError::PrevHashMismatch { at_height }))
+                if at_height == sapling_activation_height() + 2
         );
     }
 

@@ -68,6 +68,8 @@ use rusqlite::{self, named_params, OptionalExtension, ToSql};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
+use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
+
 use zcash_client_backend::data_api::ShieldedProtocol;
 use zcash_primitives::transaction::TransactionData;
 
@@ -91,9 +93,12 @@ use zcash_client_backend::{
     wallet::WalletTx,
 };
 
+use crate::VERIFY_LOOKAHEAD;
 use crate::{
     error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
 };
+
+use self::scanning::replace_queue_entries;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -109,6 +114,7 @@ use {
 pub(crate) mod commitment_tree;
 pub mod init;
 pub(crate) mod sapling;
+pub(crate) mod scanning;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
@@ -629,8 +635,8 @@ pub(crate) fn block_metadata(
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
         "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
-            FROM blocks
-            WHERE height = :block_height",
+        FROM blocks
+        WHERE height = :block_height",
         named_params![":block_height": u32::from(block_height)],
         |row| {
             let height: u32 = row.get(0)?;
@@ -742,7 +748,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let sapling_activation_height = params
         .activation_height(NetworkUpgrade::Sapling)
-        .expect("Sapling activation height mutst be available.");
+        .expect("Sapling activation height must be available.");
 
     // Recall where we synced up to previously.
     let last_scanned_height = conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
@@ -800,7 +806,8 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 
         // Un-mine transactions.
         conn.execute(
-            "UPDATE transactions SET block = NULL, tx_index = NULL WHERE block IS NOT NULL AND block > ?",
+            "UPDATE transactions SET block = NULL, tx_index = NULL
+            WHERE block IS NOT NULL AND block > ?",
             [u32::from(block_height)],
         )?;
 
@@ -809,6 +816,27 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             "DELETE FROM blocks WHERE height > ?",
             [u32::from(block_height)],
         )?;
+
+        // Delete from the scanning queue any range with a start height greater than the
+        // truncation height, and then truncate any remaining range by setting the end
+        // equal to the truncation height + 1.
+        conn.execute(
+            "DELETE FROM scan_queue
+            WHERE block_range_start > :block_height",
+            named_params![":block_height": u32::from(block_height)],
+        )?;
+
+        conn.execute(
+            "UPDATE scan_queue
+            SET block_range_end = :end_height
+            WHERE block_range_end > :end_height",
+            named_params![":end_height": u32::from(block_height + 1)],
+        )?;
+
+        // Prioritize the range starting at the height we just rewound to for verification
+        let query_range = block_height..(block_height + VERIFY_LOOKAHEAD);
+        let scan_range = ScanRange::from_parts(query_range.clone(), ScanPriority::Verify);
+        replace_queue_entries(conn, &query_range, Some(scan_range).into_iter())?;
     }
 
     Ok(())

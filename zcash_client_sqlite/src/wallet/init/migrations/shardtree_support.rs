@@ -8,10 +8,14 @@ use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
-use shardtree::ShardTree;
+use shardtree::{caching::CachingShardStore, ShardTree, ShardTreeError};
+use tracing::{debug, trace};
 use uuid::Uuid;
 
-use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
+use zcash_client_backend::data_api::{
+    scanning::{ScanPriority, ScanRange},
+    SAPLING_SHARD_HEIGHT,
+};
 use zcash_primitives::{
     consensus::BlockHeight,
     merkle_tree::{read_commitment_tree, read_incremental_witness},
@@ -20,8 +24,10 @@ use zcash_primitives::{
 
 use crate::{
     wallet::{
+        block_height_extrema,
         commitment_tree::SqliteShardStore,
         init::{migrations::received_notes_nullable_nf, WalletMigrationError},
+        scanning::insert_queue_entries,
     },
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
@@ -56,6 +62,7 @@ impl RusqliteMigration for Migration {
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // Add commitment tree sizes to block metadata.
+        debug!("Adding new columns");
         transaction.execute_batch(
             "ALTER TABLE blocks ADD COLUMN sapling_commitment_tree_size INTEGER;
              ALTER TABLE blocks ADD COLUMN orchard_commitment_tree_size INTEGER;
@@ -63,6 +70,7 @@ impl RusqliteMigration for Migration {
         )?;
 
         // Add shard persistence
+        debug!("Creating tables for shard persistence");
         transaction.execute_batch(
             "CREATE TABLE sapling_tree_shards (
                 shard_index INTEGER PRIMARY KEY,
@@ -81,6 +89,7 @@ impl RusqliteMigration for Migration {
         )?;
 
         // Add checkpoint persistence
+        debug!("Creating tables for checkpoint persistence");
         transaction.execute_batch(
             "CREATE TABLE sapling_tree_checkpoints (
                 checkpoint_id INTEGER PRIMARY KEY,
@@ -99,6 +108,7 @@ impl RusqliteMigration for Migration {
                 transaction,
                 SAPLING_TABLES_PREFIX,
             )?;
+        let shard_store = CachingShardStore::load(shard_store).map_err(ShardTreeError::Storage)?;
         let mut shard_tree: ShardTree<
             _,
             { sapling::NOTE_COMMITMENT_TREE_DEPTH },
@@ -128,22 +138,42 @@ impl RusqliteMigration for Migration {
                     )
                 })?;
 
+                if block_height % 1000 == 0 {
+                    debug!(height = block_height, "Migrating tree data to shardtree");
+                }
+                trace!(
+                    height = block_height,
+                    size = block_end_tree.size(),
+                    "Storing Sapling commitment tree size"
+                );
                 stmt_update_block_sapling_tree_size
                     .execute(params![block_end_tree.size(), block_height])?;
 
                 if let Some(nonempty_frontier) = block_end_tree.to_frontier().value() {
-                    shard_tree.insert_frontier_nodes(
-                        nonempty_frontier.clone(),
-                        Retention::Checkpoint {
-                            id: BlockHeight::from(block_height),
-                            is_marked: false,
-                        },
-                    )?;
+                    trace!(
+                        height = block_height,
+                        frontier = ?nonempty_frontier,
+                        "Inserting frontier nodes",
+                    );
+                    shard_tree
+                        .insert_frontier_nodes(
+                            nonempty_frontier.clone(),
+                            Retention::Checkpoint {
+                                id: BlockHeight::from(block_height),
+                                is_marked: false,
+                            },
+                        )
+                        .map_err(|e| match e {
+                            ShardTreeError::Query(e) => ShardTreeError::Query(e),
+                            ShardTreeError::Insert(e) => ShardTreeError::Insert(e),
+                            ShardTreeError::Storage(_) => unreachable!(),
+                        })?
                 }
             }
         }
 
         // Insert all the tree information that we can get from existing incremental witnesses
+        debug!("Migrating witness data to shardtree");
         {
             let mut stmt_blocks =
                 transaction.prepare("SELECT note, block, witness FROM sapling_witnesses")?;
@@ -180,8 +210,48 @@ impl RusqliteMigration for Migration {
                     updated_note_positions.insert(witnessed_position);
                 }
 
-                shard_tree.insert_witness_nodes(witness, BlockHeight::from(block_height))?;
+                shard_tree
+                    .insert_witness_nodes(witness, BlockHeight::from(block_height))
+                    .map_err(|e| match e {
+                        ShardTreeError::Query(e) => ShardTreeError::Query(e),
+                        ShardTreeError::Insert(e) => ShardTreeError::Insert(e),
+                        ShardTreeError::Storage(_) => unreachable!(),
+                    })?;
             }
+        }
+
+        shard_tree
+            .into_store()
+            .flush()
+            .map_err(ShardTreeError::Storage)?;
+
+        // Establish the scan queue & wallet history table.
+        // block_range_end is exclusive.
+        debug!("Creating table for scan queue");
+        transaction.execute_batch(
+            "CREATE TABLE scan_queue (
+                block_range_start INTEGER NOT NULL,
+                block_range_end INTEGER NOT NULL,
+                priority INTEGER NOT NULL,
+                CONSTRAINT range_start_uniq UNIQUE (block_range_start),
+                CONSTRAINT range_end_uniq UNIQUE (block_range_end),
+                CONSTRAINT range_bounds_order CHECK (
+                    block_range_start < block_range_end
+                )
+            );",
+        )?;
+
+        if let Some((start, end)) = block_height_extrema(transaction)? {
+            // `ScanRange` uses an exclusive upper bound.
+            let chain_end = end + 1;
+            insert_queue_entries(
+                transaction,
+                Some(ScanRange::from_parts(
+                    start..chain_end,
+                    ScanPriority::Historic,
+                ))
+                .iter(),
+            )?;
         }
 
         Ok(())

@@ -2,6 +2,8 @@ use bitvec::{order::Lsb0, view::AsBits};
 use group::{ff::PrimeField, Curve};
 use incrementalmerkletree::{Hashable, Level};
 use lazy_static::lazy_static;
+
+use std::fmt;
 use std::io::{self, Read, Write};
 
 use super::{
@@ -64,9 +66,17 @@ pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
 }
 
 /// A node within the Sapling commitment tree.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Node {
     pub(super) repr: [u8; 32],
+}
+
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Node")
+            .field("repr", &hex::encode(self.repr))
+            .finish()
+    }
 }
 
 impl Node {

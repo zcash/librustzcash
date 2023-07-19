@@ -118,6 +118,22 @@ message TreeState {
     string orchardTree = 6; // orchard commitment tree state
 }
 
+enum ShieldedProtocol {
+    sapling = 0;
+    orchard = 1;
+}
+
+message GetSubtreeRootsArg {
+    uint32 startIndex = 1;                  // Index identifying where to start returning subtree roots
+    ShieldedProtocol shieldedProtocol = 2;  // Shielded protocol to return subtree roots for
+    uint32 maxEntries = 3;                  // Maximum number of entries to return, or 0 for all entries.
+}
+message SubtreeRoot {
+    bytes rootHash = 2;                     // The 32-byte Merkle root of the subtree.
+    bytes completingBlockHash = 3;          // The hash of the block that completed this subtree.
+    uint64 completingBlockHeight = 4;       // The height of the block that completed this subtree in the main chain.
+}
+
 // Results are sorted by height, which makes it easy to issue another
 // request that picks up from where the previous left off.
 message GetAddressUtxosArg {
@@ -142,8 +158,12 @@ service CompactTxStreamer {
     rpc GetLatestBlock(ChainSpec) returns (BlockID) {}
     // Return the compact block corresponding to the given block identifier
     rpc GetBlock(BlockID) returns (CompactBlock) {}
+    // Same as GetBlock except actions contain only nullifiers
+    rpc GetBlockNullifiers(BlockID) returns (CompactBlock) {}
     // Return a list of consecutive compact blocks
     rpc GetBlockRange(BlockRange) returns (stream CompactBlock) {}
+    // Same as GetBlockRange except actions contain only nullifiers
+    rpc GetBlockRangeNullifiers(BlockRange) returns (stream CompactBlock) {}
 
     // Return the requested full (not compact) transaction (as from zcashd)
     rpc GetTransaction(TxFilter) returns (RawTransaction) {}
@@ -176,6 +196,10 @@ service CompactTxStreamer {
     // The block can be specified by either height or hash.
     rpc GetTreeState(BlockID) returns (TreeState) {}
     rpc GetLatestTreeState(Empty) returns (TreeState) {}
+
+    // Returns a stream of information about roots of subtrees of the Sapling and Orchard
+    // note commitment trees.
+    rpc GetSubtreeRoots(GetSubtreeRootsArg) returns (stream SubtreeRoot) {}
 
     rpc GetAddressUtxos(GetAddressUtxosArg) returns (GetAddressUtxosReplyList) {}
     rpc GetAddressUtxosStream(GetAddressUtxosArg) returns (stream GetAddressUtxosReply) {}
