@@ -103,6 +103,8 @@ impl RusqliteMigration for Migration {
             );",
         )?;
 
+        let block_height_extrema = block_height_extrema(transaction)?;
+
         let shard_store =
             SqliteShardStore::<_, sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
                 transaction,
@@ -149,25 +151,40 @@ impl RusqliteMigration for Migration {
                 stmt_update_block_sapling_tree_size
                     .execute(params![block_end_tree.size(), block_height])?;
 
-                if let Some(nonempty_frontier) = block_end_tree.to_frontier().value() {
-                    trace!(
-                        height = block_height,
-                        frontier = ?nonempty_frontier,
-                        "Inserting frontier nodes",
-                    );
-                    shard_tree
-                        .insert_frontier_nodes(
-                            nonempty_frontier.clone(),
-                            Retention::Checkpoint {
-                                id: BlockHeight::from(block_height),
-                                is_marked: false,
-                            },
-                        )
-                        .map_err(|e| match e {
-                            ShardTreeError::Query(e) => ShardTreeError::Query(e),
-                            ShardTreeError::Insert(e) => ShardTreeError::Insert(e),
-                            ShardTreeError::Storage(_) => unreachable!(),
-                        })?
+                // We only need to load frontiers into the ShardTree that are close enough
+                // to the wallet's known chain tip to fill `PRUNING_DEPTH` checkpoints, so
+                // that ShardTree's witness generation will be able to correctly handle
+                // anchor depths. Loading frontiers further back than this doesn't add any
+                // useful nodes to the ShardTree (as we don't support rollbacks beyond
+                // `PRUNING_DEPTH`, and we won't be finding notes in earlier blocks), and
+                // hurts performance (as frontier importing has a significant Merkle tree
+                // hashing cost).
+                if let Some((nonempty_frontier, (_, latest_height))) = block_end_tree
+                    .to_frontier()
+                    .value()
+                    .zip(block_height_extrema)
+                {
+                    let block_height = BlockHeight::from(block_height);
+                    if block_height + PRUNING_DEPTH >= latest_height {
+                        trace!(
+                            height = u32::from(block_height),
+                            frontier = ?nonempty_frontier,
+                            "Inserting frontier nodes",
+                        );
+                        shard_tree
+                            .insert_frontier_nodes(
+                                nonempty_frontier.clone(),
+                                Retention::Checkpoint {
+                                    id: block_height,
+                                    is_marked: false,
+                                },
+                            )
+                            .map_err(|e| match e {
+                                ShardTreeError::Query(e) => ShardTreeError::Query(e),
+                                ShardTreeError::Insert(e) => ShardTreeError::Insert(e),
+                                ShardTreeError::Storage(_) => unreachable!(),
+                            })?
+                    }
                 }
             }
         }
@@ -241,7 +258,7 @@ impl RusqliteMigration for Migration {
             );",
         )?;
 
-        if let Some((start, end)) = block_height_extrema(transaction)? {
+        if let Some((start, end)) = block_height_extrema {
             // `ScanRange` uses an exclusive upper bound.
             let chain_end = end + 1;
             insert_queue_entries(
