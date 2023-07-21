@@ -835,4 +835,85 @@ mod tests {
             (value - value2).unwrap()
         );
     }
+
+    #[test]
+    fn scan_cached_blocks_detects_spends_out_of_order() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+
+        // Add an account to the wallet
+        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
+
+        // Account balance should be zero
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            Amount::zero()
+        );
+
+        // Create a fake CompactBlock sending value to the address
+        let value = Amount::from_u64(5).unwrap();
+        let (cb, nf) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value,
+            0,
+        );
+        insert_into_cache(&db_cache, &cb);
+
+        // Create a second fake CompactBlock spending value from the address
+        let extsk2 = ExtendedSpendingKey::master(&[0]);
+        let to2 = extsk2.default_address().1;
+        let value2 = Amount::from_u64(2).unwrap();
+        insert_into_cache(
+            &db_cache,
+            &fake_compact_block_spending(
+                sapling_activation_height() + 1,
+                cb.hash(),
+                (nf, value),
+                &dfvk,
+                to2,
+                value2,
+                1,
+            ),
+        );
+
+        // Scan the spending block first.
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height() + 1,
+            1,
+        )
+        .unwrap();
+
+        // Account balance should equal the change
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            (value - value2).unwrap()
+        );
+
+        // Now scan the block in which we received the note that was spent.
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
+
+        // Account balance should be the same.
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            (value - value2).unwrap()
+        );
+    }
 }
