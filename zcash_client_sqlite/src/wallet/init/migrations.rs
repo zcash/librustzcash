@@ -2,6 +2,7 @@ mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
 mod initial_setup;
+mod nullifier_map;
 mod received_notes_nullable_nf;
 mod sent_notes_to_internal;
 mod shardtree_support;
@@ -30,6 +31,10 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                    add_transaction_views
     //                       /
     //        v_transactions_net
+    //                  /
+    //      received_notes_nullable_nf
+    //            /               \
+    // shardtree_support      nullifier_map
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -48,5 +53,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(v_transactions_net::Migration),
         Box::new(received_notes_nullable_nf::Migration),
         Box::new(shardtree_support::Migration),
+        Box::new(nullifier_map::Migration),
     ]
 }

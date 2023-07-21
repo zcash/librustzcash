@@ -300,6 +300,7 @@ pub struct ScannedBlock<Nf> {
     metadata: BlockMetadata,
     block_time: u32,
     transactions: Vec<WalletTx<Nf>>,
+    sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
     sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
 }
 
@@ -308,12 +309,14 @@ impl<Nf> ScannedBlock<Nf> {
         metadata: BlockMetadata,
         block_time: u32,
         transactions: Vec<WalletTx<Nf>>,
+        sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
         sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
     ) -> Self {
         Self {
             metadata,
             block_time,
             transactions,
+            sapling_nullifier_map,
             sapling_commitments,
         }
     }
@@ -336,6 +339,10 @@ impl<Nf> ScannedBlock<Nf> {
 
     pub fn transactions(&self) -> &[WalletTx<Nf>] {
         &self.transactions
+    }
+
+    pub fn sapling_nullifier_map(&self) -> &[(TxId, u16, Vec<sapling::Nullifier>)] {
+        &self.sapling_nullifier_map
     }
 
     pub fn sapling_commitments(&self) -> &[(sapling::Node, Retention<BlockHeight>)] {
@@ -498,7 +505,7 @@ pub trait WalletWrite: WalletRead {
     /// `blocks` must be sequential, in order of increasing block height
     fn put_blocks(
         &mut self,
-        block: Vec<ScannedBlock<sapling::Nullifier>>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier>>,
     ) -> Result<Vec<Self::NoteRef>, Self::Error>;
 
     /// Updates the wallet's view of the blockchain.

@@ -442,13 +442,30 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     }
 
                     for output in &tx.sapling_outputs {
-                        let received_note_id =
-                            wallet::sapling::put_received_note(wdb.conn.0, output, tx_row)?;
+                        // Check whether this note was spent in a later block range that
+                        // we previously scanned.
+                        let spent_in = wallet::query_nullifier_map(
+                            wdb.conn.0,
+                            ShieldedProtocol::Sapling,
+                            output.nf(),
+                        )?;
+
+                        let received_note_id = wallet::sapling::put_received_note(
+                            wdb.conn.0, output, tx_row, spent_in,
+                        )?;
 
                         // Save witness for note.
                         wallet_note_ids.push(received_note_id);
                     }
                 }
+
+                // Insert the new nullifiers from this block into the nullifier map.
+                wallet::insert_nullifier_map(
+                    wdb.conn.0,
+                    block.height(),
+                    ShieldedProtocol::Sapling,
+                    block.sapling_nullifier_map(),
+                )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
                     wtx.sapling_outputs
@@ -458,6 +475,14 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                 last_scanned_height = Some(block.height());
                 sapling_commitments.extend(block.into_sapling_commitments().into_iter());
+            }
+
+            // Prune the nullifier map of entries we no longer need.
+            if let Some(meta) = wdb.block_fully_scanned()? {
+                wallet::prune_nullifier_map(
+                    wdb.conn.0,
+                    meta.block_height().saturating_sub(PRUNING_DEPTH),
+                )?;
             }
 
             // We will have a start position and a last scanned height in all cases where
@@ -533,7 +558,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         )?;
 
                         if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref)?;
+                            wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                         }
                     }
                     TransferType::Incoming => {
@@ -548,7 +573,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             }
                         }
 
-                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref)?;
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                     }
                 }
             }
@@ -645,6 +670,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             transfer_type: TransferType::WalletInternal,
                         },
                         tx_ref,
+                        None,
                     )?;
                 }
             }

@@ -312,10 +312,11 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     conn: &Connection,
     output: &T,
     tx_ref: i64,
+    spent_in: Option<i64>,
 ) -> Result<NoteId, SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
-        (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change, commitment_tree_position)
+        (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change, spent, commitment_tree_position)
         VALUES (
             :tx,
             :output_index,
@@ -326,6 +327,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             :memo,
             :nf,
             :is_change,
+            :spent,
             :commitment_tree_position
         )
         ON CONFLICT (tx, output_index) DO UPDATE
@@ -336,6 +338,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
             is_change = IFNULL(:is_change, is_change),
+            spent = IFNULL(:spent, spent),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position)
         RETURNING id_note",
     )?;
@@ -354,6 +357,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
         ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change(),
+        ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
     ];
 
