@@ -265,7 +265,7 @@ impl RusqliteMigration for Migration {
                 transaction,
                 Some(ScanRange::from_parts(
                     start..chain_end,
-                    ScanPriority::Historic,
+                    ScanPriority::Scanned,
                 ))
                 .iter(),
             )?;
