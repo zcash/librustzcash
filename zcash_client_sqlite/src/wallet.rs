@@ -839,6 +839,14 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             [u32::from(block_height)],
         )?;
 
+        // Delete from the nullifier map any entries with a locator referencing a block
+        // height greater than the truncation height.
+        conn.execute(
+            "DELETE FROM tx_locator_map
+            WHERE block_height > :block_height",
+            named_params![":block_height": u32::from(block_height)],
+        )?;
+
         // Delete from the scanning queue any range with a start height greater than the
         // truncation height, and then truncate any remaining range by setting the end
         // equal to the truncation height + 1.
@@ -1312,6 +1320,165 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     ];
 
     stmt_upsert_sent_output.execute(sql_args)?;
+
+    Ok(())
+}
+
+/// Inserts the given entries into the nullifier map.
+///
+/// Returns an error if the new entries conflict with existing ones. This indicates either
+/// corrupted data, or that a reorg has occurred and the caller needs to repair the wallet
+/// state with [`truncate_to_height`].
+pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
+    conn: &rusqlite::Transaction<'_>,
+    block_height: BlockHeight,
+    spend_pool: ShieldedProtocol,
+    new_entries: &[(TxId, u16, Vec<N>)],
+) -> Result<(), SqliteClientError> {
+    let mut stmt_select_tx_locators = conn.prepare_cached(
+        "SELECT block_height, tx_index, txid
+        FROM tx_locator_map
+        WHERE (block_height = :block_height AND tx_index = :tx_index) OR txid = :txid",
+    )?;
+    let mut stmt_insert_tx_locator = conn.prepare_cached(
+        "INSERT INTO tx_locator_map
+        (block_height, tx_index, txid)
+        VALUES (:block_height, :tx_index, :txid)",
+    )?;
+    let mut stmt_insert_nullifier_mapping = conn.prepare_cached(
+        "INSERT INTO nullifier_map
+        (spend_pool, nf, block_height, tx_index)
+        VALUES (:spend_pool, :nf, :block_height, :tx_index)
+        ON CONFLICT (spend_pool, nf) DO UPDATE
+        SET block_height = :block_height,
+            tx_index = :tx_index",
+    )?;
+
+    for (txid, tx_index, nullifiers) in new_entries {
+        let tx_args = named_params![
+            ":block_height": u32::from(block_height),
+            ":tx_index": tx_index,
+            ":txid": txid.as_ref(),
+        ];
+
+        // We cannot use an upsert here, because we use the tx locator as the foreign key
+        // in `nullifier_map` instead of `txid` for database size efficiency. If an insert
+        // into `tx_locator_map` were to conflict, we would need the resulting update to
+        // cascade into `nullifier_map` as either:
+        // - an update (if a transaction moved within a block), or
+        // - a deletion (if the locator now points to a different transaction).
+        //
+        // `ON UPDATE` has `CASCADE` to always update, but has no deletion option. So we
+        // instead set `ON UPDATE RESTRICT` on the foreign key relation, and require the
+        // caller to manually rewind the database in this situation.
+        let locator = stmt_select_tx_locators
+            .query_map(tx_args, |row| {
+                Ok((
+                    BlockHeight::from_u32(row.get(0)?),
+                    row.get::<_, u16>(1)?,
+                    TxId::from_bytes(row.get(2)?),
+                ))
+            })?
+            .fold(Ok(None), |acc: Result<_, SqliteClientError>, row| {
+                match (acc?, row?) {
+                    (None, rhs) => Ok(Some(Some(rhs))),
+                    // If there was more than one row, then due to the uniqueness
+                    // constraints on the `tx_locator_map` table, all of the rows conflict
+                    // with the locator being inserted.
+                    (Some(_), _) => Ok(Some(None)),
+                }
+            })?;
+
+        match locator {
+            // If the locator in the table matches the one being inserted, do nothing.
+            Some(Some(loc)) if loc == (block_height, *tx_index, *txid) => (),
+            // If the locator being inserted would conflict, report it.
+            Some(_) => Err(SqliteClientError::DbError(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+                Some("UNIQUE constraint failed: tx_locator_map.block_height, tx_locator_map.tx_index".into()),
+            )))?,
+            // If the locator doesn't exist, insert it.
+            None => stmt_insert_tx_locator.execute(tx_args).map(|_| ())?,
+        }
+
+        for nf in nullifiers {
+            // Here it is okay to use an upsert, because per above we've confirmed that
+            // the locator points to the same transaction.
+            let nf_args = named_params![
+                ":spend_pool": pool_code(PoolType::Shielded(spend_pool)),
+                ":nf": nf.as_ref(),
+                ":block_height": u32::from(block_height),
+                ":tx_index": tx_index,
+            ];
+            stmt_insert_nullifier_mapping.execute(nf_args)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns the row of the `transactions` table corresponding to the transaction in which
+/// this nullifier is revealed, if any.
+pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
+    conn: &rusqlite::Transaction<'_>,
+    spend_pool: ShieldedProtocol,
+    nf: &N,
+) -> Result<Option<i64>, SqliteClientError> {
+    let mut stmt_select_locator = conn.prepare_cached(
+        "SELECT block_height, tx_index, txid
+        FROM nullifier_map
+        LEFT JOIN tx_locator_map USING (block_height, tx_index)
+        WHERE spend_pool = :spend_pool AND nf = :nf",
+    )?;
+
+    let sql_args = named_params![
+        ":spend_pool": pool_code(PoolType::Shielded(spend_pool)),
+        ":nf": nf.as_ref(),
+    ];
+
+    // Find the locator corresponding to this nullifier, if any.
+    let locator = stmt_select_locator
+        .query_row(sql_args, |row| {
+            Ok((
+                BlockHeight::from_u32(row.get(0)?),
+                row.get(1)?,
+                TxId::from_bytes(row.get(2)?),
+            ))
+        })
+        .optional()?;
+    let (height, index, txid) = match locator {
+        Some(res) => res,
+        None => return Ok(None),
+    };
+
+    // Find or create a corresponding row in the `transactions` table. Usually a row will
+    // have been created during the same scan that the locator was added to the nullifier
+    // map, but it would not happen if the transaction in question spent the note with no
+    // change or explicit in-wallet recipient.
+    put_tx_meta(
+        conn,
+        &WalletTx::<N> {
+            txid,
+            index,
+            sapling_spends: vec![],
+            sapling_outputs: vec![],
+        },
+        height,
+    )
+    .map(Some)
+}
+
+/// Deletes from the nullifier map any entries with a locator referencing a block height
+/// lower than the pruning height.
+pub(crate) fn prune_nullifier_map(
+    conn: &rusqlite::Transaction<'_>,
+    block_height: BlockHeight,
+) -> Result<(), SqliteClientError> {
+    conn.execute(
+        "DELETE FROM tx_locator_map
+        WHERE block_height < :block_height",
+        named_params![":block_height": u32::from(block_height)],
+    )?;
 
     Ok(())
 }

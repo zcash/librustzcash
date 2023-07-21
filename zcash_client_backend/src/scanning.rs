@@ -355,36 +355,44 @@ pub(crate) fn scan_block_with_runner<
 
     let compact_block_tx_count = block.vtx.len();
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
+    let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
         let txid = tx.txid();
+        let tx_index =
+            u16::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
 
-        // Check for spent notes.  The only step that is not constant-time is
-        // the filter() at the end.
+        // Check for spent notes. The comparison against known-unspent nullifiers is done
+        // in constant time.
         // TODO: However, this is O(|nullifiers| * |notes|); does using
         // constant-time operations here really make sense?
-        let shielded_spends: Vec<_> = tx
-            .spends
-            .into_iter()
-            .enumerate()
-            .map(|(index, spend)| {
-                let spend_nf = spend.nf().expect(
-                    "Could not deserialize nullifier for spend from protobuf representation.",
-                );
-                // Find the first tracked nullifier that matches this spend, and produce
-                // a WalletShieldedSpend if there is a match, in constant time.
-                nullifiers
-                    .iter()
-                    .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
-                    .fold(
-                        CtOption::new(AccountId::from(0), 0.into()),
-                        |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
-                    )
-                    .map(|account| WalletSaplingSpend::from_parts(index, spend_nf, account))
-            })
-            .filter(|spend| spend.is_some().into())
-            .map(|spend| spend.unwrap())
-            .collect();
+        let mut shielded_spends = vec![];
+        let mut sapling_unlinked_nullifiers = Vec::with_capacity(tx.spends.len());
+        for (index, spend) in tx.spends.into_iter().enumerate() {
+            let spend_nf = spend
+                .nf()
+                .expect("Could not deserialize nullifier for spend from protobuf representation.");
+
+            // Find the first tracked nullifier that matches this spend, and produce
+            // a WalletShieldedSpend if there is a match, in constant time.
+            let spend = nullifiers
+                .iter()
+                .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
+                .fold(
+                    CtOption::new(AccountId::from(0), 0.into()),
+                    |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
+                )
+                .map(|account| WalletSaplingSpend::from_parts(index, spend_nf, account));
+
+            if spend.is_some().into() {
+                shielded_spends.push(spend.unwrap());
+            } else {
+                // This nullifier didn't match any we are currently tracking; save it in
+                // case it matches an earlier block range we haven't scanned yet.
+                sapling_unlinked_nullifiers.push(spend_nf);
+            }
+        }
+        sapling_nullifier_map.push((txid, tx_index, sapling_unlinked_nullifiers));
 
         // Collect the set of accounts that were spent from in this transaction
         let spent_from_accounts: HashSet<_> = shielded_spends
@@ -505,7 +513,7 @@ pub(crate) fn scan_block_with_runner<
         if !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
             wtxs.push(WalletTx {
                 txid,
-                index: tx.index as usize,
+                index: tx_index as usize,
                 sapling_spends: shielded_spends,
                 sapling_outputs: shielded_outputs,
             });
@@ -518,6 +526,7 @@ pub(crate) fn scan_block_with_runner<
         BlockMetadata::from_parts(cur_height, cur_hash, sapling_commitment_tree_size),
         block.time,
         wtxs,
+        sapling_nullifier_map,
         sapling_note_commitments,
     ))
 }

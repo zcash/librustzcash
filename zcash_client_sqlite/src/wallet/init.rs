@@ -414,6 +414,18 @@ mod tests {
                 sapling_tree BLOB NOT NULL ,
                 sapling_commitment_tree_size INTEGER,
                 orchard_commitment_tree_size INTEGER)",
+            "CREATE TABLE nullifier_map (
+                spend_pool INTEGER NOT NULL,
+                nf BLOB NOT NULL,
+                block_height INTEGER NOT NULL,
+                tx_index INTEGER NOT NULL,
+                CONSTRAINT tx_locator
+                    FOREIGN KEY (block_height, tx_index)
+                    REFERENCES tx_locator_map(block_height, tx_index)
+                    ON DELETE CASCADE
+                    ON UPDATE RESTRICT,
+                CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
+            )",
             "CREATE TABLE sapling_received_notes (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -506,6 +518,12 @@ mod tests {
                 raw BLOB,
                 fee INTEGER,
                 FOREIGN KEY (block) REFERENCES blocks(height)
+            )",
+            "CREATE TABLE tx_locator_map (
+                block_height INTEGER NOT NULL,
+                tx_index INTEGER NOT NULL,
+                txid BLOB NOT NULL UNIQUE,
+                PRIMARY KEY (block_height, tx_index)
             )",
             "CREATE TABLE \"utxos\" (
                 id_utxo INTEGER PRIMARY KEY,
