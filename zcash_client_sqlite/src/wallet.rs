@@ -659,13 +659,35 @@ pub(crate) fn block_metadata(
 pub(crate) fn block_fully_scanned(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
-    // FIXME: this will need to be rewritten once out-of-order scan range suggestion
-    // is implemented.
+    // We assume here that the wallet was either initialized via `init_blocks_table`, or
+    // its birthday is Sapling activation, so the earliest block in the `blocks` table is
+    // the first fully-scanned block (because it occurs before any wallet activity).
+    //
+    // We further assume that the only way we get a contiguous range of block heights in
+    // the `blocks` table starting with this earliest block, is if all scanning operations
+    // have been performed on those blocks. This holds because the `blocks` table is only
+    // altered by `WalletDb::put_blocks` via `put_block`, and the effective combination of
+    // intra-range linear scanning and the nullifier map ensures that we discover all
+    // wallet-related information within the contiguous range.
+    //
+    // The fully-scanned height is therefore the greatest height in the first contiguous
+    // range of block rows, which is a combined case of the "gaps and islands" and
+    // "greatest N per group" SQL query problems.
     conn.query_row(
         "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
-            FROM blocks
-            ORDER BY height DESC
-            LIMIT 1",
+        FROM blocks
+        INNER JOIN (
+            WITH contiguous AS (
+                SELECT height, ROW_NUMBER() OVER (ORDER BY height) - height AS grp
+                FROM blocks
+            )
+            SELECT MAX(height) AS [fully_scanned_height]
+            FROM contiguous
+            GROUP BY grp
+            ORDER BY height
+            LIMIT 1
+        )
+        ON height = fully_scanned_height",
         [],
         |row| {
             let height: u32 = row.get(0)?;
