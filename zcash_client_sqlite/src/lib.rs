@@ -33,6 +33,10 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 
 use either::Either;
+use maybe_rayon::{
+    prelude::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, io, ops::Range, path::Path};
@@ -474,7 +478,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }));
 
                 last_scanned_height = Some(block.height());
-                sapling_commitments.extend(block.into_sapling_commitments().into_iter());
+                sapling_commitments.extend(block.into_sapling_commitments().into_iter().map(Some));
             }
 
             // Prune the nullifier map of entries we no longer need.
@@ -490,10 +494,31 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             if let Some(((start_height, start_position), last_scanned_height)) =
                 start_positions.zip(last_scanned_height)
             {
+                // Create subtrees from the note commitments in parallel.
+                const CHUNK_SIZE: usize = 1024;
+                let subtrees = sapling_commitments
+                    .par_chunks_mut(CHUNK_SIZE)
+                    .enumerate()
+                    .filter_map(|(i, chunk)| {
+                        let start = start_position + (i * CHUNK_SIZE) as u64;
+                        let end = start + chunk.len() as u64;
+
+                        shardtree::LocatedTree::from_iter(
+                            start..end,
+                            SAPLING_SHARD_HEIGHT.into(),
+                            chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                        )
+                    })
+                    .map(|res| (res.subtree, res.checkpoints))
+                    .collect::<Vec<_>>();
+
                 // Update the Sapling note commitment tree with all newly read note commitments
-                let mut sapling_commitments = sapling_commitments.into_iter();
+                let mut subtrees = subtrees.into_iter();
                 wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
-                    sapling_tree.batch_insert(start_position, &mut sapling_commitments)?;
+                    for (tree, checkpoints) in &mut subtrees {
+                        sapling_tree.insert_tree(tree, checkpoints)?;
+                    }
+
                     Ok(())
                 })?;
 

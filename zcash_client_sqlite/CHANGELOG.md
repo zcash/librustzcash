@@ -9,6 +9,9 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_client_sqlite::serialization` Serialization formats for data stored
   as SQLite BLOBs in the wallet database.
+- A new default-enabled feature flag `multicore`. This allows users to disable
+  multicore support by setting `default_features = false` on their
+  `zcash_primitives`, `zcash_proofs`, and `zcash_client_sqlite` dependencies.
 
 ### Changed
 - MSRV is now 1.65.0.
