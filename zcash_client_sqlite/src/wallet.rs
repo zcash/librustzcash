@@ -1474,11 +1474,12 @@ pub(crate) fn prune_nullifier_map(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    conn.execute(
+    let mut stmt_delete_locators = conn.prepare_cached(
         "DELETE FROM tx_locator_map
         WHERE block_height < :block_height",
-        named_params![":block_height": u32::from(block_height)],
     )?;
+
+    stmt_delete_locators.execute(named_params![":block_height": u32::from(block_height)])?;
 
     Ok(())
 }
