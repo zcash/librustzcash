@@ -10,8 +10,9 @@ use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
 
 use incrementalmerkletree::{Address, Hashable, Level, Position, Retention};
 use shardtree::{
-    Checkpoint, LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags, ShardStore,
-    ShardTreeError, TreeState,
+    error::ShardTreeError,
+    store::{Checkpoint, ShardStore, TreeState},
+    LocatedPrunableTree, LocatedTree, PrunableTree, RetentionFlags,
 };
 
 use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};

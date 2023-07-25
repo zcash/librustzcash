@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::{convert::Infallible, num::NonZeroU32};
 
-use shardtree::{ShardStore, ShardTree, ShardTreeError};
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,

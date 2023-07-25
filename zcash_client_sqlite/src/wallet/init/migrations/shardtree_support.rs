@@ -8,7 +8,7 @@ use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
-use shardtree::{caching::CachingShardStore, ShardTree, ShardTreeError};
+use shardtree::{error::ShardTreeError, store::caching::CachingShardStore, ShardTree};
 use tracing::{debug, trace};
 use uuid::Uuid;
 

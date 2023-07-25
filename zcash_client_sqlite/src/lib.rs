@@ -42,7 +42,7 @@ use secrecy::{ExposeSecret, SecretVec};
 use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, io, ops::Range, path::Path};
 
 use incrementalmerkletree::Position;
-use shardtree::{ShardTree, ShardTreeError};
+use shardtree::{error::ShardTreeError, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},

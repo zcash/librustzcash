@@ -1,8 +1,9 @@
 //! Types for wallet error handling.
 
-use shardtree::ShardTreeError;
 use std::error;
 use std::fmt::{self, Debug, Display};
+
+use shardtree::error::ShardTreeError;
 use zcash_primitives::{
     transaction::{
         builder,
