@@ -48,6 +48,7 @@ uuid = "1.1"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+maybe-rayon = {version = "0.1.0", default-features = false}
 
 [dev-dependencies]
 assert_matches = "1.5"
@@ -63,6 +64,8 @@ zcash_primitives = { version = "0.12", path = "../zcash_primitives", features = 
 zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]
+default = ["multicore"]
+multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
 mainnet = []
 test-dependencies = [
     "incrementalmerkletree/test-dependencies",
