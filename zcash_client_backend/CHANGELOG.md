@@ -26,6 +26,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::scanning`:
   - `ScanError`
   - `impl<K: ScanningKey> ScanningKey for &K`
+  - `impl ScanningKey for (zip32::Scope, sapling::SaplingIvk, sapling::NullifierDerivingKey)`
 
 ### Changed
 - MSRV is now 1.65.0.

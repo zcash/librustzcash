@@ -107,6 +107,21 @@ impl ScanningKey for DiversifiableFullViewingKey {
     }
 }
 
+impl ScanningKey for (Scope, SaplingIvk, sapling::NullifierDerivingKey) {
+    type Scope = Scope;
+    type SaplingNk = sapling::NullifierDerivingKey;
+    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 1];
+    type Nf = sapling::Nullifier;
+
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [self.clone()]
+    }
+
+    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
+        note.nf(key, position.into())
+    }
+}
+
 /// The [`ScanningKey`] implementation for [`SaplingIvk`]s.
 /// Nullifiers cannot be derived when scanning with these keys.
 ///
