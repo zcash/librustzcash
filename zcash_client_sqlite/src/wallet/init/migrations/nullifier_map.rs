@@ -56,7 +56,8 @@ impl RusqliteMigration for Migration {
                     ON DELETE CASCADE
                     ON UPDATE RESTRICT,
                 CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
-            );",
+            );
+            CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index);",
         )?;
 
         Ok(())
