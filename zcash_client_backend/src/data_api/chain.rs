@@ -155,7 +155,7 @@ use crate::{
     data_api::{BlockMetadata, NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
-    scanning::{add_block_to_runner, check_continuity, scan_block_with_runner},
+    scanning::{add_block_to_runner, check_continuity, scan_block_with_runner, ScanningKey},
 };
 
 pub mod error;
@@ -254,6 +254,15 @@ where
         .iter()
         .filter_map(|(account, ufvk)| ufvk.sapling().map(move |k| (account, k)))
         .collect();
+    // Precompute the IVKs instead of doing so per block.
+    let ivks = dfvks
+        .iter()
+        .flat_map(|(account, dfvk)| {
+            dfvk.to_sapling_keys()
+                .into_iter()
+                .map(|key| (*account, key))
+        })
+        .collect::<Vec<_>>();
 
     // Get the nullifiers for the unspent notes we are tracking
     let mut sapling_nullifiers = data_db
@@ -337,7 +346,7 @@ where
             let scanned_block = scan_block_with_runner(
                 params,
                 block,
-                &dfvks,
+                &ivks,
                 &sapling_nullifiers,
                 prior_block_metadata.as_ref(),
                 Some(&mut batch_runner),

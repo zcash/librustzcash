@@ -66,6 +66,21 @@ pub trait ScanningKey {
         -> Self::Nf;
 }
 
+impl<K: ScanningKey> ScanningKey for &K {
+    type Scope = K::Scope;
+    type SaplingNk = K::SaplingNk;
+    type SaplingKeys = K::SaplingKeys;
+    type Nf = K::Nf;
+
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        (*self).to_sapling_keys()
+    }
+
+    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
+        K::sapling_nf(key, note, position)
+    }
+}
+
 impl ScanningKey for DiversifiableFullViewingKey {
     type Scope = Scope;
     type SaplingNk = sapling::NullifierDerivingKey;
@@ -85,6 +100,21 @@ impl ScanningKey for DiversifiableFullViewingKey {
                 self.to_nk(Scope::Internal),
             ),
         ]
+    }
+
+    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
+        note.nf(key, position.into())
+    }
+}
+
+impl ScanningKey for (Scope, SaplingIvk, sapling::NullifierDerivingKey) {
+    type Scope = Scope;
+    type SaplingNk = sapling::NullifierDerivingKey;
+    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 1];
+    type Nf = sapling::Nullifier;
+
+    fn to_sapling_keys(&self) -> Self::SaplingKeys {
+        [self.clone()]
     }
 
     fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
@@ -312,7 +342,7 @@ pub(crate) fn scan_block_with_runner<
 >(
     params: &P,
     block: CompactBlock,
-    vks: &[(&AccountId, &K)],
+    vks: &[(&AccountId, K)],
     nullifiers: &[(AccountId, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,

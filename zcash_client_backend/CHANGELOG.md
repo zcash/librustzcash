@@ -23,7 +23,10 @@ and this library adheres to Rust's notion of
   - `testing::MockWalletDb::new`
   - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
 - `zcash_client_backend::wallet::WalletSaplingOutput::note_commitment_tree_position`
-- `zcash_client_backend::scanning::ScanError`
+- `zcash_client_backend::scanning`:
+  - `ScanError`
+  - `impl<K: ScanningKey> ScanningKey for &K`
+  - `impl ScanningKey for (zip32::Scope, sapling::SaplingIvk, sapling::NullifierDerivingKey)`
 
 ### Changed
 - MSRV is now 1.65.0.
