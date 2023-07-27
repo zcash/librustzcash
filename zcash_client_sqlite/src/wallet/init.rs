@@ -8,7 +8,7 @@ use rusqlite::{self, types::ToSql};
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
-use shardtree::{ShardTree, ShardTreeError};
+use shardtree::{error::ShardTreeError, ShardTree};
 use uuid::Uuid;
 
 use zcash_primitives::{

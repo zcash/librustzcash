@@ -5,7 +5,7 @@ use std::error;
 use std::fmt;
 use std::io;
 
-use shardtree::ShardTreeError;
+use shardtree::error::ShardTreeError;
 use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
 use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 

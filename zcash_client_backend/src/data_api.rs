@@ -7,7 +7,7 @@ use std::num::NonZeroU32;
 
 use incrementalmerkletree::Retention;
 use secrecy::SecretVec;
-use shardtree::{ShardStore, ShardTree, ShardTreeError};
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -584,7 +584,7 @@ pub trait WalletCommitmentTrees {
 pub mod testing {
     use incrementalmerkletree::Address;
     use secrecy::{ExposeSecret, SecretVec};
-    use shardtree::{memory::MemoryShardStore, ShardTree, ShardTreeError};
+    use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible};
 
     use zcash_primitives::{
