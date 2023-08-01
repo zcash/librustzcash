@@ -503,7 +503,7 @@ pub(crate) fn get_transaction<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     id_tx: i64,
-) -> Result<Transaction, SqliteClientError> {
+) -> Result<(BlockHeight, Transaction), SqliteClientError> {
     let (tx_bytes, block_height, expiry_height): (
         Vec<_>,
         Option<BlockHeight>,
@@ -536,6 +536,7 @@ pub(crate) fn get_transaction<P: Parameters>(
         block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
     {
         Transaction::read(&tx_bytes[..], BranchId::for_height(params, height))
+            .map(|t| (height, t))
             .map_err(SqliteClientError::from)
     } else {
         let tx_data = Transaction::read(&tx_bytes[..], BranchId::Sprout)
@@ -555,6 +556,7 @@ pub(crate) fn get_transaction<P: Parameters>(
                 tx_data.orchard_bundle().cloned(),
             )
             .freeze()
+            .map(|t| (expiry_height, t))
             .map_err(SqliteClientError::from)
         } else {
             Err(SqliteClientError::CorruptedData(

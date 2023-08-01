@@ -240,7 +240,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     }
 
     fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self.conn.borrow(), &self.params, id_tx)
+        wallet::get_transaction(self.conn.borrow(), &self.params, id_tx).map(|(_, tx)| tx)
     }
 
     fn get_sapling_nullifiers(

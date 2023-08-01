@@ -574,8 +574,9 @@ mod tests {
                             ELSE 1
                        END AS received_count,
                        CASE
-                           WHEN sapling_received_notes.memo IS NULL THEN 0
-                           ELSE 1
+                         WHEN (sapling_received_notes.memo IS NULL OR sapling_received_notes.memo = X'F6')
+                           THEN 0
+                         ELSE 1
                        END AS memo_present
                 FROM   sapling_received_notes
                 UNION
@@ -606,8 +607,9 @@ mod tests {
                        COUNT(DISTINCT sent_notes.id_note) as sent_notes,
                        SUM(
                          CASE
-                             WHEN sent_notes.memo IS NULL THEN 0
-                             ELSE 1
+                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6')
+                             THEN 0
+                           ELSE 1
                          END
                        ) AS memo_count
                 FROM sent_notes

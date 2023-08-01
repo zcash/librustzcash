@@ -545,30 +545,29 @@ where
     for payment in proposal.transaction_request().payments() {
         match &payment.recipient_address {
             RecipientAddress::Unified(ua) => {
+                let memo = payment
+                    .memo
+                    .as_ref()
+                    .map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     external_ovk,
                     *ua.sapling().expect("TODO: Add Orchard support to builder"),
                     payment.amount,
-                    payment.memo.clone().unwrap_or_else(MemoBytes::empty),
+                    memo.clone(),
                 )?;
                 sapling_output_meta.push((
                     Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),
                     payment.amount,
-                    payment.memo.clone(),
+                    Some(memo),
                 ));
             }
             RecipientAddress::Shielded(addr) => {
-                builder.add_sapling_output(
-                    external_ovk,
-                    *addr,
-                    payment.amount,
-                    payment.memo.clone().unwrap_or_else(MemoBytes::empty),
-                )?;
-                sapling_output_meta.push((
-                    Recipient::Sapling(*addr),
-                    payment.amount,
-                    payment.memo.clone(),
-                ));
+                let memo = payment
+                    .memo
+                    .as_ref()
+                    .map_or_else(MemoBytes::empty, |m| m.clone());
+                builder.add_sapling_output(external_ovk, *addr, payment.amount, memo.clone())?;
+                sapling_output_meta.push((Recipient::Sapling(*addr), payment.amount, Some(memo)));
             }
             RecipientAddress::Transparent(to) => {
                 if payment.memo.is_some() {
@@ -584,11 +583,14 @@ where
     for change_value in proposal.balance().proposed_change() {
         match change_value {
             ChangeValue::Sapling(amount) => {
+                let memo = change_memo
+                    .as_ref()
+                    .map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     internal_ovk(),
                     dfvk.change_address().1,
                     *amount,
-                    change_memo.clone().unwrap_or_else(MemoBytes::empty),
+                    memo.clone(),
                 )?;
                 sapling_output_meta.push((
                     Recipient::InternalAccount(
@@ -596,7 +598,7 @@ where
                         PoolType::Shielded(ShieldedProtocol::Sapling),
                     ),
                     *amount,
-                    change_memo.clone(),
+                    Some(memo),
                 ))
             }
         }
