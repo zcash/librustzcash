@@ -581,12 +581,19 @@ pub(crate) mod tests {
         let mut found_sent_change_memo = false;
         let mut found_sent_empty_memo = false;
         for sent_note_id in sent_note_ids {
-            let memo = db_data.get_memo(sent_note_id).expect("Note id is valid");
-            if memo.as_ref() == Some(&change_memo) {
-                found_sent_change_memo = true
-            }
-            if memo == Some(Memo::Empty) {
-                found_sent_empty_memo = true
+            match db_data
+                .get_memo(sent_note_id)
+                .expect("Note id is valid")
+                .as_ref()
+            {
+                Some(m) if m == &change_memo => {
+                    found_sent_change_memo = true;
+                }
+                Some(m) if m == &Memo::Empty => {
+                    found_sent_empty_memo = true;
+                }
+                Some(other) => panic!("Unexpected memo value: {:?}", other),
+                None => panic!("Memo should not be stored as NULL"),
             }
         }
         assert!(found_sent_change_memo);

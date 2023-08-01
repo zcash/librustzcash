@@ -129,8 +129,14 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
 }
 
 pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
-    memo.filter(|m| *m != &MemoBytes::empty())
-        .map(|m| m.as_slice())
+    memo.map(|m| {
+        if m == &MemoBytes::empty() {
+            // we store the empty memo as a single 0xf6 byte
+            &[0xf6]
+        } else {
+            m.as_slice()
+        }
+    })
 }
 
 pub(crate) fn get_max_account_id(
@@ -1262,7 +1268,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
         ":to_address": &to_address,
         ":to_account": &to_account,
         ":value": &i64::from(output.value()),
-        ":memo": output.memo().filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+        ":memo": memo_repr(output.memo())
     ];
 
     stmt_insert_sent_output.execute(sql_args)?;
