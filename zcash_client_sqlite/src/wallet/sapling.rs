@@ -543,7 +543,9 @@ pub(crate) mod tests {
         .unwrap();
 
         let fee_rule = FixedFeeRule::standard();
-        let change_strategy = fixed::SingleOutputChangeStrategy::new(fee_rule);
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let change_strategy =
+            fixed::SingleOutputChangeStrategy::new(fee_rule, Some(change_memo.clone().into()));
         let input_selector =
             &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
         let proposal_result = st.propose_transfer(
@@ -554,13 +556,11 @@ pub(crate) mod tests {
         );
         assert_matches!(proposal_result, Ok(_));
 
-        let change_memo = "Test change memo".parse::<Memo>().unwrap();
         let create_proposed_result = st.create_proposed_transaction(
             &usk,
             OvkPolicy::Sender,
             proposal_result.unwrap(),
             NonZeroU32::new(1).unwrap(),
-            Some(change_memo.clone().into()),
         );
         assert_matches!(create_proposed_result, Ok(_));
 
@@ -670,6 +670,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None
             ),
             Err(data_api::error::Error::KeyNotRecognized)
         );
@@ -697,6 +698,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None
             ),
             Err(data_api::error::Error::ScanRequired)
         );
@@ -763,6 +765,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(10).unwrap(),
+                None
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -791,6 +794,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(10).unwrap(),
+                None
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -823,6 +827,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(10).unwrap(),
+                None,
             )
             .unwrap();
 
@@ -868,6 +873,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None
             ),
             Ok(_)
         );
@@ -881,6 +887,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -909,6 +916,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -939,6 +947,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None,
             )
             .unwrap();
 
@@ -995,6 +1004,7 @@ pub(crate) mod tests {
                 None,
                 ovk_policy,
                 NonZeroU32::new(1).unwrap(),
+                None,
             )?;
 
             // Fetch the transaction from the database
@@ -1082,6 +1092,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None
             ),
             Ok(_)
         );
@@ -1123,6 +1134,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
+                None
             ),
             Ok(_)
         );
@@ -1188,7 +1200,7 @@ pub(crate) mod tests {
 
         let fee_rule = FixedFeeRule::standard();
         let input_selector = GreedyInputSelector::new(
-            fixed::SingleOutputChangeStrategy::new(fee_rule),
+            fixed::SingleOutputChangeStrategy::new(fee_rule, None),
             DustOutputPolicy::default(),
         );
 
@@ -1280,7 +1292,7 @@ pub(crate) mod tests {
         assert_eq!(st.get_spendable_balance(account, 1), total);
 
         let input_selector = GreedyInputSelector::new(
-            zip317::SingleOutputChangeStrategy::new(Zip317FeeRule::standard()),
+            zip317::SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None),
             DustOutputPolicy::default(),
         );
 
@@ -1382,7 +1394,7 @@ pub(crate) mod tests {
         assert!(matches!(res0, Ok(_)));
 
         let input_selector = GreedyInputSelector::new(
-            fixed::SingleOutputChangeStrategy::new(FixedFeeRule::standard()),
+            fixed::SingleOutputChangeStrategy::new(FixedFeeRule::standard(), None),
             DustOutputPolicy::default(),
         );
 
@@ -1392,7 +1404,6 @@ pub(crate) mod tests {
                 NonNegativeAmount::from_u64(10000).unwrap(),
                 &usk,
                 &[*taddr],
-                &MemoBytes::empty(),
                 NonZeroU32::new(1).unwrap()
             ),
             Ok(_)
@@ -1548,6 +1559,7 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(5).unwrap(),
+                None
             ),
             Ok(_)
         );

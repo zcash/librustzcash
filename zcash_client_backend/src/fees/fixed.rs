@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
+    memo::MemoBytes,
     transaction::{
         components::{
             amount::{Amount, BalanceError, NonNegativeAmount},
@@ -21,12 +22,16 @@ use super::{
 /// shielded pool and delegates fee calculation to the provided fee rule.
 pub struct SingleOutputChangeStrategy {
     fee_rule: FixedFeeRule,
+    change_memo: Option<MemoBytes>,
 }
 
 impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule.
-    pub fn new(fee_rule: FixedFeeRule) -> Self {
-        Self { fee_rule }
+    pub fn new(fee_rule: FixedFeeRule, change_memo: Option<MemoBytes>) -> Self {
+        Self {
+            fee_rule,
+            change_memo,
+        }
     }
 }
 
@@ -136,7 +141,10 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                                 })
                             }
                             DustAction::AllowDustChange => TransactionBalance::new(
-                                vec![ChangeValue::Sapling(proposed_change)],
+                                vec![ChangeValue::sapling(
+                                    proposed_change,
+                                    self.change_memo.clone(),
+                                )],
                                 fee_amount,
                             )
                             .map_err(overflow),
@@ -148,7 +156,10 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                         }
                     } else {
                         TransactionBalance::new(
-                            vec![ChangeValue::Sapling(proposed_change)],
+                            vec![ChangeValue::sapling(
+                                proposed_change,
+                                self.change_memo.clone(),
+                            )],
                             fee_amount,
                         )
                         .map_err(overflow)
@@ -185,7 +196,7 @@ mod tests {
     fn change_without_dust() {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
-        let change_strategy = SingleOutputChangeStrategy::new(fee_rule);
+        let change_strategy = SingleOutputChangeStrategy::new(fee_rule, None);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -205,8 +216,9 @@ mod tests {
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(NonNegativeAmount::const_from_u64(10000))]
-                && balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(10000), None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
     }
 
@@ -214,7 +226,7 @@ mod tests {
     fn dust_change() {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
-        let change_strategy = SingleOutputChangeStrategy::new(fee_rule);
+        let change_strategy = SingleOutputChangeStrategy::new(fee_rule, None);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
