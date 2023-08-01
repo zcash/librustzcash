@@ -588,7 +588,7 @@ where
                     internal_ovk(),
                     dfvk.change_address().1,
                     *amount,
-                    MemoBytes::empty(),
+                    change_memo.clone().unwrap_or_else(MemoBytes::empty),
                 )?;
                 sapling_output_meta.push((
                     Recipient::InternalAccount(
