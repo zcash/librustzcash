@@ -89,6 +89,8 @@ tempfile = "3.5.0"
 zcash_proofs = { version = "0.12", path = "../zcash_proofs", default-features = false }
 zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
 
+time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
+
 [features]
 lightwalletd-tonic = ["tonic"]
 transparent-inputs = ["hdwallet", "zcash_primitives/transparent-inputs"]
