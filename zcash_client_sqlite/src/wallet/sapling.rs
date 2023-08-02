@@ -18,7 +18,7 @@ use zcash_client_backend::{
     DecryptedOutput, TransferType,
 };
 
-use crate::{error::SqliteClientError, NoteId};
+use crate::{error::SqliteClientError, ReceivedNoteId};
 
 use super::memo_repr;
 
@@ -81,8 +81,8 @@ impl ReceivedSaplingOutput for DecryptedOutput<Note> {
     }
 }
 
-fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<NoteId>, SqliteClientError> {
-    let note_id = NoteId::ReceivedNoteId(row.get(0)?);
+fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, SqliteClientError> {
+    let note_id = ReceivedNoteId(row.get(0)?);
     let diversifier = {
         let d: Vec<_> = row.get(1)?;
         if d.len() != 11 {
@@ -130,8 +130,8 @@ pub(crate) fn get_spendable_sapling_notes(
     conn: &Connection,
     account: AccountId,
     anchor_height: BlockHeight,
-    exclude: &[NoteId],
-) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
+    exclude: &[ReceivedNoteId],
+) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
     let mut stmt_select_notes = conn.prepare_cached(
         "SELECT id_note, diversifier, value, rcm, commitment_tree_position
          FROM sapling_received_notes
@@ -142,13 +142,7 @@ pub(crate) fn get_spendable_sapling_notes(
          AND id_note NOT IN rarray(:exclude)",
     )?;
 
-    let excluded: Vec<Value> = exclude
-        .iter()
-        .filter_map(|n| match n {
-            NoteId::ReceivedNoteId(i) => Some(Value::from(*i)),
-            NoteId::SentNoteId(_) => None,
-        })
-        .collect();
+    let excluded: Vec<Value> = exclude.iter().map(|n| Value::from(n.0)).collect();
     let excluded_ptr = Rc::new(excluded);
 
     let notes = stmt_select_notes.query_and_then(
@@ -168,8 +162,8 @@ pub(crate) fn select_spendable_sapling_notes(
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
-    exclude: &[NoteId],
-) -> Result<Vec<ReceivedSaplingNote<NoteId>>, SqliteClientError> {
+    exclude: &[ReceivedNoteId],
+) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached, and then fetch the witnesses at the desired height for the
     // selected notes. This is achieved in several steps:
@@ -207,13 +201,7 @@ pub(crate) fn select_spendable_sapling_notes(
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
-    let excluded: Vec<Value> = exclude
-        .iter()
-        .filter_map(|n| match n {
-            NoteId::ReceivedNoteId(i) => Some(Value::from(*i)),
-            NoteId::SentNoteId(_) => None,
-        })
-        .collect();
+    let excluded: Vec<Value> = exclude.iter().map(|n| Value::from(n.0)).collect();
     let excluded_ptr = Rc::new(excluded);
 
     let notes = stmt_select_notes.query_and_then(
@@ -313,7 +301,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     output: &T,
     tx_ref: i64,
     spent_in: Option<i64>,
-) -> Result<NoteId, SqliteClientError> {
+) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
         (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change, spent, commitment_tree_position)
@@ -339,8 +327,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             memo = IFNULL(:memo, memo),
             is_change = IFNULL(:is_change, is_change),
             spent = IFNULL(:spent, spent),
-            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position)
-        RETURNING id_note",
+            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position)",
     )?;
 
     let rcm = output.note().rcm().to_repr();
@@ -362,10 +349,10 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     ];
 
     stmt_upsert_received_note
-        .query_row(sql_args, |row| {
-            row.get::<_, i64>(0).map(NoteId::ReceivedNoteId)
-        })
-        .map_err(SqliteClientError::from)
+        .execute(sql_args)
+        .map_err(SqliteClientError::from)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -403,7 +390,7 @@ pub(crate) mod tests {
                 create_proposed_transaction, create_spend_to_address,
                 input_selection::GreedyInputSelector, propose_transfer, spend,
             },
-            WalletRead, WalletWrite,
+            ShieldedProtocol, WalletRead, WalletWrite,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -566,13 +553,24 @@ pub(crate) mod tests {
         // Verify that the stored sent notes match what we're expecting
         let mut stmt_sent_notes = db_data
             .conn
-            .prepare("SELECT id_note FROM sent_notes WHERE tx = ?")
+            .prepare(
+                "SELECT output_index 
+                FROM sent_notes 
+                JOIN transactions ON transactions.id_tx = sent_notes.tx
+                WHERE transactions.txid = ?",
+            )
             .unwrap();
 
         let sent_note_ids = stmt_sent_notes
-            .query(rusqlite::params![sent_tx_id])
+            .query(rusqlite::params![sent_tx_id.as_ref()])
             .unwrap()
-            .mapped(|row| row.get::<_, i64>(0).map(NoteId::SentNoteId))
+            .mapped(|row| {
+                Ok(NoteId::new(
+                    sent_tx_id,
+                    ShieldedProtocol::Sapling,
+                    row.get(0)?,
+                ))
+            })
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
@@ -601,8 +599,11 @@ pub(crate) mod tests {
         assert!(found_sent_change_memo);
         assert!(found_sent_empty_memo);
 
-        // Check that querying for a nonexistent sent note returns an error
-        assert_matches!(db_data.get_memo(NoteId::SentNoteId(12345)), Err(_));
+        // Check that querying for a nonexistent sent note returns None
+        assert_matches!(
+            db_data.get_memo(NoteId::new(sent_tx_id, ShieldedProtocol::Sapling, 12345)),
+            Ok(None)
+        );
     }
 
     #[test]
@@ -1101,7 +1102,7 @@ pub(crate) mod tests {
         let to = addr2.into();
 
         let send_and_recover_with_policy = |db_data: &mut WalletDb<Connection, _>, ovk_policy| {
-            let tx_row = create_spend_to_address(
+            let txid = create_spend_to_address(
                 db_data,
                 &tests::network(),
                 test_prover(),
@@ -1119,8 +1120,8 @@ pub(crate) mod tests {
                 .conn
                 .query_row(
                     "SELECT raw FROM transactions
-                    WHERE id_tx = ?",
-                    [tx_row],
+                    WHERE txid = ?",
+                    [txid.as_ref()],
                     |row| row.get(0),
                 )
                 .unwrap();

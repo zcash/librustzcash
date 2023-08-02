@@ -1,7 +1,7 @@
-use std::fmt::Debug;
 use std::{convert::Infallible, num::NonZeroU32};
 
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zcash_primitives::transaction::TxId;
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
@@ -203,7 +203,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
 ) -> Result<
-    DbT::TxRef,
+    TxId,
     Error<
         <DbT as WalletRead>::Error,
         <DbT as WalletCommitmentTrees>::Error,
@@ -306,7 +306,7 @@ pub fn spend<DbT, ParamsT, InputsT>(
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
 ) -> Result<
-    DbT::TxRef,
+    TxId,
     Error<
         <DbT as WalletRead>::Error,
         <DbT as WalletCommitmentTrees>::Error,
@@ -317,7 +317,6 @@ pub fn spend<DbT, ParamsT, InputsT>(
 >
 where
     DbT: WalletWrite + WalletCommitmentTrees,
-    DbT::TxRef: Copy + Debug,
     DbT::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<DataSource = DbT>,
@@ -441,7 +440,7 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
     min_confirmations: NonZeroU32,
     change_memo: Option<MemoBytes>,
 ) -> Result<
-    DbT::TxRef,
+    TxId,
     Error<
         <DbT as WalletRead>::Error,
         <DbT as WalletCommitmentTrees>::Error,
@@ -452,7 +451,6 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
 >
 where
     DbT: WalletWrite + WalletCommitmentTrees,
-    DbT::TxRef: Copy + Debug,
     DbT::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
@@ -670,7 +668,9 @@ where
             #[cfg(feature = "transparent-inputs")]
             utxos_spent: utxos.iter().map(|utxo| utxo.outpoint().clone()).collect(),
         })
-        .map_err(Error::DataSource)
+        .map_err(Error::DataSource)?;
+
+    Ok(tx.txid())
 }
 
 /// Constructs a transaction that consumes available transparent UTXOs belonging to
@@ -720,7 +720,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
     memo: &MemoBytes,
     min_confirmations: NonZeroU32,
 ) -> Result<
-    DbT::TxRef,
+    TxId,
     Error<
         <DbT as WalletRead>::Error,
         <DbT as WalletCommitmentTrees>::Error,

@@ -38,7 +38,7 @@ use maybe_rayon::{
 };
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, ops::Range, path::Path};
+use std::{borrow::Borrow, collections::HashMap, convert::AsRef, ops::Range, path::Path};
 
 use incrementalmerkletree::Position;
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -61,9 +61,9 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        BlockMetadata, DecryptedTransaction, NullifierQuery, PoolType, Recipient, ScannedBlock,
-        SentTransaction, ShieldedProtocol, WalletCommitmentTrees, WalletRead, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        BlockMetadata, DecryptedTransaction, NoteId, NullifierQuery, PoolType, Recipient,
+        ScannedBlock, SentTransaction, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -97,22 +97,9 @@ pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
-/// A newtype wrapper for sqlite primary key values for the notes
-/// table.
+/// A newtype wrapper for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum NoteId {
-    SentNoteId(i64),
-    ReceivedNoteId(i64),
-}
-
-impl fmt::Display for NoteId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            NoteId::SentNoteId(id) => write!(f, "Sent Note {}", id),
-            NoteId::ReceivedNoteId(id) => write!(f, "Received Note {}", id),
-        }
-    }
-}
+pub struct ReceivedNoteId(pub(crate) i64);
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
@@ -160,8 +147,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
-    type NoteRef = NoteId;
-    type TxRef = i64;
+    type NoteRef = ReceivedNoteId;
 
     fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
         wallet::block_height_extrema(self.conn.borrow()).map_err(SqliteClientError::from)
@@ -229,17 +215,17 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_balance_at(self.conn.borrow(), account, anchor_height)
     }
 
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
-        match id_note {
-            NoteId::SentNoteId(id_note) => wallet::get_sent_memo(self.conn.borrow(), id_note),
-            NoteId::ReceivedNoteId(id_note) => {
-                wallet::get_received_memo(self.conn.borrow(), id_note)
-            }
+    fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
+        let sent_memo = wallet::get_sent_memo(self.conn.borrow(), note_id)?;
+        if sent_memo.is_some() {
+            Ok(sent_memo)
+        } else {
+            wallet::get_received_memo(self.conn.borrow(), note_id)
         }
     }
 
-    fn get_transaction(&self, id_tx: i64) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self.conn.borrow(), &self.params, id_tx).map(|(_, tx)| tx)
+    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error> {
+        wallet::get_transaction(self.conn.borrow(), &self.params, txid).map(|(_, tx)| tx)
     }
 
     fn get_sapling_nullifiers(
@@ -404,7 +390,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn put_blocks(
         &mut self,
         blocks: Vec<ScannedBlock<sapling::Nullifier>>,
-    ) -> Result<Vec<Self::NoteRef>, Self::Error> {
+    ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let start_positions = blocks.first().map(|block| {
                 (
@@ -415,7 +401,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     ),
                 )
             });
-            let mut wallet_note_ids = vec![];
             let mut sapling_commitments = vec![];
             let mut last_scanned_height = None;
             let mut note_positions = vec![];
@@ -453,12 +438,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             output.nf(),
                         )?;
 
-                        let received_note_id = wallet::sapling::put_received_note(
-                            wdb.conn.0, output, tx_row, spent_in,
-                        )?;
-
-                        // Save witness for note.
-                        wallet_note_ids.push(received_note_id);
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
                     }
                 }
 
@@ -535,7 +515,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 )?;
             }
 
-            Ok(wallet_note_ids)
+            Ok(())
         })
     }
 
@@ -546,10 +526,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         Ok(())
     }
 
-    fn store_decrypted_tx(
-        &mut self,
-        d_tx: DecryptedTransaction,
-    ) -> Result<Self::TxRef, Self::Error> {
+    fn store_decrypted_tx(&mut self, d_tx: DecryptedTransaction) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None)?;
 
@@ -636,11 +613,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }
             }
 
-            Ok(tx_ref)
+            Ok(())
         })
     }
 
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error> {
+    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(
                 wdb.conn.0,
@@ -699,8 +676,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }
             }
 
-            // Return the row number of the transaction, so the caller can fetch it for sending.
-            Ok(tx_ref)
+            Ok(())
         })
     }
 

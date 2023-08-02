@@ -8,7 +8,7 @@ use rusqlite::named_params;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{decrypt_transaction, keys::UnifiedFullViewingKey};
-use zcash_primitives::{consensus, zip32::AccountId};
+use zcash_primitives::{consensus, transaction::TxId, zip32::AccountId};
 
 use crate::{
     error::SqliteClientError,
@@ -46,7 +46,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         let mut stmt_raw_tx = transaction.prepare(
-            "SELECT DISTINCT sent_notes.tx, accounts.account, accounts.ufvk
+            "SELECT DISTINCT 
+               transactions.id_tx, transactions.txid, 
+               accounts.account, accounts.ufvk
              FROM sent_notes 
              JOIN accounts ON sent_notes.from_account = accounts.account
              JOIN transactions ON transactions.id_tx = sent_notes.tx
@@ -55,12 +57,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         let mut rows = stmt_raw_tx.query([])?;
 
-        let mut tx_sent_notes: BTreeMap<i64, HashMap<AccountId, UnifiedFullViewingKey>> =
+        let mut tx_sent_notes: BTreeMap<(i64, TxId), HashMap<AccountId, UnifiedFullViewingKey>> =
             BTreeMap::new();
         while let Some(row) = rows.next()? {
             let id_tx: i64 = row.get(0)?;
-            let account: u32 = row.get(1)?;
-            let ufvk_str: String = row.get(2)?;
+            let txid = row.get(1).map(TxId::from_bytes)?;
+            let account: u32 = row.get(2)?;
+            let ufvk_str: String = row.get(3)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
                 WalletMigrationError::CorruptedData(format!(
                     "Could not decode unified full viewing key for account {}: {:?}",
@@ -69,7 +72,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             })?;
 
             tx_sent_notes
-                .entry(id_tx)
+                .entry((id_tx, txid))
                 .or_default()
                 .insert(AccountId::from(account), ufvk);
         }
@@ -81,9 +84,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             AND output_index = :output_index",
         )?;
 
-        for (id_tx, ufvks) in tx_sent_notes {
+        for ((id_tx, txid), ufvks) in tx_sent_notes {
             let (block_height, tx) =
-                get_transaction(transaction, &self.params, id_tx).map_err(|err| match err {
+                get_transaction(transaction, &self.params, txid).map_err(|err| match err {
                     SqliteClientError::CorruptedData(msg) => {
                         WalletMigrationError::CorruptedData(msg)
                     }

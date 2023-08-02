@@ -70,7 +70,7 @@ use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 
-use zcash_client_backend::data_api::ShieldedProtocol;
+use zcash_client_backend::data_api::{NoteId, ShieldedProtocol};
 use zcash_primitives::transaction::TransactionData;
 
 use zcash_primitives::{
@@ -474,20 +474,27 @@ pub(crate) fn get_balance_at(
     }
 }
 
-/// Returns the memo for a received note.
-///
-/// The note is identified by its row index in the `sapling_received_notes` table within the wdb
-/// database.
+/// Returns the memo for a received note, if the note is known to the wallet.
 pub(crate) fn get_received_memo(
     conn: &rusqlite::Connection,
-    id_note: i64,
+    note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
-    let memo_bytes: Option<Vec<_>> = conn.query_row(
-        "SELECT memo FROM sapling_received_notes
-        WHERE id_note = ?",
-        [id_note],
-        |row| row.get(0),
-    )?;
+    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
+        ShieldedProtocol::Sapling => conn
+            .query_row(
+                "SELECT memo FROM sapling_received_notes
+                JOIN transactions ON sapling_received_notes.tx = transactions.id_tx
+                WHERE transactions.txid = :txid
+                AND sapling_received_notes.output_index = :output_index",
+                named_params![
+                    ":txid": note_id.txid().as_ref(),
+                    ":output_index": note_id.output_index()
+                ],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten(),
+    };
 
     memo_bytes
         .map(|b| {
@@ -507,7 +514,7 @@ pub(crate) fn get_received_memo(
 pub(crate) fn get_transaction<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    id_tx: i64,
+    txid: TxId,
 ) -> Result<(BlockHeight, Transaction), SqliteClientError> {
     let (tx_bytes, block_height, expiry_height): (
         Vec<_>,
@@ -515,8 +522,8 @@ pub(crate) fn get_transaction<P: Parameters>(
         Option<BlockHeight>,
     ) = conn.query_row(
         "SELECT raw, block, expiry_height FROM transactions
-        WHERE id_tx = ?",
-        [id_tx],
+        WHERE txid = ?",
+        [txid.as_ref()],
         |row| {
             let h: Option<u32> = row.get(1)?;
             let expiry: Option<u32> = row.get(2)?;
@@ -572,20 +579,27 @@ pub(crate) fn get_transaction<P: Parameters>(
     }
 }
 
-/// Returns the memo for a sent note.
-///
-/// The note is identified by its row index in the `sent_notes` table within the wdb
-/// database.
+/// Returns the memo for a sent note, if the sent note is known to the wallet.
 pub(crate) fn get_sent_memo(
     conn: &rusqlite::Connection,
-    id_note: i64,
+    note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
-    let memo_bytes: Option<Vec<_>> = conn.query_row(
-        "SELECT memo FROM sent_notes
-        WHERE id_note = ?",
-        [id_note],
-        |row| row.get(0),
-    )?;
+    let memo_bytes: Option<Vec<_>> = conn
+        .query_row(
+            "SELECT memo FROM sent_notes
+            JOIN transactions ON sent_notes.tx = transactions.id_tx
+            WHERE transactions.txid = :txid
+            AND sent_notes.output_pool = :pool_code
+            AND sent_notes.output_index = :output_index",
+            named_params![
+                ":txid": note_id.txid().as_ref(),
+                ":pool_code": pool_code(PoolType::Shielded(note_id.protocol())),
+                ":output_index": note_id.output_index()
+            ],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
 
     memo_bytes
         .map(|b| {
