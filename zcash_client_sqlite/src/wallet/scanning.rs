@@ -755,7 +755,7 @@ mod tests {
 
     use crate::{
         chain::init::init_cache_database,
-        tests::{
+        testing::{
             self, fake_compact_block, init_test_accounts_table, insert_into_cache,
             sapling_activation_height, AddressType,
         },
@@ -1098,7 +1098,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet.
@@ -1159,7 +1159,7 @@ mod tests {
 
         assert_matches!(
             scan_cached_blocks(
-                &tests::network(),
+                &testing::network(),
                 &db_cache,
                 &mut db_data,
                 initial_height,
@@ -1226,7 +1226,7 @@ mod tests {
         use ScanPriority::*;
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         let sap_active = db_data

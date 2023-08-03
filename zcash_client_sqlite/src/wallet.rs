@@ -1579,7 +1579,7 @@ mod tests {
     use zcash_client_backend::data_api::WalletRead;
 
     use crate::{
-        tests,
+        testing,
         wallet::{get_current_address, init::init_wallet_db},
         AccountId, WalletDb,
     };
@@ -1600,11 +1600,11 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
-        tests::init_test_accounts_table(&mut db_data);
+        testing::init_test_accounts_table(&mut db_data);
 
         // The account should be empty
         assert_eq!(
@@ -1635,7 +1635,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn put_received_transparent_utxo() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
 
         // Add an account to the wallet

@@ -348,7 +348,7 @@ mod tests {
 
     use crate::{
         chain::init::init_cache_database,
-        tests::{
+        testing::{
             self, fake_compact_block, fake_compact_block_spending, init_test_accounts_table,
             insert_into_cache, sapling_activation_height, AddressType,
         },
@@ -363,7 +363,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
@@ -386,7 +386,7 @@ mod tests {
 
         // Scan the cache
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height(),
@@ -409,7 +409,7 @@ mod tests {
         // Scanning should detect no inconsistencies
         assert_matches!(
             scan_cached_blocks(
-                &tests::network(),
+                &testing::network(),
                 &db_cache,
                 &mut db_data,
                 sapling_activation_height() + 1,
@@ -426,7 +426,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
@@ -455,7 +455,7 @@ mod tests {
         // Scanning the cache should find no inconsistencies
         assert_matches!(
             scan_cached_blocks(
-                &tests::network(),
+                &testing::network(),
                 &db_cache,
                 &mut db_data,
                 sapling_activation_height(),
@@ -487,7 +487,7 @@ mod tests {
         // Data+cache chain should be invalid at the data/cache boundary
         assert_matches!(
             scan_cached_blocks(
-                &tests::network(),
+                &testing::network(),
                 &db_cache,
                 &mut db_data,
                 sapling_activation_height() + 2,
@@ -505,7 +505,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
@@ -542,7 +542,7 @@ mod tests {
 
         // Scan the cache
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height(),
@@ -584,7 +584,7 @@ mod tests {
 
         // Scan the cache again
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height(),
@@ -606,7 +606,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
@@ -626,7 +626,7 @@ mod tests {
         );
         insert_into_cache(&db_cache, &cb1);
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height(),
@@ -660,7 +660,7 @@ mod tests {
         insert_into_cache(&db_cache, &cb3);
         assert_matches!(
             scan_cached_blocks(
-                &tests::network(),
+                &testing::network(),
                 &db_cache,
                 &mut db_data,
                 sapling_activation_height() + 2,
@@ -672,7 +672,7 @@ mod tests {
         // If we add a block of height SAPLING_ACTIVATION_HEIGHT + 1, we can now scan that
         insert_into_cache(&db_cache, &cb2);
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height() + 1,
@@ -701,7 +701,7 @@ mod tests {
         assert_matches!(
             spend(
                 &mut db_data,
-                &tests::network(),
+                &testing::network(),
                 crate::wallet::sapling::tests::test_prover(),
                 &input_selector,
                 &usk,
@@ -720,7 +720,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
@@ -746,7 +746,7 @@ mod tests {
 
         // Scan the cache
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height(),
@@ -774,7 +774,7 @@ mod tests {
 
         // Scan the cache again
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height() + 1,
@@ -796,7 +796,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
@@ -822,7 +822,7 @@ mod tests {
 
         // Scan the cache
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height(),
@@ -855,7 +855,7 @@ mod tests {
 
         // Scan the cache again
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height() + 1,
@@ -877,7 +877,7 @@ mod tests {
         init_cache_database(&db_cache).unwrap();
 
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // Add an account to the wallet
@@ -920,7 +920,7 @@ mod tests {
 
         // Scan the spending block first.
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height() + 1,
@@ -936,7 +936,7 @@ mod tests {
 
         // Now scan the block in which we received the note that was spent.
         scan_cached_blocks(
-            &tests::network(),
+            &testing::network(),
             &db_cache,
             &mut db_data,
             sapling_activation_height(),

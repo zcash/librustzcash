@@ -215,7 +215,7 @@ mod tests {
     use zcash_primitives::zip32::AccountId;
 
     use crate::{
-        tests,
+        testing,
         wallet::init::{init_wallet_db_internal, migrations::add_transaction_views},
         WalletDb,
     };
@@ -223,32 +223,32 @@ mod tests {
     #[test]
     fn v_transactions_net() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db_internal(&mut db_data, None, &[add_transaction_views::MIGRATION_ID])
             .unwrap();
 
         // Create two accounts in the wallet.
         let usk0 =
-            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
+            UnifiedSpendingKey::from_seed(&testing::network(), &[0u8; 32][..], AccountId::from(0))
                 .unwrap();
         let ufvk0 = usk0.to_unified_full_viewing_key();
         db_data
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
-                params![ufvk0.encode(&tests::network())],
+                params![ufvk0.encode(&testing::network())],
             )
             .unwrap();
 
         let usk1 =
-            UnifiedSpendingKey::from_seed(&tests::network(), &[1u8; 32][..], AccountId::from(1))
+            UnifiedSpendingKey::from_seed(&testing::network(), &[1u8; 32][..], AccountId::from(1))
                 .unwrap();
         let ufvk1 = usk1.to_unified_full_viewing_key();
         db_data
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk) VALUES (1, ?)",
-                params![ufvk1.encode(&tests::network())],
+                params![ufvk1.encode(&testing::network())],
             )
             .unwrap();
 
