@@ -32,7 +32,6 @@ tracing = "0.1"
 # - Serialization
 byteorder = "1"
 prost = "0.11"
-either = "1.8"
 group = "0.13"
 jubjub = "0.10"
 

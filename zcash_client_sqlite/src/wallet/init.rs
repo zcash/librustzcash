@@ -1,7 +1,7 @@
 //! Functions for initializing the various databases.
-use either::Either;
+
 use incrementalmerkletree::Retention;
-use std::{collections::HashMap, fmt, io};
+use std::{collections::HashMap, fmt};
 use tracing::debug;
 
 use rusqlite::{self, types::ToSql};
@@ -24,7 +24,7 @@ use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullView
 
 use crate::{error::SqliteClientError, wallet, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX};
 
-use super::commitment_tree::SqliteShardStore;
+use super::commitment_tree::{self, SqliteShardStore};
 
 mod migrations;
 
@@ -43,7 +43,7 @@ pub enum WalletMigrationError {
     BalanceError(BalanceError),
 
     /// Wrapper for commitment tree invariant violations
-    CommitmentTree(ShardTreeError<Either<io::Error, rusqlite::Error>>),
+    CommitmentTree(ShardTreeError<commitment_tree::Error>),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -58,8 +58,8 @@ impl From<BalanceError> for WalletMigrationError {
     }
 }
 
-impl From<ShardTreeError<Either<io::Error, rusqlite::Error>>> for WalletMigrationError {
-    fn from(e: ShardTreeError<Either<io::Error, rusqlite::Error>>) -> Self {
+impl From<ShardTreeError<commitment_tree::Error>> for WalletMigrationError {
+    fn from(e: ShardTreeError<commitment_tree::Error>) -> Self {
         WalletMigrationError::CommitmentTree(e)
     }
 }

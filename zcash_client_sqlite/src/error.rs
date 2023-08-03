@@ -1,14 +1,13 @@
 //! Error types for problems that may arise when reading or storing wallet data to SQLite.
 
-use either::Either;
 use std::error;
 use std::fmt;
-use std::io;
 
 use shardtree::error::ShardTreeError;
 use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
 use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
+use crate::wallet::commitment_tree;
 use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
@@ -85,7 +84,7 @@ pub enum SqliteClientError {
 
     /// An error occurred in inserting data into or accessing data from one of the wallet's note
     /// commitment trees.
-    CommitmentTree(ShardTreeError<Either<io::Error, rusqlite::Error>>),
+    CommitmentTree(ShardTreeError<commitment_tree::Error>),
 }
 
 impl error::Error for SqliteClientError {
@@ -176,8 +175,8 @@ impl From<zcash_primitives::memo::Error> for SqliteClientError {
     }
 }
 
-impl From<ShardTreeError<Either<io::Error, rusqlite::Error>>> for SqliteClientError {
-    fn from(e: ShardTreeError<Either<io::Error, rusqlite::Error>>) -> Self {
+impl From<ShardTreeError<commitment_tree::Error>> for SqliteClientError {
+    fn from(e: ShardTreeError<commitment_tree::Error>) -> Self {
         SqliteClientError::CommitmentTree(e)
     }
 }
