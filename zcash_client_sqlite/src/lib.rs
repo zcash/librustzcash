@@ -38,7 +38,7 @@ use maybe_rayon::{
 };
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, io, ops::Range, path::Path};
+use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, ops::Range, path::Path};
 
 use incrementalmerkletree::Position;
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -76,8 +76,8 @@ use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore}
 #[cfg(feature = "unstable")]
 use {
     crate::chain::{fsblockdb_with_blocks, BlockMeta},
-    std::fs,
     std::path::PathBuf,
+    std::{fs, io},
 };
 
 pub mod chain;

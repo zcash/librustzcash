@@ -26,6 +26,15 @@ pub enum Error {
     Serialization(io::Error),
     /// Errors encountered querying stored shard data
     Query(rusqlite::Error),
+    /// Raised when the caller attempts to add a checkpoint at a block height where a checkpoint
+    /// already exists, but the tree state being checkpointed or the marks removed at that
+    /// checkpoint conflict with the existing tree state.
+    CheckpointConflict {
+        checkpoint_id: BlockHeight,
+        checkpoint: Checkpoint,
+        extant_tree_state: TreeState,
+        extant_marks_removed: Option<BTreeSet<Position>>,
+    },
 }
 
 impl fmt::Display for Error {
@@ -33,6 +42,18 @@ impl fmt::Display for Error {
         match &self {
             Error::Serialization(err) => write!(f, "Commitment tree serializtion error: {}", err),
             Error::Query(err) => write!(f, "Commitment tree query or update error: {}", err),
+            Error::CheckpointConflict {
+                checkpoint_id,
+                checkpoint,
+                extant_tree_state,
+                extant_marks_removed,
+            } => {
+                write!(
+                    f,
+                    "Conflict at checkpoint id {}, tried to insert {:?}, which is incompatible with existing state ({:?}, {:?})",
+                    checkpoint_id, checkpoint, extant_tree_state, extant_marks_removed
+                )
+            }
         }
     }
 }
@@ -42,6 +63,7 @@ impl error::Error for Error {
         match &self {
             Error::Serialization(e) => Some(e),
             Error::Query(e) => Some(e),
+            Error::CheckpointConflict { .. } => None,
         }
     }
 }
@@ -508,39 +530,89 @@ pub(crate) fn add_checkpoint(
     checkpoint_id: BlockHeight,
     checkpoint: Checkpoint,
 ) -> Result<(), Error> {
-    let mut stmt_insert_checkpoint = conn
-        .prepare_cached(&format!(
-            "INSERT INTO {}_tree_checkpoints (checkpoint_id, position)
-             VALUES (:checkpoint_id, :position)",
-            table_prefix
-        ))
+    let extant_tree_state = conn
+        .query_row(
+            &format!(
+                "SELECT position FROM {}_tree_checkpoints WHERE checkpoint_id = :checkpoint_id",
+                table_prefix
+            ),
+            named_params![":checkpoint_id": u32::from(checkpoint_id),],
+            |row| {
+                row.get::<_, Option<u64>>(0).map(|opt| {
+                    opt.map_or_else(
+                        || TreeState::Empty,
+                        |pos| TreeState::AtPosition(Position::from(pos)),
+                    )
+                })
+            },
+        )
+        .optional()
         .map_err(Error::Query)?;
 
-    stmt_insert_checkpoint
-        .execute(named_params![
-            ":checkpoint_id": u32::from(checkpoint_id),
-            ":position": checkpoint.position().map(u64::from)
-        ])
-        .map_err(Error::Query)?;
+    match extant_tree_state {
+        Some(current) => {
+            if current != checkpoint.tree_state() {
+                // If the checkpoint position for a given checkpoint identifier has changed, we treat
+                // this as an error because the wallet should have detected a chain reorg and truncated
+                // the tree.
+                Err(Error::CheckpointConflict {
+                    checkpoint_id,
+                    checkpoint,
+                    extant_tree_state: current,
+                    extant_marks_removed: None,
+                })
+            } else {
+                // if the existing spends are the same, we can skip the insert; if the
+                // existing spends have changed, this is also a conflict.
+                let marks_removed = get_marks_removed(conn, table_prefix, checkpoint_id)?;
+                if &marks_removed == checkpoint.marks_removed() {
+                    Ok(())
+                } else {
+                    Err(Error::CheckpointConflict {
+                        checkpoint_id,
+                        checkpoint,
+                        extant_tree_state: current,
+                        extant_marks_removed: Some(marks_removed),
+                    })
+                }
+            }
+        }
+        None => {
+            let mut stmt_insert_checkpoint = conn
+                .prepare_cached(&format!(
+                    "INSERT INTO {}_tree_checkpoints (checkpoint_id, position)
+                     VALUES (:checkpoint_id, :position)",
+                    table_prefix
+                ))
+                .map_err(Error::Query)?;
 
-    let mut stmt_insert_mark_removed = conn
-        .prepare_cached(&format!(
-            "INSERT INTO {}_tree_checkpoint_marks_removed (checkpoint_id, mark_removed_position)
-             VALUES (:checkpoint_id, :position)",
-            table_prefix
-        ))
-        .map_err(Error::Query)?;
+            stmt_insert_checkpoint
+                .execute(named_params![
+                    ":checkpoint_id": u32::from(checkpoint_id),
+                    ":position": checkpoint.position().map(u64::from)
+                ])
+                .map_err(Error::Query)?;
 
-    for pos in checkpoint.marks_removed() {
-        stmt_insert_mark_removed
-            .execute(named_params![
-                ":checkpoint_id": u32::from(checkpoint_id),
-                ":position": u64::from(*pos)
-            ])
-            .map_err(Error::Query)?;
+            let mut stmt_insert_mark_removed = conn
+                .prepare_cached(&format!(
+                    "INSERT INTO {}_tree_checkpoint_marks_removed (checkpoint_id, mark_removed_position)
+                     VALUES (:checkpoint_id, :position)",
+                    table_prefix
+                ))
+                .map_err(Error::Query)?;
+
+            for pos in checkpoint.marks_removed() {
+                stmt_insert_mark_removed
+                    .execute(named_params![
+                        ":checkpoint_id": u32::from(checkpoint_id),
+                        ":position": u64::from(*pos)
+                    ])
+                    .map_err(Error::Query)?;
+            }
+
+            Ok(())
+        }
     }
-
-    Ok(())
 }
 
 pub(crate) fn checkpoint_count(
@@ -553,6 +625,29 @@ pub(crate) fn checkpoint_count(
         |row| row.get::<_, usize>(0),
     )
     .map_err(Error::Query)
+}
+
+fn get_marks_removed(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+    checkpoint_id: BlockHeight,
+) -> Result<BTreeSet<Position>, Error> {
+    let mut stmt = conn
+        .prepare_cached(&format!(
+            "SELECT mark_removed_position
+            FROM {}_tree_checkpoint_marks_removed
+            WHERE checkpoint_id = ?",
+            table_prefix
+        ))
+        .map_err(Error::Query)?;
+    let mark_removed_rows = stmt
+        .query([u32::from(checkpoint_id)])
+        .map_err(Error::Query)?;
+
+    mark_removed_rows
+        .mapped(|row| row.get::<_, u64>(0).map(Position::from))
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map_err(Error::Query)
 }
 
 pub(crate) fn get_checkpoint(
@@ -579,26 +674,9 @@ pub(crate) fn get_checkpoint(
 
     checkpoint_position
         .map(|pos_opt| {
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT mark_removed_position
-                    FROM {}_tree_checkpoint_marks_removed
-                    WHERE checkpoint_id = ?",
-                    table_prefix
-                ))
-                .map_err(Error::Query)?;
-            let mark_removed_rows = stmt
-                .query([u32::from(checkpoint_id)])
-                .map_err(Error::Query)?;
-
-            let marks_removed = mark_removed_rows
-                .mapped(|row| row.get::<_, u64>(0).map(Position::from))
-                .collect::<Result<BTreeSet<_>, _>>()
-                .map_err(Error::Query)?;
-
             Ok(Checkpoint::from_parts(
                 pos_opt.map_or(TreeState::Empty, TreeState::AtPosition),
-                marks_removed,
+                get_marks_removed(conn, table_prefix, checkpoint_id)?,
             ))
         })
         .transpose()
