@@ -70,7 +70,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             tx_sent_notes
                 .entry(id_tx)
                 .and_modify(|v| v.push((output_index, AccountId::from(account), ufvk.clone())))
-                .or_insert(vec![(output_index, AccountId::from(account), ufvk)]);
+                .or_insert_with(|| vec![(output_index, AccountId::from(account), ufvk)]);
         }
 
         for (id_tx, sapling_outputs) in tx_sent_notes {
