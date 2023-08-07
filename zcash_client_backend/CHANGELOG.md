@@ -12,6 +12,7 @@ and this library adheres to Rust's notion of
 - `impl Debug` for `zcash_client_backend::{data_api::wallet::input_selection::Proposal, wallet::ReceivedSaplingNote}`
 - `zcash_client_backend::data_api`:
   - `BlockMetadata`
+  - `NoteId`
   - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
   - `ScannedBlock`
   - `ShieldedProtocol`
@@ -33,9 +34,15 @@ and this library adheres to Rust's notion of
 - Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.12`, `zcash_note_encryption 0.4`,
   `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`
 - `zcash_client_backend::data_api`:
-  - `WalletRead::get_memo` now returns `Result<Option<Memo>, Self::Error>`
-    instead of `Result<Memo, Self::Error>` in order to make representable
-    wallet states where the full note plaintext is not available.
+  - `WalletRead::TxRef` has been removed in favor of consistently using `TxId` instead. 
+  - `WalletRead::get_transaction` now takes a `TxId` as its argument.
+  - `WalletWrite::{store_decrypted_tx, store_sent_tx}` now return `Result<(), Self::Error>` 
+    as the `WalletRead::TxRef` associated type has been removed. Use
+    `WalletRead::get_transaction` with the transaction's `TxId` instead.
+  - `WalletRead::get_memo` now takes a `NoteId` as its argument instead of `Self::NoteRef`
+    and returns `Result<Option<Memo>, Self::Error>` instead of `Result<Memo,
+    Self::Error>` in order to make representable wallet states where the full
+    note plaintext is not available.
   - `WalletRead::get_nullifiers` has been renamed to `WalletRead::get_sapling_nullifiers`
     and its signature has changed; it now subsumes the removed `WalletRead::get_all_nullifiers`.
   - `WalletRead::get_target_and_anchor_heights` now takes its argument as a `NonZeroU32`
@@ -45,15 +52,15 @@ and this library adheres to Rust's notion of
   - `chain::BlockSource::with_blocks` now takes its limit as an `Option<usize>`
     instead of `Option<u32>`.
   - A new `CommitmentTree` variant has been added to `data_api::error::Error`
-  - `data_api::wallet::{create_spend_to_address, create_proposed_transaction,
+  - `wallet::{create_spend_to_address, create_proposed_transaction,
     shield_transparent_funds}` all now require that `WalletCommitmentTrees` be
     implemented for the type passed to them for the `wallet_db` parameter.
-  - `data_api::wallet::create_proposed_transaction` now takes an additional 
+  - `wallet::create_proposed_transaction` now takes an additional 
     `min_confirmations` argument.
-  - `data_api::wallet::{spend, create_spend_to_address, shield_transparent_funds, 
+  - `wallet::{spend, create_spend_to_address, shield_transparent_funds, 
     propose_transfer, propose_shielding, create_proposed_transaction}` now take their
     respective `min_confirmations` arguments as `NonZeroU32`
-  - `data_api::wallet::input_selection::InputSelector::{propose_transaction, propose_shielding}`
+  - `wallet::input_selection::InputSelector::{propose_transaction, propose_shielding}`
     now take their respective `min_confirmations` arguments as `NonZeroU32`
   - A new `Scan` variant has been added to `data_api::chain::error::Error`.
   - A new `SyncRequired` variant has been added to `data_api::wallet::input_selection::InputSelectorError`.
@@ -64,6 +71,9 @@ and this library adheres to Rust's notion of
   - Arguments to `WalletSaplingOutput::from_parts` have changed.
 - `zcash_client_backend::data_api::wallet::input_selection::InputSelector`:
   - Arguments to `{propose_transaction, propose_shielding}` have changed. 
+- `zcash_client_backend::data_api::wallet::{create_spend_to_address, spend,
+  create_proposed_transaction, shield_transparent_funds}` now return the `TxId`
+  for the newly created transaction instead an internal database identifier.
 - `zcash_client_backend::wallet::ReceivedSaplingNote::note_commitment_tree_position`
   has replaced the `witness` field in the same struct.
 - `zcash_client_backend::welding_rig` has been renamed to `zcash_client_backend::scanning`

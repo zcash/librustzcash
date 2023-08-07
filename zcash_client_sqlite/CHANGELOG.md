@@ -12,6 +12,7 @@ and this library adheres to Rust's notion of
 - A new default-enabled feature flag `multicore`. This allows users to disable
   multicore support by setting `default_features = false` on their
   `zcash_primitives`, `zcash_proofs`, and `zcash_client_sqlite` dependencies.
+- `zcash_client_sqlite::ReceivedNoteId`
 - `zcash_client_sqlite::wallet::commitment_tree` A new module containing a
   sqlite-backed implementation of `shardtree::store::ShardStore`.
 
@@ -30,6 +31,9 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - The empty `wallet::transact` module has been removed.
+- `zcash_client_sqlite::NoteId` has been replaced with `zcash_client_sqlite::ReceivedNoteId`
+  as the `SentNoteId` variant of is now unused following changes to 
+  `zcash_client_backend::data_api::WalletRead`.
 
 ### Fixed
 - Fixed an off-by-one error in the `BlockSource` implementation for the SQLite-backed

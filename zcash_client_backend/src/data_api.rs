@@ -38,6 +38,8 @@ pub mod wallet;
 
 pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 
+/// An enumeration of constraints that can be applied when querying for nullifiers for notes
+/// belonging to the wallet.
 pub enum NullifierQuery {
     Unspent,
     All,
@@ -57,13 +59,6 @@ pub trait WalletRead {
     /// For example, this might be a database identifier type
     /// or a UUID.
     type NoteRef: Copy + Debug + Eq + Ord;
-
-    /// Backend-specific transaction identifier.
-    ///
-    /// For example, this might be a database identifier type
-    /// or a TxId if the backend is able to support that type
-    /// directly.
-    type TxRef: Copy + Debug + Eq + Ord;
 
     /// Returns the minimum and maximum block heights for stored blocks.
     ///
@@ -189,14 +184,13 @@ pub trait WalletRead {
 
     /// Returns the memo for a note.
     ///
-    /// Implementations of this method must return an error if the note identifier
-    /// does not appear in the backing data store. Returns `Ok(None)` if the note
-    /// is known to the wallet but memo data has not yet been populated for that
-    /// note.
-    fn get_memo(&self, id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error>;
+    /// Returns `Ok(None)` if the note is known to the wallet but memo data has not yet been
+    /// populated for that note, or if the note identifier does not correspond to a note
+    /// that is known to the wallet.
+    fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error>;
 
     /// Returns a transaction.
-    fn get_transaction(&self, id_tx: Self::TxRef) -> Result<Transaction, Self::Error>;
+    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error>;
 
     /// Returns the nullifiers for notes that the wallet is tracking, along with their associated
     /// account IDs, that are either unspent or have not yet been confirmed as spent (in that a
@@ -206,7 +200,7 @@ pub trait WalletRead {
         query: NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error>;
 
-    /// Return all unspent Sapling notes.
+    /// Return all unspent Sapling notes, excluding the specified note IDs.
     fn get_spendable_sapling_notes(
         &self,
         account: AccountId,
@@ -380,11 +374,46 @@ pub struct SentTransaction<'a> {
 }
 
 /// A shielded transfer protocol supported by the wallet.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
     // TODO: Orchard
+}
+
+/// A unique identifier for a shielded transaction output
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NoteId {
+    txid: TxId,
+    protocol: ShieldedProtocol,
+    output_index: u16,
+}
+
+impl NoteId {
+    /// Constructs a new `NoteId` from its parts.
+    pub fn new(txid: TxId, protocol: ShieldedProtocol, output_index: u16) -> Self {
+        Self {
+            txid,
+            protocol,
+            output_index,
+        }
+    }
+
+    /// Returns the ID of the transaction containing this note.
+    pub fn txid(&self) -> &TxId {
+        &self.txid
+    }
+
+    /// Returns the shielded protocol used by this note.
+    pub fn protocol(&self) -> ShieldedProtocol {
+        self.protocol
+    }
+
+    /// Returns the index of this note within its transaction's corresponding list of
+    /// shielded outputs.
+    pub fn output_index(&self) -> u16 {
+        self.output_index
+    }
 }
 
 /// A value pool to which the wallet supports sending transaction outputs.
@@ -508,7 +537,7 @@ pub trait WalletWrite: WalletRead {
     fn put_blocks(
         &mut self,
         blocks: Vec<ScannedBlock<sapling::Nullifier>>,
-    ) -> Result<Vec<Self::NoteRef>, Self::Error>;
+    ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
     ///
@@ -520,14 +549,11 @@ pub trait WalletWrite: WalletRead {
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
-    fn store_decrypted_tx(
-        &mut self,
-        received_tx: DecryptedTransaction,
-    ) -> Result<Self::TxRef, Self::Error>;
+    fn store_decrypted_tx(&mut self, received_tx: DecryptedTransaction) -> Result<(), Self::Error>;
 
     /// Saves information about a transaction that was constructed and sent by the wallet to the
     /// persistent wallet store.
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<Self::TxRef, Self::Error>;
+    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<(), Self::Error>;
 
     /// Truncates the wallet database to the specified height.
     ///
@@ -610,7 +636,7 @@ pub mod testing {
 
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, BlockMetadata, DecryptedTransaction,
-        NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
+        NoteId, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
         WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
@@ -635,7 +661,6 @@ pub mod testing {
     impl WalletRead for MockWalletDb {
         type Error = ();
         type NoteRef = u32;
-        type TxRef = TxId;
 
         fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
             Ok(None)
@@ -707,11 +732,11 @@ pub mod testing {
             Ok(Amount::zero())
         }
 
-        fn get_memo(&self, _id_note: Self::NoteRef) -> Result<Option<Memo>, Self::Error> {
+        fn get_memo(&self, _id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
             Ok(None)
         }
 
-        fn get_transaction(&self, _id_tx: Self::TxRef) -> Result<Transaction, Self::Error> {
+        fn get_transaction(&self, _txid: TxId) -> Result<Transaction, Self::Error> {
             Err(())
         }
 
@@ -790,8 +815,8 @@ pub mod testing {
         fn put_blocks(
             &mut self,
             _blocks: Vec<ScannedBlock<sapling::Nullifier>>,
-        ) -> Result<Vec<Self::NoteRef>, Self::Error> {
-            Ok(vec![])
+        ) -> Result<(), Self::Error> {
+            Ok(())
         }
 
         fn update_chain_tip(&mut self, _tip_height: BlockHeight) -> Result<(), Self::Error> {
@@ -801,15 +826,12 @@ pub mod testing {
         fn store_decrypted_tx(
             &mut self,
             _received_tx: DecryptedTransaction,
-        ) -> Result<Self::TxRef, Self::Error> {
-            Ok(TxId::from_bytes([0u8; 32]))
+        ) -> Result<(), Self::Error> {
+            Ok(())
         }
 
-        fn store_sent_tx(
-            &mut self,
-            _sent_tx: &SentTransaction,
-        ) -> Result<Self::TxRef, Self::Error> {
-            Ok(TxId::from_bytes([0u8; 32]))
+        fn store_sent_tx(&mut self, _sent_tx: &SentTransaction) -> Result<(), Self::Error> {
+            Ok(())
         }
 
         fn truncate_to_height(&mut self, _block_height: BlockHeight) -> Result<(), Self::Error> {

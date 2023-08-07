@@ -346,7 +346,7 @@ pub fn init_blocks_table<P: consensus::Parameters>(
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use rusqlite::{self, ToSql};
+    use rusqlite::{self, named_params, ToSql};
     use secrecy::Secret;
     use std::collections::HashMap;
     use tempfile::NamedTempFile;
@@ -969,8 +969,11 @@ mod tests {
             let mut tx_bytes = vec![];
             tx.write(&mut tx_bytes).unwrap();
             wdb.conn.execute(
-                "INSERT INTO transactions (block, id_tx, txid, raw) VALUES (0, 0, '', ?)",
-                [&tx_bytes[..]],
+                "INSERT INTO transactions (block, id_tx, txid, raw) VALUES (0, 0, :txid, :tx_bytes)",
+                named_params![
+                    ":txid": tx.txid().as_ref(), 
+                    ":tx_bytes": &tx_bytes[..]
+                ],
             )?;
             wdb.conn.execute(
                 "INSERT INTO sent_notes (tx, output_index, from_account, address, value)
