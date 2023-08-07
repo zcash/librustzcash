@@ -12,6 +12,8 @@ and this library adheres to Rust's notion of
 - A new default-enabled feature flag `multicore`. This allows users to disable
   multicore support by setting `default_features = false` on their
   `zcash_primitives`, `zcash_proofs`, and `zcash_client_sqlite` dependencies.
+- `zcash_client_sqlite::wallet::commitment_tree` A new module containing a
+  sqlite-backed implementation of `shardtree::store::ShardStore`.
 
 ### Changed
 - MSRV is now 1.65.0.

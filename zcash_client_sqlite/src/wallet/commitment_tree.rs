@@ -1,7 +1,7 @@
-use either::Either;
 use rusqlite::{self, named_params, OptionalExtension};
 use std::{
     collections::BTreeSet,
+    error, fmt,
     io::{self, Cursor},
     marker::PhantomData,
     sync::Arc,
@@ -18,6 +18,55 @@ use shardtree::{
 use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};
 
 use crate::serialization::{read_shard, write_shard};
+
+/// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
+#[derive(Debug)]
+pub enum Error {
+    /// Errors in deserializing stored shard data
+    Serialization(io::Error),
+    /// Errors encountered querying stored shard data
+    Query(rusqlite::Error),
+    /// Raised when the caller attempts to add a checkpoint at a block height where a checkpoint
+    /// already exists, but the tree state being checkpointed or the marks removed at that
+    /// checkpoint conflict with the existing tree state.
+    CheckpointConflict {
+        checkpoint_id: BlockHeight,
+        checkpoint: Checkpoint,
+        extant_tree_state: TreeState,
+        extant_marks_removed: Option<BTreeSet<Position>>,
+    },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            Error::Serialization(err) => write!(f, "Commitment tree serializtion error: {}", err),
+            Error::Query(err) => write!(f, "Commitment tree query or update error: {}", err),
+            Error::CheckpointConflict {
+                checkpoint_id,
+                checkpoint,
+                extant_tree_state,
+                extant_marks_removed,
+            } => {
+                write!(
+                    f,
+                    "Conflict at checkpoint id {}, tried to insert {:?}, which is incompatible with existing state ({:?}, {:?})",
+                    checkpoint_id, checkpoint, extant_tree_state, extant_marks_removed
+                )
+            }
+        }
+    }
+}
+
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match &self {
+            Error::Serialization(e) => Some(e),
+            Error::Query(e) => Some(e),
+            Error::CheckpointConflict { .. } => None,
+        }
+    }
+}
 
 pub struct SqliteShardStore<C, H, const SHARD_HEIGHT: u8> {
     pub(crate) conn: C,
@@ -45,7 +94,7 @@ impl<'conn, 'a: 'conn, H: HashSer, const SHARD_HEIGHT: u8> ShardStore
 {
     type H = H;
     type CheckpointId = BlockHeight;
-    type Error = Either<io::Error, rusqlite::Error>;
+    type Error = Error;
 
     fn get_shard(
         &self,
@@ -147,7 +196,7 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
 {
     type H = H;
     type CheckpointId = BlockHeight;
-    type Error = Either<io::Error, rusqlite::Error>;
+    type Error = Error;
 
     fn get_shard(
         &self,
@@ -161,9 +210,9 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
     }
 
     fn put_shard(&mut self, subtree: LocatedPrunableTree<Self::H>) -> Result<(), Self::Error> {
-        let tx = self.conn.transaction().map_err(Either::Right)?;
+        let tx = self.conn.transaction().map_err(Error::Query)?;
         put_shard(&tx, self.table_prefix, subtree)?;
-        tx.commit().map_err(Either::Right)?;
+        tx.commit().map_err(Error::Query)?;
         Ok(())
     }
 
@@ -196,9 +245,9 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         checkpoint_id: Self::CheckpointId,
         checkpoint: Checkpoint,
     ) -> Result<(), Self::Error> {
-        let tx = self.conn.transaction().map_err(Either::Right)?;
+        let tx = self.conn.transaction().map_err(Error::Query)?;
         add_checkpoint(&tx, self.table_prefix, checkpoint_id, checkpoint)?;
-        tx.commit().map_err(Either::Right)
+        tx.commit().map_err(Error::Query)
     }
 
     fn checkpoint_count(&self) -> Result<usize, Self::Error> {
@@ -223,9 +272,9 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
     where
         F: FnMut(&Self::CheckpointId, &Checkpoint) -> Result<(), Self::Error>,
     {
-        let tx = self.conn.transaction().map_err(Either::Right)?;
+        let tx = self.conn.transaction().map_err(Error::Query)?;
         with_checkpoints(&tx, self.table_prefix, limit, callback)?;
-        tx.commit().map_err(Either::Right)
+        tx.commit().map_err(Error::Query)
     }
 
     fn update_checkpoint_with<F>(
@@ -236,29 +285,27 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
     where
         F: Fn(&mut Checkpoint) -> Result<(), Self::Error>,
     {
-        let tx = self.conn.transaction().map_err(Either::Right)?;
+        let tx = self.conn.transaction().map_err(Error::Query)?;
         let result = update_checkpoint_with(&tx, self.table_prefix, *checkpoint_id, update)?;
-        tx.commit().map_err(Either::Right)?;
+        tx.commit().map_err(Error::Query)?;
         Ok(result)
     }
 
     fn remove_checkpoint(&mut self, checkpoint_id: &Self::CheckpointId) -> Result<(), Self::Error> {
-        let tx = self.conn.transaction().map_err(Either::Right)?;
+        let tx = self.conn.transaction().map_err(Error::Query)?;
         remove_checkpoint(&tx, self.table_prefix, *checkpoint_id)?;
-        tx.commit().map_err(Either::Right)
+        tx.commit().map_err(Error::Query)
     }
 
     fn truncate_checkpoints(
         &mut self,
         checkpoint_id: &Self::CheckpointId,
     ) -> Result<(), Self::Error> {
-        let tx = self.conn.transaction().map_err(Either::Right)?;
+        let tx = self.conn.transaction().map_err(Error::Query)?;
         truncate_checkpoints(&tx, self.table_prefix, *checkpoint_id)?;
-        tx.commit().map_err(Either::Right)
+        tx.commit().map_err(Error::Query)
     }
 }
-
-type Error = Either<io::Error, rusqlite::Error>;
 
 pub(crate) fn get_shard<H: HashSer>(
     conn: &rusqlite::Connection,
@@ -276,12 +323,12 @@ pub(crate) fn get_shard<H: HashSer>(
         |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
     )
     .optional()
-    .map_err(Either::Right)?
+    .map_err(Error::Query)?
     .map(|(shard_data, root_hash)| {
-        let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Either::Left)?;
+        let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Error::Serialization)?;
         let located_tree = LocatedPrunableTree::from_parts(shard_root_addr, shard_tree);
         if let Some(root_hash_data) = root_hash {
-            let root_hash = H::read(Cursor::new(root_hash_data)).map_err(Either::Left)?;
+            let root_hash = H::read(Cursor::new(root_hash_data)).map_err(Error::Serialization)?;
             Ok(located_tree.reannotate_root(Some(Arc::new(root_hash))))
         } else {
             Ok(located_tree)
@@ -311,10 +358,10 @@ pub(crate) fn last_shard<H: HashSer>(
         },
     )
     .optional()
-    .map_err(Either::Right)?
+    .map_err(Error::Query)?
     .map(|(shard_index, shard_data)| {
         let shard_root = Address::from_parts(shard_root_level, shard_index);
-        let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Either::Left)?;
+        let shard_tree = read_shard(&mut Cursor::new(shard_data)).map_err(Error::Serialization)?;
         Ok(LocatedPrunableTree::from_parts(shard_root, shard_tree))
     })
     .transpose()
@@ -336,10 +383,10 @@ pub(crate) fn put_shard<H: HashSer>(
             })
         })
         .transpose()
-        .map_err(Either::Left)?;
+        .map_err(Error::Serialization)?;
 
     let mut subtree_data = vec![];
-    write_shard(&mut subtree_data, subtree.root()).map_err(Either::Left)?;
+    write_shard(&mut subtree_data, subtree.root()).map_err(Error::Serialization)?;
 
     let mut stmt_put_shard = conn
         .prepare_cached(&format!(
@@ -350,7 +397,7 @@ pub(crate) fn put_shard<H: HashSer>(
              shard_data = :shard_data",
             table_prefix
         ))
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     stmt_put_shard
         .execute(named_params![
@@ -358,7 +405,7 @@ pub(crate) fn put_shard<H: HashSer>(
             ":root_hash": subtree_root_hash,
             ":shard_data": subtree_data
         ])
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     Ok(())
 }
@@ -373,14 +420,14 @@ pub(crate) fn get_shard_roots(
             "SELECT shard_index FROM {}_tree_shards ORDER BY shard_index",
             table_prefix
         ))
-        .map_err(Either::Right)?;
-    let mut rows = stmt.query([]).map_err(Either::Right)?;
+        .map_err(Error::Query)?;
+    let mut rows = stmt.query([]).map_err(Error::Query)?;
 
     let mut res = vec![];
-    while let Some(row) = rows.next().map_err(Either::Right)? {
+    while let Some(row) = rows.next().map_err(Error::Query)? {
         res.push(Address::from_parts(
             shard_root_level,
-            row.get(0).map_err(Either::Right)?,
+            row.get(0).map_err(Error::Query)?,
         ));
     }
     Ok(res)
@@ -398,7 +445,7 @@ pub(crate) fn truncate(
         ),
         [from.index()],
     )
-    .map_err(Either::Right)
+    .map_err(Error::Query)
     .map(|_| ())
 }
 
@@ -412,10 +459,10 @@ pub(crate) fn get_cap<H: HashSer>(
         |row| row.get::<_, Vec<u8>>(0),
     )
     .optional()
-    .map_err(Either::Right)?
+    .map_err(Error::Query)?
     .map_or_else(
         || Ok(PrunableTree::empty()),
-        |cap_data| read_shard(&mut Cursor::new(cap_data)).map_err(Either::Left),
+        |cap_data| read_shard(&mut Cursor::new(cap_data)).map_err(Error::Serialization),
     )
 }
 
@@ -432,11 +479,11 @@ pub(crate) fn put_cap<H: HashSer>(
              SET cap_data = :cap_data",
             table_prefix
         ))
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     let mut cap_data = vec![];
-    write_shard(&mut cap_data, &cap).map_err(Either::Left)?;
-    stmt.execute([cap_data]).map_err(Either::Right)?;
+    write_shard(&mut cap_data, &cap).map_err(Error::Serialization)?;
+    stmt.execute([cap_data]).map_err(Error::Query)?;
 
     Ok(())
 }
@@ -456,7 +503,7 @@ pub(crate) fn min_checkpoint_id(
                 .map(|opt| opt.map(BlockHeight::from))
         },
     )
-    .map_err(Either::Right)
+    .map_err(Error::Query)
 }
 
 pub(crate) fn max_checkpoint_id(
@@ -474,7 +521,7 @@ pub(crate) fn max_checkpoint_id(
                 .map(|opt| opt.map(BlockHeight::from))
         },
     )
-    .map_err(Either::Right)
+    .map_err(Error::Query)
 }
 
 pub(crate) fn add_checkpoint(
@@ -483,39 +530,89 @@ pub(crate) fn add_checkpoint(
     checkpoint_id: BlockHeight,
     checkpoint: Checkpoint,
 ) -> Result<(), Error> {
-    let mut stmt_insert_checkpoint = conn
-        .prepare_cached(&format!(
-            "INSERT INTO {}_tree_checkpoints (checkpoint_id, position)
-             VALUES (:checkpoint_id, :position)",
-            table_prefix
-        ))
-        .map_err(Either::Right)?;
+    let extant_tree_state = conn
+        .query_row(
+            &format!(
+                "SELECT position FROM {}_tree_checkpoints WHERE checkpoint_id = :checkpoint_id",
+                table_prefix
+            ),
+            named_params![":checkpoint_id": u32::from(checkpoint_id),],
+            |row| {
+                row.get::<_, Option<u64>>(0).map(|opt| {
+                    opt.map_or_else(
+                        || TreeState::Empty,
+                        |pos| TreeState::AtPosition(Position::from(pos)),
+                    )
+                })
+            },
+        )
+        .optional()
+        .map_err(Error::Query)?;
 
-    stmt_insert_checkpoint
-        .execute(named_params![
-            ":checkpoint_id": u32::from(checkpoint_id),
-            ":position": checkpoint.position().map(u64::from)
-        ])
-        .map_err(Either::Right)?;
+    match extant_tree_state {
+        Some(current) => {
+            if current != checkpoint.tree_state() {
+                // If the checkpoint position for a given checkpoint identifier has changed, we treat
+                // this as an error because the wallet should have detected a chain reorg and truncated
+                // the tree.
+                Err(Error::CheckpointConflict {
+                    checkpoint_id,
+                    checkpoint,
+                    extant_tree_state: current,
+                    extant_marks_removed: None,
+                })
+            } else {
+                // if the existing spends are the same, we can skip the insert; if the
+                // existing spends have changed, this is also a conflict.
+                let marks_removed = get_marks_removed(conn, table_prefix, checkpoint_id)?;
+                if &marks_removed == checkpoint.marks_removed() {
+                    Ok(())
+                } else {
+                    Err(Error::CheckpointConflict {
+                        checkpoint_id,
+                        checkpoint,
+                        extant_tree_state: current,
+                        extant_marks_removed: Some(marks_removed),
+                    })
+                }
+            }
+        }
+        None => {
+            let mut stmt_insert_checkpoint = conn
+                .prepare_cached(&format!(
+                    "INSERT INTO {}_tree_checkpoints (checkpoint_id, position)
+                     VALUES (:checkpoint_id, :position)",
+                    table_prefix
+                ))
+                .map_err(Error::Query)?;
 
-    let mut stmt_insert_mark_removed = conn
-        .prepare_cached(&format!(
-            "INSERT INTO {}_tree_checkpoint_marks_removed (checkpoint_id, mark_removed_position)
-             VALUES (:checkpoint_id, :position)",
-            table_prefix
-        ))
-        .map_err(Either::Right)?;
+            stmt_insert_checkpoint
+                .execute(named_params![
+                    ":checkpoint_id": u32::from(checkpoint_id),
+                    ":position": checkpoint.position().map(u64::from)
+                ])
+                .map_err(Error::Query)?;
 
-    for pos in checkpoint.marks_removed() {
-        stmt_insert_mark_removed
-            .execute(named_params![
-                ":checkpoint_id": u32::from(checkpoint_id),
-                ":position": u64::from(*pos)
-            ])
-            .map_err(Either::Right)?;
+            let mut stmt_insert_mark_removed = conn
+                .prepare_cached(&format!(
+                    "INSERT INTO {}_tree_checkpoint_marks_removed (checkpoint_id, mark_removed_position)
+                     VALUES (:checkpoint_id, :position)",
+                    table_prefix
+                ))
+                .map_err(Error::Query)?;
+
+            for pos in checkpoint.marks_removed() {
+                stmt_insert_mark_removed
+                    .execute(named_params![
+                        ":checkpoint_id": u32::from(checkpoint_id),
+                        ":position": u64::from(*pos)
+                    ])
+                    .map_err(Error::Query)?;
+            }
+
+            Ok(())
+        }
     }
-
-    Ok(())
 }
 
 pub(crate) fn checkpoint_count(
@@ -527,7 +624,30 @@ pub(crate) fn checkpoint_count(
         [],
         |row| row.get::<_, usize>(0),
     )
-    .map_err(Either::Right)
+    .map_err(Error::Query)
+}
+
+fn get_marks_removed(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+    checkpoint_id: BlockHeight,
+) -> Result<BTreeSet<Position>, Error> {
+    let mut stmt = conn
+        .prepare_cached(&format!(
+            "SELECT mark_removed_position
+            FROM {}_tree_checkpoint_marks_removed
+            WHERE checkpoint_id = ?",
+            table_prefix
+        ))
+        .map_err(Error::Query)?;
+    let mark_removed_rows = stmt
+        .query([u32::from(checkpoint_id)])
+        .map_err(Error::Query)?;
+
+    mark_removed_rows
+        .mapped(|row| row.get::<_, u64>(0).map(Position::from))
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map_err(Error::Query)
 }
 
 pub(crate) fn get_checkpoint(
@@ -550,30 +670,13 @@ pub(crate) fn get_checkpoint(
             },
         )
         .optional()
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     checkpoint_position
         .map(|pos_opt| {
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT mark_removed_position
-                    FROM {}_tree_checkpoint_marks_removed
-                    WHERE checkpoint_id = ?",
-                    table_prefix
-                ))
-                .map_err(Either::Right)?;
-            let mark_removed_rows = stmt
-                .query([u32::from(checkpoint_id)])
-                .map_err(Either::Right)?;
-
-            let marks_removed = mark_removed_rows
-                .mapped(|row| row.get::<_, u64>(0).map(Position::from))
-                .collect::<Result<BTreeSet<_>, _>>()
-                .map_err(Either::Right)?;
-
             Ok(Checkpoint::from_parts(
                 pos_opt.map_or(TreeState::Empty, TreeState::AtPosition),
-                marks_removed,
+                get_marks_removed(conn, table_prefix, checkpoint_id)?,
             ))
         })
         .transpose()
@@ -609,7 +712,7 @@ pub(crate) fn get_checkpoint_at_depth(
             },
         )
         .optional()
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     checkpoint_parts
         .map(|(checkpoint_id, pos_opt)| {
@@ -620,15 +723,15 @@ pub(crate) fn get_checkpoint_at_depth(
                     WHERE checkpoint_id = ?",
                     table_prefix
                 ))
-                .map_err(Either::Right)?;
+                .map_err(Error::Query)?;
             let mark_removed_rows = stmt
                 .query([u32::from(checkpoint_id)])
-                .map_err(Either::Right)?;
+                .map_err(Error::Query)?;
 
             let marks_removed = mark_removed_rows
                 .mapped(|row| row.get::<_, u64>(0).map(Position::from))
                 .collect::<Result<BTreeSet<_>, _>>()
-                .map_err(Either::Right)?;
+                .map_err(Error::Query)?;
 
             Ok((
                 checkpoint_id,
@@ -658,7 +761,7 @@ where
             LIMIT :limit",
             table_prefix
         ))
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     let mut stmt_get_checkpoint_marks_removed = conn
         .prepare_cached(&format!(
@@ -667,27 +770,27 @@ where
             WHERE checkpoint_id = :checkpoint_id",
             table_prefix
         ))
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     let mut rows = stmt_get_checkpoints
         .query(named_params![":limit": limit])
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
-    while let Some(row) = rows.next().map_err(Either::Right)? {
-        let checkpoint_id = row.get::<_, u32>(0).map_err(Either::Right)?;
+    while let Some(row) = rows.next().map_err(Error::Query)? {
+        let checkpoint_id = row.get::<_, u32>(0).map_err(Error::Query)?;
         let tree_state = row
             .get::<_, Option<u64>>(1)
             .map(|opt| opt.map_or_else(|| TreeState::Empty, |p| TreeState::AtPosition(p.into())))
-            .map_err(Either::Right)?;
+            .map_err(Error::Query)?;
 
         let mark_removed_rows = stmt_get_checkpoint_marks_removed
             .query(named_params![":checkpoint_id": checkpoint_id])
-            .map_err(Either::Right)?;
+            .map_err(Error::Query)?;
 
         let marks_removed = mark_removed_rows
             .mapped(|row| row.get::<_, u64>(0).map(Position::from))
             .collect::<Result<BTreeSet<_>, _>>()
-            .map_err(Either::Right)?;
+            .map_err(Error::Query)?;
 
         callback(
             &BlockHeight::from(checkpoint_id),
@@ -730,11 +833,11 @@ pub(crate) fn remove_checkpoint(
              WHERE checkpoint_id = :checkpoint_id",
             table_prefix
         ))
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     stmt_delete_checkpoint
         .execute(named_params![":checkpoint_id": u32::from(checkpoint_id),])
-        .map_err(Either::Right)?;
+        .map_err(Error::Query)?;
 
     Ok(())
 }
@@ -753,7 +856,7 @@ pub(crate) fn truncate_checkpoints(
         ),
         [u32::from(checkpoint_id)],
     )
-    .map_err(Either::Right)?;
+    .map_err(Error::Query)?;
 
     Ok(())
 }
@@ -844,18 +947,18 @@ pub(crate) fn put_shard_roots<
             SET subtree_end_height = :subtree_end_height, root_hash = :root_hash",
             table_prefix
         ))
-            .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
+            .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
 
         // The `shard_data` value will only be used in the case that no tree already exists.
         let mut shard_data: Vec<u8> = vec![];
         let tree = PrunableTree::leaf((root.root_hash().clone(), RetentionFlags::EPHEMERAL));
         write_shard(&mut shard_data, &tree)
-            .map_err(|e| ShardTreeError::Storage(Either::Left(e)))?;
+            .map_err(|e| ShardTreeError::Storage(Error::Serialization(e)))?;
 
         let mut root_hash_data: Vec<u8> = vec![];
         root.root_hash()
             .write(&mut root_hash_data)
-            .map_err(|e| ShardTreeError::Storage(Either::Left(e)))?;
+            .map_err(|e| ShardTreeError::Storage(Error::Serialization(e)))?;
 
         stmt.execute(named_params![
             ":shard_index": start_index + i,
@@ -863,7 +966,7 @@ pub(crate) fn put_shard_roots<
             ":root_hash": root_hash_data,
             ":shard_data": shard_data,
         ])
-        .map_err(|e| ShardTreeError::Storage(Either::Right(e)))?;
+        .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
     }
 
     Ok(())
