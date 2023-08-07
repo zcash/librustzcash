@@ -38,7 +38,7 @@ use maybe_rayon::{
 };
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::{borrow::Borrow, collections::HashMap, convert::AsRef, ops::Range, path::Path};
+use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, ops::Range, path::Path};
 
 use incrementalmerkletree::Position;
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -100,6 +100,14 @@ pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 /// A newtype wrapper for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReceivedNoteId(pub(crate) i64);
+
+impl fmt::Display for ReceivedNoteId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ReceivedNoteId(id) => write!(f, "Received Note {}", id),
+        }
+    }
+}
 
 /// A newtype wrapper for sqlite primary key values for the utxos
 /// table.
