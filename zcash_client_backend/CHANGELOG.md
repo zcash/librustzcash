@@ -37,7 +37,8 @@ and this library adheres to Rust's notion of
   - `WalletRead::TxRef` has been removed in favor of consistently using `TxId` instead. 
   - `WalletRead::get_transaction` now takes a `TxId` as its argument.
   - `WalletWrite::{store_decrypted_tx, store_sent_tx}` now return `Result<(), Self::Error>` 
-    as the `WalletRead::TxRef` associated type has been removed. Use `TxId` instead.
+    as the `WalletRead::TxRef` associated type has been removed. Use
+    `WalletRead::get_transaction` with the transaction's `TxId` instead.
   - `WalletRead::get_memo` now takes a `NoteId` as its argument instead of `Self::NoteRef`
     and returns `Result<Option<Memo>, Self::Error>` instead of `Result<Memo,
     Self::Error>` in order to make representable wallet states where the full

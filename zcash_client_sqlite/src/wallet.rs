@@ -505,7 +505,7 @@ pub(crate) fn get_received_memo(
         .transpose()
 }
 
-/// Looks up a transaction by its internal database identifier.
+/// Looks up a transaction by its [`TxId`].
 ///
 /// Returns the decoded transaction, along with the block height that was used in its decoding.
 /// This is either the block height at which the transaction was mined, or the expiry height if the

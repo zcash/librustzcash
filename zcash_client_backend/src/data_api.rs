@@ -386,11 +386,12 @@ pub enum ShieldedProtocol {
 pub struct NoteId {
     txid: TxId,
     protocol: ShieldedProtocol,
-    output_index: u32,
+    output_index: u16,
 }
 
 impl NoteId {
-    pub fn new(txid: TxId, protocol: ShieldedProtocol, output_index: u32) -> Self {
+    /// Constructs a new `NoteId` from its parts.
+    pub fn new(txid: TxId, protocol: ShieldedProtocol, output_index: u16) -> Self {
         Self {
             txid,
             protocol,
@@ -398,15 +399,19 @@ impl NoteId {
         }
     }
 
+    /// Returns the ID of the transaction containing this note.
     pub fn txid(&self) -> &TxId {
         &self.txid
     }
 
+    /// Returns the shielded protocol used by this note.
     pub fn protocol(&self) -> ShieldedProtocol {
         self.protocol
     }
 
-    pub fn output_index(&self) -> u32 {
+    /// Returns the index of this note within its transaction's corresponding list of
+    /// shielded outputs.
+    pub fn output_index(&self) -> u16 {
         self.output_index
     }
 }
