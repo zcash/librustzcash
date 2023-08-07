@@ -548,6 +548,7 @@ pub(crate) mod tests {
             &tx,
             &ufvks,
         );
+        assert_eq!(decrypted_outputs.len(), 2);
 
         let mut found_tx_change_memo = false;
         let mut found_tx_empty_memo = false;
@@ -577,7 +578,8 @@ pub(crate) mod tests {
 
         assert_eq!(sent_note_ids.len(), 2);
 
-        // The sent memo should be the empty memo for both the sent output and change
+        // The sent memo should be the empty memo for the sent output, and the
+        // change output's memo should be as specified.
         let mut found_sent_change_memo = false;
         let mut found_sent_empty_memo = false;
         for sent_note_id in sent_note_ids {

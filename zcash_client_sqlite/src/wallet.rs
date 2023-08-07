@@ -499,6 +499,11 @@ pub(crate) fn get_received_memo(
 }
 
 /// Looks up a transaction by its internal database identifier.
+///
+/// Returns the decoded transaction, along with the block height that was used in its decoding.
+/// This is either the block height at which the transaction was mined, or the expiry height if the
+/// wallet created the transaction but the transaction has not yet been mined from the perspective
+/// of the wallet.
 pub(crate) fn get_transaction<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,

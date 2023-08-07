@@ -1,6 +1,6 @@
-//! This migration reads decrypted transaction data and updates the `sent_notes` table to ensure
-//! that memo entries are consistent with the decrypted transaction's outputs. The empty memo is
-//! now consistently represented as a single `0xf6` byte.
+//! This migration reads the wallet's raw transaction data and updates the `sent_notes` table to
+//! ensure that memo entries are consistent with the decrypted transaction's outputs. The empty
+//! memo is now consistently represented as a single `0xf6` byte.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -35,7 +35,9 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn description(&self) -> &'static str {
-        ""
+        "This migration reads the wallet's raw transaction data and updates the `sent_notes` table to
+        ensure that memo entries are consistent with the decrypted transaction's outputs. The empty
+        memo is now consistently represented as a single `0xf6` byte."
     }
 }
 
@@ -44,22 +46,21 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         let mut stmt_raw_tx = transaction.prepare(
-            "SELECT DISTINCT sent_notes.tx, sent_notes.output_index, accounts.account, accounts.ufvk
+            "SELECT DISTINCT sent_notes.tx, accounts.account, accounts.ufvk
              FROM sent_notes 
              JOIN accounts ON sent_notes.from_account = accounts.account
              JOIN transactions ON transactions.id_tx = sent_notes.tx
-             WHERE transactions.raw IS NOT NULL"
+             WHERE transactions.raw IS NOT NULL",
         )?;
 
         let mut rows = stmt_raw_tx.query([])?;
 
-        let mut tx_sent_notes: BTreeMap<i64, Vec<(u32, AccountId, UnifiedFullViewingKey)>> =
+        let mut tx_sent_notes: BTreeMap<i64, HashMap<AccountId, UnifiedFullViewingKey>> =
             BTreeMap::new();
         while let Some(row) = rows.next()? {
             let id_tx: i64 = row.get(0)?;
-            let output_index: u32 = row.get(1)?;
-            let account: u32 = row.get(2)?;
-            let ufvk_str: String = row.get(3)?;
+            let account: u32 = row.get(1)?;
+            let ufvk_str: String = row.get(2)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
                 WalletMigrationError::CorruptedData(format!(
                     "Could not decode unified full viewing key for account {}: {:?}",
@@ -69,11 +70,18 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             tx_sent_notes
                 .entry(id_tx)
-                .and_modify(|v| v.push((output_index, AccountId::from(account), ufvk.clone())))
-                .or_insert_with(|| vec![(output_index, AccountId::from(account), ufvk)]);
+                .or_default()
+                .insert(AccountId::from(account), ufvk);
         }
 
-        for (id_tx, sapling_outputs) in tx_sent_notes {
+        let mut stmt_update_sent_memo = transaction.prepare(
+            "UPDATE sent_notes 
+            SET memo = :memo 
+            WHERE tx = :id_tx
+            AND output_index = :output_index",
+        )?;
+
+        for (id_tx, ufvks) in tx_sent_notes {
             let (block_height, tx) =
                 get_transaction(transaction, &self.params, id_tx).map_err(|err| match err {
                     SqliteClientError::CorruptedData(msg) => {
@@ -86,30 +94,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     )),
                 })?;
 
-            let ufvks: HashMap<AccountId, UnifiedFullViewingKey> = sapling_outputs
-                .iter()
-                .map(|(_, account, ufvk)| (*account, ufvk.clone()))
-                .collect();
-
             let decrypted_outputs = decrypt_transaction(&self.params, block_height, &tx, &ufvks);
-            let mut stmt_update_sent_memo = transaction.prepare(
-                "UPDATE sent_notes 
-                SET memo = :memo 
-                WHERE tx = :id_tx
-                AND output_index = :output_index",
-            )?;
-
             for d_out in decrypted_outputs {
-                if sapling_outputs
-                    .iter()
-                    .any(|(idx, _, _)| &(u32::try_from(d_out.index).unwrap()) == idx)
-                {
-                    stmt_update_sent_memo.execute(named_params![
-                        ":id_tx": id_tx,
-                        ":output_index": d_out.index,
-                        ":memo": memo_repr(Some(&d_out.memo))
-                    ])?;
-                }
+                stmt_update_sent_memo.execute(named_params![
+                    ":id_tx": id_tx,
+                    ":output_index": d_out.index,
+                    ":memo": memo_repr(Some(&d_out.memo))
+                ])?;
             }
         }
 
