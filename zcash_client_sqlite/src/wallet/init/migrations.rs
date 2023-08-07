@@ -4,6 +4,7 @@ mod addresses_table;
 mod initial_setup;
 mod nullifier_map;
 mod received_notes_nullable_nf;
+mod sapling_memo_consistency;
 mod sent_notes_to_internal;
 mod shardtree_support;
 mod ufvk_support;
@@ -22,19 +23,19 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
 ) -> Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>> {
     //      initial_setup
     //      /           \
-    // utxos_table     ufvk_support ----------
-    //      \                \                \
-    //       \         addresses_table   sent_notes_to_internal
-    //        \              /                /
-    //        add_utxo_account               /
-    //                       \              /
-    //                    add_transaction_views
-    //                       /
-    //        v_transactions_net
-    //                  /
-    //      received_notes_nullable_nf
-    //            /               \
-    // shardtree_support      nullifier_map
+    // utxos_table    ufvk_support ---------
+    //      \              |                \
+    //       \       addresses_table   sent_notes_to_internal
+    //        \            /                /
+    //        add_utxo_account             /
+    //                     \              /
+    //                  add_transaction_views
+    //                            |
+    //                    v_transactions_net
+    //                            |
+    //                  received_notes_nullable_nf
+    //                 /          |           \
+    // shardtree_support    nullifier_map    sapling_memo_consistency
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -54,5 +55,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(received_notes_nullable_nf::Migration),
         Box::new(shardtree_support::Migration),
         Box::new(nullifier_map::Migration),
+        Box::new(sapling_memo_consistency::Migration {
+            params: params.clone(),
+        }),
     ]
 }

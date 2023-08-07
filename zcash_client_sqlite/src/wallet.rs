@@ -129,8 +129,14 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
 }
 
 pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
-    memo.filter(|m| *m != &MemoBytes::empty())
-        .map(|m| m.as_slice())
+    memo.map(|m| {
+        if m == &MemoBytes::empty() {
+            // we store the empty memo as a single 0xf6 byte
+            &[0xf6]
+        } else {
+            m.as_slice()
+        }
+    })
 }
 
 pub(crate) fn get_max_account_id(
@@ -493,11 +499,16 @@ pub(crate) fn get_received_memo(
 }
 
 /// Looks up a transaction by its internal database identifier.
+///
+/// Returns the decoded transaction, along with the block height that was used in its decoding.
+/// This is either the block height at which the transaction was mined, or the expiry height if the
+/// wallet created the transaction but the transaction has not yet been mined from the perspective
+/// of the wallet.
 pub(crate) fn get_transaction<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     id_tx: i64,
-) -> Result<Transaction, SqliteClientError> {
+) -> Result<(BlockHeight, Transaction), SqliteClientError> {
     let (tx_bytes, block_height, expiry_height): (
         Vec<_>,
         Option<BlockHeight>,
@@ -530,6 +541,7 @@ pub(crate) fn get_transaction<P: Parameters>(
         block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
     {
         Transaction::read(&tx_bytes[..], BranchId::for_height(params, height))
+            .map(|t| (height, t))
             .map_err(SqliteClientError::from)
     } else {
         let tx_data = Transaction::read(&tx_bytes[..], BranchId::Sprout)
@@ -549,6 +561,7 @@ pub(crate) fn get_transaction<P: Parameters>(
                 tx_data.orchard_bundle().cloned(),
             )
             .freeze()
+            .map(|t| (expiry_height, t))
             .map_err(SqliteClientError::from)
         } else {
             Err(SqliteClientError::CorruptedData(
@@ -1262,7 +1275,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
         ":to_address": &to_address,
         ":to_account": &to_account,
         ":value": &i64::from(output.value()),
-        ":memo": output.memo().filter(|m| *m != &MemoBytes::empty()).map(|m| m.as_slice()),
+        ":memo": memo_repr(output.memo())
     ];
 
     stmt_insert_sent_output.execute(sql_args)?;

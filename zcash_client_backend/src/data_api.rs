@@ -451,12 +451,14 @@ impl SentTransactionOutput {
     pub fn value(&self) -> Amount {
         self.value
     }
-    /// Returns the memo that was attached to the output, if any.
+    /// Returns the memo that was attached to the output, if any. This will only be `None`
+    /// for transparent outputs.
     pub fn memo(&self) -> Option<&MemoBytes> {
         self.memo.as_ref()
     }
 
-    /// Returns t decrypted note, if the sent output belongs to this wallet
+    /// Returns the account to which change (or wallet-internal value in the case of a shielding
+    /// transaction) was sent, along with the change note.
     pub fn sapling_change_to(&self) -> Option<&(AccountId, sapling::Note)> {
         self.sapling_change_to.as_ref()
     }

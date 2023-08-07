@@ -371,7 +371,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 #[cfg(test)]
 #[allow(deprecated)]
 pub(crate) mod tests {
-    use std::num::NonZeroU32;
+    use std::{convert::Infallible, num::NonZeroU32};
 
     use rusqlite::Connection;
     use secrecy::Secret;
@@ -383,8 +383,13 @@ pub(crate) mod tests {
         block::BlockHash,
         consensus::{BlockHeight, BranchId},
         legacy::TransparentAddress,
+        memo::Memo,
         sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
-        transaction::{components::Amount, fees::zip317::FeeRule as Zip317FeeRule, Transaction},
+        transaction::{
+            components::Amount,
+            fees::{fixed::FeeRule as FixedFeeRule, zip317::FeeRule as Zip317FeeRule},
+            Transaction,
+        },
         zip32::{sapling::ExtendedSpendingKey, Scope},
     };
 
@@ -394,13 +399,17 @@ pub(crate) mod tests {
             self,
             chain::scan_cached_blocks,
             error::Error,
-            wallet::{create_spend_to_address, input_selection::GreedyInputSelector, spend},
+            wallet::{
+                create_proposed_transaction, create_spend_to_address,
+                input_selection::GreedyInputSelector, propose_transfer, spend,
+            },
             WalletRead, WalletWrite,
         },
-        fees::{zip317, DustOutputPolicy},
+        decrypt_transaction,
+        fees::{fixed, zip317, DustOutputPolicy},
         keys::UnifiedSpendingKey,
         wallet::OvkPolicy,
-        zip321::{Payment, TransactionRequest},
+        zip321::{self, Payment, TransactionRequest},
     };
 
     use crate::{
@@ -413,21 +422,17 @@ pub(crate) mod tests {
             get_balance, get_balance_at,
             init::{init_blocks_table, init_wallet_db},
         },
-        AccountId, BlockDb, WalletDb,
+        AccountId, BlockDb, NoteId, WalletDb,
     };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         zcash_client_backend::{
-            data_api::wallet::shield_transparent_funds, fees::fixed,
-            wallet::WalletTransparentOutput,
+            data_api::wallet::shield_transparent_funds, wallet::WalletTransparentOutput,
         },
         zcash_primitives::{
             memo::MemoBytes,
-            transaction::{
-                components::{amount::NonNegativeAmount, OutPoint, TxOut},
-                fees::fixed::FeeRule as FixedFeeRule,
-            },
+            transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
         },
     };
 
@@ -438,6 +443,166 @@ pub(crate) mod tests {
                 panic!("Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.");
             }
         }
+    }
+
+    #[test]
+    fn send_proposed_transfer() {
+        let cache_file = NamedTempFile::new().unwrap();
+        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
+        init_cache_database(&db_cache).unwrap();
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
+
+        // Add an account to the wallet
+        let seed = Secret::new([0u8; 32].to_vec());
+        let (account, usk) = db_data.create_account(&seed).unwrap();
+        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+
+        // Add funds to the wallet in a single note
+        let value = Amount::from_u64(60000).unwrap();
+        let (cb, _) = fake_compact_block(
+            sapling_activation_height(),
+            BlockHash([0; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            value,
+            0,
+        );
+        insert_into_cache(&db_cache, &cb);
+        scan_cached_blocks(
+            &tests::network(),
+            &db_cache,
+            &mut db_data,
+            sapling_activation_height(),
+            1,
+        )
+        .unwrap();
+
+        // Verified balance matches total balance
+        let (_, anchor_height) = db_data
+            .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            value
+        );
+        assert_eq!(
+            get_balance_at(&db_data.conn, AccountId::from(0), anchor_height).unwrap(),
+            value
+        );
+
+        let to_extsk = ExtendedSpendingKey::master(&[]);
+        let to: RecipientAddress = to_extsk.default_address().1.into();
+        let request = zip321::TransactionRequest::new(vec![Payment {
+            recipient_address: to,
+            amount: Amount::from_u64(10000).unwrap(),
+            memo: None, // this should result in the creation of an empty memo
+            label: None,
+            message: None,
+            other_params: vec![],
+        }])
+        .unwrap();
+
+        let fee_rule = FixedFeeRule::standard();
+        let change_strategy = fixed::SingleOutputChangeStrategy::new(fee_rule);
+        let input_selector =
+            &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
+        let proposal_result = propose_transfer::<_, _, _, Infallible>(
+            &mut db_data,
+            &tests::network(),
+            account,
+            input_selector,
+            request,
+            NonZeroU32::new(1).unwrap(),
+        );
+        assert_matches!(proposal_result, Ok(_));
+
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let create_proposed_result = create_proposed_transaction::<_, _, Infallible, _>(
+            &mut db_data,
+            &tests::network(),
+            test_prover(),
+            &usk,
+            OvkPolicy::Sender,
+            proposal_result.unwrap(),
+            NonZeroU32::new(1).unwrap(),
+            Some(change_memo.clone().into()),
+        );
+        assert_matches!(create_proposed_result, Ok(_));
+
+        let sent_tx_id = create_proposed_result.unwrap();
+
+        // Verify that the sent transaction was stored and that we can decrypt the memos
+        let tx = db_data
+            .get_transaction(sent_tx_id)
+            .expect("Created transaction was stored.");
+        let ufvks = [(account, usk.to_unified_full_viewing_key())]
+            .into_iter()
+            .collect();
+        let decrypted_outputs = decrypt_transaction(
+            &tests::network(),
+            sapling_activation_height() + 1,
+            &tx,
+            &ufvks,
+        );
+        assert_eq!(decrypted_outputs.len(), 2);
+
+        let mut found_tx_change_memo = false;
+        let mut found_tx_empty_memo = false;
+        for output in decrypted_outputs {
+            if output.memo == change_memo.clone().into() {
+                found_tx_change_memo = true
+            }
+            if output.memo == Memo::Empty.into() {
+                found_tx_empty_memo = true
+            }
+        }
+        assert!(found_tx_change_memo);
+        assert!(found_tx_empty_memo);
+
+        // Verify that the stored sent notes match what we're expecting
+        let mut stmt_sent_notes = db_data
+            .conn
+            .prepare("SELECT id_note FROM sent_notes WHERE tx = ?")
+            .unwrap();
+
+        let sent_note_ids = stmt_sent_notes
+            .query(rusqlite::params![sent_tx_id])
+            .unwrap()
+            .mapped(|row| row.get::<_, i64>(0).map(NoteId::SentNoteId))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(sent_note_ids.len(), 2);
+
+        // The sent memo should be the empty memo for the sent output, and the
+        // change output's memo should be as specified.
+        let mut found_sent_change_memo = false;
+        let mut found_sent_empty_memo = false;
+        for sent_note_id in sent_note_ids {
+            match db_data
+                .get_memo(sent_note_id)
+                .expect("Note id is valid")
+                .as_ref()
+            {
+                Some(m) if m == &change_memo => {
+                    found_sent_change_memo = true;
+                }
+                Some(m) if m == &Memo::Empty => {
+                    found_sent_empty_memo = true;
+                }
+                Some(other) => panic!("Unexpected memo value: {:?}", other),
+                None => panic!("Memo should not be stored as NULL"),
+            }
+        }
+        assert!(found_sent_change_memo);
+        assert!(found_sent_empty_memo);
+
+        // Check that querying for a nonexistent sent note returns an error
+        assert_matches!(db_data.get_memo(NoteId::SentNoteId(12345)), Err(_));
     }
 
     #[test]
