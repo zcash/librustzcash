@@ -132,6 +132,19 @@ pub(crate) fn get_spendable_sapling_notes(
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+    let mut stmt_unscanned_tip = conn.prepare_cached(
+        "SELECT 1 FROM v_sapling_shard_unscanned_ranges
+         WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
+         AND block_range_start <= :anchor_height",
+    )?;
+    let mut unscanned =
+        stmt_unscanned_tip.query(named_params![":anchor_height": &u32::from(anchor_height),])?;
+    if unscanned.next()?.is_some() {
+        // if the tip shard has unscanned ranges below the anchor height, none of our notes can be
+        // spent
+        return Ok(vec![]);
+    }
+
     let mut stmt_select_notes = conn.prepare_cached(
         "SELECT id_note, diversifier, value, rcm, commitment_tree_position
          FROM sapling_received_notes
@@ -172,6 +185,19 @@ pub(crate) fn select_spendable_sapling_notes(
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+    let mut stmt_unscanned_tip = conn.prepare_cached(
+        "SELECT 1 FROM v_sapling_shard_unscanned_ranges
+         WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
+         AND block_range_start <= :anchor_height",
+    )?;
+    let mut unscanned =
+        stmt_unscanned_tip.query(named_params![":anchor_height": &u32::from(anchor_height),])?;
+    if unscanned.next()?.is_some() {
+        // if the tip shard has unscanned ranges below the anchor height, none of our notes can be
+        // spent
+        return Ok(vec![]);
+    }
+
     // The goal of this SQL statement is to select the oldest notes until the required
     // value has been reached.
     // 1) Use a window function to create a view of all notes, ordered from oldest to
