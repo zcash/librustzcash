@@ -50,7 +50,8 @@ and this library adheres to Rust's notion of
     permits the caller to control the starting position of the scan range.
     In addition, the `limit` parameter is now required and has type `usize`.
   - `chain::BlockSource::with_blocks` now takes its limit as an `Option<usize>`
-    instead of `Option<u32>`.
+    instead of `Option<u32>`. It is also now required to return an error if
+    `from_height` is set to a block that does not exist in `self`.
   - A new `CommitmentTree` variant has been added to `data_api::error::Error`
   - `wallet::{create_spend_to_address, create_proposed_transaction,
     shield_transparent_funds}` all now require that `WalletCommitmentTrees` be

@@ -58,8 +58,20 @@ where
         ])
         .map_err(to_chain_error)?;
 
+    // Only look for the `from_height` in the scanned blocks if it is set.
+    let mut from_height_found = from_height.is_none();
     while let Some(row) = rows.next().map_err(to_chain_error)? {
         let height = BlockHeight::from_u32(row.get(0).map_err(to_chain_error)?);
+        if !from_height_found {
+            // We will only perform this check on the first row.
+            let from_height = from_height.expect("can only reach here if set");
+            if from_height != height {
+                return Err(to_chain_error(SqliteClientError::CacheMiss(from_height)));
+            } else {
+                from_height_found = true;
+            }
+        }
+
         let data: Vec<u8> = row.get(1).map_err(to_chain_error)?;
         let block = CompactBlock::decode(&data[..]).map_err(to_chain_error)?;
         if block.height() != height {
@@ -71,6 +83,11 @@ where
         }
 
         with_row(block)?;
+    }
+
+    if !from_height_found {
+        let from_height = from_height.expect("can only reach here if set");
+        return Err(to_chain_error(SqliteClientError::CacheMiss(from_height)));
     }
 
     Ok(())
@@ -260,8 +277,20 @@ where
         )
         .map_err(to_chain_error)?;
 
+    // Only look for the `from_height` in the scanned blocks if it is set.
+    let mut from_height_found = from_height.is_none();
     for row_result in rows {
         let cbr = row_result.map_err(to_chain_error)?;
+        if !from_height_found {
+            // We will only perform this check on the first row.
+            let from_height = from_height.expect("can only reach here if set");
+            if from_height != cbr.height {
+                return Err(to_chain_error(FsBlockDbError::CacheMiss(from_height)));
+            } else {
+                from_height_found = true;
+            }
+        }
+
         let mut block_file =
             File::open(cbr.block_file_path(&cache.blocks_dir)).map_err(to_chain_error)?;
         let mut block_data = vec![];
@@ -280,6 +309,11 @@ where
         }
 
         with_block(block)?;
+    }
+
+    if !from_height_found {
+        let from_height = from_height.expect("can only reach here if set");
+        return Err(to_chain_error(FsBlockDbError::CacheMiss(from_height)));
     }
 
     Ok(())
