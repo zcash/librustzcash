@@ -9,6 +9,7 @@ mod sent_notes_to_internal;
 mod shardtree_support;
 mod ufvk_support;
 mod utxos_table;
+mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
 
 use schemer_rusqlite::RusqliteMigration;
@@ -36,6 +37,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                  received_notes_nullable_nf
     //                 /          |           \
     // shardtree_support    nullifier_map    sapling_memo_consistency
+    //         |
+    // v_sapling_shard_unscanned_ranges
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -56,6 +59,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(shardtree_support::Migration),
         Box::new(nullifier_map::Migration),
         Box::new(sapling_memo_consistency::Migration {
+            params: params.clone(),
+        }),
+        Box::new(v_sapling_shard_unscanned_ranges::Migration {
             params: params.clone(),
         }),
     ]

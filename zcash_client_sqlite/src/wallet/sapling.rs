@@ -139,7 +139,15 @@ pub(crate) fn get_spendable_sapling_notes(
          WHERE account = :account
          AND spent IS NULL
          AND transactions.block <= :anchor_height
-         AND id_note NOT IN rarray(:exclude)",
+         AND id_note NOT IN rarray(:exclude)
+         AND NOT EXISTS (
+            SELECT 1 FROM v_sapling_shard_unscanned_ranges unscanned
+            -- select all the unscanned ranges involving the shard containing this note
+            WHERE sapling_received_notes.commitment_tree_position >= unscanned.start_position
+            AND sapling_received_notes.commitment_tree_position < unscanned.end_position_exclusive
+            -- exclude unscanned ranges above the anchor height which don't affect spendability
+            AND unscanned.block_range_start <= :anchor_height
+         )",
     )?;
 
     let excluded: Vec<Value> = exclude.iter().map(|n| Value::from(n.0)).collect();
@@ -165,9 +173,7 @@ pub(crate) fn select_spendable_sapling_notes(
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
     // The goal of this SQL statement is to select the oldest notes until the required
-    // value has been reached, and then fetch the witnesses at the desired height for the
-    // selected notes. This is achieved in several steps:
-    //
+    // value has been reached.
     // 1) Use a window function to create a view of all notes, ordered from oldest to
     //    newest, with an additional column containing a running sum:
     //    - Unspent notes accumulate the values of all unspent notes in that note's
@@ -188,11 +194,20 @@ pub(crate) fn select_spendable_sapling_notes(
                  SUM(value)
                     OVER (PARTITION BY account, spent ORDER BY id_note) AS so_far
              FROM sapling_received_notes
-             INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
+             INNER JOIN transactions
+                ON transactions.id_tx = sapling_received_notes.tx
              WHERE account = :account
              AND spent IS NULL
              AND transactions.block <= :anchor_height
              AND id_note NOT IN rarray(:exclude)
+             AND NOT EXISTS (
+                SELECT 1 FROM v_sapling_shard_unscanned_ranges unscanned
+                -- select all the unscanned ranges involving the shard containing this note
+                WHERE sapling_received_notes.commitment_tree_position >= unscanned.start_position
+                AND sapling_received_notes.commitment_tree_position < unscanned.end_position_exclusive
+                -- exclude unscanned ranges above the anchor height which don't affect spendability
+                AND unscanned.block_range_start <= :anchor_height
+             )
          )
          SELECT id_note, diversifier, value, rcm, commitment_tree_position
          FROM eligible WHERE so_far < :target_value
@@ -370,7 +385,7 @@ pub(crate) mod tests {
         block::BlockHash,
         consensus::BranchId,
         legacy::TransparentAddress,
-        memo::Memo,
+        memo::{Memo, MemoBytes},
         sapling::{
             note_encryption::try_sapling_output_recovery, prover::TxProver, Note, PaymentAddress,
         },
@@ -418,10 +433,7 @@ pub(crate) mod tests {
         zcash_client_backend::{
             data_api::wallet::shield_transparent_funds, wallet::WalletTransparentOutput,
         },
-        zcash_primitives::{
-            memo::MemoBytes,
-            transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
-        },
+        zcash_primitives::transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
     };
 
     pub(crate) fn test_prover() -> impl TxProver {
@@ -555,8 +567,8 @@ pub(crate) mod tests {
         let mut stmt_sent_notes = db_data
             .conn
             .prepare(
-                "SELECT output_index 
-                FROM sent_notes 
+                "SELECT output_index
+                FROM sent_notes
                 JOIN transactions ON transactions.id_tx = sent_notes.tx
                 WHERE transactions.txid = ?",
             )

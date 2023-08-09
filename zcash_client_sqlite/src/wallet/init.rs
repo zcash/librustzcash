@@ -353,14 +353,14 @@ mod tests {
 
     use zcash_client_backend::{
         address::RecipientAddress,
-        data_api::WalletRead,
+        data_api::{scanning::ScanPriority, WalletRead},
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, BranchId, Parameters},
+        consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
         transaction::{TransactionData, TxVersion},
         zip32::sapling::ExtendedFullViewingKey,
     };
@@ -368,6 +368,7 @@ mod tests {
     use crate::{
         error::SqliteClientError,
         tests::{self, network},
+        wallet::scanning::priority_code,
         AccountId, WalletDb,
     };
 
@@ -558,6 +559,33 @@ mod tests {
         }
 
         let expected_views = vec![
+            // v_sapling_shard_unscanned_ranges
+            format!(
+                "CREATE VIEW v_sapling_shard_unscanned_ranges AS
+                SELECT
+                    shard.shard_index,
+                    shard.shard_index << 16 AS start_position,
+                    (shard.shard_index + 1) << 16 AS end_position_exclusive,
+                    IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+                    shard.subtree_end_height AS subtree_end_height,
+                    shard.contains_marked,
+                    scan_queue.block_range_start,
+                    scan_queue.block_range_end,
+                    scan_queue.priority
+                FROM sapling_tree_shards shard
+                LEFT OUTER JOIN sapling_tree_shards prev_shard
+                    ON shard.shard_index = prev_shard.shard_index + 1
+                INNER JOIN scan_queue ON 
+                    (scan_queue.block_range_start BETWEEN subtree_start_height AND shard.subtree_end_height) OR
+                    ((scan_queue.block_range_end - 1) BETWEEN subtree_start_height AND shard.subtree_end_height) OR
+                    (
+                        scan_queue.block_range_start <= prev_shard.subtree_end_height
+                        AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
+                    )
+                WHERE scan_queue.priority != {}",
+                u32::from(tests::network().activation_height(NetworkUpgrade::Sapling).unwrap()),
+                priority_code(&ScanPriority::Scanned),
+            ),
             // v_transactions
             "CREATE VIEW v_transactions AS
             WITH
@@ -649,7 +677,7 @@ mod tests {
             LEFT JOIN sent_note_counts
                       ON sent_note_counts.account_id = notes.account_id
                       AND sent_note_counts.id_tx = notes.id_tx
-            GROUP BY notes.account_id, transactions.id_tx",
+            GROUP BY notes.account_id, transactions.id_tx".to_owned(),
             // v_tx_outputs
             "CREATE VIEW v_tx_outputs AS
             SELECT sapling_received_notes.tx           AS id_tx,
@@ -693,7 +721,7 @@ mod tests {
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
             WHERE  sapling_received_notes.is_change IS NULL
-               OR  sapling_received_notes.is_change = 0"
+               OR  sapling_received_notes.is_change = 0".to_owned(),
         ];
 
         let mut views_query = db_data
@@ -706,7 +734,7 @@ mod tests {
             let sql: String = row.get(0).unwrap();
             assert_eq!(
                 re.replace_all(&sql, " "),
-                re.replace_all(expected_views[expected_idx], " ")
+                re.replace_all(&expected_views[expected_idx], " ")
             );
             expected_idx += 1;
         }
@@ -971,7 +999,7 @@ mod tests {
             wdb.conn.execute(
                 "INSERT INTO transactions (block, id_tx, txid, raw) VALUES (0, 0, :txid, :tx_bytes)",
                 named_params![
-                    ":txid": tx.txid().as_ref(), 
+                    ":txid": tx.txid().as_ref(),
                     ":tx_bytes": &tx_bytes[..]
                 ],
             )?;
