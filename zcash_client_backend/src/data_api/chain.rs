@@ -302,7 +302,7 @@ where
                 return Err(Error::Scan(scan_error));
             }
 
-            if from_height == BlockHeight::from(0) {
+            if block.height() == BlockHeight::from(0) {
                 // We can always derive a valid `continuity_check_metadata` for the
                 // genesis block, even if the block source doesn't have
                 // `sapling_commitment_tree_size`. So briefly set it to a dummy value that
