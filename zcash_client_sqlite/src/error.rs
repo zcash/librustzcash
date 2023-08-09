@@ -85,6 +85,8 @@ pub enum SqliteClientError {
     /// An error occurred in inserting data into or accessing data from one of the wallet's note
     /// commitment trees.
     CommitmentTree(ShardTreeError<commitment_tree::Error>),
+
+    CacheMiss(BlockHeight),
 }
 
 impl error::Error for SqliteClientError {
@@ -128,6 +130,7 @@ impl fmt::Display for SqliteClientError {
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
+            SqliteClientError::CacheMiss(height) => write!(f, "Requested height {} does not exist in the block cache.", height),
         }
     }
 }

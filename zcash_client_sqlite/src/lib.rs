@@ -883,6 +883,7 @@ pub enum FsBlockDbError {
     InvalidBlockstoreRoot(PathBuf),
     InvalidBlockPath(PathBuf),
     CorruptedData(String),
+    CacheMiss(BlockHeight),
 }
 
 #[cfg(feature = "unstable")]
@@ -1045,6 +1046,13 @@ impl std::fmt::Display for FsBlockDbError {
                     f,
                     "The block cache has corrupted data and this caused an error: {}",
                     e,
+                )
+            }
+            FsBlockDbError::CacheMiss(height) => {
+                write!(
+                    f,
+                    "Requested height {} does not exist in the block cache",
+                    height
                 )
             }
         }

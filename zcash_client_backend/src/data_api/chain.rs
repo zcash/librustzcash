@@ -199,6 +199,8 @@ pub trait BlockSource {
     /// `from_height`, applying the provided callback to each block. If `from_height`
     /// is `None` then scanning will begin at the first available block.
     ///
+    /// Returns an error if `from_height` is set to a block that does not exist in `self`.
+    ///
     /// * `WalletErrT`: the types of errors produced by the wallet operations performed
     ///   as part of processing each row.
     /// * `NoteRefT`: the type of note identifiers in the wallet data store, for use in

@@ -25,7 +25,11 @@ and this library adheres to Rust's notion of
   a note could be spent with fewer than `min_confirmations` confirmations if the
   wallet did not contain enough observed blocks to satisfy the `min_confirmations`
   value specified; this situation is now treated as an error.
-- A `BlockConflict` variant has been added to `zcash_client_sqlite::error::SqliteClientError`
+- `zcash_client_sqlite::error::SqliteClientError` has new error variants:
+  - `SqliteClientError::BlockConflict`
+  - `SqliteClientError::CacheMiss`
+- `zcash_client_backend::FsBlockDbError` has a new error variant:
+  - `FsBlockDbError::CacheMiss`
 - `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
   existing metadata entries that have the same height as a new entry.
 
@@ -39,6 +43,8 @@ and this library adheres to Rust's notion of
 - Fixed an off-by-one error in the `BlockSource` implementation for the SQLite-backed
  `BlockDb` block database which could result in blocks being skipped at the start of
  scan ranges.
+- `zcash_client_sqlite::{BlockDb, FsBlockDb}::with_blocks` now return an error
+  if `from_height` is set to a block height that does not exist in the cache.
 - `WalletDb::get_transaction` no longer returns an error when called on a transaction
   that has not yet been mined, unless the transaction's consensus branch ID cannot be
   determined by other means.
