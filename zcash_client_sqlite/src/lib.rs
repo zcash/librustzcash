@@ -38,7 +38,10 @@ use maybe_rayon::{
 };
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
-use std::{borrow::Borrow, collections::HashMap, convert::AsRef, fmt, ops::Range, path::Path};
+use std::{
+    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
+    path::Path,
+};
 
 use incrementalmerkletree::Position;
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -157,8 +160,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
 
-    fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        wallet::block_height_extrema(self.conn.borrow()).map_err(SqliteClientError::from)
+    fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::scan_queue_extrema(self.conn.borrow())
+            .map(|h| h.map(|(_, max)| max))
+            .map_err(SqliteClientError::from)
     }
 
     fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
@@ -174,12 +179,24 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             .map_err(SqliteClientError::from)
     }
 
+    fn get_target_and_anchor_heights(
+        &self,
+        min_confirmations: NonZeroU32,
+    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        wallet::get_target_and_anchor_heights(self.conn.borrow(), min_confirmations)
+            .map_err(SqliteClientError::from)
+    }
+
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::get_min_unspent_height(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
         wallet::get_block_hash(self.conn.borrow(), block_height).map_err(SqliteClientError::from)
+    }
+
+    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
+        wallet::get_max_height_hash(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {

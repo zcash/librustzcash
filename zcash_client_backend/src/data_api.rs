@@ -1,6 +1,5 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
-use std::cmp;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
@@ -60,10 +59,11 @@ pub trait WalletRead {
     /// or a UUID.
     type NoteRef: Copy + Debug + Eq + Ord;
 
-    /// Returns the minimum and maximum block heights for stored blocks.
+    /// Returns the height of the chain as known to the wallet as of the most recent call to
+    /// [`WalletWrite::update_chain_tip`].
     ///
-    /// This will return `Ok(None)` if no block data is present in the database.
-    fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
+    /// This will return `Ok(None)` if the height of the current consensus chain tip is unknown.
+    fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns the available block metadata for the block at the specified height, if any.
     fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error>;
@@ -98,22 +98,7 @@ pub trait WalletRead {
     fn get_target_and_anchor_heights(
         &self,
         min_confirmations: NonZeroU32,
-    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
-        self.block_height_extrema().map(|heights| {
-            heights.map(|(min_height, max_height)| {
-                let target_height = max_height + 1;
-
-                // Select an anchor min_confirmations back from the target block,
-                // unless that would be before the earliest block we have.
-                let anchor_height = BlockHeight::from(cmp::max(
-                    u32::from(target_height).saturating_sub(min_confirmations.into()),
-                    u32::from(min_height),
-                ));
-
-                (target_height, anchor_height)
-            })
-        })
-    }
+    ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error>;
 
     /// Returns the minimum block height corresponding to an unspent note in the wallet.
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
@@ -123,22 +108,10 @@ pub trait WalletRead {
     /// is not found in the database.
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
-    /// Returns the block hash for the block at the maximum height known
-    /// in stored data.
+    /// Returns the block height and hash for the block at the maximum scanned block height.
     ///
-    /// This will return `Ok(None)` if no block data is present in the database.
-    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-        self.block_height_extrema()
-            .and_then(|extrema_opt| {
-                extrema_opt
-                    .map(|(_, max_height)| {
-                        self.get_block_hash(max_height)
-                            .map(|hash_opt| hash_opt.map(move |hash| (max_height, hash)))
-                    })
-                    .transpose()
-            })
-            .map(|oo| oo.flatten())
-    }
+    /// This will return `Ok(None)` if no blocks have been scanned.
+    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error>;
 
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
     /// transaction is not in the main chain.
@@ -613,7 +586,7 @@ pub mod testing {
     use incrementalmerkletree::Address;
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
-    use std::{collections::HashMap, convert::Infallible};
+    use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
 
     use zcash_primitives::{
         block::BlockHash,
@@ -662,7 +635,14 @@ pub mod testing {
         type Error = ();
         type NoteRef = u32;
 
-        fn block_height_extrema(&self) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_target_and_anchor_heights(
+            &self,
+            _min_confirmations: NonZeroU32,
+        ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
             Ok(None)
         }
 
@@ -689,6 +669,10 @@ pub mod testing {
             &self,
             _block_height: BlockHeight,
         ) -> Result<Option<BlockHash>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
             Ok(None)
         }
 

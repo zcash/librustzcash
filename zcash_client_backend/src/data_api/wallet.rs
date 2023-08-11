@@ -66,9 +66,7 @@ where
     // for mempool transactions.
     let height = data
         .get_tx_height(tx.txid())?
-        .or(data
-            .block_height_extrema()?
-            .map(|(_, max_height)| max_height + 1))
+        .or(data.chain_height()?.map(|max_height| max_height + 1))
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .expect("Sapling activation height must be known.");
 

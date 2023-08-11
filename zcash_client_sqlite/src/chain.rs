@@ -370,7 +370,7 @@ mod tests {
         let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
 
         // Empty chain should return None
-        assert_matches!(db_data.get_max_height_hash(), Ok(None));
+        assert_matches!(db_data.chain_height(), Ok(None));
 
         // Create a fake CompactBlock sending value to the address
         let (cb, _) = fake_compact_block(
