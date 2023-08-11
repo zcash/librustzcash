@@ -150,6 +150,7 @@ pub(crate) fn get_spendable_sapling_notes(
          FROM sapling_received_notes
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
          WHERE account = :account
+         AND commitment_tree_position IS NOT NULL
          AND spent IS NULL
          AND transactions.block <= :anchor_height
          AND id_note NOT IN rarray(:exclude)
@@ -223,6 +224,7 @@ pub(crate) fn select_spendable_sapling_notes(
              INNER JOIN transactions
                 ON transactions.id_tx = sapling_received_notes.tx
              WHERE account = :account
+             AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
              AND id_note NOT IN rarray(:exclude)
