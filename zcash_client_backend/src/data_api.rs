@@ -1,9 +1,11 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
-use std::fmt::Debug;
-use std::io;
-use std::num::NonZeroU32;
-use std::{collections::HashMap, num::TryFromIntError};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    io,
+    num::{NonZeroU32, TryFromIntError},
+};
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
@@ -15,7 +17,10 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     sapling::{self, Node, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
-        components::{amount::Amount, OutPoint},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            OutPoint,
+        },
         Transaction, TxId,
     },
     zip32::{AccountId, ExtendedFullViewingKey},
@@ -44,6 +49,155 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 pub enum NullifierQuery {
     Unspent,
     All,
+}
+
+/// Balance information for a value within a single shielded pool in an account.
+#[derive(Debug, Clone, Copy)]
+pub struct Balance {
+    /// The value in the account that may currently be spent; it is possible to compute witnesses
+    /// for all the notes that comprise this value, and all of this value is confirmed to the
+    /// required confirmation depth.
+    pub spendable_value: NonNegativeAmount,
+
+    /// The value in the account of shielded change notes that do not yet have sufficient
+    /// confirmations to be spendable.
+    pub change_pending_confirmation: NonNegativeAmount,
+
+    /// The value in the account of all remaining received notes that either do not have sufficient
+    /// confirmations to be spendable, or for which witnesses cannot yet be constructed without
+    /// additional scanning.
+    pub value_pending_spendability: NonNegativeAmount,
+}
+
+impl Balance {
+    /// The [`Balance`] value having zero values for all its fields.
+    pub const ZERO: Self = Self {
+        spendable_value: NonNegativeAmount::ZERO,
+        change_pending_confirmation: NonNegativeAmount::ZERO,
+        value_pending_spendability: NonNegativeAmount::ZERO,
+    };
+
+    /// Returns the total value of funds represented by this [`Balance`].
+    pub fn total(&self) -> NonNegativeAmount {
+        (self.spendable_value + self.change_pending_confirmation + self.value_pending_spendability)
+            .expect("Balance cannot overflow MAX_MONEY")
+    }
+}
+
+/// Balance information for a single account. The sum of this struct's fields is the total balance
+/// of the wallet.
+#[derive(Debug, Clone, Copy)]
+pub struct AccountBalance {
+    /// The value of unspent Sapling outputs belonging to the account.
+    pub sapling_balance: Balance,
+
+    /// The value of all unspent transparent outputs belonging to the account, irrespective of
+    /// confirmation depth.
+    ///
+    /// Unshielded balances are not subject to confirmation-depth constraints, because the only
+    /// possible operation on a transparent balance is to shield it, it is possible to create a
+    /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
+    /// subject to normal confirmation rules.
+    pub unshielded: NonNegativeAmount,
+}
+
+impl AccountBalance {
+    /// Returns the total value of funds belonging to the account.
+    pub fn total(&self) -> NonNegativeAmount {
+        (self.sapling_balance.total() + self.unshielded)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+}
+
+/// A polymorphic ratio type, usually used for rational numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ratio<T> {
+    numerator: T,
+    denominator: T,
+}
+
+impl<T> Ratio<T> {
+    /// Constructs a new Ratio from a numerator and a denominator.
+    pub fn new(numerator: T, denominator: T) -> Self {
+        Self {
+            numerator,
+            denominator,
+        }
+    }
+
+    /// Returns the numerator of the ratio.
+    pub fn numerator(&self) -> &T {
+        &self.numerator
+    }
+
+    /// Returns the denominator of the ratio.
+    pub fn denominator(&self) -> &T {
+        &self.denominator
+    }
+}
+
+/// A type representing the potentially-spendable value of unspent outputs in the wallet.
+///
+/// The balances reported using this data structure may overestimate the total spendable value of
+/// the wallet, in the case that the spend of a previously received shielded note has not yet been
+/// detected by the process of scanning the chain. The balances reported using this data structure
+/// can only be certain to be unspent in the case that [`Self::is_synced`] is true, and even in
+/// this circumstance it is possible that a newly created transaction could conflict with a
+/// not-yet-mined transaction in the mempool.
+#[derive(Debug, Clone)]
+pub struct WalletSummary {
+    account_balances: BTreeMap<AccountId, AccountBalance>,
+    chain_tip_height: BlockHeight,
+    fully_scanned_height: BlockHeight,
+    sapling_scan_progress: Option<Ratio<u64>>,
+}
+
+impl WalletSummary {
+    /// Constructs a new [`WalletSummary`] from its constituent parts.
+    pub fn new(
+        account_balances: BTreeMap<AccountId, AccountBalance>,
+        chain_tip_height: BlockHeight,
+        fully_scanned_height: BlockHeight,
+        sapling_scan_progress: Option<Ratio<u64>>,
+    ) -> Self {
+        Self {
+            account_balances,
+            chain_tip_height,
+            fully_scanned_height,
+            sapling_scan_progress,
+        }
+    }
+
+    /// Returns the balances of accounts in the wallet, keyed by account ID.
+    pub fn account_balances(&self) -> &BTreeMap<AccountId, AccountBalance> {
+        &self.account_balances
+    }
+
+    /// Returns the height of the current chain tip.
+    pub fn chain_tip_height(&self) -> BlockHeight {
+        self.chain_tip_height
+    }
+
+    /// Returns the height below which all blocks wallet have been scanned, ignoring blocks below
+    /// the wallet birthday.
+    pub fn fully_scanned_height(&self) -> BlockHeight {
+        self.fully_scanned_height
+    }
+
+    /// Returns the progress of scanning Sapling outputs, in terms of the ratio between notes
+    /// scanned and the total number of notes added to the chain since the wallet birthday.
+    ///
+    /// This ratio should only be used to compute progress percentages, and the numerator and
+    /// denominator should not be treated as authoritative note counts. Returns `None` if the
+    /// wallet is unable to determine the size of the note commitment tree.
+    pub fn sapling_scan_progress(&self) -> Option<Ratio<u64>> {
+        self.sapling_scan_progress
+    }
+
+    /// Returns whether or not wallet scanning is complete.
+    pub fn is_synced(&self) -> bool {
+        self.chain_tip_height == self.fully_scanned_height
+    }
 }
 
 /// Read-only operations required for light wallet functions.
@@ -157,15 +311,12 @@ pub trait WalletRead {
         extfvk: &ExtendedFullViewingKey,
     ) -> Result<bool, Self::Error>;
 
-    /// Returns the wallet balance for an account as of the specified block height.
-    ///
-    /// This may be used to obtain a balance that ignores notes that have been received so recently
-    /// that they are not yet deemed spendable.
-    fn get_balance_at(
+    /// Returns the wallet balances and sync status for an account given the specified minimum
+    /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
+    fn get_wallet_summary(
         &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-    ) -> Result<Amount, Self::Error>;
+        min_confirmations: u32,
+    ) -> Result<Option<WalletSummary>, Self::Error>;
 
     /// Returns the memo for a note.
     ///
@@ -747,7 +898,7 @@ pub mod testing {
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
         DecryptedTransaction, NoteId, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -853,12 +1004,11 @@ pub mod testing {
             Ok(false)
         }
 
-        fn get_balance_at(
+        fn get_wallet_summary(
             &self,
-            _account: AccountId,
-            _anchor_height: BlockHeight,
-        ) -> Result<Amount, Self::Error> {
-            Ok(Amount::zero())
+            _min_confirmations: u32,
+        ) -> Result<Option<WalletSummary>, Self::Error> {
+            Ok(None)
         }
 
         fn get_memo(&self, _id_note: NoteId) -> Result<Option<Memo>, Self::Error> {

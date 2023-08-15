@@ -881,7 +881,8 @@ mod tests {
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, WalletCommitmentTrees, WalletRead, WalletWrite,
+        AccountBirthday, Ratio, WalletCommitmentTrees, WalletRead, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     };
     use zcash_primitives::{
         block::BlockHash,
@@ -1689,6 +1690,10 @@ mod tests {
             )
             .unwrap();
 
+        // We have scan ranges and a subtree, but have scanned no blocks.
+        let summary = st.get_wallet_summary(1);
+        assert_eq!(summary.sapling_scan_progress(), None);
+
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
         st.wallet_mut().update_chain_tip(prior_tip).unwrap();
@@ -1722,6 +1727,14 @@ mod tests {
                 .unwrap(),
         );
         st.scan_cached_blocks(max_scanned, 1);
+
+        // We have scanned a block, so we now have a starting tree position, 500 blocks above the
+        // wallet birthday but before the end of the shard.
+        let summary = st.get_wallet_summary(1);
+        assert_eq!(
+            summary.sapling_scan_progress(),
+            Some(Ratio::new(1, 0x1 << SAPLING_SHARD_HEIGHT))
+        );
 
         // Now simulate shutting down, and then restarting 70 blocks later, after a shard
         // has been completed.
@@ -1758,6 +1771,14 @@ mod tests {
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
+
+        // We've crossed a subtree boundary, and so still only have one scanned note but have two
+        // shards worth of notes to scan.
+        let summary = st.get_wallet_summary(1);
+        assert_eq!(
+            summary.sapling_scan_progress(),
+            Some(Ratio::new(1, 0x1 << (SAPLING_SHARD_HEIGHT + 1)))
+        );
     }
 
     #[test]

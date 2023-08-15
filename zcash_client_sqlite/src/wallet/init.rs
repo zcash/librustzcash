@@ -219,7 +219,9 @@ mod tests {
                 time INTEGER NOT NULL,
                 sapling_tree BLOB NOT NULL ,
                 sapling_commitment_tree_size INTEGER,
-                orchard_commitment_tree_size INTEGER)",
+                orchard_commitment_tree_size INTEGER,
+                sapling_output_count INTEGER,
+                orchard_action_count INTEGER)",
             "CREATE TABLE nullifier_map (
                 spend_pool INTEGER NOT NULL,
                 nf BLOB NOT NULL,
@@ -365,16 +367,15 @@ mod tests {
         }
 
         let expected_views = vec![
-            // v_sapling_shard_unscanned_ranges
+            // v_sapling_shard_scan_ranges
             format!(
-                "CREATE VIEW v_sapling_shard_unscanned_ranges AS
-                WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+                "CREATE VIEW v_sapling_shard_scan_ranges AS
                 SELECT
                     shard.shard_index,
                     shard.shard_index << 16 AS start_position,
                     (shard.shard_index + 1) << 16 AS end_position_exclusive,
                     IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
-                    shard.subtree_end_height AS subtree_end_height,
+                    shard.subtree_end_height,
                     shard.contains_marked,
                     scan_queue.block_range_start,
                     scan_queue.block_range_end,
@@ -383,18 +384,53 @@ mod tests {
                 LEFT OUTER JOIN sapling_tree_shards prev_shard
                     ON shard.shard_index = prev_shard.shard_index + 1
                 INNER JOIN scan_queue ON
+                    (scan_queue.block_range_start >= subtree_start_height AND shard.subtree_end_height IS NULL) OR
                     (scan_queue.block_range_start BETWEEN subtree_start_height AND shard.subtree_end_height) OR
                     ((scan_queue.block_range_end - 1) BETWEEN subtree_start_height AND shard.subtree_end_height) OR
                     (
                         scan_queue.block_range_start <= prev_shard.subtree_end_height
                         AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
-                    )
-                INNER JOIN wallet_birthday
-                WHERE scan_queue.priority > {}
-                AND scan_queue.block_range_end > wallet_birthday.height",
+                    )",
                 u32::from(st.network().activation_height(NetworkUpgrade::Sapling).unwrap()),
+            ),
+            // v_sapling_shard_unscanned_ranges
+            format!(
+                "CREATE VIEW v_sapling_shard_unscanned_ranges AS
+                WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+                SELECT
+                    shard_index,
+                    start_position,
+                    end_position_exclusive,
+                    subtree_start_height,
+                    subtree_end_height,
+                    contains_marked,
+                    block_range_start,
+                    block_range_end,
+                    priority
+                FROM v_sapling_shard_scan_ranges
+                INNER JOIN wallet_birthday
+                WHERE priority > {}
+                AND block_range_end > wallet_birthday.height",
                 priority_code(&ScanPriority::Scanned)
             ),
+            // v_sapling_shards_scan_state
+            "CREATE VIEW v_sapling_shards_scan_state AS
+            SELECT
+                shard_index,
+                start_position,
+                end_position_exclusive,
+                subtree_start_height,
+                subtree_end_height,
+                contains_marked,
+                MAX(priority) AS max_priority
+            FROM v_sapling_shard_scan_ranges
+            GROUP BY
+                shard_index,
+                start_position,
+                end_position_exclusive,
+                subtree_start_height,
+                subtree_end_height,
+                contains_marked".to_owned(),
             // v_transactions
             "CREATE VIEW v_transactions AS
             WITH

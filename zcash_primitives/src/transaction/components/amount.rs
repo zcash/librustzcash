@@ -238,6 +238,9 @@ impl TryFrom<orchard::ValueSum> for Amount {
 pub struct NonNegativeAmount(Amount);
 
 impl NonNegativeAmount {
+    /// Returns the identity `NonNegativeAmount`
+    pub const ZERO: Self = NonNegativeAmount(Amount(0));
+
     /// Creates a NonNegativeAmount from a u64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
@@ -256,6 +259,34 @@ impl NonNegativeAmount {
 impl From<NonNegativeAmount> for Amount {
     fn from(n: NonNegativeAmount) -> Self {
         n.0
+    }
+}
+
+impl TryFrom<Amount> for NonNegativeAmount {
+    type Error = ();
+
+    fn try_from(value: Amount) -> Result<Self, Self::Error> {
+        if value.is_negative() {
+            Err(())
+        } else {
+            Ok(NonNegativeAmount(value))
+        }
+    }
+}
+
+impl Add<NonNegativeAmount> for NonNegativeAmount {
+    type Output = Option<NonNegativeAmount>;
+
+    fn add(self, rhs: NonNegativeAmount) -> Option<NonNegativeAmount> {
+        (self.0 + rhs.0).map(NonNegativeAmount)
+    }
+}
+
+impl Add<NonNegativeAmount> for Option<NonNegativeAmount> {
+    type Output = Self;
+
+    fn add(self, rhs: NonNegativeAmount) -> Option<NonNegativeAmount> {
+        self.and_then(|lhs| lhs + rhs)
     }
 }
 

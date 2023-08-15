@@ -25,7 +25,7 @@ use zcash_client_backend::{
             input_selection::{GreedyInputSelectorError, InputSelector, Proposal},
             propose_transfer, spend,
         },
-        AccountBirthday, WalletWrite,
+        AccountBirthday, WalletSummary, WalletWrite,
     },
     keys::UnifiedSpendingKey,
     proto::compact_formats::{
@@ -46,7 +46,10 @@ use zcash_primitives::{
         Note, Nullifier, PaymentAddress,
     },
     transaction::{
-        components::{amount::BalanceError, Amount},
+        components::{
+            amount::{BalanceError, NonNegativeAmount},
+            Amount,
+        },
         fees::FeeRule,
         TxId,
     },
@@ -56,7 +59,10 @@ use zcash_primitives::{
 use crate::{
     chain::init::init_cache_database,
     error::SqliteClientError,
-    wallet::{commitment_tree, init::init_wallet_db, sapling::tests::test_prover},
+    wallet::{
+        commitment_tree, get_wallet_summary, init::init_wallet_db, sapling::tests::test_prover,
+        SubtreeScanProgress,
+    },
     AccountId, ReceivedNoteId, WalletDb,
 };
 
@@ -65,9 +71,7 @@ use super::BlockDb;
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::data_api::wallet::{propose_shielding, shield_transparent_funds},
-    zcash_primitives::{
-        legacy::TransparentAddress, transaction::components::amount::NonNegativeAmount,
-    },
+    zcash_primitives::legacy::TransparentAddress,
 };
 
 #[cfg(feature = "unstable")]
@@ -285,6 +289,66 @@ where
             from_height,
             limit,
         )
+    }
+
+    pub(crate) fn get_total_balance(&self, account: AccountId) -> NonNegativeAmount {
+        get_wallet_summary(&self.wallet().conn, 0, &SubtreeScanProgress)
+            .unwrap()
+            .unwrap()
+            .account_balances()
+            .get(&account)
+            .unwrap()
+            .total()
+    }
+
+    pub(crate) fn get_spendable_balance(
+        &self,
+        account: AccountId,
+        min_confirmations: u32,
+    ) -> NonNegativeAmount {
+        let binding =
+            get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
+                .unwrap()
+                .unwrap();
+        let balance = binding.account_balances().get(&account).unwrap();
+
+        balance.sapling_balance.spendable_value
+    }
+
+    pub(crate) fn get_pending_shielded_balance(
+        &self,
+        account: AccountId,
+        min_confirmations: u32,
+    ) -> NonNegativeAmount {
+        let binding =
+            get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
+                .unwrap()
+                .unwrap();
+        let balance = binding.account_balances().get(&account).unwrap();
+
+        (balance.sapling_balance.value_pending_spendability
+            + balance.sapling_balance.change_pending_confirmation)
+            .unwrap()
+    }
+
+    pub(crate) fn get_pending_change(
+        &self,
+        account: AccountId,
+        min_confirmations: u32,
+    ) -> NonNegativeAmount {
+        let binding =
+            get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
+                .unwrap()
+                .unwrap();
+        let balance = binding.account_balances().get(&account).unwrap();
+
+        balance.sapling_balance.change_pending_confirmation
+    }
+
+    pub(crate) fn get_wallet_summary(&self, min_confirmations: u32) -> WalletSummary {
+        get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
+            .unwrap()
+            .unwrap()
     }
 }
 

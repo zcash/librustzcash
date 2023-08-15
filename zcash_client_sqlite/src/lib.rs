@@ -66,7 +66,7 @@ use zcash_client_backend::{
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, DecryptedTransaction, NoteId, NullifierQuery, PoolType,
         Recipient, ScannedBlock, SentTransaction, ShieldedProtocol, WalletCommitmentTrees,
-        WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -88,7 +88,10 @@ pub mod error;
 pub mod serialization;
 
 pub mod wallet;
-use wallet::commitment_tree::{self, put_shard_roots};
+use wallet::{
+    commitment_tree::{self, put_shard_roots},
+    SubtreeScanProgress,
+};
 
 #[cfg(test)]
 mod testing;
@@ -243,12 +246,11 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::is_valid_account_extfvk(self.conn.borrow(), &self.params, account, extfvk)
     }
 
-    fn get_balance_at(
+    fn get_wallet_summary(
         &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-    ) -> Result<Amount, Self::Error> {
-        wallet::get_balance_at(self.conn.borrow(), account, anchor_height)
+        min_confirmations: u32,
+    ) -> Result<Option<WalletSummary>, Self::Error> {
+        wallet::get_wallet_summary(self.conn.borrow(), min_confirmations, &SubtreeScanProgress)
     }
 
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
@@ -456,6 +458,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     block.block_hash(),
                     block.block_time(),
                     block.metadata().sapling_tree_size(),
+                    block.sapling_commitments().len().try_into().unwrap(),
                 )?;
 
                 for tx in block.transactions() {
