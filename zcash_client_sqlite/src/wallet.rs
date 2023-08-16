@@ -675,6 +675,40 @@ pub(crate) fn get_sent_memo(
         .transpose()
 }
 
+/// Returns the minimum birthday height for accounts in the wallet.
+///
+/// TODO ORCHARD: we should consider whether we want to permit protocol-restricted accounts; if so,
+/// we would then want this method to take a protocol identifier to be able to learn the wallet's
+/// "Orchard birthday" which might be different from the overall wallet birthday.
+pub(crate) fn wallet_birthday(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    conn.query_row(
+        "SELECT MIN(birthday_height) AS wallet_birthday FROM accounts",
+        [],
+        |row| {
+            row.get::<_, Option<u32>>(0)
+                .map(|opt| opt.map(BlockHeight::from))
+        },
+    )
+}
+
+pub(crate) fn account_birthday(
+    conn: &rusqlite::Connection,
+    account: AccountId,
+) -> Result<BlockHeight, SqliteClientError> {
+    conn.query_row(
+        "SELECT birthday_height
+         FROM accounts
+         WHERE account = :account_id",
+        named_params![":account_id": u32::from(account)],
+        |row| row.get::<_, u32>(0).map(BlockHeight::from),
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|opt| opt.ok_or(SqliteClientError::AccountUnknown(account)))
+}
+
 /// Returns the minimum and maximum heights for blocks stored in the wallet database.
 pub(crate) fn block_height_extrema(
     conn: &rusqlite::Connection,

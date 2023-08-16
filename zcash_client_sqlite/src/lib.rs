@@ -206,6 +206,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
     }
 
+    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::wallet_birthday(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error> {
+        wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
+    }
+
     fn get_current_address(
         &self,
         account: AccountId,

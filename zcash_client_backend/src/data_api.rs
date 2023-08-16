@@ -119,6 +119,16 @@ pub trait WalletRead {
     /// transaction is not in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
 
+    /// Returns the birthday height for the wallet.
+    ///
+    /// This returns earliest birthday height among accounts maintained by this wallet, or
+    /// `Ok(None)` if the wallet has no initialized accounts.
+    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
+
+    /// Returns the birthday height for the given account, or an error if the account is not known
+    /// to the wallet.
+    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error>;
+
     /// Returns the most recently generated unified address for the specified account, if the
     /// account identifier specified refers to a valid account for this wallet.
     ///
@@ -799,6 +809,14 @@ pub mod testing {
 
         fn get_tx_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)
+        }
+
+        fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_account_birthday(&self, _account: AccountId) -> Result<BlockHeight, Self::Error> {
+            Err(())
         }
 
         fn get_current_address(

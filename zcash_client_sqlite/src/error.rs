@@ -66,6 +66,9 @@ pub enum SqliteClientError {
     /// The space of allocatable diversifier indices has been exhausted for the given account.
     DiversifierIndexOutOfRange,
 
+    /// The account for which information was requested does not belong to the wallet.
+    AccountUnknown(AccountId),
+
     /// An error occurred deriving a spending key from a seed and an account
     /// identifier.
     KeyDerivationError(AccountId),
@@ -132,6 +135,8 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
+            SqliteClientError::AccountUnknown(id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*id)),
+
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),

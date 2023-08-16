@@ -29,7 +29,8 @@ and this library adheres to Rust's notion of
   - `ScannedBlock`
   - `ShieldedProtocol`
   - `WalletCommitmentTrees`
-  - `WalletRead::{chain_height, block_metadata, block_fully_scanned, suggest_scan_ranges}`
+  - `WalletRead::{chain_height, block_metadata, block_fully_scanned, suggest_scan_ranges,
+    get_wallet_birthday, get_account_birthday}`
   - `WalletWrite::{put_blocks, update_chain_tip}`
   - `chain::CommitmentTreeRoot`
   - `scanning` A new module containing types required for `suggest_scan_ranges`
