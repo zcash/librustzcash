@@ -609,7 +609,7 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_incorrect_usk() {
-        let mut st = TestBuilder::new().with_seed(Secret::new(vec![])).build();
+        let mut st = TestBuilder::new().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
@@ -778,10 +778,7 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_locked_notes() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .build();
+        let mut st = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());

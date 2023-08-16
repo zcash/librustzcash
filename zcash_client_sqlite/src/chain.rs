@@ -345,7 +345,7 @@ mod tests {
     };
 
     use crate::{
-        testing::{AddressType, TestBuilder},
+        testing::{birthday_at_sapling_activation, AddressType, TestBuilder},
         wallet::{get_balance, truncate_to_height},
         AccountId,
     };
@@ -354,8 +354,7 @@ mod tests {
     fn valid_chain_states() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -388,8 +387,7 @@ mod tests {
     fn invalid_chain_cache_disconnected() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -440,8 +438,7 @@ mod tests {
     fn data_db_truncation() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -501,10 +498,7 @@ mod tests {
 
     #[test]
     fn scan_cached_blocks_allows_blocks_out_of_order() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .build();
+        let mut st = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
@@ -564,8 +558,7 @@ mod tests {
     fn scan_cached_blocks_finds_received_notes() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -607,8 +600,7 @@ mod tests {
     fn scan_cached_blocks_finds_change_notes() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -653,8 +645,7 @@ mod tests {
     fn scan_cached_blocks_detects_spends_out_of_order() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();

@@ -1577,7 +1577,10 @@ mod tests {
 
     use zcash_client_backend::data_api::WalletRead;
 
-    use crate::{testing::TestBuilder, AccountId};
+    use crate::{
+        testing::{birthday_at_sapling_activation, TestBuilder},
+        AccountId,
+    };
 
     use super::get_balance;
 
@@ -1595,8 +1598,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         // The account should be empty

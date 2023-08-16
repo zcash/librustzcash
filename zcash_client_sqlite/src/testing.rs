@@ -8,7 +8,7 @@ use std::fs::File;
 use prost::Message;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, Connection};
-use secrecy::SecretVec;
+use secrecy::Secret;
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
@@ -25,8 +25,9 @@ use zcash_client_backend::{
             input_selection::{GreedyInputSelectorError, InputSelector, Proposal},
             propose_transfer, spend,
         },
+        AccountBirthday, WalletWrite,
     },
-    keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::UnifiedSpendingKey,
     proto::compact_formats::{
         self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
@@ -56,11 +57,7 @@ use zcash_primitives::{
 use crate::{
     chain::init::init_cache_database,
     error::SqliteClientError,
-    wallet::{
-        commitment_tree,
-        init::{init_accounts_table, init_wallet_db},
-        sapling::tests::test_prover,
-    },
+    wallet::{commitment_tree, init::init_wallet_db, sapling::tests::test_prover},
     AccountId, ReceivedNoteId, WalletDb,
 };
 
@@ -69,10 +66,7 @@ use super::BlockDb;
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::data_api::wallet::{propose_shielding, shield_transparent_funds},
-    zcash_primitives::{
-        legacy::{self, keys::IncomingViewingKey},
-        transaction::components::amount::NonNegativeAmount,
-    },
+    zcash_primitives::transaction::components::amount::NonNegativeAmount,
 };
 
 #[cfg(feature = "unstable")]
@@ -85,8 +79,7 @@ use crate::{
 pub(crate) struct TestBuilder<Cache> {
     network: Network,
     cache: Cache,
-    seed: Option<SecretVec<u8>>,
-    with_test_account: bool,
+    test_account_birthday: Option<AccountBirthday>,
 }
 
 impl TestBuilder<()> {
@@ -95,8 +88,7 @@ impl TestBuilder<()> {
         TestBuilder {
             network: Network::TestNetwork,
             cache: (),
-            seed: None,
-            with_test_account: false,
+            test_account_birthday: None,
         }
     }
 
@@ -105,8 +97,7 @@ impl TestBuilder<()> {
         TestBuilder {
             network: self.network,
             cache: BlockCache::new(),
-            seed: self.seed,
-            with_test_account: self.with_test_account,
+            test_account_birthday: self.test_account_birthday,
         }
     }
 
@@ -116,22 +107,17 @@ impl TestBuilder<()> {
         TestBuilder {
             network: self.network,
             cache: FsBlockCache::new(),
-            seed: self.seed,
-            with_test_account: self.with_test_account,
+            test_account_birthday: self.test_account_birthday,
         }
     }
 }
 
 impl<Cache> TestBuilder<Cache> {
-    /// Gives the test knowledge of the wallet seed for initialization.
-    pub(crate) fn with_seed(mut self, seed: SecretVec<u8>) -> Self {
-        // TODO remove
-        self.seed = Some(seed);
-        self
-    }
-
-    pub(crate) fn with_test_account(mut self) -> Self {
-        self.with_test_account = true;
+    pub(crate) fn with_test_account<F: FnOnce(&Network) -> AccountBirthday>(
+        mut self,
+        birthday: F,
+    ) -> Self {
+        self.test_account_birthday = Some(birthday(&self.network));
         self
     }
 
@@ -139,11 +125,12 @@ impl<Cache> TestBuilder<Cache> {
     pub(crate) fn build(self) -> TestState<Cache> {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), self.network).unwrap();
-        init_wallet_db(&mut db_data, self.seed).unwrap();
+        init_wallet_db(&mut db_data, None).unwrap();
 
-        let test_account = if self.with_test_account {
-            // Add an account to the wallet
-            Some(init_test_accounts_table_ufvk(&mut db_data))
+        let test_account = if let Some(birthday) = self.test_account_birthday {
+            let seed = Secret::new(vec![0u8; 32]);
+            let (account, usk) = db_data.create_account(&seed).unwrap();
+            Some((account, usk, birthday))
         } else {
             None
         };
@@ -166,7 +153,7 @@ pub(crate) struct TestState<Cache> {
     latest_cached_block: Option<(BlockHeight, BlockHash, u32)>,
     _data_file: NamedTempFile,
     db_data: WalletDb<Connection, Network>,
-    test_account: Option<(UnifiedFullViewingKey, Option<TransparentAddress>)>,
+    test_account: Option<(AccountId, UnifiedSpendingKey, AccountBirthday)>,
 }
 
 impl<Cache: TestCache> TestState<Cache>
@@ -293,8 +280,7 @@ where
 
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     pub(crate) fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) {
-        self.try_scan_cached_blocks(from_height, limit)
-            .expect("should succeed for this test");
+        assert_matches!(self.try_scan_cached_blocks(from_height, limit), Ok(_));
     }
 
     /// Invokes [`scan_cached_blocks`] with the given arguments.
@@ -344,10 +330,7 @@ impl<Cache> TestState<Cache> {
     }
 
     /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
-    #[cfg(feature = "unstable")]
-    pub(crate) fn test_account(
-        &self,
-    ) -> Option<(UnifiedFullViewingKey, Option<TransparentAddress>)> {
+    pub(crate) fn test_account(&self) -> Option<(AccountId, UnifiedSpendingKey, AccountBirthday)> {
         self.test_account.as_ref().cloned()
     }
 
@@ -355,7 +338,7 @@ impl<Cache> TestState<Cache> {
     pub(crate) fn test_account_sapling(&self) -> Option<DiversifiableFullViewingKey> {
         self.test_account
             .as_ref()
-            .map(|(ufvk, _)| ufvk.sapling().unwrap().clone())
+            .and_then(|(_, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.
@@ -561,40 +544,14 @@ impl<Cache> TestState<Cache> {
 }
 
 #[cfg(test)]
-pub(crate) fn init_test_accounts_table_ufvk(
-    db_data: &mut WalletDb<rusqlite::Connection, Network>,
-) -> (UnifiedFullViewingKey, Option<TransparentAddress>) {
-    use std::collections::HashMap;
-
-    let seed = [0u8; 32];
-    let account = AccountId::from(0);
-    let extsk = sapling::spending_key(&seed, db_data.params.coin_type(), account);
-    let dfvk = extsk.to_diversifiable_full_viewing_key();
-
-    #[cfg(feature = "transparent-inputs")]
-    let (tkey, taddr) = {
-        let tkey = legacy::keys::AccountPrivKey::from_seed(&db_data.params, &seed, account)
-            .unwrap()
-            .to_account_pubkey();
-        let taddr = tkey.derive_external_ivk().unwrap().default_address().0;
-        (Some(tkey), Some(taddr))
-    };
-
-    #[cfg(not(feature = "transparent-inputs"))]
-    let taddr = None;
-
-    let ufvk = UnifiedFullViewingKey::new(
-        #[cfg(feature = "transparent-inputs")]
-        tkey,
-        Some(dfvk),
-        None,
+pub(crate) fn birthday_at_sapling_activation<P: consensus::Parameters>(
+    params: &P,
+) -> AccountBirthday {
+    use incrementalmerkletree::frontier::Frontier;
+    AccountBirthday::from_parts(
+        params.activation_height(NetworkUpgrade::Sapling).unwrap(),
+        Frontier::empty(),
     )
-    .unwrap();
-
-    let ufvks = HashMap::from([(account, ufvk.clone())]);
-    init_accounts_table(db_data, &ufvks).unwrap();
-
-    (ufvk, taddr)
 }
 
 #[allow(dead_code)]

@@ -11,6 +11,7 @@ and this library adheres to Rust's notion of
 - `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
 - `impl Debug` for `zcash_client_backend::{data_api::wallet::input_selection::Proposal, wallet::ReceivedSaplingNote}`
 - `zcash_client_backend::data_api`:
+  - `AccountBirthday`
   - `BlockMetadata`
   - `NoteId`
   - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`

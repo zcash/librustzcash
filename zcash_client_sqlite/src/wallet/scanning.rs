@@ -739,6 +739,7 @@ mod tests {
 
     use incrementalmerkletree::{Hashable, Level};
     use secrecy::Secret;
+
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
         scanning::{ScanPriority, ScanRange},
@@ -752,7 +753,7 @@ mod tests {
     };
 
     use crate::{
-        testing::{AddressType, TestBuilder},
+        testing::{birthday_at_sapling_activation, AddressType, TestBuilder},
         wallet::{init::init_blocks_table, scanning::suggest_scan_ranges},
     };
 
@@ -1085,8 +1086,7 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -1197,23 +1197,21 @@ mod tests {
     }
 
     #[test]
-    fn init_blocks_table_creates_ignored_range() {
+    fn create_account_creates_ignored_range() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().with_seed(Secret::new(vec![])).build();
+        let mut st = TestBuilder::new().with_block_cache().build();
 
-        let sap_active = st
-            .wallet()
-            .params
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap();
-        // Initialise the blocks table. We use Canopy activation as an arbitrary birthday height
-        // that's greater than Sapling activation.
+        let sap_active = st.sapling_activation_height();
+
+        // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
+        // activation.
         let birthday_height = st
-            .wallet()
-            .params
+            .network()
             .activation_height(NetworkUpgrade::Canopy)
             .unwrap();
+
+        // call `init_blocks_table` to initialize the scan queue
         init_blocks_table(
             st.wallet_mut(),
             birthday_height,
@@ -1222,6 +1220,10 @@ mod tests {
             &[0x0, 0x0, 0x0],
         )
         .unwrap();
+
+        let seed = Secret::new(vec![0u8; 32]);
+        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
+        let _dfvk = usk.to_unified_full_viewing_key().sapling().unwrap().clone();
 
         let expected = vec![
             // The range up to and including the wallet's birthday height is ignored.
@@ -1290,9 +1292,7 @@ mod tests {
             ),
         ];
 
-        assert_matches!(
-            suggest_scan_ranges(&st.wallet().conn, Ignored),
-            Ok(scan_ranges) if scan_ranges == expected
-        );
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
     }
 }
