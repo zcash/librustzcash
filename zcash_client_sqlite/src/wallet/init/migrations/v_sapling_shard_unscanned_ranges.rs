@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::data_api::scanning::ScanPriority;
+use zcash_client_backend::data_api::{scanning::ScanPriority, SAPLING_SHARD_HEIGHT};
 use zcash_primitives::consensus;
 
 use crate::wallet::{init::WalletMigrationError, scanning::priority_code};
@@ -41,8 +41,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 "CREATE VIEW v_sapling_shard_unscanned_ranges AS
                 SELECT
                     shard.shard_index,
-                    shard.shard_index << 16 AS start_position,
-                    (shard.shard_index + 1) << 16 AS end_position_exclusive,
+                    shard.shard_index << {} AS start_position,
+                    (shard.shard_index + 1) << {} AS end_position_exclusive,
                     IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
                     shard.subtree_end_height AS subtree_end_height,
                     shard.contains_marked,
@@ -60,6 +60,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
                     )
                 WHERE scan_queue.priority != {}",
+                SAPLING_SHARD_HEIGHT,
+                SAPLING_SHARD_HEIGHT,
                 u32::from(self.params.activation_height(consensus::NetworkUpgrade::Sapling).unwrap()),
                 priority_code(&ScanPriority::Scanned),
             )
