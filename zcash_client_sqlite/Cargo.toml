@@ -60,6 +60,7 @@ tempfile = "3.5.0"
 zcash_note_encryption = "0.4"
 zcash_proofs = { version = "0.12", path = "../zcash_proofs" }
 zcash_primitives = { version = "0.12", path = "../zcash_primitives", features = ["test-dependencies"] }
+zcash_client_backend = { version = "0.9", path = "../zcash_client_backend", features = ["test-dependencies"] }
 zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
 
 [features]

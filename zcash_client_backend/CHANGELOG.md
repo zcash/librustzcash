@@ -28,15 +28,17 @@ and this library adheres to Rust's notion of
   - `ScanError`
   - `impl<K: ScanningKey> ScanningKey for &K`
   - `impl ScanningKey for (zip32::Scope, sapling::SaplingIvk, sapling::NullifierDerivingKey)`
+- Test utility functions `zcash_client_backend::keys::UnifiedSpendingKey::{default_address,
+  default_transparent_address}` are now available under the `test-dependencies` feature flag.
 
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.12`, `zcash_note_encryption 0.4`,
   `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`
 - `zcash_client_backend::data_api`:
-  - `WalletRead::TxRef` has been removed in favor of consistently using `TxId` instead. 
+  - `WalletRead::TxRef` has been removed in favor of consistently using `TxId` instead.
   - `WalletRead::get_transaction` now takes a `TxId` as its argument.
-  - `WalletWrite::{store_decrypted_tx, store_sent_tx}` now return `Result<(), Self::Error>` 
+  - `WalletWrite::{store_decrypted_tx, store_sent_tx}` now return `Result<(), Self::Error>`
     as the `WalletRead::TxRef` associated type has been removed. Use
     `WalletRead::get_transaction` with the transaction's `TxId` instead.
   - `WalletRead::get_memo` now takes a `NoteId` as its argument instead of `Self::NoteRef`
@@ -56,22 +58,22 @@ and this library adheres to Rust's notion of
   - `wallet::{create_spend_to_address, create_proposed_transaction,
     shield_transparent_funds}` all now require that `WalletCommitmentTrees` be
     implemented for the type passed to them for the `wallet_db` parameter.
-  - `wallet::create_proposed_transaction` now takes an additional 
+  - `wallet::create_proposed_transaction` now takes an additional
     `min_confirmations` argument.
-  - `wallet::{spend, create_spend_to_address, shield_transparent_funds, 
+  - `wallet::{spend, create_spend_to_address, shield_transparent_funds,
     propose_transfer, propose_shielding, create_proposed_transaction}` now take their
     respective `min_confirmations` arguments as `NonZeroU32`
   - `wallet::input_selection::InputSelector::{propose_transaction, propose_shielding}`
     now take their respective `min_confirmations` arguments as `NonZeroU32`
   - A new `Scan` variant has been added to `data_api::chain::error::Error`.
   - A new `SyncRequired` variant has been added to `data_api::wallet::input_selection::InputSelectorError`.
-  - The variants of the `PoolType` enum have changed; the `PoolType::Sapling` variant has been 
+  - The variants of the `PoolType` enum have changed; the `PoolType::Sapling` variant has been
     removed in favor of a `PoolType::Shielded` variant that wraps a `ShieldedProtocol` value.
 - `zcash_client_backend::wallet`:
   - `SpendableNote` has been renamed to `ReceivedSaplingNote`.
   - Arguments to `WalletSaplingOutput::from_parts` have changed.
 - `zcash_client_backend::data_api::wallet::input_selection::InputSelector`:
-  - Arguments to `{propose_transaction, propose_shielding}` have changed. 
+  - Arguments to `{propose_transaction, propose_shielding}` have changed.
 - `zcash_client_backend::data_api::wallet::{create_spend_to_address, spend,
   create_proposed_transaction, shield_transparent_funds}` now return the `TxId`
   for the newly created transaction instead an internal database identifier.
@@ -85,7 +87,7 @@ and this library adheres to Rust's notion of
   tree and incremental witnesses for each previously-known note. In addition, the
   return type has now been updated to return a `Result<ScannedBlock, ScanError>`.
 - `proto/service.proto` has been updated to include the new GRPC endpoints
-  supported by lightwalletd v0.4.15 
+  supported by lightwalletd v0.4.15
 
 ### Removed
 - `zcash_client_backend::data_api`:
@@ -99,12 +101,12 @@ and this library adheres to Rust's notion of
   - `WalletWrite::advance_by_block` (use `WalletWrite::put_blocks` instead).
   - `PrunedBlock` has been replaced by `ScannedBlock`
   - `testing::MockWalletDb`, which is available under the `test-dependencies`
-    feature flag, has been modified by the addition of a `sapling_tree` property. 
+    feature flag, has been modified by the addition of a `sapling_tree` property.
   - `wallet::input_selection`:
     - `Proposal::target_height` (use `Proposal::min_target_height` instead).
 - `zcash_client_backend::data_api::chain::validate_chain` (logic merged into
   `chain::scan_cached_blocks`.
-- `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been 
+- `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been
   replaced by `zcash_client_backend::scanning::ScanError`
 - `zcash_client_backend::wallet::WalletSaplingOutput::{witness, witness_mut}`
   have been removed as individual incremental witnesses are no longer tracked on a
