@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 use std::fmt;
-use std::{collections::HashMap, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 #[cfg(feature = "unstable")]
 use std::fs::File;
@@ -15,14 +15,13 @@ use tempfile::NamedTempFile;
 use tempfile::TempDir;
 
 #[allow(deprecated)]
-use zcash_client_backend::data_api::wallet::create_spend_to_address;
 use zcash_client_backend::{
     address::RecipientAddress,
     data_api::{
         self,
         chain::{scan_cached_blocks, BlockSource},
         wallet::{
-            create_proposed_transaction,
+            create_proposed_transaction, create_spend_to_address,
             input_selection::{GreedyInputSelectorError, InputSelector, Proposal},
             propose_transfer, spend,
         },
@@ -37,7 +36,7 @@ use zcash_client_backend::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
     legacy::TransparentAddress,
     memo::MemoBytes,
     sapling::{
@@ -54,13 +53,6 @@ use zcash_primitives::{
     zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
 };
 
-#[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::data_api::wallet::{propose_shielding, shield_transparent_funds};
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{
-    legacy, legacy::keys::IncomingViewingKey, transaction::components::amount::NonNegativeAmount,
-};
-
 use crate::{
     chain::init::init_cache_database,
     error::SqliteClientError,
@@ -74,13 +66,24 @@ use crate::{
 
 use super::BlockDb;
 
+#[cfg(feature = "transparent-inputs")]
+use {
+    zcash_client_backend::data_api::wallet::{propose_shielding, shield_transparent_funds},
+    zcash_primitives::{
+        legacy::{self, keys::IncomingViewingKey},
+        transaction::components::amount::NonNegativeAmount,
+    },
+};
+
 #[cfg(feature = "unstable")]
 use crate::{
     chain::{init::init_blockmeta_db, BlockMeta},
     FsBlockDb,
 };
+
 /// A builder for a `zcash_client_sqlite` test.
 pub(crate) struct TestBuilder<Cache> {
+    network: Network,
     cache: Cache,
     seed: Option<SecretVec<u8>>,
     with_test_account: bool,
@@ -90,6 +93,7 @@ impl TestBuilder<()> {
     /// Constructs a new test.
     pub(crate) fn new() -> Self {
         TestBuilder {
+            network: Network::TestNetwork,
             cache: (),
             seed: None,
             with_test_account: false,
@@ -99,6 +103,7 @@ impl TestBuilder<()> {
     /// Adds a [`BlockDb`] cache to the test.
     pub(crate) fn with_block_cache(self) -> TestBuilder<BlockCache> {
         TestBuilder {
+            network: self.network,
             cache: BlockCache::new(),
             seed: self.seed,
             with_test_account: self.with_test_account,
@@ -109,6 +114,7 @@ impl TestBuilder<()> {
     #[cfg(feature = "unstable")]
     pub(crate) fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache> {
         TestBuilder {
+            network: self.network,
             cache: FsBlockCache::new(),
             seed: self.seed,
             with_test_account: self.with_test_account,
@@ -131,10 +137,8 @@ impl<Cache> TestBuilder<Cache> {
 
     /// Builds the state for this test.
     pub(crate) fn build(self) -> TestState<Cache> {
-        let params = network();
-
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), params).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), self.network).unwrap();
         init_wallet_db(&mut db_data, self.seed).unwrap();
 
         let test_account = if self.with_test_account {
@@ -145,7 +149,7 @@ impl<Cache> TestBuilder<Cache> {
         };
 
         TestState {
-            params,
+            params: self.network,
             cache: self.cache,
             latest_cached_block: None,
             _data_file: data_file,
@@ -186,7 +190,15 @@ where
         let (height, prev_hash, initial_sapling_tree_size) = self
             .latest_cached_block
             .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (sapling_activation_height(), BlockHash([0; 32]), 0));
+            .unwrap_or_else(|| {
+                (
+                    self.params
+                        .activation_height(NetworkUpgrade::Sapling)
+                        .unwrap(),
+                    BlockHash([0; 32]),
+                    0,
+                )
+            });
 
         let (res, nf) = self.generate_block_at(
             height,
@@ -215,6 +227,7 @@ where
         initial_sapling_tree_size: u32,
     ) -> (Cache::InsertResult, Nullifier) {
         let (cb, nf) = fake_compact_block(
+            &self.params,
             height,
             prev_hash,
             dfvk,
@@ -246,9 +259,18 @@ where
         let (height, prev_hash, initial_sapling_tree_size) = self
             .latest_cached_block
             .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (sapling_activation_height(), BlockHash([0; 32]), 0));
+            .unwrap_or_else(|| {
+                (
+                    self.params
+                        .activation_height(NetworkUpgrade::Sapling)
+                        .unwrap(),
+                    BlockHash([0; 32]),
+                    0,
+                )
+            });
 
         let cb = fake_compact_block_spending(
+            &self.params,
             height,
             prev_hash,
             note,
@@ -306,6 +328,19 @@ impl<Cache> TestState<Cache> {
     /// Exposes a mutable reference to the test's [`WalletDb`].
     pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, Network> {
         &mut self.db_data
+    }
+
+    /// Exposes an immutable reference to the network in use.
+    pub(crate) fn network(&self) -> &Network {
+        &self.db_data.params
+    }
+
+    /// Convenience method for obtaining the Sapling activation height for the network under test.
+    pub(crate) fn sapling_activation_height(&self) -> BlockHeight {
+        self.db_data
+            .params
+            .activation_height(NetworkUpgrade::Sapling)
+            .expect("Sapling activation height must be known.")
     }
 
     /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
@@ -525,42 +560,20 @@ impl<Cache> TestState<Cache> {
     }
 }
 
-#[cfg(feature = "mainnet")]
-pub(crate) fn network() -> Network {
-    Network::MainNetwork
-}
-
-#[cfg(not(feature = "mainnet"))]
-pub(crate) fn network() -> Network {
-    Network::TestNetwork
-}
-
-#[cfg(feature = "mainnet")]
-pub(crate) fn sapling_activation_height() -> BlockHeight {
-    Network::MainNetwork
-        .activation_height(NetworkUpgrade::Sapling)
-        .unwrap()
-}
-
-#[cfg(not(feature = "mainnet"))]
-pub(crate) fn sapling_activation_height() -> BlockHeight {
-    Network::TestNetwork
-        .activation_height(NetworkUpgrade::Sapling)
-        .unwrap()
-}
-
 #[cfg(test)]
 pub(crate) fn init_test_accounts_table_ufvk(
     db_data: &mut WalletDb<rusqlite::Connection, Network>,
 ) -> (UnifiedFullViewingKey, Option<TransparentAddress>) {
+    use std::collections::HashMap;
+
     let seed = [0u8; 32];
     let account = AccountId::from(0);
-    let extsk = sapling::spending_key(&seed, network().coin_type(), account);
+    let extsk = sapling::spending_key(&seed, db_data.params.coin_type(), account);
     let dfvk = extsk.to_diversifiable_full_viewing_key();
 
     #[cfg(feature = "transparent-inputs")]
     let (tkey, taddr) = {
-        let tkey = legacy::keys::AccountPrivKey::from_seed(&network(), &seed, account)
+        let tkey = legacy::keys::AccountPrivKey::from_seed(&db_data.params, &seed, account)
             .unwrap()
             .to_account_pubkey();
         let taddr = tkey.derive_external_ivk().unwrap().default_address().0;
@@ -593,7 +606,8 @@ pub(crate) enum AddressType {
 
 /// Create a fake CompactBlock at the given height, containing a single output paying
 /// an address. Returns the CompactBlock and the nullifier for the new note.
-pub(crate) fn fake_compact_block(
+pub(crate) fn fake_compact_block<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
     dfvk: &DiversifiableFullViewingKey,
@@ -609,7 +623,7 @@ pub(crate) fn fake_compact_block(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(&network(), height, &mut rng);
+    let rseed = generate_random_rseed(params, height, &mut rng);
     let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
     let encryptor = sapling_note_encryption::<_, Network>(
         Some(dfvk.fvk().ovk),
@@ -655,7 +669,9 @@ pub(crate) fn fake_compact_block(
 
 /// Create a fake CompactBlock at the given height, spending a single note from the
 /// given address.
-pub(crate) fn fake_compact_block_spending(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
+    params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
     (nf, in_value): (Nullifier, Amount),
@@ -665,7 +681,7 @@ pub(crate) fn fake_compact_block_spending(
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(&network(), height, &mut rng);
+    let rseed = generate_random_rseed(params, height, &mut rng);
 
     // Create a fake CompactBlock containing the note
     let cspend = CompactSaplingSpend { nf: nf.to_vec() };
@@ -700,7 +716,7 @@ pub(crate) fn fake_compact_block_spending(
     // Create a fake Note for the change
     ctx.outputs.push({
         let change_addr = dfvk.default_address().1;
-        let rseed = generate_random_rseed(&network(), height, &mut rng);
+        let rseed = generate_random_rseed(params, height, &mut rng);
         let note = Note::from_parts(
             change_addr,
             NoteValue::from_raw((in_value - value).unwrap().into()),

@@ -752,7 +752,7 @@ mod tests {
     };
 
     use crate::{
-        testing::{sapling_activation_height, AddressType, TestBuilder},
+        testing::{AddressType, TestBuilder},
         wallet::{init::init_blocks_table, scanning::suggest_scan_ranges},
     };
 
@@ -1090,6 +1090,7 @@ mod tests {
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
+        let sapling_activation_height = st.sapling_activation_height();
 
         assert_matches!(
             // In the following, we don't care what the root hashes are, they just need to be
@@ -1098,15 +1099,15 @@ mod tests {
                 0,
                 &[
                     CommitmentTreeRoot::from_parts(
-                        sapling_activation_height() + 100,
+                        sapling_activation_height + 100,
                         Node::empty_root(Level::from(0))
                     ),
                     CommitmentTreeRoot::from_parts(
-                        sapling_activation_height() + 200,
+                        sapling_activation_height + 200,
                         Node::empty_root(Level::from(1))
                     ),
                     CommitmentTreeRoot::from_parts(
-                        sapling_activation_height() + 300,
+                        sapling_activation_height + 300,
                         Node::empty_root(Level::from(2))
                     ),
                 ]
@@ -1118,7 +1119,7 @@ mod tests {
         // of 10 blocks. After `scan_cached_blocks`, the scan queue should have a requested scan
         // range of 300..310 with `FoundNote` priority, 310..320 with `Scanned` priority.
         let initial_sapling_tree_size = (0x1 << 16) * 3 + 5;
-        let initial_height = sapling_activation_height() + 310;
+        let initial_height = sapling_activation_height + 310;
 
         let value = Amount::from_u64(50000).unwrap();
         st.generate_block_at(
@@ -1141,7 +1142,7 @@ mod tests {
         st.scan_cached_blocks(initial_height, 10);
 
         // Verify the that adjacent range needed to make the note spendable has been prioritized.
-        let sap_active = u32::from(sapling_activation_height());
+        let sap_active = u32::from(sapling_activation_height);
         assert_matches!(
             st.wallet().suggest_scan_ranges(),
             Ok(scan_ranges) if scan_ranges == vec![
@@ -1162,7 +1163,7 @@ mod tests {
         // future.
         assert_matches!(
             st.wallet_mut()
-                .update_chain_tip(sapling_activation_height() + 340),
+                .update_chain_tip(sapling_activation_height + 340),
             Ok(())
         );
 
@@ -1179,7 +1180,7 @@ mod tests {
         // Now simulate a jump ahead more than 100 blocks.
         assert_matches!(
             st.wallet_mut()
-                .update_chain_tip(sapling_activation_height() + 450),
+                .update_chain_tip(sapling_activation_height + 450),
             Ok(())
         );
 

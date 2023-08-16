@@ -439,7 +439,7 @@ pub(crate) mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::{self, network, AddressType, BlockCache, TestBuilder, TestState},
+        testing::{AddressType, BlockCache, TestBuilder, TestState},
         wallet::{commitment_tree, get_balance, get_balance_at},
         AccountId, NoteId, ReceivedNoteId,
     };
@@ -532,7 +532,7 @@ pub(crate) mod tests {
         let ufvks = [(account, usk.to_unified_full_viewing_key())]
             .into_iter()
             .collect();
-        let decrypted_outputs = decrypt_transaction(&testing::network(), h + 1, &tx, &ufvks);
+        let decrypted_outputs = decrypt_transaction(st.network(), h + 1, &tx, &ufvks);
         assert_eq!(decrypted_outputs.len(), 2);
 
         let mut found_tx_change_memo = false;
@@ -619,7 +619,7 @@ pub(crate) mod tests {
 
         // Create a USK that doesn't exist in the wallet
         let acct1 = AccountId::from(1);
-        let usk1 = UnifiedSpendingKey::from_seed(&network(), &[1u8; 32], acct1).unwrap();
+        let usk1 = UnifiedSpendingKey::from_seed(st.network(), &[1u8; 32], acct1).unwrap();
 
         // Attempting to spend with a USK that is not in the wallet results in an error
         assert_matches!(
@@ -900,7 +900,7 @@ pub(crate) mod tests {
         let to = addr2.into();
 
         #[allow(clippy::type_complexity)]
-        let send_and_recover_with_policy = |test: &mut TestState<BlockCache>,
+        let send_and_recover_with_policy = |st: &mut TestState<BlockCache>,
                                             ovk_policy|
          -> Result<
             Option<(Note, PaymentAddress, MemoBytes)>,
@@ -912,7 +912,7 @@ pub(crate) mod tests {
                 ReceivedNoteId,
             >,
         > {
-            let txid = test.create_spend_to_address(
+            let txid = st.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(15000).unwrap(),
@@ -922,7 +922,7 @@ pub(crate) mod tests {
             )?;
 
             // Fetch the transaction from the database
-            let raw_tx: Vec<_> = test
+            let raw_tx: Vec<_> = st
                 .wallet()
                 .conn
                 .query_row(
@@ -937,7 +937,7 @@ pub(crate) mod tests {
             for output in tx.sapling_bundle().unwrap().shielded_outputs() {
                 // Find the output that decrypts with the external OVK
                 let result = try_sapling_output_recovery(
-                    &network(),
+                    st.network(),
                     h1,
                     &dfvk.to_ovk(Scope::External),
                     output,
