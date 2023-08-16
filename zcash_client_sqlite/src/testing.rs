@@ -130,7 +130,7 @@ impl<Cache> TestBuilder<Cache> {
 
         let test_account = if let Some(birthday) = self.test_account_birthday {
             let seed = Secret::new(vec![0u8; 32]);
-            let (account, usk) = db_data.create_account(&seed).unwrap();
+            let (account, usk) = db_data.create_account(&seed, birthday.clone()).unwrap();
             Some((account, usk, birthday))
         } else {
             None
@@ -530,17 +530,6 @@ impl<Cache> TestState<Cache> {
             min_confirmations,
         )
     }
-}
-
-#[cfg(test)]
-pub(crate) fn birthday_at_sapling_activation<P: consensus::Parameters>(
-    params: &P,
-) -> AccountBirthday {
-    use incrementalmerkletree::frontier::Frontier;
-    AccountBirthday::from_parts(
-        params.activation_height(NetworkUpgrade::Sapling).unwrap(),
-        Frontier::empty(),
-    )
 }
 
 #[allow(dead_code)]

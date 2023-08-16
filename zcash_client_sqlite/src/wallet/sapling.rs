@@ -403,8 +403,6 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
-    use secrecy::Secret;
-
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
@@ -428,7 +426,7 @@ pub(crate) mod tests {
             self,
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-            ShieldedProtocol, WalletRead, WalletWrite,
+            AccountBirthday, ShieldedProtocol, WalletRead,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -446,7 +444,7 @@ pub(crate) mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_client_backend::wallet::WalletTransparentOutput,
+        zcash_client_backend::{data_api::WalletWrite, wallet::WalletTransparentOutput},
         zcash_primitives::transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
     };
 
@@ -461,12 +459,13 @@ pub(crate) mod tests {
 
     #[test]
     fn send_proposed_transfer() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (account, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (account, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
@@ -609,12 +608,10 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_incorrect_usk() {
-        let mut st = TestBuilder::new().build();
-
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let mut st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+        let dfvk = st.test_account_sapling().unwrap();
         let to = dfvk.default_address().1.into();
 
         // Create a USK that doesn't exist in the wallet
@@ -637,12 +634,12 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_with_no_blocks() {
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
         let to = dfvk.default_address().1.into();
 
         // Account balance should be zero
@@ -667,12 +664,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_unverified_notes() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -778,12 +776,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_locked_notes() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -876,12 +875,13 @@ pub(crate) mod tests {
 
     #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -976,12 +976,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_succeeds_to_t_addr_zero_change() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
@@ -1019,12 +1020,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_spends_a_change_note() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
@@ -1062,12 +1064,13 @@ pub(crate) mod tests {
 
     #[test]
     fn zip317_spend() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet
         let (h1, _, _) = st.generate_next_block(
@@ -1159,12 +1162,14 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn shield_transparent() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (account_id, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (account_id, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
+
         let uaddr = st
             .wallet()
             .get_current_address(account_id)

@@ -1,3 +1,4 @@
+mod add_account_birthdays;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
@@ -38,6 +39,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                 /          |           \
     // shardtree_support    nullifier_map    sapling_memo_consistency
     //         |
+    //   add_account_birthdays
+    //         |
     // v_sapling_shard_unscanned_ranges
     vec![
         Box::new(initial_setup::Migration {}),
@@ -61,6 +64,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(nullifier_map::Migration),
         Box::new(sapling_memo_consistency::Migration {
+            params: params.clone(),
+        }),
+        Box::new(add_account_birthdays::Migration {
             params: params.clone(),
         }),
         Box::new(v_sapling_shard_unscanned_ranges::Migration {

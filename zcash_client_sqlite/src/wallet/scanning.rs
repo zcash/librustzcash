@@ -1,20 +1,22 @@
 use rusqlite::{self, named_params, types::Value, OptionalExtension};
+use shardtree::error::ShardTreeError;
 use std::cmp::{max, min, Ordering};
 use std::collections::BTreeSet;
 use std::ops::{Not, Range};
 use std::rc::Rc;
 use tracing::{debug, trace};
-use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 
 use incrementalmerkletree::{Address, Position};
+use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 
-use crate::error::SqliteClientError;
-use crate::{PRUNING_DEPTH, VERIFY_LOOKAHEAD};
-
-use super::block_height_extrema;
+use crate::{
+    error::SqliteClientError,
+    wallet::{block_height_extrema, commitment_tree, init::WalletMigrationError},
+    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+};
 
 #[derive(Debug, Clone, Copy)]
 enum InsertOn {
@@ -481,15 +483,66 @@ pub(crate) fn insert_queue_entries<'a>(
     Ok(())
 }
 
-pub(crate) fn replace_queue_entries(
+/// A trait that abstracts over the construction of wallet errors.
+///
+/// In order to make it possible to use [`replace_queue_entries`] in database migrations as well as
+/// in code that returns `SqliteClientError`, it is necessary for that method to be polymorphic in
+/// the error type.
+pub(crate) trait WalletError {
+    fn db_error(err: rusqlite::Error) -> Self;
+    fn corrupt(message: String) -> Self;
+    fn chain_height_unknown() -> Self;
+    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self;
+}
+
+impl WalletError for SqliteClientError {
+    fn db_error(err: rusqlite::Error) -> Self {
+        SqliteClientError::DbError(err)
+    }
+
+    fn corrupt(message: String) -> Self {
+        SqliteClientError::CorruptedData(message)
+    }
+
+    fn chain_height_unknown() -> Self {
+        SqliteClientError::ChainHeightUnknown
+    }
+
+    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
+        SqliteClientError::CommitmentTree(err)
+    }
+}
+
+impl WalletError for WalletMigrationError {
+    fn db_error(err: rusqlite::Error) -> Self {
+        WalletMigrationError::DbError(err)
+    }
+
+    fn corrupt(message: String) -> Self {
+        WalletMigrationError::CorruptedData(message)
+    }
+
+    fn chain_height_unknown() -> Self {
+        WalletMigrationError::CorruptedData(
+            "Wallet migration requires a valid account birthday.".to_owned(),
+        )
+    }
+
+    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
+        WalletMigrationError::CommitmentTree(err)
+    }
+}
+
+pub(crate) fn replace_queue_entries<E: WalletError>(
     conn: &rusqlite::Transaction<'_>,
     query_range: &Range<BlockHeight>,
     entries: impl Iterator<Item = ScanRange>,
     force_rescans: bool,
-) -> Result<(), SqliteClientError> {
+) -> Result<(), E> {
     let (to_create, to_delete_ends) = {
-        let mut suggested_stmt = conn.prepare_cached(
-            "SELECT block_range_start, block_range_end, priority
+        let mut suggested_stmt = conn
+            .prepare_cached(
+                "SELECT block_range_start, block_range_end, priority
             FROM scan_queue
             WHERE (
                 -- the start is contained within or adjacent to the range
@@ -507,12 +560,15 @@ pub(crate) fn replace_queue_entries(
                 AND block_range_end <= :end
             )
             ORDER BY block_range_end",
-        )?;
+            )
+            .map_err(E::db_error)?;
 
-        let mut rows = suggested_stmt.query(named_params![
-            ":start": u32::from(query_range.start),
-            ":end": u32::from(query_range.end),
-        ])?;
+        let mut rows = suggested_stmt
+            .query(named_params![
+                ":start": u32::from(query_range.start),
+                ":end": u32::from(query_range.end),
+            ])
+            .map_err(E::db_error)?;
 
         // Iterate over the ranges in the scan queue that overlap the range that we have
         // identified as needing to be fully scanned. For each such range add it to the
@@ -520,19 +576,16 @@ pub(crate) fn replace_queue_entries(
         // some in the process).
         let mut to_create: Option<SpanningTree> = None;
         let mut to_delete_ends: Vec<Value> = vec![];
-        while let Some(row) = rows.next()? {
+        while let Some(row) = rows.next().map_err(E::db_error)? {
             let entry = ScanRange::from_parts(
                 Range {
-                    start: BlockHeight::from(row.get::<_, u32>(0)?),
-                    end: BlockHeight::from(row.get::<_, u32>(1)?),
+                    start: BlockHeight::from(row.get::<_, u32>(0).map_err(E::db_error)?),
+                    end: BlockHeight::from(row.get::<_, u32>(1).map_err(E::db_error)?),
                 },
                 {
-                    let code = row.get::<_, i64>(2)?;
+                    let code = row.get::<_, i64>(2).map_err(E::db_error)?;
                     parse_priority_code(code).ok_or_else(|| {
-                        SqliteClientError::CorruptedData(format!(
-                            "scan priority not recognized: {}",
-                            code
-                        ))
+                        E::corrupt(format!("scan priority not recognized: {}", code))
                     })?
                 },
             );
@@ -562,10 +615,11 @@ pub(crate) fn replace_queue_entries(
         conn.execute(
             "DELETE FROM scan_queue WHERE block_range_end IN rarray(:ends)",
             named_params![":ends": ends_ptr],
-        )?;
+        )
+        .map_err(E::db_error)?;
 
         let scan_ranges = tree.into_vec();
-        insert_queue_entries(conn, scan_ranges.iter())?;
+        insert_queue_entries(conn, scan_ranges.iter()).map_err(E::db_error)?;
     }
 
     Ok(())
@@ -646,7 +700,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         vec![]
     };
 
-    replace_queue_entries(
+    replace_queue_entries::<SqliteClientError>(
         conn,
         &query_range,
         Some(scanned).into_iter().chain(extensions.into_iter()),
@@ -750,7 +804,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     };
 
     if let Some(query_range) = query_range {
-        replace_queue_entries(
+        replace_queue_entries::<SqliteClientError>(
             conn,
             &query_range,
             shard_entry.into_iter().chain(tip_entry.into_iter()),
@@ -778,13 +832,12 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 mod tests {
     use std::ops::Range;
 
-    use incrementalmerkletree::{Hashable, Level};
-    use secrecy::Secret;
+    use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
 
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
         scanning::{ScanPriority, ScanRange},
-        WalletCommitmentTrees, WalletRead, WalletWrite,
+        AccountBirthday, WalletCommitmentTrees, WalletRead, WalletWrite,
     };
     use zcash_primitives::{
         block::BlockHash,
@@ -794,11 +847,9 @@ mod tests {
     };
 
     use crate::{
-        testing::{birthday_at_sapling_activation, AddressType, TestBuilder},
-        wallet::{
-            init::init_blocks_table,
-            scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
-        },
+        error::SqliteClientError,
+        testing::{AddressType, TestBuilder},
+        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
     };
 
     use super::{join_nonoverlapping, Joined, RangeOrdering, SpanningTree};
@@ -1160,7 +1211,7 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -1274,42 +1325,33 @@ mod tests {
     fn create_account_creates_ignored_range() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(|network| {
+                // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
+                // activation.
+                let birthday_height = network.activation_height(NetworkUpgrade::Canopy).unwrap();
+                let frontier_position = Position::from((0x1 << 16) + 1234);
+                let frontier = Frontier::from_parts(
+                    frontier_position,
+                    Node::empty_leaf(),
+                    vec![Node::empty_leaf(); frontier_position.past_ommer_count().into()],
+                )
+                .unwrap();
+                AccountBirthday::from_parts(birthday_height, frontier, None)
+            })
+            .build();
 
+        let (_, _, birthday) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
         let sap_active = st.sapling_activation_height();
-
-        // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
-        // activation.
-        let birthday_height = st
-            .network()
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-
-        // call `init_blocks_table` to initialize the scan queue
-        init_blocks_table(
-            st.wallet_mut(),
-            birthday_height,
-            BlockHash([1; 32]),
-            1,
-            &[0x0, 0x0, 0x0],
-        )
-        .unwrap();
-
-        let seed = Secret::new(vec![0u8; 32]);
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let _dfvk = usk.to_unified_full_viewing_key().sapling().unwrap().clone();
 
         let expected = vec![
             // The range up to and including the wallet's birthday height is ignored.
-            scan_range(
-                u32::from(sap_active)..u32::from(birthday_height + 1),
-                Ignored,
-            ),
+            scan_range(u32::from(sap_active)..u32::from(birthday.height()), Ignored),
         ];
-        assert_matches!(
-            suggest_scan_ranges(&st.wallet().conn, Ignored),
-            Ok(scan_ranges) if scan_ranges == expected
-        );
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
 
         // Set up some shard history
         st.wallet_mut()
@@ -1322,13 +1364,25 @@ mod tests {
                     // complete the left-hand side of the required shard; this can be fixed once we
                     // have proper account birthdays.
                     CommitmentTreeRoot::from_parts(
-                        birthday_height - 1000,
+                        birthday.height() - 1000,
                         // fake a hash, the value doesn't matter
                         Node::empty_leaf(),
                     ),
                 ],
             )
             .unwrap();
+
+        st.generate_block_at(
+            birthday.height(),
+            BlockHash([0u8; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::const_from_i64(10000),
+            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
+                .try_into()
+                .unwrap(),
+        );
+        st.scan_cached_blocks(birthday.height(), 1);
 
         // Update the chain tip
         let tip_height = st
@@ -1343,25 +1397,25 @@ mod tests {
             // The birthday height was "last scanned" (as the wallet birthday) so we verify 10
             // blocks starting at that height.
             scan_range(
-                u32::from(birthday_height)..u32::from(birthday_height + 10),
+                u32::from(birthday.height())..u32::from(birthday.height() + 10),
                 Verify,
             ),
             // The remainder of the shard after the verify segment is required in order to make
             // notes spendable, so it has priority `ChainTip`
             scan_range(
-                u32::from(birthday_height + 10)..u32::from(tip_height + 1),
+                u32::from(birthday.height() + 10)..u32::from(tip_height + 1),
                 ChainTip,
             ),
             // The remainder of the shard prior to the birthday height must be scanned because the
             // wallet doesn't know that it already has enough data from the initial frontier to
             // avoid having to scan this range.
             scan_range(
-                u32::from(birthday_height - 1000)..u32::from(birthday_height),
+                u32::from(birthday.height() - 1000)..u32::from(birthday.height()),
                 ChainTip,
             ),
             // The range below the wallet's birthday height is ignored
             scan_range(
-                u32::from(sap_active)..u32::from(birthday_height - 1000),
+                u32::from(sap_active)..u32::from(birthday.height() - 1000),
                 Ignored,
             ),
         ];
@@ -1393,7 +1447,7 @@ mod tests {
 
         {
             let tx = st.wallet_mut().conn.transaction().unwrap();
-            replace_queue_entries(
+            replace_queue_entries::<SqliteClientError>(
                 &tx,
                 &(BlockHeight::from(150)..BlockHeight::from(160)),
                 vec![scan_range(150..160, Scanned)].into_iter(),
@@ -1436,7 +1490,7 @@ mod tests {
 
         {
             let tx = st.wallet_mut().conn.transaction().unwrap();
-            replace_queue_entries(
+            replace_queue_entries::<SqliteClientError>(
                 &tx,
                 &(BlockHeight::from(90)..BlockHeight::from(100)),
                 vec![scan_range(90..100, Scanned)].into_iter(),

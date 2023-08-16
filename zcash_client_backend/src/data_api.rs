@@ -1,8 +1,9 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
-use std::collections::HashMap;
 use std::fmt::Debug;
+use std::io;
 use std::num::NonZeroU32;
+use std::{collections::HashMap, num::TryFromIntError};
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
@@ -24,6 +25,7 @@ use crate::{
     address::{AddressMetadata, UnifiedAddress},
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+    proto::service::TreeState,
     wallet::{ReceivedSaplingNote, WalletTransparentOutput, WalletTx},
 };
 
@@ -472,23 +474,75 @@ impl SentTransactionOutput {
 pub struct AccountBirthday {
     height: BlockHeight,
     sapling_frontier: Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH>,
+    recover_until: Option<BlockHeight>,
+}
+
+/// Errors that can occur in the construction of an [`AccountBirthday`] from a [`TreeState`]
+pub enum BirthdayError {
+    HeightInvalid(TryFromIntError),
+    Decode(io::Error),
+}
+
+impl From<TryFromIntError> for BirthdayError {
+    fn from(value: TryFromIntError) -> Self {
+        Self::HeightInvalid(value)
+    }
+}
+
+impl From<io::Error> for BirthdayError {
+    fn from(value: io::Error) -> Self {
+        Self::Decode(value)
+    }
 }
 
 impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
-    /// * `height`: The birthday height of the account. This is defined as the height of the last
-    /// block that is known to contain no transactions sent to addresses belonging to the account.
+    /// * `height`: The birthday height of the account. This is defined as the height of the first
+    ///    block block to be scanned in wallet recovery.
     /// * `sapling_frontier`: The Sapling note commitment tree frontier as of the end of the block
-    /// at `height`.
+    ///    prior to the birthday height.
+    /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
+    ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
+    ///    visible to a user during the process of recovering from seed, wallets may optionally set a
+    ///    "recover until" height. The wallet is considered to be in "recovery mode" until there
+    ///    exist no unscanned ranges between the wallet's birthday height and the provided
+    ///    `recover_until` height, exclusive.
+    ///
+    /// This API is intended primarily to be used in testing contexts; under normal circumstances,
+    /// [`AccountBirthday::from_treestate`] should be used instead.
+    #[cfg(feature = "test-dependencies")]
     pub fn from_parts(
         height: BlockHeight,
         sapling_frontier: Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH>,
+        recover_until: Option<BlockHeight>,
     ) -> Self {
         Self {
             height,
             sapling_frontier,
+            recover_until,
         }
+    }
+
+    /// Constructs a new [`AccountBirthday`] from a [`TreeState`] returned from `lightwalletd`.
+    ///
+    /// * `treestate`: The tree state corresponding to the last block prior to the wallet's
+    ///    birthday height.
+    /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
+    ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
+    ///    visible to a user during the process of recovering from seed, wallets may optionally set a
+    ///    "recover until" height. The wallet is considered to be in "recovery mode" until there
+    ///    exist no unscanned ranges between the wallet's birthday height and the provided
+    ///    `recover_until` height, exclusive.
+    pub fn from_treestate(
+        treestate: TreeState,
+        recover_until: Option<BlockHeight>,
+    ) -> Result<Self, BirthdayError> {
+        Ok(Self {
+            height: BlockHeight::try_from(treestate.height + 1)?,
+            sapling_frontier: treestate.sapling_tree()?.to_frontier(),
+            recover_until,
+        })
     }
 
     /// Returns the Sapling note commitment tree frontier as of the end of the block at
@@ -501,6 +555,24 @@ impl AccountBirthday {
     pub fn height(&self) -> BlockHeight {
         self.height
     }
+
+    /// Returns the height at which the wallet should exit "recovery mode".
+    pub fn recover_until(&self) -> Option<BlockHeight> {
+        self.recover_until
+    }
+
+    #[cfg(feature = "test-dependencies")]
+    pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
+        params: &P,
+    ) -> AccountBirthday {
+        use zcash_primitives::consensus::NetworkUpgrade;
+
+        AccountBirthday::from_parts(
+            params.activation_height(NetworkUpgrade::Sapling).unwrap(),
+            Frontier::empty(),
+            None,
+        )
+    }
 }
 
 /// This trait encapsulates the write capabilities required to update stored
@@ -509,24 +581,36 @@ pub trait WalletWrite: WalletRead {
     /// The type of identifiers used to look up transparent UTXOs.
     type UtxoRef;
 
-    /// Tells the wallet to track the next available account-level spend authority, given
-    /// the current set of [ZIP 316] account identifiers known to the wallet database.
+    /// Tells the wallet to track the next available account-level spend authority, given the
+    /// current set of [ZIP 316] account identifiers known to the wallet database.
     ///
-    /// Returns the account identifier for the newly-created wallet database entry, along
-    /// with the associated [`UnifiedSpendingKey`].
+    /// Returns the account identifier for the newly-created wallet database entry, along with the
+    /// associated [`UnifiedSpendingKey`].
     ///
-    /// If `seed` was imported from a backup and this method is being used to restore a
-    /// previous wallet state, you should use this method to add all of the desired
-    /// accounts before scanning the chain from the seed's birthday height.
+    /// If a birthday height is having a height is below the current chain tip, this operation will
+    /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
+    /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
     ///
-    /// By convention, wallets should only allow a new account to be generated after funds
-    /// have been received by the currently-available account (in order to enable
-    /// automated account recovery).
+    /// For new wallets, callers should construct the [`AccountBirthday`] using
+    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - PRUNING_DEPTH`.
+    /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
+    /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
+    /// were used for the wallet birthday, a transaction targeted at a height greater than the
+    /// chain tip could be mined at a height below that tip as part of a reorg.
+    ///
+    /// If `seed` was imported from a backup and this method is being used to restore a previous
+    /// wallet state, you should use this method to add all of the desired accounts before scanning
+    /// the chain from the seed's birthday height.
+    ///
+    /// By convention, wallets should only allow a new account to be generated after funds have
+    /// been received by the currently-available account (in order to enable automated account
+    /// recovery).
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
+        birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
@@ -645,9 +729,9 @@ pub mod testing {
     };
 
     use super::{
-        chain::CommitmentTreeRoot, scanning::ScanRange, BlockMetadata, DecryptedTransaction,
-        NoteId, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
+        DecryptedTransaction, NoteId, NullifierQuery, ScannedBlock, SentTransaction,
+        WalletCommitmentTrees, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -818,6 +902,7 @@ pub mod testing {
         fn create_account(
             &mut self,
             seed: &SecretVec<u8>,
+            _birthday: AccountBirthday,
         ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
             let account = AccountId::from(0);
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)

@@ -324,8 +324,6 @@ where
 mod tests {
     use std::num::NonZeroU32;
 
-    use secrecy::Secret;
-
     use zcash_primitives::{
         block::BlockHash,
         transaction::{components::Amount, fees::zip317::FeeRule},
@@ -335,8 +333,8 @@ mod tests {
     use zcash_client_backend::{
         address::RecipientAddress,
         data_api::{
-            chain::error::Error, wallet::input_selection::GreedyInputSelector, WalletRead,
-            WalletWrite,
+            chain::error::Error, wallet::input_selection::GreedyInputSelector, AccountBirthday,
+            WalletRead,
         },
         fees::{zip317::SingleOutputChangeStrategy, DustOutputPolicy},
         scanning::ScanError,
@@ -345,7 +343,7 @@ mod tests {
     };
 
     use crate::{
-        testing::{birthday_at_sapling_activation, AddressType, TestBuilder},
+        testing::{AddressType, TestBuilder},
         wallet::{get_balance, truncate_to_height},
         AccountId,
     };
@@ -354,7 +352,7 @@ mod tests {
     fn valid_chain_states() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -387,7 +385,7 @@ mod tests {
     fn invalid_chain_cache_disconnected() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -438,7 +436,7 @@ mod tests {
     fn data_db_truncation() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -498,12 +496,13 @@ mod tests {
 
     #[test]
     fn scan_cached_blocks_allows_blocks_out_of_order() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
         let value = Amount::from_u64(50000).unwrap();
@@ -558,7 +557,7 @@ mod tests {
     fn scan_cached_blocks_finds_received_notes() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -600,9 +599,8 @@ mod tests {
     fn scan_cached_blocks_finds_change_notes() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
-
         let dfvk = st.test_account_sapling().unwrap();
 
         // Account balance should be zero
@@ -645,7 +643,7 @@ mod tests {
     fn scan_cached_blocks_detects_spends_out_of_order() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();

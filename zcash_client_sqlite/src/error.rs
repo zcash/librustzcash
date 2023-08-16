@@ -86,7 +86,15 @@ pub enum SqliteClientError {
     /// commitment trees.
     CommitmentTree(ShardTreeError<commitment_tree::Error>),
 
+    /// The block at the specified height was not available from the block cache.
     CacheMiss(BlockHeight),
+
+    /// The height of the chain was not available; a call to [`WalletWrite::update_chain_tip`] is
+    /// required before the requested operation can succeed.
+    ///
+    /// [`WalletWrite::update_chain_tip`]:
+    /// zcash_client_backend::data_api::WalletWrite::update_chain_tip
+    ChainHeightUnknown,
 }
 
 impl error::Error for SqliteClientError {
@@ -131,6 +139,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
             SqliteClientError::CacheMiss(height) => write!(f, "Requested height {} does not exist in the block cache.", height),
+            SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`")
         }
     }
 }

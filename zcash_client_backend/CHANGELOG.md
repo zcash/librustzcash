@@ -6,6 +6,17 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Notable Changes
+
+- `zcash_client_backend` now supports out-of-order scanning of blockchain history.
+- This release of `zcash_client_backend` defines the concept of an account
+  birthday. The account birthday is defined as the minimum height among blocks
+  to be scanned when recovering an account.
+- Account creation now requires the caller to provide account birthday information,
+  including the state of the note commitment tree at the end of the block prior to
+  the birthday height.
+
 ### Added
 - `impl Eq for zcash_client_backend::address::RecipientAddress`
 - `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
@@ -39,6 +50,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `WalletRead::TxRef` has been removed in favor of consistently using `TxId` instead.
   - `WalletRead::get_transaction` now takes a `TxId` as its argument.
+  - `WalletRead::create_account` now takes an additional `birthday` argument.
   - `WalletWrite::{store_decrypted_tx, store_sent_tx}` now return `Result<(), Self::Error>`
     as the `WalletRead::TxRef` associated type has been removed. Use
     `WalletRead::get_transaction` with the transaction's `TxId` instead.

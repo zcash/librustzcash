@@ -64,9 +64,9 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        BlockMetadata, DecryptedTransaction, NoteId, NullifierQuery, PoolType, Recipient,
-        ScannedBlock, SentTransaction, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, BlockMetadata, DecryptedTransaction, NoteId, NullifierQuery, PoolType,
+        Recipient, ScannedBlock, SentTransaction, ShieldedProtocol, WalletCommitmentTrees,
+        WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -356,6 +356,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
+        birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let account = wallet::get_max_account_id(wdb.conn.0)?
@@ -370,7 +371,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            wallet::add_account(wdb.conn.0, &wdb.params, account, &ufvk)?;
+            wallet::add_account(wdb.conn.0, &wdb.params, account, &ufvk, birthday)?;
 
             Ok((account, usk))
         })
@@ -1085,26 +1086,21 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
-    use zcash_client_backend::data_api::{WalletRead, WalletWrite};
+    use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
 
-    use crate::{
-        testing::{birthday_at_sapling_activation, TestBuilder},
-        AccountId,
+    use crate::{testing::TestBuilder, AccountId};
+
+    #[cfg(feature = "unstable")]
+    use {
+        crate::testing::AddressType,
+        zcash_client_backend::keys::sapling,
+        zcash_primitives::{consensus::Parameters, transaction::components::Amount},
     };
-
-    #[cfg(feature = "unstable")]
-    use zcash_primitives::{consensus::Parameters, transaction::components::Amount};
-
-    #[cfg(feature = "unstable")]
-    use zcash_client_backend::keys::sapling;
-
-    #[cfg(feature = "unstable")]
-    use crate::testing::AddressType;
 
     #[test]
     pub(crate) fn get_next_available_address() {
         let mut st = TestBuilder::new()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let account = AccountId::from(0);
@@ -1125,7 +1121,7 @@ mod tests {
         // Add an account to the wallet.
         let st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let (_, usk, _) = st.test_account().unwrap();

@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
-use rusqlite::Transaction;
+use rusqlite::{named_params, Transaction};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{address::RecipientAddress, keys::UnifiedFullViewingKey};
 use zcash_primitives::{consensus, zip32::AccountId};
 
-use crate::wallet::{add_account_internal, init::WalletMigrationError};
+use crate::wallet::{init::WalletMigrationError, insert_address};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::keys::IncomingViewingKey;
@@ -152,13 +152,17 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 }
             }
 
-            add_account_internal::<P, WalletMigrationError>(
-                transaction,
-                &self.params,
-                "accounts_new",
-                account,
-                &ufvk,
+            transaction.execute(
+                "INSERT INTO accounts_new (account, ufvk)
+                 VALUES (:account, :ufvk)",
+                named_params![
+                    ":account": u32::from(account),
+                    ":ufvk": ufvk.encode(&self.params),
+                ],
             )?;
+
+            let (address, d_idx) = ufvk.default_address();
+            insert_address(transaction, &self.params, account, d_idx, &address)?;
         }
 
         transaction.execute_batch(

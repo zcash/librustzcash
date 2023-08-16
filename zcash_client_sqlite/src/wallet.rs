@@ -64,15 +64,20 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
+use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, OptionalExtension, ToSql};
+use shardtree::ShardTree;
 use std::cmp;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
-use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
+use tracing::debug;
 
-use zcash_client_backend::data_api::{NoteId, ShieldedProtocol};
+use zcash_client_backend::data_api::{
+    scanning::{ScanPriority, ScanRange},
+    AccountBirthday, NoteId, ShieldedProtocol, SAPLING_SHARD_HEIGHT,
+};
 use zcash_primitives::transaction::TransactionData;
 
 use zcash_primitives::{
@@ -95,10 +100,11 @@ use zcash_client_backend::{
     wallet::WalletTx,
 };
 
-use crate::VERIFY_LOOKAHEAD;
+use crate::wallet::commitment_tree::SqliteShardStore;
 use crate::{
     error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
 };
+use crate::{SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD};
 
 use self::scanning::replace_queue_entries;
 
@@ -157,29 +163,86 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     params: &P,
     account: AccountId,
     key: &UnifiedFullViewingKey,
+    birthday: AccountBirthday,
 ) -> Result<(), SqliteClientError> {
-    add_account_internal(conn, params, "accounts", account, key)
-}
+    // Set the wallet birthday, falling back to the chain tip if not specified
+    let chain_tip = scan_queue_extrema(conn)?.map(|(_, max)| max);
 
-pub(crate) fn add_account_internal<P: consensus::Parameters, E: From<rusqlite::Error>>(
-    conn: &rusqlite::Transaction,
-    network: &P,
-    accounts_table: &'static str,
-    account: AccountId,
-    key: &UnifiedFullViewingKey,
-) -> Result<(), E> {
-    let ufvk_str: String = key.encode(network);
     conn.execute(
-        &format!(
-            "INSERT INTO {} (account, ufvk) VALUES (:account, :ufvk)",
-            accounts_table
-        ),
-        named_params![":account": &<u32>::from(account), ":ufvk": &ufvk_str],
+        "INSERT INTO accounts (account, ufvk, birthday_height, recover_until_height)
+        VALUES (:account, :ufvk, :birthday_height, :recover_until_height)",
+        named_params![
+            ":account": u32::from(account),
+            ":ufvk": &key.encode(params),
+            ":birthday_height": u32::from(birthday.height()),
+            ":recover_until_height": birthday.recover_until().map(u32::from)
+        ],
     )?;
+
+    // If a birthday frontier is available, insert it into the note commitment tree. If the
+    // birthday frontier is the empty frontier, we don't need to do anything.
+    if let Some(frontier) = birthday.sapling_frontier().value() {
+        debug!("Inserting frontier into ShardTree: {:?}", frontier);
+        let shard_store = SqliteShardStore::<
+            _,
+            zcash_primitives::sapling::Node,
+            SAPLING_SHARD_HEIGHT,
+        >::from_connection(conn, SAPLING_TABLES_PREFIX)?;
+        let mut shard_tree: ShardTree<
+            _,
+            { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
+            SAPLING_SHARD_HEIGHT,
+        > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+        shard_tree.insert_frontier_nodes(
+            frontier.clone(),
+            Retention::Checkpoint {
+                // This subtraction is safe, because the non-empty frontier cannot exist at genesis
+                id: birthday.height() - 1,
+                is_marked: false,
+            },
+        )?;
+    }
+
+    let sapling_activation_height = params
+        .activation_height(NetworkUpgrade::Sapling)
+        .expect("Sapling activation height must be available.");
+
+    // Add the ignored range up to and including the birthday height.
+    if sapling_activation_height < birthday.height() {
+        let ignored_range = sapling_activation_height..birthday.height();
+
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &ignored_range,
+            Some(ScanRange::from_parts(
+                ignored_range.clone(),
+                ScanPriority::Ignored,
+            ))
+            .into_iter(),
+            false,
+        )?;
+    };
+
+    // Rewrite the scan ranges above the birthday height so that we'll ensure we re-scan to find
+    // any notes that might belong to the newly added account.
+    if let Some(t) = chain_tip {
+        let rescan_range = birthday.height()..(t + 1);
+
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &rescan_range,
+            Some(ScanRange::from_parts(
+                rescan_range.clone(),
+                ScanPriority::Historic,
+            ))
+            .into_iter(),
+            true,
+        )?;
+    }
 
     // Always derive the default Unified Address for the account.
     let (address, d_idx) = key.default_address();
-    insert_address(conn, network, account, d_idx, &address)?;
+    insert_address(conn, params, account, d_idx, &address)?;
 
     Ok(())
 }
@@ -235,17 +298,17 @@ pub(crate) fn insert_address<P: consensus::Parameters>(
 ) -> Result<(), rusqlite::Error> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO addresses (
-                    account,
-                    diversifier_index_be,
-                    address,
-                    cached_transparent_receiver_address
-                )
-                VALUES (
-                    :account,
-                    :diversifier_index_be,
-                    :address,
-                    :cached_transparent_receiver_address
-                )",
+            account,
+            diversifier_index_be,
+            address,
+            cached_transparent_receiver_address
+        )
+        VALUES (
+            :account,
+            :diversifier_index_be,
+            :address,
+            :cached_transparent_receiver_address
+        )",
     )?;
 
     // the diversifier index is stored in big-endian order to allow sorting
@@ -949,7 +1012,12 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         // Prioritize the range starting at the height we just rewound to for verification
         let query_range = block_height..(block_height + VERIFY_LOOKAHEAD);
         let scan_range = ScanRange::from_parts(query_range.clone(), ScanPriority::Verify);
-        replace_queue_entries(conn, &query_range, Some(scan_range).into_iter(), false)?;
+        replace_queue_entries::<SqliteClientError>(
+            conn,
+            &query_range,
+            Some(scan_range).into_iter(),
+            false,
+        )?;
     }
 
     Ok(())
@@ -1573,17 +1641,15 @@ mod tests {
 
     use zcash_primitives::transaction::components::Amount;
 
-    use zcash_client_backend::data_api::WalletRead;
+    use zcash_client_backend::data_api::{AccountBirthday, WalletRead};
 
-    use crate::{
-        testing::{birthday_at_sapling_activation, TestBuilder},
-        AccountId,
-    };
+    use crate::{testing::TestBuilder, AccountId};
 
     use super::get_balance;
 
     #[cfg(feature = "transparent-inputs")]
     use {
+        incrementalmerkletree::frontier::Frontier,
         secrecy::Secret,
         zcash_client_backend::{
             data_api::WalletWrite, encoding::AddressCodec, wallet::WalletTransparentOutput,
@@ -1597,7 +1663,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         // The account should be empty
@@ -1628,11 +1694,15 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn put_received_transparent_utxo() {
+        use crate::testing::TestBuilder;
+
         let mut st = TestBuilder::new().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (account_id, _usk) = st.wallet_mut().create_account(&seed).unwrap();
+        let birthday =
+            AccountBirthday::from_parts(st.sapling_activation_height(), Frontier::empty(), None);
+        let (account_id, _usk) = st.wallet_mut().create_account(&seed, birthday).unwrap();
         let uaddr = st
             .wallet()
             .get_current_address(account_id)
