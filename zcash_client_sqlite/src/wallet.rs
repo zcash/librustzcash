@@ -949,7 +949,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         // Prioritize the range starting at the height we just rewound to for verification
         let query_range = block_height..(block_height + VERIFY_LOOKAHEAD);
         let scan_range = ScanRange::from_parts(query_range.clone(), ScanPriority::Verify);
-        replace_queue_entries(conn, &query_range, Some(scan_range).into_iter())?;
+        replace_queue_entries(conn, &query_range, Some(scan_range).into_iter(), false)?;
     }
 
     Ok(())

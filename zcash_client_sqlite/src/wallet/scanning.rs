@@ -17,18 +17,42 @@ use crate::{PRUNING_DEPTH, VERIFY_LOOKAHEAD};
 use super::block_height_extrema;
 
 #[derive(Debug, Clone, Copy)]
-enum Insert {
+enum InsertOn {
     Left,
     Right,
+}
+
+struct Insert {
+    on: InsertOn,
+    force_rescan: bool,
+}
+
+impl Insert {
+    fn left(force_rescan: bool) -> Self {
+        Insert {
+            on: InsertOn::Left,
+            force_rescan,
+        }
+    }
+
+    fn right(force_rescan: bool) -> Self {
+        Insert {
+            on: InsertOn::Right,
+            force_rescan,
+        }
+    }
 }
 
 impl Not for Insert {
     type Output = Self;
 
     fn not(self) -> Self::Output {
-        match self {
-            Insert::Left => Insert::Right,
-            Insert::Right => Insert::Left,
+        Insert {
+            on: match self.on {
+                InsertOn::Left => InsertOn::Right,
+                InsertOn::Right => InsertOn::Left,
+            },
+            force_rescan: self.force_rescan,
         }
     }
 }
@@ -42,9 +66,9 @@ enum Dominance {
 
 impl From<Insert> for Dominance {
     fn from(value: Insert) -> Self {
-        match value {
-            Insert::Left => Dominance::Left,
-            Insert::Right => Dominance::Right,
+        match value.on {
+            InsertOn::Left => Dominance::Left,
+            InsertOn::Right => Dominance::Right,
         }
     }
 }
@@ -115,7 +139,7 @@ fn dominance(current: &ScanPriority, inserted: &ScanPriority, insert: Insert) ->
     match (current.cmp(inserted), (current, inserted)) {
         (Ordering::Equal, _) => Dominance::Equal,
         (_, (_, ScanPriority::Verify | ScanPriority::Scanned)) => Dominance::from(insert),
-        (_, (ScanPriority::Scanned, _)) => Dominance::from(!insert),
+        (_, (ScanPriority::Scanned, _)) if !insert.force_rescan => Dominance::from(!insert),
         (Ordering::Less, _) => Dominance::from(insert),
         (Ordering::Greater, _) => Dominance::from(!insert),
     }
@@ -197,7 +221,7 @@ fn join_nonoverlapping(left: ScanRange, right: ScanRange) -> Joined {
     }
 }
 
-fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
+fn insert(current: ScanRange, to_insert: ScanRange, force_rescans: bool) -> Joined {
     fn join_overlapping(left: ScanRange, right: ScanRange, insert: Insert) -> Joined {
         assert!(
             left.block_range().start <= right.block_range().start
@@ -205,9 +229,9 @@ fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
         );
 
         // recompute the range dominance based upon the queue entry priorities
-        let dominance = match insert {
-            Insert::Left => dominance(&right.priority(), &left.priority(), insert),
-            Insert::Right => dominance(&left.priority(), &right.priority(), insert),
+        let dominance = match insert.on {
+            InsertOn::Left => dominance(&right.priority(), &left.priority(), insert),
+            InsertOn::Right => dominance(&left.priority(), &right.priority(), insert),
         };
 
         match dominance {
@@ -237,15 +261,23 @@ fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
     use RangeOrdering::*;
     match RangeOrdering::cmp(to_insert.block_range(), current.block_range()) {
         LeftFirstDisjoint => join_nonoverlapping(to_insert, current),
-        LeftFirstOverlap | RightContained => join_overlapping(to_insert, current, Insert::Left),
+        LeftFirstOverlap | RightContained => {
+            join_overlapping(to_insert, current, Insert::left(force_rescans))
+        }
         Equal => Joined::One(ScanRange::from_parts(
             to_insert.block_range().clone(),
-            match dominance(&current.priority(), &to_insert.priority(), Insert::Right) {
+            match dominance(
+                &current.priority(),
+                &to_insert.priority(),
+                Insert::right(force_rescans),
+            ) {
                 Dominance::Left | Dominance::Equal => current.priority(),
                 Dominance::Right => to_insert.priority(),
             },
         )),
-        RightFirstOverlap | LeftContained => join_overlapping(current, to_insert, Insert::Right),
+        RightFirstOverlap | LeftContained => {
+            join_overlapping(current, to_insert, Insert::right(force_rescans))
+        }
         RightFirstDisjoint => join_nonoverlapping(current, to_insert),
     }
 }
@@ -294,9 +326,9 @@ impl SpanningTree {
         to_insert: ScanRange,
         insert: Insert,
     ) -> Self {
-        let (left, right) = match insert {
-            Insert::Left => (Box::new(left.insert(to_insert)), right),
-            Insert::Right => (left, Box::new(right.insert(to_insert))),
+        let (left, right) = match insert.on {
+            InsertOn::Left => (Box::new(left.insert(to_insert, insert.force_rescan)), right),
+            InsertOn::Right => (left, Box::new(right.insert(to_insert, insert.force_rescan))),
         };
         SpanningTree::Parent {
             span: left.span().start..right.span().end,
@@ -305,12 +337,18 @@ impl SpanningTree {
         }
     }
 
-    fn from_split(left: Self, right: Self, to_insert: ScanRange, split_point: BlockHeight) -> Self {
+    fn from_split(
+        left: Self,
+        right: Self,
+        to_insert: ScanRange,
+        split_point: BlockHeight,
+        force_rescans: bool,
+    ) -> Self {
         let (l_insert, r_insert) = to_insert
             .split_at(split_point)
             .expect("Split point is within the range of to_insert");
-        let left = Box::new(left.insert(l_insert));
-        let right = Box::new(right.insert(r_insert));
+        let left = Box::new(left.insert(l_insert, force_rescans));
+        let right = Box::new(right.insert(r_insert, force_rescans));
         SpanningTree::Parent {
             span: left.span().start..right.span().end,
             left,
@@ -318,9 +356,9 @@ impl SpanningTree {
         }
     }
 
-    fn insert(self, to_insert: ScanRange) -> Self {
+    fn insert(self, to_insert: ScanRange, force_rescans: bool) -> Self {
         match self {
-            SpanningTree::Leaf(cur) => Self::from_joined(insert(cur, to_insert)),
+            SpanningTree::Leaf(cur) => Self::from_joined(insert(cur, to_insert, force_rescans)),
             SpanningTree::Parent { span, left, right } => {
                 // This algorithm always preserves the existing partition point, and does not do
                 // any rebalancing or unification of ranges within the tree. This should be okay
@@ -331,15 +369,15 @@ impl SpanningTree {
                 match RangeOrdering::cmp(&span, to_insert.block_range()) {
                     LeftFirstDisjoint => {
                         // extend the right-hand branch
-                        Self::from_insert(left, right, to_insert, Insert::Right)
+                        Self::from_insert(left, right, to_insert, Insert::right(force_rescans))
                     }
                     LeftFirstOverlap => {
                         let split_point = left.span().end;
                         if split_point > to_insert.block_range().start {
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         } else {
                             // to_insert is fully contained in or equals the right child
-                            Self::from_insert(left, right, to_insert, Insert::Right)
+                            Self::from_insert(left, right, to_insert, Insert::right(force_rescans))
                         }
                     }
                     RightContained => {
@@ -348,42 +386,42 @@ impl SpanningTree {
                         let split_point = left.span().end;
                         if to_insert.block_range().start >= split_point {
                             // to_insert is fully contained in the right
-                            Self::from_insert(left, right, to_insert, Insert::Right)
+                            Self::from_insert(left, right, to_insert, Insert::right(force_rescans))
                         } else if to_insert.block_range().end <= split_point {
                             // to_insert is fully contained in the left
-                            Self::from_insert(left, right, to_insert, Insert::Left)
+                            Self::from_insert(left, right, to_insert, Insert::left(force_rescans))
                         } else {
                             // to_insert must be split.
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         }
                     }
                     Equal => {
                         let split_point = left.span().end;
                         if split_point > to_insert.block_range().start {
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         } else {
                             // to_insert is fully contained in the right subtree
-                            right.insert(to_insert)
+                            right.insert(to_insert, force_rescans)
                         }
                     }
                     LeftContained => {
                         // the current span is fully contained within to_insert, so we will extend
                         // or overwrite both sides
                         let split_point = left.span().end;
-                        Self::from_split(*left, *right, to_insert, split_point)
+                        Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                     }
                     RightFirstOverlap => {
                         let split_point = left.span().end;
                         if split_point < to_insert.block_range().end {
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         } else {
                             // to_insert is fully contained in or equals the left child
-                            Self::from_insert(left, right, to_insert, Insert::Left)
+                            Self::from_insert(left, right, to_insert, Insert::left(force_rescans))
                         }
                     }
                     RightFirstDisjoint => {
                         // extend the left-hand branch
-                        Self::from_insert(left, right, to_insert, Insert::Left)
+                        Self::from_insert(left, right, to_insert, Insert::left(force_rescans))
                     }
                 }
             }
@@ -447,6 +485,7 @@ pub(crate) fn replace_queue_entries(
     conn: &rusqlite::Transaction<'_>,
     query_range: &Range<BlockHeight>,
     entries: impl Iterator<Item = ScanRange>,
+    force_rescans: bool,
 ) -> Result<(), SqliteClientError> {
     let (to_create, to_delete_ends) = {
         let mut suggested_stmt = conn.prepare_cached(
@@ -499,7 +538,7 @@ pub(crate) fn replace_queue_entries(
             );
             to_delete_ends.push(Value::from(u32::from(entry.block_range().end)));
             to_create = if let Some(cur) = to_create {
-                Some(cur.insert(entry))
+                Some(cur.insert(entry, force_rescans))
             } else {
                 Some(SpanningTree::Leaf(entry))
             };
@@ -509,7 +548,7 @@ pub(crate) fn replace_queue_entries(
         // start with the scanned range.
         for entry in entries {
             to_create = if let Some(cur) = to_create {
-                Some(cur.insert(entry))
+                Some(cur.insert(entry, force_rescans))
             } else {
                 Some(SpanningTree::Leaf(entry))
             };
@@ -611,6 +650,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         conn,
         &query_range,
         Some(scanned).into_iter().chain(extensions.into_iter()),
+        false,
     )?;
 
     Ok(())
@@ -714,6 +754,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
             conn,
             &query_range,
             shard_entry.into_iter().chain(tip_entry.into_iter()),
+            false,
         )?;
     } else {
         // If we have neither shard data nor any existing block data in the database, we should also
@@ -904,7 +945,7 @@ mod tests {
             let scan_range = scan_range(range.clone(), *priority);
             match acc {
                 None => Some(SpanningTree::Leaf(scan_range)),
-                Some(t) => Some(t.insert(scan_range)),
+                Some(t) => Some(t.insert(scan_range, false)),
             }
         })
     }
@@ -1035,7 +1076,7 @@ mod tests {
 
         // a `ChainTip` insertion should not overwrite a scanned range.
         let mut t = spanning_tree(&[(0..3, ChainTip), (3..5, Scanned), (5..7, ChainTip)]).unwrap();
-        t = t.insert(scan_range(0..7, ChainTip));
+        t = t.insert(scan_range(0..7, ChainTip), false);
         assert_eq!(
             t.into_vec(),
             vec![
@@ -1054,7 +1095,7 @@ mod tests {
                 scan_range(280310..280320, Scanned)
             ]
         );
-        t = t.insert(scan_range(280300..280340, ChainTip));
+        t = t.insert(scan_range(280300..280340, ChainTip), false);
         assert_eq!(
             t.into_vec(),
             vec![
@@ -1077,10 +1118,40 @@ mod tests {
         ])
         .unwrap();
 
-        t = t.insert(scan_range(0..3, Scanned));
-        t = t.insert(scan_range(5..8, Scanned));
+        t = t.insert(scan_range(0..3, Scanned), false);
+        t = t.insert(scan_range(5..8, Scanned), false);
 
         assert_eq!(t.into_vec(), vec![scan_range(0..10, Scanned)]);
+    }
+
+    #[test]
+    fn spanning_tree_force_rescans() {
+        use ScanPriority::*;
+
+        let mut t = spanning_tree(&[
+            (0..3, Historic),
+            (3..5, Scanned),
+            (5..7, ChainTip),
+            (7..10, Scanned),
+        ])
+        .unwrap();
+
+        t = t.insert(scan_range(4..9, OpenAdjacent), true);
+
+        let expected = vec![
+            scan_range(0..3, Historic),
+            scan_range(3..4, Scanned),
+            scan_range(4..5, OpenAdjacent),
+            scan_range(5..7, ChainTip),
+            scan_range(7..9, OpenAdjacent),
+            scan_range(9..10, Scanned),
+        ];
+        assert_eq!(t.clone().into_vec(), expected);
+
+        // An insert of an ignored range should not override a scanned range; the existing
+        // priority should prevail, and so the expected state of the tree is unchanged.
+        t = t.insert(scan_range(2..5, Ignored), true);
+        assert_eq!(t.into_vec(), expected);
     }
 
     #[test]
@@ -1326,6 +1397,7 @@ mod tests {
                 &tx,
                 &(BlockHeight::from(150)..BlockHeight::from(160)),
                 vec![scan_range(150..160, Scanned)].into_iter(),
+                false,
             )
             .unwrap();
             tx.commit().unwrap();
@@ -1368,6 +1440,7 @@ mod tests {
                 &tx,
                 &(BlockHeight::from(90)..BlockHeight::from(100)),
                 vec![scan_range(90..100, Scanned)].into_iter(),
+                false,
             )
             .unwrap();
             tx.commit().unwrap();
