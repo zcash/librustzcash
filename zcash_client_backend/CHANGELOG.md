@@ -17,7 +17,7 @@ and this library adheres to Rust's notion of
   - `ScannedBlock`
   - `ShieldedProtocol`
   - `WalletCommitmentTrees`
-  - `WalletRead::{block_metadata, block_fully_scanned, suggest_scan_ranges}`
+  - `WalletRead::{chain_height, block_metadata, block_fully_scanned, suggest_scan_ranges}`
   - `WalletWrite::{put_blocks, update_chain_tip}`
   - `chain::CommitmentTreeRoot`
   - `scanning` A new module containing types required for `suggest_scan_ranges`
@@ -89,10 +89,13 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_client_backend::data_api`:
-  - `WalletRead::get_all_nullifiers`
-  - `WalletRead::{get_commitment_tree, get_witnesses}` have been removed 
-    without replacement. The utility of these methods is now subsumed
-    by those available from the `WalletCommitmentTrees` trait.
+  - `WalletRead::block_height_extrema` has been removed. Use `chain_height`
+    instead to obtain the wallet's view of the chain tip instead, or
+    `suggest_scan_ranges` to obtain information about blocks that need to be
+    scanned.
+  - `WalletRead::{get_all_nullifiers, get_commitment_tree, get_witnesses}` have
+    been removed without replacement. The utility of these methods is now
+    subsumed by those available from the `WalletCommitmentTrees` trait.
   - `WalletWrite::advance_by_block` (use `WalletWrite::put_blocks` instead).
   - `PrunedBlock` has been replaced by `ScannedBlock`
   - `testing::MockWalletDb`, which is available under the `test-dependencies`
@@ -107,6 +110,9 @@ and this library adheres to Rust's notion of
   have been removed as individual incremental witnesses are no longer tracked on a
   per-note basis. The global note commitment tree for the wallet should be used
   to obtain witnesses for spend operations instead.
+- Default implementations of `zcash_client_backend::data_api::WalletRead::{
+    get_target_and_anchor_heights, get_max_height_hash
+  }` have been removed. These should be implemented in a backend-specific fashion.
 
 
 ## [0.9.0] - 2023-04-28

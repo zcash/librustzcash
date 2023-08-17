@@ -368,12 +368,14 @@ pub(crate) mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, BranchId},
+        consensus::BranchId,
         legacy::TransparentAddress,
         memo::Memo,
-        sapling::{note_encryption::try_sapling_output_recovery, prover::TxProver},
+        sapling::{
+            note_encryption::try_sapling_output_recovery, prover::TxProver, Note, PaymentAddress,
+        },
         transaction::{
-            components::Amount,
+            components::{amount::BalanceError, Amount},
             fees::{fixed::FeeRule as FixedFeeRule, zip317::FeeRule as Zip317FeeRule},
             Transaction,
         },
@@ -388,7 +390,8 @@ pub(crate) mod tests {
             error::Error,
             wallet::{
                 create_proposed_transaction, create_spend_to_address,
-                input_selection::GreedyInputSelector, propose_transfer, spend,
+                input_selection::{GreedyInputSelector, GreedyInputSelectorError},
+                propose_transfer, spend,
             },
             ShieldedProtocol, WalletRead, WalletWrite,
         },
@@ -401,15 +404,13 @@ pub(crate) mod tests {
 
     use crate::{
         chain::init::init_cache_database,
+        error::SqliteClientError,
         tests::{
             self, fake_compact_block, insert_into_cache, network, sapling_activation_height,
             AddressType,
         },
-        wallet::{
-            get_balance, get_balance_at,
-            init::{init_blocks_table, init_wallet_db},
-        },
-        AccountId, BlockDb, NoteId, WalletDb,
+        wallet::{commitment_tree, get_balance, get_balance_at, init::init_wallet_db},
+        AccountId, BlockDb, NoteId, ReceivedNoteId, WalletDb,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -651,6 +652,12 @@ pub(crate) mod tests {
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
         let to = dfvk.default_address().1.into();
 
+        // Account balance should be zero
+        assert_eq!(
+            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            Amount::zero()
+        );
+
         // We cannot do anything if we aren't synchronised
         assert_matches!(
             create_spend_to_address(
@@ -665,53 +672,6 @@ pub(crate) mod tests {
                 NonZeroU32::new(1).unwrap(),
             ),
             Err(data_api::error::Error::ScanRequired)
-        );
-    }
-
-    #[test]
-    fn create_to_address_fails_on_insufficient_balance() {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
-        init_blocks_table(
-            &mut db_data,
-            BlockHeight::from(1u32),
-            BlockHash([1; 32]),
-            1,
-            &[0x0, 0x0, 0x0],
-        )
-        .unwrap();
-
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
-        let to = dfvk.default_address().1.into();
-
-        // Account balance should be zero
-        assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
-
-        // We cannot spend anything
-        assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &tests::network(),
-                test_prover(),
-                &usk,
-                &to,
-                Amount::from_u64(1).unwrap(),
-                None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
-            ),
-            Err(data_api::error::Error::InsufficientFunds {
-                available,
-                required
-            })
-            if available == Amount::zero() && required == Amount::from_u64(10001).unwrap()
         );
     }
 
@@ -1101,7 +1061,19 @@ pub(crate) mod tests {
         let addr2 = extsk2.default_address().1;
         let to = addr2.into();
 
-        let send_and_recover_with_policy = |db_data: &mut WalletDb<Connection, _>, ovk_policy| {
+        #[allow(clippy::type_complexity)]
+        let send_and_recover_with_policy = |db_data: &mut WalletDb<Connection, _>,
+                                            ovk_policy|
+         -> Result<
+            Option<(Note, PaymentAddress, MemoBytes)>,
+            Error<
+                SqliteClientError,
+                commitment_tree::Error,
+                GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
+                Infallible,
+                ReceivedNoteId,
+            >,
+        > {
             let txid = create_spend_to_address(
                 db_data,
                 &tests::network(),
@@ -1112,8 +1084,7 @@ pub(crate) mod tests {
                 None,
                 ovk_policy,
                 NonZeroU32::new(1).unwrap(),
-            )
-            .unwrap();
+            )?;
 
             // Fetch the transaction from the database
             let raw_tx: Vec<_> = db_data
@@ -1137,18 +1108,19 @@ pub(crate) mod tests {
                 );
 
                 if result.is_some() {
-                    return result;
+                    return Ok(result);
                 }
             }
 
-            None
+            Ok(None)
         };
 
         // Send some of the funds to another address, keeping history.
         // The recipient output is decryptable by the sender.
-        let (_, recovered_to, _) =
-            send_and_recover_with_policy(&mut db_data, OvkPolicy::Sender).unwrap();
-        assert_eq!(&recovered_to, &addr2);
+        assert_matches!(
+            send_and_recover_with_policy(&mut db_data, OvkPolicy::Sender),
+            Ok(Some((_, recovered_to, _))) if recovered_to == addr2
+        );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 42 (that don't send us funds)
         // so that the first transaction expires
@@ -1175,7 +1147,10 @@ pub(crate) mod tests {
 
         // Send the funds again, discarding history.
         // Neither transaction output is decryptable by the sender.
-        assert!(send_and_recover_with_policy(&mut db_data, OvkPolicy::Discard).is_none());
+        assert_matches!(
+            send_and_recover_with_policy(&mut db_data, OvkPolicy::Discard),
+            Ok(None)
+        );
     }
 
     #[test]

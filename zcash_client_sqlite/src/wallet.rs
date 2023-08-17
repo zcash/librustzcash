@@ -65,9 +65,11 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use rusqlite::{self, named_params, OptionalExtension, ToSql};
+use std::cmp;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
+use std::num::NonZeroU32;
 use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 
 use zcash_client_backend::data_api::{NoteId, ShieldedProtocol};
@@ -623,6 +625,45 @@ pub(crate) fn block_height_extrema(
     })
 }
 
+/// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
+pub(crate) fn scan_queue_extrema(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+    conn.query_row(
+        "SELECT MIN(block_range_start), MAX(block_range_end) FROM scan_queue",
+        [],
+        |row| {
+            let min_height: Option<u32> = row.get(0)?;
+            let max_height: Option<u32> = row.get(1)?;
+
+            // Scan ranges are end-exclusive, so we subtract 1 from `max_height` to obtain the
+            // height of the last known chain tip;
+            Ok(min_height
+                .map(BlockHeight::from)
+                .zip(max_height.map(|h| BlockHeight::from(h.saturating_sub(1)))))
+        },
+    )
+}
+
+pub(crate) fn get_target_and_anchor_heights(
+    conn: &rusqlite::Connection,
+    min_confirmations: NonZeroU32,
+) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+    scan_queue_extrema(conn).map(|heights| {
+        heights.map(|(min_height, max_height)| {
+            let target_height = max_height + 1;
+            // Select an anchor min_confirmations back from the target block,
+            // unless that would be before the earliest block we have.
+            let anchor_height = BlockHeight::from(cmp::max(
+                u32::from(target_height).saturating_sub(min_confirmations.into()),
+                u32::from(min_height),
+            ));
+
+            (target_height, anchor_height)
+        })
+    })
+}
+
 fn parse_block_metadata(
     row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>),
 ) -> Result<BlockMetadata, SqliteClientError> {
@@ -765,6 +806,21 @@ pub(crate) fn get_block_hash(
     .optional()
 }
 
+pub(crate) fn get_max_height_hash(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(BlockHeight, BlockHash)>, rusqlite::Error> {
+    conn.query_row(
+        "SELECT height, hash FROM blocks ORDER BY height DESC LIMIT 1",
+        [],
+        |row| {
+            let height = row.get::<_, u32>(0).map(BlockHeight::from)?;
+            let row_data = row.get::<_, Vec<_>>(1)?;
+            Ok((height, BlockHash::from_slice(&row_data)))
+        },
+    )
+    .optional()
+}
+
 /// Gets the height to which the database must be truncated if any truncation that would remove a
 /// number of blocks greater than the pruning height is attempted.
 pub(crate) fn get_min_unspent_height(
@@ -772,9 +828,9 @@ pub(crate) fn get_min_unspent_height(
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
     conn.query_row(
         "SELECT MIN(tx.block)
-             FROM sapling_received_notes n
-             JOIN transactions tx ON tx.id_tx = n.tx
-             WHERE n.spent IS NULL",
+         FROM sapling_received_notes n
+         JOIN transactions tx ON tx.id_tx = n.tx
+         WHERE n.spent IS NULL",
         [],
         |row| {
             row.get(0)

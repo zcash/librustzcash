@@ -619,12 +619,12 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     params: &P,
     new_tip: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    // Read the previous tip height from the blocks table.
+    // Read the previous max scanned height from the blocks table
     let prior_tip = block_height_extrema(conn)?.map(|(_, prior_tip)| prior_tip);
 
-    // If the chain tip is below the prior tip height, then the caller has caught the
-    // chain in the middle of a reorg. Do nothing; the caller will continue using the old
-    // scan ranges and either:
+    // If the chain tip is below the prior max scanned height, then the caller has caught
+    // the chain in the middle of a reorg. Do nothing; the caller will continue using the
+    // old scan ranges and either:
     // - encounter an error trying to fetch the blocks (and thus trigger the same handling
     //   logic as if this happened with the old linear scanning code); or
     // - encounter a discontinuity error in `scan_cached_blocks`, at which point they will
