@@ -4,7 +4,7 @@ use incrementalmerkletree::Retention;
 use std::{collections::HashMap, fmt};
 use tracing::debug;
 
-use rusqlite::{self, types::ToSql};
+use rusqlite::{self, named_params};
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
@@ -13,18 +13,27 @@ use uuid::Uuid;
 
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight},
+    consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::read_commitment_tree,
     sapling,
     transaction::components::amount::BalanceError,
     zip32::AccountId,
 };
 
-use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullViewingKey};
+use zcash_client_backend::{
+    data_api::{
+        scanning::{ScanPriority, ScanRange},
+        SAPLING_SHARD_HEIGHT,
+    },
+    keys::UnifiedFullViewingKey,
+};
 
 use crate::{error::SqliteClientError, wallet, WalletDb, PRUNING_DEPTH, SAPLING_TABLES_PREFIX};
 
-use super::commitment_tree::{self, SqliteShardStore};
+use super::{
+    commitment_tree::{self, SqliteShardStore},
+    scanning::insert_queue_entries,
+};
 
 mod migrations;
 
@@ -309,14 +318,27 @@ pub fn init_blocks_table<P: consensus::Parameters>(
 
         wdb.conn.0.execute(
             "INSERT INTO blocks (height, hash, time, sapling_tree)
-            VALUES (?, ?, ?, ?)",
-            [
-                u32::from(height).to_sql()?,
-                hash.0.to_sql()?,
-                time.to_sql()?,
-                sapling_tree.to_sql()?,
+             VALUES (:height, :hash, :time, :sapling_tree)",
+            named_params![
+                ":height": u32::from(height),
+                ":hash": hash.0,
+                ":time": time,
+                ":sapling_tree": sapling_tree,
             ],
         )?;
+
+        if let Some(sapling_activation) = wdb.params.activation_height(NetworkUpgrade::Sapling) {
+            let scan_range_start = std::cmp::min(sapling_activation, height);
+            let scan_range_end = height + 1;
+            insert_queue_entries(
+                wdb.conn.0,
+                Some(ScanRange::from_parts(
+                    scan_range_start..scan_range_end,
+                    ScanPriority::Ignored,
+                ))
+                .iter(),
+            )?;
+        }
 
         if let Some(nonempty_frontier) = block_end_tree.to_frontier().value() {
             debug!("Inserting frontier into ShardTree: {:?}", nonempty_frontier);
@@ -582,7 +604,7 @@ mod tests {
                         scan_queue.block_range_start <= prev_shard.subtree_end_height
                         AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
                     )
-                WHERE scan_queue.priority != {}",
+                WHERE scan_queue.priority > {}",
                 u32::from(tests::network().activation_height(NetworkUpgrade::Sapling).unwrap()),
                 priority_code(&ScanPriority::Scanned),
             ),

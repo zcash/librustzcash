@@ -56,7 +56,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(add_transaction_views::Migration),
         Box::new(v_transactions_net::Migration),
         Box::new(received_notes_nullable_nf::Migration),
-        Box::new(shardtree_support::Migration),
+        Box::new(shardtree_support::Migration {
+            params: params.clone(),
+        }),
         Box::new(nullifier_map::Migration),
         Box::new(sapling_memo_consistency::Migration {
             params: params.clone(),

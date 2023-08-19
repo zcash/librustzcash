@@ -17,7 +17,7 @@ use zcash_client_backend::data_api::{
     SAPLING_SHARD_HEIGHT,
 };
 use zcash_primitives::{
-    consensus::BlockHeight,
+    consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{read_commitment_tree, read_incremental_witness},
     sapling,
 };
@@ -39,9 +39,11 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
     b"\x8b\xe5\xf5\x12\xbc\xce\x6c\xbf",
 );
 
-pub(super) struct Migration;
+pub(super) struct Migration<P> {
+    pub(super) params: P,
+}
 
-impl schemer::Migration for Migration {
+impl<P> schemer::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
@@ -57,7 +59,7 @@ impl schemer::Migration for Migration {
     }
 }
 
-impl RusqliteMigration for Migration {
+impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
@@ -262,13 +264,17 @@ impl RusqliteMigration for Migration {
         if let Some((start, end)) = block_height_extrema {
             // `ScanRange` uses an exclusive upper bound.
             let chain_end = end + 1;
+            let ignored_range =
+                self.params
+                    .activation_height(NetworkUpgrade::Sapling)
+                    .map(|sapling_activation| {
+                        let ignored_range_start = std::cmp::min(sapling_activation, start);
+                        ScanRange::from_parts(ignored_range_start..start, ScanPriority::Ignored)
+                    });
+            let scanned_range = ScanRange::from_parts(start..chain_end, ScanPriority::Scanned);
             insert_queue_entries(
                 transaction,
-                Some(ScanRange::from_parts(
-                    start..chain_end,
-                    ScanPriority::Scanned,
-                ))
-                .iter(),
+                ignored_range.iter().chain(Some(scanned_range).iter()),
             )?;
         }
 
