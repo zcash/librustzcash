@@ -1249,7 +1249,7 @@ mod tests {
         .unwrap();
 
         let expected = vec![
-            // The range below the wallet's birthday height is ignored
+            // The range up to and including the wallet's birthday height is ignored.
             scan_range(
                 u32::from(sap_active)..u32::from(birthday_height + 1),
                 Ignored,
