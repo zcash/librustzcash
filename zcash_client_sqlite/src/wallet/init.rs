@@ -330,6 +330,10 @@ pub fn init_blocks_table<P: consensus::Parameters>(
         if let Some(sapling_activation) = wdb.params.activation_height(NetworkUpgrade::Sapling) {
             let scan_range_start = std::cmp::min(sapling_activation, height);
             let scan_range_end = height + 1;
+            debug!(
+                "Setting ignored block range {}..{}",
+                scan_range_start, scan_range_end
+            );
             insert_queue_entries(
                 wdb.conn.0,
                 Some(ScanRange::from_parts(
