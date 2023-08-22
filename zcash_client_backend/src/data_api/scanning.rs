@@ -6,7 +6,9 @@ use zcash_primitives::consensus::BlockHeight;
 /// Scanning range priority levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScanPriority {
-    /// Block ranges that have already been scanned have lowest priority.
+    /// Block ranges that are ignored have lowest priority.
+    Ignored,
+    /// Block ranges that have already been scanned will not be re-scanned.
     Scanned,
     /// Block ranges to be scanned to advance the fully-scanned height.
     Historic,

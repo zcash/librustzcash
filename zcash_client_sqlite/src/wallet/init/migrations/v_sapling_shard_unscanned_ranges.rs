@@ -59,7 +59,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         scan_queue.block_range_start <= prev_shard.subtree_end_height
                         AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
                     )
-                WHERE scan_queue.priority != {}",
+                WHERE scan_queue.priority > {}",
                 SAPLING_SHARD_HEIGHT,
                 SAPLING_SHARD_HEIGHT,
                 u32::from(self.params.activation_height(consensus::NetworkUpgrade::Sapling).unwrap()),

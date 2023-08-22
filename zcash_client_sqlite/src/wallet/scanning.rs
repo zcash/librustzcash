@@ -52,6 +52,7 @@ impl From<Insert> for Dominance {
 pub(crate) fn parse_priority_code(code: i64) -> Option<ScanPriority> {
     use ScanPriority::*;
     match code {
+        0 => Some(Ignored),
         10 => Some(Scanned),
         20 => Some(Historic),
         30 => Some(OpenAdjacent),
@@ -65,6 +66,7 @@ pub(crate) fn parse_priority_code(code: i64) -> Option<ScanPriority> {
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
     match priority {
+        Ignored => 0,
         Scanned => 10,
         Historic => 20,
         OpenAdjacent => 30,
@@ -745,7 +747,10 @@ mod tests {
         WalletCommitmentTrees, WalletRead, WalletWrite,
     };
     use zcash_primitives::{
-        block::BlockHash, consensus::BlockHeight, sapling::Node, transaction::components::Amount,
+        block::BlockHash,
+        consensus::{BlockHeight, NetworkUpgrade, Parameters},
+        sapling::Node,
+        transaction::components::Amount,
     };
 
     use crate::{
@@ -754,7 +759,10 @@ mod tests {
             self, fake_compact_block, init_test_accounts_table, insert_into_cache,
             sapling_activation_height, AddressType,
         },
-        wallet::{init::init_wallet_db, scanning::suggest_scan_ranges},
+        wallet::{
+            init::{init_blocks_table, init_wallet_db},
+            scanning::suggest_scan_ranges,
+        },
         BlockDb, WalletDb,
     };
 
@@ -1210,6 +1218,105 @@ mod tests {
                 scan_range((sap_active + 329)..(sap_active + 451), ChainTip),
                 scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
             ]
+        );
+    }
+
+    #[test]
+    fn init_blocks_table_creates_ignored_range() {
+        use ScanPriority::*;
+
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+
+        let sap_active = db_data
+            .params
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        // Initialise the blocks table. We use Canopy activation as an arbitrary birthday height
+        // that's greater than Sapling activation.
+        let birthday_height = db_data
+            .params
+            .activation_height(NetworkUpgrade::Canopy)
+            .unwrap();
+        init_blocks_table(
+            &mut db_data,
+            birthday_height,
+            BlockHash([1; 32]),
+            1,
+            &[0x0, 0x0, 0x0],
+        )
+        .unwrap();
+
+        let expected = vec![
+            // The range up to and including the wallet's birthday height is ignored.
+            scan_range(
+                u32::from(sap_active)..u32::from(birthday_height + 1),
+                Ignored,
+            ),
+        ];
+        assert_matches!(
+            suggest_scan_ranges(&db_data.conn, Ignored),
+            Ok(scan_ranges) if scan_ranges == expected
+        );
+
+        // Set up some shard history
+        db_data
+            .put_sapling_subtree_roots(
+                0,
+                &[
+                    // Add the end of a commitment tree below the wallet birthday. We currently
+                    // need to scan from this height up to the tip to make notes spendable, though
+                    // this should not be necessary as we have added a frontier that should
+                    // complete the left-hand side of the required shard; this can be fixed once we
+                    // have proper account birthdays.
+                    CommitmentTreeRoot::from_parts(
+                        birthday_height - 1000,
+                        // fake a hash, the value doesn't matter
+                        Node::empty_leaf(),
+                    ),
+                ],
+            )
+            .unwrap();
+
+        // Update the chain tip
+        let tip_height = db_data
+            .params
+            .activation_height(NetworkUpgrade::Nu5)
+            .unwrap();
+        db_data.update_chain_tip(tip_height).unwrap();
+
+        // Verify that the suggested scan ranges match what is expected
+        let expected = vec![
+            // The birthday height was "last scanned" (as the wallet birthday) so we verify 10
+            // blocks starting at that height.
+            scan_range(
+                u32::from(birthday_height)..u32::from(birthday_height + 10),
+                Verify,
+            ),
+            // The remainder of the shard after the verify segment is required in order to make
+            // notes spendable, so it has priority `ChainTip`
+            scan_range(
+                u32::from(birthday_height + 10)..u32::from(tip_height + 1),
+                ChainTip,
+            ),
+            // The remainder of the shard prior to the birthday height must be scanned because the
+            // wallet doesn't know that it already has enough data from the initial frontier to
+            // avoid having to scan this range.
+            scan_range(
+                u32::from(birthday_height - 1000)..u32::from(birthday_height),
+                ChainTip,
+            ),
+            // The range below the wallet's birthday height is ignored
+            scan_range(
+                u32::from(sap_active)..u32::from(birthday_height - 1000),
+                Ignored,
+            ),
+        ];
+
+        assert_matches!(
+            suggest_scan_ranges(&db_data.conn, Ignored),
+            Ok(scan_ranges) if scan_ranges == expected
         );
     }
 }
