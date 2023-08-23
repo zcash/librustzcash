@@ -20,7 +20,7 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, ReceivedNoteId};
 
-use super::memo_repr;
+use super::{memo_repr, wallet_birthday};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
@@ -132,6 +132,15 @@ pub(crate) fn get_spendable_sapling_notes(
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+    let birthday_height = match wallet_birthday(conn)? {
+        Some(birthday) => birthday,
+        None => {
+            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
+            // such a case, the wallet has no notes to spend.
+            return Ok(vec![]);
+        }
+    };
+
     let mut stmt_unscanned_tip = conn.prepare_cached(
         "SELECT 1 FROM v_sapling_shard_unscanned_ranges
          WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
@@ -159,8 +168,10 @@ pub(crate) fn get_spendable_sapling_notes(
             -- select all the unscanned ranges involving the shard containing this note
             WHERE sapling_received_notes.commitment_tree_position >= unscanned.start_position
             AND sapling_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-            -- exclude unscanned ranges above the anchor height which don't affect spendability
+            -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
             AND unscanned.block_range_start <= :anchor_height
+            -- exclude unscanned ranges that end below the wallet birthday
+            AND unscanned.block_range_end > :wallet_birthday
          )",
     )?;
 
@@ -169,9 +180,10 @@ pub(crate) fn get_spendable_sapling_notes(
 
     let notes = stmt_select_notes.query_and_then(
         named_params![
-            ":account": &u32::from(account),
-            ":anchor_height": &u32::from(anchor_height),
+            ":account": u32::from(account),
+            ":anchor_height": u32::from(anchor_height),
             ":exclude": &excluded_ptr,
+            ":wallet_birthday": u32::from(birthday_height)
         ],
         to_spendable_note,
     )?;
@@ -186,6 +198,15 @@ pub(crate) fn select_spendable_sapling_notes(
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+    let birthday_height = match wallet_birthday(conn)? {
+        Some(birthday) => birthday,
+        None => {
+            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
+            // such a case, the wallet has no notes to spend.
+            return Ok(vec![]);
+        }
+    };
+
     let mut stmt_unscanned_tip = conn.prepare_cached(
         "SELECT 1 FROM v_sapling_shard_unscanned_ranges
          WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
@@ -233,8 +254,10 @@ pub(crate) fn select_spendable_sapling_notes(
                 -- select all the unscanned ranges involving the shard containing this note
                 WHERE sapling_received_notes.commitment_tree_position >= unscanned.start_position
                 AND sapling_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-                -- exclude unscanned ranges above the anchor height which don't affect spendability
+                -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
                 AND unscanned.block_range_start <= :anchor_height
+                -- exclude unscanned ranges that end below the wallet birthday
+                AND unscanned.block_range_end > :wallet_birthday
              )
          )
          SELECT id_note, diversifier, value, rcm, commitment_tree_position
@@ -252,7 +275,8 @@ pub(crate) fn select_spendable_sapling_notes(
             ":account": &u32::from(account),
             ":anchor_height": &u32::from(anchor_height),
             ":target_value": &i64::from(target_value),
-            ":exclude": &excluded_ptr
+            ":exclude": &excluded_ptr,
+            ":wallet_birthday": u32::from(birthday_height)
         ],
         to_spendable_note,
     )?;
