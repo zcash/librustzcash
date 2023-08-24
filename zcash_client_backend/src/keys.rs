@@ -133,7 +133,7 @@ impl Era {
     }
 }
 
-/// A set of viewing keys that are all associated with a single
+/// A set of spending keys that are all associated with a single
 /// ZIP-0032 account identifier.
 #[derive(Clone, Debug)]
 #[doc(hidden)]
