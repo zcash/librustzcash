@@ -55,7 +55,7 @@ use zcash_primitives::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_client_backend::data_api::wallet::shield_transparent_funds;
+use zcash_client_backend::data_api::wallet::{propose_shielding, shield_transparent_funds};
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::{
     legacy, legacy::keys::IncomingViewingKey, transaction::components::amount::NonNegativeAmount,
@@ -418,6 +418,38 @@ impl<Cache> TestState<Cache> {
             spend_from_account,
             input_selector,
             request,
+            min_confirmations,
+        )
+    }
+
+    /// Invokes [`propose_shielding`] with the given arguments.
+    #[cfg(feature = "transparent-inputs")]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn propose_shielding<InputsT>(
+        &mut self,
+        input_selector: &InputsT,
+        shielding_threshold: NonNegativeAmount,
+        from_addrs: &[TransparentAddress],
+        min_confirmations: NonZeroU32,
+    ) -> Result<
+        Proposal<InputsT::FeeRule, ReceivedNoteId>,
+        data_api::error::Error<
+            SqliteClientError,
+            Infallible,
+            InputsT::Error,
+            <InputsT::FeeRule as FeeRule>::Error,
+            ReceivedNoteId,
+        >,
+    >
+    where
+        InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
+    {
+        propose_shielding::<_, _, _, Infallible>(
+            &mut self.db_data,
+            &self.params,
+            input_selector,
+            shielding_threshold,
+            from_addrs,
             min_confirmations,
         )
     }
