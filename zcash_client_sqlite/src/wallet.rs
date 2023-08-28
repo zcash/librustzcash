@@ -1572,17 +1572,12 @@ mod tests {
     use std::num::NonZeroU32;
 
     use secrecy::Secret;
-    use tempfile::NamedTempFile;
 
     use zcash_primitives::transaction::components::Amount;
 
     use zcash_client_backend::data_api::WalletRead;
 
-    use crate::{
-        tests,
-        wallet::{get_current_address, init::init_wallet_db},
-        AccountId, WalletDb,
-    };
+    use crate::{testing::TestBuilder, AccountId};
 
     use super::get_balance;
 
@@ -1599,22 +1594,20 @@ mod tests {
 
     #[test]
     fn empty_database_has_no_balance() {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
-
-        // Add an account to the wallet
-        tests::init_test_accounts_table(&mut db_data);
+        let st = TestBuilder::new()
+            .with_seed(Secret::new(vec![]))
+            .with_test_account()
+            .build();
 
         // The account should be empty
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
         // We can't get an anchor height, as we have not scanned any blocks.
         assert_eq!(
-            db_data
+            st.wallet()
                 .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
                 .unwrap(),
             None
@@ -1622,11 +1615,11 @@ mod tests {
 
         // An invalid account has zero balance
         assert_matches!(
-            get_current_address(&db_data.conn, &db_data.params, AccountId::from(1)),
+            st.wallet().get_current_address(AccountId::from(1)),
             Ok(None)
         );
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
     }
@@ -1634,17 +1627,20 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn put_received_transparent_utxo() {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut st = TestBuilder::new().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (account_id, _usk) = db_data.create_account(&seed).unwrap();
-        let uaddr = db_data.get_current_address(account_id).unwrap().unwrap();
+        let (account_id, _usk) = st.wallet_mut().create_account(&seed).unwrap();
+        let uaddr = st
+            .wallet()
+            .get_current_address(account_id)
+            .unwrap()
+            .unwrap();
         let taddr = uaddr.transparent().unwrap();
 
-        let bal_absent = db_data
+        let bal_absent = st
+            .wallet()
             .get_transparent_balances(account_id, BlockHeight::from_u32(12345))
             .unwrap();
         assert!(bal_absent.is_empty());
@@ -1659,7 +1655,7 @@ mod tests {
         )
         .unwrap();
 
-        let res0 = super::put_received_transparent_utxo(&db_data.conn, &db_data.params, &utxo);
+        let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
         assert_matches!(res0, Ok(_));
 
         // Change the mined height of the UTXO and upsert; we should get back
@@ -1673,13 +1669,11 @@ mod tests {
             BlockHeight::from_u32(34567),
         )
         .unwrap();
-        let res1 = super::put_received_transparent_utxo(&db_data.conn, &db_data.params, &utxo2);
+        let res1 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res1, Ok(id) if id == res0.unwrap());
 
         assert_matches!(
-            super::get_unspent_transparent_outputs(
-                &db_data.conn,
-                &db_data.params,
+            st.wallet().get_unspent_transparent_outputs(
                 taddr,
                 BlockHeight::from_u32(12345),
                 &[]
@@ -1688,9 +1682,7 @@ mod tests {
         );
 
         assert_matches!(
-            super::get_unspent_transparent_outputs(
-                &db_data.conn,
-                &db_data.params,
+            st.wallet().get_unspent_transparent_outputs(
                 taddr,
                 BlockHeight::from_u32(34567),
                 &[]
@@ -1702,21 +1694,21 @@ mod tests {
         );
 
         assert_matches!(
-            db_data.get_transparent_balances(account_id, BlockHeight::from_u32(34567)),
+            st.wallet().get_transparent_balances(account_id, BlockHeight::from_u32(34567)),
             Ok(h) if h.get(taddr) == Amount::from_u64(100000).ok().as_ref()
         );
 
         // Artificially delete the address from the addresses table so that
         // we can ensure the update fails if the join doesn't work.
-        db_data
+        st.wallet()
             .conn
             .execute(
                 "DELETE FROM addresses WHERE cached_transparent_receiver_address = ?",
-                [Some(taddr.encode(&db_data.params))],
+                [Some(taddr.encode(&st.wallet().params))],
             )
             .unwrap();
 
-        let res2 = super::put_received_transparent_utxo(&db_data.conn, &db_data.params, &utxo2);
+        let res2 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res2, Err(_));
     }
 }

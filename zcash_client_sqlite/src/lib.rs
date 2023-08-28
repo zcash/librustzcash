@@ -90,6 +90,9 @@ pub mod serialization;
 pub mod wallet;
 use wallet::commitment_tree::{self, put_shard_roots};
 
+#[cfg(test)]
+mod testing;
+
 /// The maximum number of blocks the wallet is allowed to rewind. This is
 /// consistent with the bound in zcashd, and allows block data deeper than
 /// this delta from the chain tip to be pruned.
@@ -1082,337 +1085,32 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
-    use prost::Message;
-    use rand_core::{OsRng, RngCore};
-    use rusqlite::params;
-    use std::collections::HashMap;
+    use zcash_client_backend::data_api::{WalletRead, WalletWrite};
+
+    use crate::{testing::TestBuilder, AccountId};
 
     #[cfg(feature = "unstable")]
-    use std::{fs::File, path::Path};
-
-    #[cfg(feature = "transparent-inputs")]
-    use zcash_primitives::{legacy, legacy::keys::IncomingViewingKey};
-
-    use zcash_note_encryption::Domain;
-    use zcash_primitives::{
-        block::BlockHash,
-        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
-        legacy::TransparentAddress,
-        memo::MemoBytes,
-        sapling::{
-            note_encryption::{sapling_note_encryption, SaplingDomain},
-            util::generate_random_rseed,
-            value::NoteValue,
-            Note, Nullifier, PaymentAddress,
-        },
-        transaction::components::Amount,
-        zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
-    };
-
-    use zcash_client_backend::{
-        data_api::{WalletRead, WalletWrite},
-        keys::{sapling, UnifiedFullViewingKey},
-        proto::compact_formats::{
-            self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
-        },
-    };
-
-    use crate::{
-        wallet::init::{init_accounts_table, init_wallet_db},
-        AccountId, WalletDb,
-    };
-
-    use super::BlockDb;
+    use zcash_primitives::{consensus::Parameters, transaction::components::Amount};
 
     #[cfg(feature = "unstable")]
-    use super::{
-        chain::{init::init_blockmeta_db, BlockMeta},
-        FsBlockDb,
-    };
-
-    #[cfg(feature = "mainnet")]
-    pub(crate) fn network() -> Network {
-        Network::MainNetwork
-    }
-
-    #[cfg(not(feature = "mainnet"))]
-    pub(crate) fn network() -> Network {
-        Network::TestNetwork
-    }
-
-    #[cfg(feature = "mainnet")]
-    pub(crate) fn sapling_activation_height() -> BlockHeight {
-        Network::MainNetwork
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap()
-    }
-
-    #[cfg(not(feature = "mainnet"))]
-    pub(crate) fn sapling_activation_height() -> BlockHeight {
-        Network::TestNetwork
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn init_test_accounts_table(
-        db_data: &mut WalletDb<rusqlite::Connection, Network>,
-    ) -> (DiversifiableFullViewingKey, Option<TransparentAddress>) {
-        let (ufvk, taddr) = init_test_accounts_table_ufvk(db_data);
-        (ufvk.sapling().unwrap().clone(), taddr)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn init_test_accounts_table_ufvk(
-        db_data: &mut WalletDb<rusqlite::Connection, Network>,
-    ) -> (UnifiedFullViewingKey, Option<TransparentAddress>) {
-        let seed = [0u8; 32];
-        let account = AccountId::from(0);
-        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
-        let dfvk = extsk.to_diversifiable_full_viewing_key();
-
-        #[cfg(feature = "transparent-inputs")]
-        let (tkey, taddr) = {
-            let tkey = legacy::keys::AccountPrivKey::from_seed(&network(), &seed, account)
-                .unwrap()
-                .to_account_pubkey();
-            let taddr = tkey.derive_external_ivk().unwrap().default_address().0;
-            (Some(tkey), Some(taddr))
-        };
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        let taddr = None;
-
-        let ufvk = UnifiedFullViewingKey::new(
-            #[cfg(feature = "transparent-inputs")]
-            tkey,
-            Some(dfvk),
-            None,
-        )
-        .unwrap();
-
-        let ufvks = HashMap::from([(account, ufvk.clone())]);
-        init_accounts_table(db_data, &ufvks).unwrap();
-
-        (ufvk, taddr)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) enum AddressType {
-        DefaultExternal,
-        DiversifiedExternal(DiversifierIndex),
-        Internal,
-    }
-
-    /// Create a fake CompactBlock at the given height, containing a single output paying
-    /// an address. Returns the CompactBlock and the nullifier for the new note.
-    pub(crate) fn fake_compact_block(
-        height: BlockHeight,
-        prev_hash: BlockHash,
-        dfvk: &DiversifiableFullViewingKey,
-        req: AddressType,
-        value: Amount,
-        initial_sapling_tree_size: u32,
-    ) -> (CompactBlock, Nullifier) {
-        let to = match req {
-            AddressType::DefaultExternal => dfvk.default_address().1,
-            AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
-            AddressType::Internal => dfvk.change_address().1,
-        };
-
-        // Create a fake Note for the account
-        let mut rng = OsRng;
-        let rseed = generate_random_rseed(&network(), height, &mut rng);
-        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
-        let encryptor = sapling_note_encryption::<_, Network>(
-            Some(dfvk.fvk().ovk),
-            note.clone(),
-            MemoBytes::empty(),
-            &mut rng,
-        );
-        let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-            .0
-            .to_vec();
-        let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-        // Create a fake CompactBlock containing the note
-        let cout = CompactSaplingOutput {
-            cmu,
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-        };
-        let mut ctx = CompactTx::default();
-        let mut txid = vec![0; 32];
-        rng.fill_bytes(&mut txid);
-        ctx.hash = txid;
-        ctx.outputs.push(cout);
-        let mut cb = CompactBlock {
-            hash: {
-                let mut hash = vec![0; 32];
-                rng.fill_bytes(&mut hash);
-                hash
-            },
-            height: height.into(),
-            ..Default::default()
-        };
-        cb.prev_hash.extend_from_slice(&prev_hash.0);
-        cb.vtx.push(ctx);
-        cb.chain_metadata = Some(compact::ChainMetadata {
-            sapling_commitment_tree_size: initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-            ..Default::default()
-        });
-        (cb, note.nf(&dfvk.fvk().vk.nk, 0))
-    }
-
-    /// Create a fake CompactBlock at the given height, spending a single note from the
-    /// given address.
-    pub(crate) fn fake_compact_block_spending(
-        height: BlockHeight,
-        prev_hash: BlockHash,
-        (nf, in_value): (Nullifier, Amount),
-        dfvk: &DiversifiableFullViewingKey,
-        to: PaymentAddress,
-        value: Amount,
-        initial_sapling_tree_size: u32,
-    ) -> CompactBlock {
-        let mut rng = OsRng;
-        let rseed = generate_random_rseed(&network(), height, &mut rng);
-
-        // Create a fake CompactBlock containing the note
-        let cspend = CompactSaplingSpend { nf: nf.to_vec() };
-        let mut ctx = CompactTx::default();
-        let mut txid = vec![0; 32];
-        rng.fill_bytes(&mut txid);
-        ctx.hash = txid;
-        ctx.spends.push(cspend);
-
-        // Create a fake Note for the payment
-        ctx.outputs.push({
-            let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
-            let encryptor = sapling_note_encryption::<_, Network>(
-                Some(dfvk.fvk().ovk),
-                note.clone(),
-                MemoBytes::empty(),
-                &mut rng,
-            );
-            let cmu = note.cmu().to_bytes().to_vec();
-            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-                .0
-                .to_vec();
-            let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-            CompactSaplingOutput {
-                cmu,
-                ephemeral_key,
-                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-            }
-        });
-
-        // Create a fake Note for the change
-        ctx.outputs.push({
-            let change_addr = dfvk.default_address().1;
-            let rseed = generate_random_rseed(&network(), height, &mut rng);
-            let note = Note::from_parts(
-                change_addr,
-                NoteValue::from_raw((in_value - value).unwrap().into()),
-                rseed,
-            );
-            let encryptor = sapling_note_encryption::<_, Network>(
-                Some(dfvk.fvk().ovk),
-                note.clone(),
-                MemoBytes::empty(),
-                &mut rng,
-            );
-            let cmu = note.cmu().to_bytes().to_vec();
-            let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-                .0
-                .to_vec();
-            let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-            CompactSaplingOutput {
-                cmu,
-                ephemeral_key,
-                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-            }
-        });
-
-        let mut cb = CompactBlock {
-            hash: {
-                let mut hash = vec![0; 32];
-                rng.fill_bytes(&mut hash);
-                hash
-            },
-            height: height.into(),
-            ..Default::default()
-        };
-        cb.prev_hash.extend_from_slice(&prev_hash.0);
-        cb.vtx.push(ctx);
-        cb.chain_metadata = Some(compact::ChainMetadata {
-            sapling_commitment_tree_size: initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-            ..Default::default()
-        });
-        cb
-    }
-
-    /// Insert a fake CompactBlock into the cache DB.
-    pub(crate) fn insert_into_cache(db_cache: &BlockDb, cb: &CompactBlock) {
-        let cb_bytes = cb.encode_to_vec();
-        db_cache
-            .0
-            .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
-            .unwrap()
-            .execute(params![u32::from(cb.height()), cb_bytes,])
-            .unwrap();
-    }
+    use zcash_client_backend::keys::sapling;
 
     #[cfg(feature = "unstable")]
-    pub(crate) fn store_in_fsblockdb<P: AsRef<Path>>(
-        fsblockdb_root: P,
-        cb: &CompactBlock,
-    ) -> BlockMeta {
-        use std::io::Write;
-
-        let meta = BlockMeta {
-            height: cb.height(),
-            block_hash: cb.hash(),
-            block_time: cb.time,
-            sapling_outputs_count: cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum(),
-            orchard_actions_count: cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum(),
-        };
-
-        let blocks_dir = fsblockdb_root.as_ref().join("blocks");
-        let block_path = meta.block_file_path(&blocks_dir);
-
-        File::create(block_path)
-            .unwrap()
-            .write_all(&cb.encode_to_vec())
-            .unwrap();
-
-        meta
-    }
+    use crate::testing::AddressType;
 
     #[test]
     pub(crate) fn get_next_available_address() {
-        use tempfile::NamedTempFile;
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
+        let mut st = TestBuilder::new().with_test_account().build();
 
         let account = AccountId::from(0);
-        init_wallet_db(&mut db_data, None).unwrap();
-        init_test_accounts_table_ufvk(&mut db_data);
-
-        let current_addr = db_data.get_current_address(account).unwrap();
+        let current_addr = st.wallet().get_current_address(account).unwrap();
         assert!(current_addr.is_some());
 
-        let addr2 = db_data.get_next_available_address(account).unwrap();
+        let addr2 = st.wallet_mut().get_next_available_address(account).unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = db_data.get_current_address(account).unwrap();
+        let addr2_cur = st.wallet().get_current_address(account).unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1420,23 +1118,18 @@ mod tests {
     #[test]
     fn transparent_receivers() {
         use secrecy::Secret;
-        use tempfile::NamedTempFile;
 
-        use crate::{chain::init::init_cache_database, wallet::init::init_wallet_db};
-
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+        let st = TestBuilder::new()
+            .with_block_cache()
+            .with_seed(Secret::new(vec![]))
+            .with_test_account()
+            .build();
 
         // Add an account to the wallet.
-        let (ufvk, taddr) = init_test_accounts_table_ufvk(&mut db_data);
+        let (ufvk, taddr) = st.test_account().unwrap();
         let taddr = taddr.unwrap();
 
-        let receivers = db_data.get_transparent_receivers(0.into()).unwrap();
+        let receivers = st.wallet().get_transparent_receivers(0.into()).unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
@@ -1448,74 +1141,44 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
-        // Initialise a BlockMeta DB in a new directory.
-        let fsblockdb_root = tempfile::tempdir().unwrap();
-        let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
-        init_blockmeta_db(&mut db_meta).unwrap();
+        let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.
-        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let account = AccountId::from(0);
-        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
+        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let (cb1, _) = fake_compact_block(
-            BlockHeight::from_u32(1),
-            BlockHash([1; 32]),
+        let (h1, meta1, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
-            0,
         );
-        let (cb2, _) = fake_compact_block(
-            BlockHeight::from_u32(2),
-            BlockHash([2; 32]),
+        let (h2, meta2, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(10).unwrap(),
-            1,
         );
-
-        // Write the CompactBlocks to the BlockMeta DB's corresponding disk storage.
-        let meta1 = store_in_fsblockdb(&fsblockdb_root, &cb1);
-        let meta2 = store_in_fsblockdb(&fsblockdb_root, &cb2);
 
         // The BlockMeta DB is not updated until we do so explicitly.
-        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
 
         // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-        db_meta.write_block_metadata(&[meta1, meta2]).unwrap();
+        st.cache().write_block_metadata(&[meta1, meta2]).unwrap();
 
         // The BlockMeta DB now sees blocks up to height 2.
-        assert_eq!(
-            db_meta.get_max_cached_height().unwrap(),
-            Some(BlockHeight::from_u32(2)),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
-            Some(meta1),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(2)).unwrap(),
-            Some(meta2),
-        );
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h2),);
+        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).unwrap(), Some(meta2));
+        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        db_meta
-            .truncate_to_height(BlockHeight::from_u32(1))
-            .unwrap();
-        assert_eq!(
-            db_meta.get_max_cached_height().unwrap(),
-            Some(BlockHeight::from_u32(1)),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
-            Some(meta1),
-        );
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(2)).unwrap(), None);
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+        st.cache().truncate_to_height(h1).unwrap();
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h1));
+        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).unwrap(), None);
+        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
     }
 }

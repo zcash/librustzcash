@@ -393,7 +393,7 @@ mod tests {
 
     use crate::{
         error::SqliteClientError,
-        tests::{self, network},
+        testing::{self, network},
         wallet::scanning::priority_code,
         AccountId, WalletDb,
     };
@@ -415,7 +415,7 @@ mod tests {
     #[test]
     fn verify_schema() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
 
         use regex::Regex;
@@ -609,7 +609,7 @@ mod tests {
                         AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
                     )
                 WHERE scan_queue.priority > {}",
-                u32::from(tests::network().activation_height(NetworkUpgrade::Sapling).unwrap()),
+                u32::from(testing::network().activation_height(NetworkUpgrade::Sapling).unwrap()),
                 priority_code(&ScanPriority::Scanned),
             ),
             // v_transactions
@@ -852,11 +852,11 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                tests::network().hrp_sapling_payment_address(),
+                testing::network().hrp_sapling_payment_address(),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                tests::network().hrp_sapling_extended_full_viewing_key(),
+                testing::network().hrp_sapling_extended_full_viewing_key(),
                 extfvk,
             );
             wdb.conn.execute(
@@ -874,10 +874,10 @@ mod tests {
 
         let seed = [0xab; 32];
         let account = AccountId::from(0);
-        let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
+        let secret_key = sapling::spending_key(&seed, testing::network().coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(seed.to_vec()))).unwrap();
     }
@@ -984,11 +984,11 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                tests::network().hrp_sapling_payment_address(),
+                testing::network().hrp_sapling_payment_address(),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                tests::network().hrp_sapling_extended_full_viewing_key(),
+                testing::network().hrp_sapling_extended_full_viewing_key(),
                 extfvk,
             );
             wdb.conn.execute(
@@ -1040,10 +1040,10 @@ mod tests {
 
         let seed = [0xab; 32];
         let account = AccountId::from(0);
-        let secret_key = sapling::spending_key(&seed, tests::network().coin_type(), account);
+        let secret_key = sapling::spending_key(&seed, testing::network().coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_autoshielding(&mut db_data, &extfvk, account).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(seed.to_vec()))).unwrap();
     }
@@ -1150,9 +1150,9 @@ mod tests {
                 [],
             )?;
 
-            let ufvk_str = ufvk.encode(&tests::network());
+            let ufvk_str = ufvk.encode(&testing::network());
             let address_str =
-                RecipientAddress::Unified(ufvk.default_address().0).encode(&tests::network());
+                RecipientAddress::Unified(ufvk.default_address().0).encode(&testing::network());
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1168,7 +1168,7 @@ mod tests {
             {
                 let taddr =
                     RecipientAddress::Transparent(*ufvk.default_address().0.transparent().unwrap())
-                        .encode(&tests::network());
+                        .encode(&testing::network());
                 wdb.conn.execute(
                     "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
                     [],
@@ -1188,9 +1188,10 @@ mod tests {
 
         let seed = [0xab; 32];
         let account = AccountId::from(0);
-        let secret_key = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account).unwrap();
+        let secret_key =
+            UnifiedSpendingKey::from_seed(&testing::network(), &seed, account).unwrap();
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_main(
             &mut db_data,
             &secret_key.to_unified_full_viewing_key(),
@@ -1203,7 +1204,7 @@ mod tests {
     #[test]
     fn init_accounts_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // We can call the function as many times as we want with no data
@@ -1272,7 +1273,7 @@ mod tests {
     #[test]
     fn init_blocks_table_only_works_once() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
 
         // First call with data should initialise the blocks table
@@ -1299,14 +1300,14 @@ mod tests {
     #[test]
     fn init_accounts_table_stores_correct_address() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
 
         let seed = [0u8; 32];
 
         // Add an account to the wallet
         let account_id = AccountId::from(0);
-        let usk = UnifiedSpendingKey::from_seed(&tests::network(), &seed, account_id).unwrap();
+        let usk = UnifiedSpendingKey::from_seed(&testing::network(), &seed, account_id).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let expected_address = ufvk.sapling().unwrap().default_address().1;
         let ufvks = HashMap::from([(account_id, ufvk)]);

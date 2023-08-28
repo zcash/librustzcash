@@ -286,7 +286,7 @@ mod tests {
     use zcash_primitives::zip32::AccountId;
 
     use crate::{
-        tests,
+        testing,
         wallet::init::{init_wallet_db_internal, migrations::addresses_table},
         WalletDb,
     };
@@ -311,10 +311,10 @@ mod tests {
     #[test]
     fn transaction_views() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID]).unwrap();
         let usk =
-            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
+            UnifiedSpendingKey::from_seed(&testing::network(), &[0u8; 32][..], AccountId::from(0))
                 .unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
 
@@ -322,7 +322,7 @@ mod tests {
             .conn
             .execute(
                 "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
-                params![ufvk.encode(&tests::network())],
+                params![ufvk.encode(&testing::network())],
             )
             .unwrap();
 
@@ -403,7 +403,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), tests::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
         init_wallet_db_internal(
             &mut db_data,
             None,
@@ -440,7 +440,7 @@ mod tests {
         tx.write(&mut tx_bytes).unwrap();
 
         let usk =
-            UnifiedSpendingKey::from_seed(&tests::network(), &[0u8; 32][..], AccountId::from(0))
+            UnifiedSpendingKey::from_seed(&testing::network(), &[0u8; 32][..], AccountId::from(0))
                 .unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk.default_address();
@@ -451,11 +451,11 @@ mod tests {
                     .ok()
                     .map(|k| k.derive_address(0).unwrap())
             })
-            .map(|a| a.encode(&tests::network()));
+            .map(|a| a.encode(&testing::network()));
 
         db_data.conn.execute(
             "INSERT INTO accounts (account, ufvk, address, transparent_address) VALUES (0, ?, ?, ?)",
-            params![ufvk.encode(&tests::network()), ua.encode(&tests::network()), &taddr]
+            params![ufvk.encode(&testing::network()), ua.encode(&testing::network()), &taddr]
         ).unwrap();
         db_data
             .conn
