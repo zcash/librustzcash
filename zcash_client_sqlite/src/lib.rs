@@ -1100,20 +1100,17 @@ mod tests {
 
     #[test]
     pub(crate) fn get_next_available_address() {
-        let mut test = TestBuilder::new().with_test_account().build();
+        let mut st = TestBuilder::new().with_test_account().build();
 
         let account = AccountId::from(0);
-        let current_addr = test.wallet().get_current_address(account).unwrap();
+        let current_addr = st.wallet().get_current_address(account).unwrap();
         assert!(current_addr.is_some());
 
-        let addr2 = test
-            .wallet_mut()
-            .get_next_available_address(account)
-            .unwrap();
+        let addr2 = st.wallet_mut().get_next_available_address(account).unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = test.wallet().get_current_address(account).unwrap();
+        let addr2_cur = st.wallet().get_current_address(account).unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1122,17 +1119,17 @@ mod tests {
     fn transparent_receivers() {
         use secrecy::Secret;
 
-        let test = TestBuilder::new()
+        let st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
         // Add an account to the wallet.
-        let (ufvk, taddr) = test.test_account().unwrap();
+        let (ufvk, taddr) = st.test_account().unwrap();
         let taddr = taddr.unwrap();
 
-        let receivers = test.wallet().get_transparent_receivers(0.into()).unwrap();
+        let receivers = st.wallet().get_transparent_receivers(0.into()).unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
@@ -1144,44 +1141,44 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
-        let mut test = TestBuilder::new().with_fs_block_cache().build();
+        let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.
-        assert_eq!(test.cache().get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let account = AccountId::from(0);
-        let extsk = sapling::spending_key(&seed, test.wallet().params.coin_type(), account);
+        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let (h1, meta1, _) = test.generate_next_block(
+        let (h1, meta1, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
-        let (h2, meta2, _) = test.generate_next_block(
+        let (h2, meta2, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(10).unwrap(),
         );
 
         // The BlockMeta DB is not updated until we do so explicitly.
-        assert_eq!(test.cache().get_max_cached_height().unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), None);
 
         // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-        test.cache().write_block_metadata(&[meta1, meta2]).unwrap();
+        st.cache().write_block_metadata(&[meta1, meta2]).unwrap();
 
         // The BlockMeta DB now sees blocks up to height 2.
-        assert_eq!(test.cache().get_max_cached_height().unwrap(), Some(h2),);
-        assert_eq!(test.cache().find_block(h1).unwrap(), Some(meta1));
-        assert_eq!(test.cache().find_block(h2).unwrap(), Some(meta2));
-        assert_eq!(test.cache().find_block(h2 + 1).unwrap(), None);
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h2),);
+        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).unwrap(), Some(meta2));
+        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        test.cache().truncate_to_height(h1).unwrap();
-        assert_eq!(test.cache().get_max_cached_height().unwrap(), Some(h1));
-        assert_eq!(test.cache().find_block(h1).unwrap(), Some(meta1));
-        assert_eq!(test.cache().find_block(h2).unwrap(), None);
-        assert_eq!(test.cache().find_block(h2 + 1).unwrap(), None);
+        st.cache().truncate_to_height(h1).unwrap();
+        assert_eq!(st.cache().get_max_cached_height().unwrap(), Some(h1));
+        assert_eq!(st.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(st.cache().find_block(h2).unwrap(), None);
+        assert_eq!(st.cache().find_block(h2 + 1).unwrap(), None);
     }
 }

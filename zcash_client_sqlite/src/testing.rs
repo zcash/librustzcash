@@ -129,8 +129,8 @@ impl<Cache> TestBuilder<Cache> {
         self
     }
 
-    /// Builds the runner for this test.
-    pub(crate) fn build(self) -> TestRunner<Cache> {
+    /// Builds the state for this test.
+    pub(crate) fn build(self) -> TestState<Cache> {
         let params = network();
 
         let data_file = NamedTempFile::new().unwrap();
@@ -144,7 +144,7 @@ impl<Cache> TestBuilder<Cache> {
             None
         };
 
-        TestRunner {
+        TestState {
             params,
             cache: self.cache,
             latest_cached_block: None,
@@ -155,8 +155,8 @@ impl<Cache> TestBuilder<Cache> {
     }
 }
 
-/// A `zcash_client_sqlite` test runner.
-pub(crate) struct TestRunner<Cache> {
+/// The state for a `zcash_client_sqlite` test.
+pub(crate) struct TestState<Cache> {
     params: Network,
     cache: Cache,
     latest_cached_block: Option<(BlockHeight, BlockHash, u32)>,
@@ -165,7 +165,7 @@ pub(crate) struct TestRunner<Cache> {
     test_account: Option<(UnifiedFullViewingKey, Option<TransparentAddress>)>,
 }
 
-impl<Cache: TestCache> TestRunner<Cache>
+impl<Cache: TestCache> TestState<Cache>
 where
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
 {
@@ -297,7 +297,7 @@ where
     }
 }
 
-impl<Cache> TestRunner<Cache> {
+impl<Cache> TestState<Cache> {
     /// Exposes an immutable reference to the test's [`WalletDb`].
     pub(crate) fn wallet(&self) -> &WalletDb<Connection, Network> {
         &self.db_data

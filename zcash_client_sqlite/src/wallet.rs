@@ -1594,20 +1594,20 @@ mod tests {
 
     #[test]
     fn empty_database_has_no_balance() {
-        let test = TestBuilder::new()
+        let st = TestBuilder::new()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
         // The account should be empty
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
         // We can't get an anchor height, as we have not scanned any blocks.
         assert_eq!(
-            test.wallet()
+            st.wallet()
                 .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
                 .unwrap(),
             None
@@ -1615,11 +1615,11 @@ mod tests {
 
         // An invalid account has zero balance
         assert_matches!(
-            test.wallet().get_current_address(AccountId::from(1)),
+            st.wallet().get_current_address(AccountId::from(1)),
             Ok(None)
         );
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
     }
@@ -1627,19 +1627,19 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn put_received_transparent_utxo() {
-        let mut test = TestBuilder::new().build();
+        let mut st = TestBuilder::new().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (account_id, _usk) = test.wallet_mut().create_account(&seed).unwrap();
-        let uaddr = test
+        let (account_id, _usk) = st.wallet_mut().create_account(&seed).unwrap();
+        let uaddr = st
             .wallet()
             .get_current_address(account_id)
             .unwrap()
             .unwrap();
         let taddr = uaddr.transparent().unwrap();
 
-        let bal_absent = test
+        let bal_absent = st
             .wallet()
             .get_transparent_balances(account_id, BlockHeight::from_u32(12345))
             .unwrap();
@@ -1655,7 +1655,7 @@ mod tests {
         )
         .unwrap();
 
-        let res0 = test.wallet_mut().put_received_transparent_utxo(&utxo);
+        let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
         assert_matches!(res0, Ok(_));
 
         // Change the mined height of the UTXO and upsert; we should get back
@@ -1669,11 +1669,11 @@ mod tests {
             BlockHeight::from_u32(34567),
         )
         .unwrap();
-        let res1 = test.wallet_mut().put_received_transparent_utxo(&utxo2);
+        let res1 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res1, Ok(id) if id == res0.unwrap());
 
         assert_matches!(
-            test.wallet().get_unspent_transparent_outputs(
+            st.wallet().get_unspent_transparent_outputs(
                 taddr,
                 BlockHeight::from_u32(12345),
                 &[]
@@ -1682,7 +1682,7 @@ mod tests {
         );
 
         assert_matches!(
-            test.wallet().get_unspent_transparent_outputs(
+            st.wallet().get_unspent_transparent_outputs(
                 taddr,
                 BlockHeight::from_u32(34567),
                 &[]
@@ -1694,21 +1694,21 @@ mod tests {
         );
 
         assert_matches!(
-            test.wallet().get_transparent_balances(account_id, BlockHeight::from_u32(34567)),
+            st.wallet().get_transparent_balances(account_id, BlockHeight::from_u32(34567)),
             Ok(h) if h.get(taddr) == Amount::from_u64(100000).ok().as_ref()
         );
 
         // Artificially delete the address from the addresses table so that
         // we can ensure the update fails if the join doesn't work.
-        test.wallet()
+        st.wallet()
             .conn
             .execute(
                 "DELETE FROM addresses WHERE cached_transparent_receiver_address = ?",
-                [Some(taddr.encode(&test.wallet().params))],
+                [Some(taddr.encode(&st.wallet().params))],
             )
             .unwrap();
 
-        let res2 = test.wallet_mut().put_received_transparent_utxo(&utxo2);
+        let res2 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res2, Err(_));
     }
 }

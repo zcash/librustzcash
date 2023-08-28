@@ -352,66 +352,66 @@ mod tests {
 
     #[test]
     fn valid_chain_states() {
-        let mut test = TestBuilder::new()
+        let mut st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
-        let dfvk = test.test_account_sapling().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Empty chain should return None
-        assert_matches!(test.wallet().chain_height(), Ok(None));
+        assert_matches!(st.wallet().chain_height(), Ok(None));
 
         // Create a fake CompactBlock sending value to the address
-        let (h1, _, _) = test.generate_next_block(
+        let (h1, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
 
         // Scan the cache
-        test.scan_cached_blocks(h1, 1);
+        st.scan_cached_blocks(h1, 1);
 
         // Create a second fake CompactBlock sending more value to the address
-        let (h2, _, _) = test.generate_next_block(
+        let (h2, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
         );
 
         // Scanning should detect no inconsistencies
-        test.scan_cached_blocks(h2, 1);
+        st.scan_cached_blocks(h2, 1);
     }
 
     #[test]
     fn invalid_chain_cache_disconnected() {
-        let mut test = TestBuilder::new()
+        let mut st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
-        let dfvk = test.test_account_sapling().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Create some fake CompactBlocks
-        let (h, _, _) = test.generate_next_block(
+        let (h, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
         );
-        let (last_contiguous_height, _, _) = test.generate_next_block(
+        let (last_contiguous_height, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(7).unwrap(),
         );
 
         // Scanning the cache should find no inconsistencies
-        test.scan_cached_blocks(h, 2);
+        st.scan_cached_blocks(h, 2);
 
         // Create more fake CompactBlocks that don't connect to the scanned ones
         let disconnect_height = last_contiguous_height + 1;
-        test.generate_block_at(
+        st.generate_block_at(
             disconnect_height,
             BlockHash([1; 32]),
             &dfvk,
@@ -419,7 +419,7 @@ mod tests {
             Amount::from_u64(8).unwrap(),
             2,
         );
-        test.generate_next_block(
+        st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(3).unwrap(),
@@ -427,7 +427,7 @@ mod tests {
 
         // Data+cache chain should be invalid at the data/cache boundary
         assert_matches!(
-            test.try_scan_cached_blocks(
+            st.try_scan_cached_blocks(
                 disconnect_height,
                 2
             ),
@@ -438,99 +438,99 @@ mod tests {
 
     #[test]
     fn data_db_truncation() {
-        let mut test = TestBuilder::new()
+        let mut st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
-        let dfvk = test.test_account_sapling().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
         // Create fake CompactBlocks sending value to the address
         let value = Amount::from_u64(5).unwrap();
         let value2 = Amount::from_u64(7).unwrap();
-        let (h, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        test.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
         // Scan the cache
-        test.scan_cached_blocks(h, 2);
+        st.scan_cached_blocks(h, 2);
 
         // Account balance should reflect both received notes
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
 
         // "Rewind" to height of last scanned block
-        test.wallet_mut()
+        st.wallet_mut()
             .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
             .unwrap();
 
         // Account balance should be unaltered
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
 
         // Rewind so that one block is dropped
-        test.wallet_mut()
+        st.wallet_mut()
             .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
             .unwrap();
 
         // Account balance should only contain the first received note
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
 
         // Scan the cache again
-        test.scan_cached_blocks(h, 2);
+        st.scan_cached_blocks(h, 2);
 
         // Account balance should again reflect both received notes
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
     }
 
     #[test]
     fn scan_cached_blocks_allows_blocks_out_of_order() {
-        let mut test = TestBuilder::new()
+        let mut st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
+        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
         let value = Amount::from_u64(50000).unwrap();
-        let (h1, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        test.scan_cached_blocks(h1, 1);
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h1, 1);
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
 
         // Create blocks to reach SAPLING_ACTIVATION_HEIGHT + 2
-        let (h2, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        let (h3, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Scan the later block first
-        test.scan_cached_blocks(h3, 1);
+        st.scan_cached_blocks(h3, 1);
 
         // Now scan the block of height SAPLING_ACTIVATION_HEIGHT + 1
-        test.scan_cached_blocks(h2, 1);
+        st.scan_cached_blocks(h2, 1);
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::from_u64(150_000).unwrap()
         );
 
@@ -549,7 +549,7 @@ mod tests {
             DustOutputPolicy::default(),
         );
         assert_matches!(
-            test.spend(
+            st.spend(
                 &input_selector,
                 &usk,
                 req,
@@ -562,74 +562,74 @@ mod tests {
 
     #[test]
     fn scan_cached_blocks_finds_received_notes() {
-        let mut test = TestBuilder::new()
+        let mut st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
-        let dfvk = test.test_account_sapling().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
-        let (h1, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Scan the cache
-        test.scan_cached_blocks(h1, 1);
+        st.scan_cached_blocks(h1, 1);
 
         // Account balance should reflect the received note
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
 
         // Create a second fake CompactBlock sending more value to the address
         let value2 = Amount::from_u64(7).unwrap();
-        let (h2, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
         // Scan the cache again
-        test.scan_cached_blocks(h2, 1);
+        st.scan_cached_blocks(h2, 1);
 
         // Account balance should reflect both received notes
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             (value + value2).unwrap()
         );
     }
 
     #[test]
     fn scan_cached_blocks_finds_change_notes() {
-        let mut test = TestBuilder::new()
+        let mut st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
-        let dfvk = test.test_account_sapling().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
         let (received_height, _, nf) =
-            test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Scan the cache
-        test.scan_cached_blocks(received_height, 1);
+        st.scan_cached_blocks(received_height, 1);
 
         // Account balance should reflect the received note
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
 
@@ -637,60 +637,60 @@ mod tests {
         let extsk2 = ExtendedSpendingKey::master(&[0]);
         let to2 = extsk2.default_address().1;
         let value2 = Amount::from_u64(2).unwrap();
-        let (spent_height, _) = test.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+        let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
         // Scan the cache again
-        test.scan_cached_blocks(spent_height, 1);
+        st.scan_cached_blocks(spent_height, 1);
 
         // Account balance should equal the change
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             (value - value2).unwrap()
         );
     }
 
     #[test]
     fn scan_cached_blocks_detects_spends_out_of_order() {
-        let mut test = TestBuilder::new()
+        let mut st = TestBuilder::new()
             .with_block_cache()
             .with_seed(Secret::new(vec![]))
             .with_test_account()
             .build();
 
-        let dfvk = test.test_account_sapling().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
         // Create a fake CompactBlock sending value to the address
         let value = Amount::from_u64(5).unwrap();
         let (received_height, _, nf) =
-            test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
         let to2 = extsk2.default_address().1;
         let value2 = Amount::from_u64(2).unwrap();
-        let (spent_height, _) = test.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+        let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
         // Scan the spending block first.
-        test.scan_cached_blocks(spent_height, 1);
+        st.scan_cached_blocks(spent_height, 1);
 
         // Account balance should equal the change
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             (value - value2).unwrap()
         );
 
         // Now scan the block in which we received the note that was spent.
-        test.scan_cached_blocks(received_height, 1);
+        st.scan_cached_blocks(received_height, 1);
 
         // Account balance should be the same.
         assert_eq!(
-            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
+            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
             (value - value2).unwrap()
         );
     }
