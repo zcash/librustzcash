@@ -738,11 +738,9 @@ mod tests {
     use std::ops::Range;
 
     use incrementalmerkletree::{Hashable, Level};
-    use rusqlite::Connection;
     use secrecy::Secret;
-    use tempfile::NamedTempFile;
     use zcash_client_backend::data_api::{
-        chain::{scan_cached_blocks, CommitmentTreeRoot},
+        chain::CommitmentTreeRoot,
         scanning::{ScanPriority, ScanRange},
         WalletCommitmentTrees, WalletRead, WalletWrite,
     };
@@ -754,16 +752,8 @@ mod tests {
     };
 
     use crate::{
-        chain::init::init_cache_database,
-        testing::{
-            self, fake_compact_block, init_test_accounts_table, insert_into_cache,
-            sapling_activation_height, AddressType,
-        },
-        wallet::{
-            init::{init_blocks_table, init_wallet_db},
-            scanning::suggest_scan_ranges,
-        },
-        BlockDb, WalletDb,
+        testing::{sapling_activation_height, AddressType, TestBuilder},
+        wallet::{init::init_blocks_table, scanning::suggest_scan_ranges},
     };
 
     use super::{join_nonoverlapping, Joined, RangeOrdering, SpanningTree};
@@ -1093,21 +1083,18 @@ mod tests {
     fn scan_complete() {
         use ScanPriority::*;
 
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
+        let mut test = TestBuilder::new()
+            .with_block_cache()
+            .with_seed(Secret::new(vec![]))
+            .with_test_account()
+            .build();
 
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
-
-        // Add an account to the wallet.
-        let (dfvk, _taddr) = init_test_accounts_table(&mut db_data);
+        let dfvk = test.test_account_sapling().unwrap();
 
         assert_matches!(
             // In the following, we don't care what the root hashes are, they just need to be
             // distinct.
-            db_data.put_sapling_subtree_roots(
+            test.wallet_mut().put_sapling_subtree_roots(
                 0,
                 &[
                     CommitmentTreeRoot::from_parts(
@@ -1134,7 +1121,7 @@ mod tests {
         let initial_height = sapling_activation_height() + 310;
 
         let value = Amount::from_u64(50000).unwrap();
-        let (mut cb, _) = fake_compact_block(
+        test.generate_block_at(
             initial_height,
             BlockHash([0; 32]),
             &dfvk,
@@ -1142,36 +1129,21 @@ mod tests {
             value,
             initial_sapling_tree_size,
         );
-        insert_into_cache(&db_cache, &cb);
 
-        for i in 1..=10 {
-            cb = fake_compact_block(
-                initial_height + i,
-                cb.hash(),
+        for _ in 1..=10 {
+            test.generate_next_block(
                 &dfvk,
                 AddressType::DefaultExternal,
                 Amount::from_u64(10000).unwrap(),
-                initial_sapling_tree_size + i,
-            )
-            .0;
-            insert_into_cache(&db_cache, &cb);
+            );
         }
 
-        assert_matches!(
-            scan_cached_blocks(
-                &testing::network(),
-                &db_cache,
-                &mut db_data,
-                initial_height,
-                10,
-            ),
-            Ok(())
-        );
+        test.scan_cached_blocks(initial_height, 10);
 
         // Verify the that adjacent range needed to make the note spendable has been prioritized.
         let sap_active = u32::from(sapling_activation_height());
         assert_matches!(
-            db_data.suggest_scan_ranges(),
+            test.wallet().suggest_scan_ranges(),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 300)..(sap_active + 310), FoundNote)
             ]
@@ -1179,7 +1151,7 @@ mod tests {
 
         // Check that the scanned range has been properly persisted.
         assert_matches!(
-            suggest_scan_ranges(&db_data.conn, Scanned),
+            suggest_scan_ranges(&test.wallet().conn, Scanned),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 300)..(sap_active + 310), FoundNote),
                 scan_range((sap_active + 310)..(sap_active + 320), Scanned)
@@ -1189,14 +1161,15 @@ mod tests {
         // Simulate the wallet going offline for a bit, update the chain tip to 20 blocks in the
         // future.
         assert_matches!(
-            db_data.update_chain_tip(sapling_activation_height() + 340),
+            test.wallet_mut()
+                .update_chain_tip(sapling_activation_height() + 340),
             Ok(())
         );
 
         // Check the scan range again, we should see a `ChainTip` range for the period we've been
         // offline.
         assert_matches!(
-            db_data.suggest_scan_ranges(),
+            test.wallet().suggest_scan_ranges(),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 320)..(sap_active + 341), ChainTip),
                 scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
@@ -1205,14 +1178,15 @@ mod tests {
 
         // Now simulate a jump ahead more than 100 blocks.
         assert_matches!(
-            db_data.update_chain_tip(sapling_activation_height() + 450),
+            test.wallet_mut()
+                .update_chain_tip(sapling_activation_height() + 450),
             Ok(())
         );
 
         // Check the scan range again, we should see a `Validate` range for the previous wallet
         // tip, and then a `ChainTip` for the remaining range.
         assert_matches!(
-            db_data.suggest_scan_ranges(),
+            test.wallet().suggest_scan_ranges(),
             Ok(scan_ranges) if scan_ranges == vec![
                 scan_range((sap_active + 319)..(sap_active + 329), Verify),
                 scan_range((sap_active + 329)..(sap_active + 451), ChainTip),
@@ -1225,22 +1199,22 @@ mod tests {
     fn init_blocks_table_creates_ignored_range() {
         use ScanPriority::*;
 
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+        let mut test = TestBuilder::new().with_seed(Secret::new(vec![])).build();
 
-        let sap_active = db_data
+        let sap_active = test
+            .wallet()
             .params
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap();
         // Initialise the blocks table. We use Canopy activation as an arbitrary birthday height
         // that's greater than Sapling activation.
-        let birthday_height = db_data
+        let birthday_height = test
+            .wallet()
             .params
             .activation_height(NetworkUpgrade::Canopy)
             .unwrap();
         init_blocks_table(
-            &mut db_data,
+            test.wallet_mut(),
             birthday_height,
             BlockHash([1; 32]),
             1,
@@ -1256,12 +1230,12 @@ mod tests {
             ),
         ];
         assert_matches!(
-            suggest_scan_ranges(&db_data.conn, Ignored),
+            suggest_scan_ranges(&test.wallet().conn, Ignored),
             Ok(scan_ranges) if scan_ranges == expected
         );
 
         // Set up some shard history
-        db_data
+        test.wallet_mut()
             .put_sapling_subtree_roots(
                 0,
                 &[
@@ -1280,11 +1254,12 @@ mod tests {
             .unwrap();
 
         // Update the chain tip
-        let tip_height = db_data
+        let tip_height = test
+            .wallet()
             .params
             .activation_height(NetworkUpgrade::Nu5)
             .unwrap();
-        db_data.update_chain_tip(tip_height).unwrap();
+        test.wallet_mut().update_chain_tip(tip_height).unwrap();
 
         // Verify that the suggested scan ranges match what is expected
         let expected = vec![
@@ -1315,7 +1290,7 @@ mod tests {
         ];
 
         assert_matches!(
-            suggest_scan_ranges(&db_data.conn, Ignored),
+            suggest_scan_ranges(&test.wallet().conn, Ignored),
             Ok(scan_ranges) if scan_ranges == expected
         );
     }

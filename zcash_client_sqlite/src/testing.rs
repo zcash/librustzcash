@@ -518,14 +518,6 @@ pub(crate) fn sapling_activation_height() -> BlockHeight {
 }
 
 #[cfg(test)]
-pub(crate) fn init_test_accounts_table(
-    db_data: &mut WalletDb<rusqlite::Connection, Network>,
-) -> (DiversifiableFullViewingKey, Option<TransparentAddress>) {
-    let (ufvk, taddr) = init_test_accounts_table_ufvk(db_data);
-    (ufvk.sapling().unwrap().clone(), taddr)
-}
-
-#[cfg(test)]
 pub(crate) fn init_test_accounts_table_ufvk(
     db_data: &mut WalletDb<rusqlite::Connection, Network>,
 ) -> (UnifiedFullViewingKey, Option<TransparentAddress>) {

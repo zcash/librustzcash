@@ -1087,51 +1087,33 @@ extern crate assert_matches;
 mod tests {
     use zcash_client_backend::data_api::{WalletRead, WalletWrite};
 
-    use crate::{
-        testing::{init_test_accounts_table_ufvk, network},
-        wallet::init::init_wallet_db,
-        AccountId, WalletDb,
-    };
+    use crate::{testing::TestBuilder, AccountId};
 
     #[cfg(feature = "unstable")]
-    use zcash_primitives::{
-        block::BlockHash,
-        consensus::{BlockHeight, Parameters},
-        transaction::components::Amount,
-    };
+    use zcash_primitives::{consensus::Parameters, transaction::components::Amount};
 
     #[cfg(feature = "unstable")]
     use zcash_client_backend::keys::sapling;
 
     #[cfg(feature = "unstable")]
-    use crate::{
-        chain::init::init_blockmeta_db,
-        testing::{fake_compact_block, store_in_fsblockdb, AddressType},
-        FsBlockDb,
-    };
-
-    #[cfg(feature = "unstable")]
-    use super::BlockDb;
+    use crate::testing::AddressType;
 
     #[test]
     pub(crate) fn get_next_available_address() {
-        use tempfile::NamedTempFile;
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
+        let mut test = TestBuilder::new().with_test_account().build();
 
         let account = AccountId::from(0);
-        init_wallet_db(&mut db_data, None).unwrap();
-        init_test_accounts_table_ufvk(&mut db_data);
-
-        let current_addr = db_data.get_current_address(account).unwrap();
+        let current_addr = test.wallet().get_current_address(account).unwrap();
         assert!(current_addr.is_some());
 
-        let addr2 = db_data.get_next_available_address(account).unwrap();
+        let addr2 = test
+            .wallet_mut()
+            .get_next_available_address(account)
+            .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = db_data.get_current_address(account).unwrap();
+        let addr2_cur = test.wallet().get_current_address(account).unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1139,25 +1121,18 @@ mod tests {
     #[test]
     fn transparent_receivers() {
         use secrecy::Secret;
-        use tempfile::NamedTempFile;
 
-        use crate::{
-            chain::init::init_cache_database, testing::network, wallet::init::init_wallet_db,
-        };
-
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+        let test = TestBuilder::new()
+            .with_block_cache()
+            .with_seed(Secret::new(vec![]))
+            .with_test_account()
+            .build();
 
         // Add an account to the wallet.
-        let (ufvk, taddr) = init_test_accounts_table_ufvk(&mut db_data);
+        let (ufvk, taddr) = test.test_account().unwrap();
         let taddr = taddr.unwrap();
 
-        let receivers = db_data.get_transparent_receivers(0.into()).unwrap();
+        let receivers = test.wallet().get_transparent_receivers(0.into()).unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
@@ -1169,74 +1144,44 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
-        // Initialise a BlockMeta DB in a new directory.
-        let fsblockdb_root = tempfile::tempdir().unwrap();
-        let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
-        init_blockmeta_db(&mut db_meta).unwrap();
+        let mut test = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.
-        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+        assert_eq!(test.cache().get_max_cached_height().unwrap(), None);
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let account = AccountId::from(0);
-        let extsk = sapling::spending_key(&seed, network().coin_type(), account);
+        let extsk = sapling::spending_key(&seed, test.wallet().params.coin_type(), account);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let (cb1, _) = fake_compact_block(
-            BlockHeight::from_u32(1),
-            BlockHash([1; 32]),
+        let (h1, meta1, _) = test.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(5).unwrap(),
-            0,
         );
-        let (cb2, _) = fake_compact_block(
-            BlockHeight::from_u32(2),
-            BlockHash([2; 32]),
+        let (h2, meta2, _) = test.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
             Amount::from_u64(10).unwrap(),
-            1,
         );
-
-        // Write the CompactBlocks to the BlockMeta DB's corresponding disk storage.
-        let meta1 = store_in_fsblockdb(&fsblockdb_root, &cb1);
-        let meta2 = store_in_fsblockdb(&fsblockdb_root, &cb2);
 
         // The BlockMeta DB is not updated until we do so explicitly.
-        assert_eq!(db_meta.get_max_cached_height().unwrap(), None);
+        assert_eq!(test.cache().get_max_cached_height().unwrap(), None);
 
         // Inform the BlockMeta DB about the newly-persisted CompactBlocks.
-        db_meta.write_block_metadata(&[meta1, meta2]).unwrap();
+        test.cache().write_block_metadata(&[meta1, meta2]).unwrap();
 
         // The BlockMeta DB now sees blocks up to height 2.
-        assert_eq!(
-            db_meta.get_max_cached_height().unwrap(),
-            Some(BlockHeight::from_u32(2)),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
-            Some(meta1),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(2)).unwrap(),
-            Some(meta2),
-        );
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+        assert_eq!(test.cache().get_max_cached_height().unwrap(), Some(h2),);
+        assert_eq!(test.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(test.cache().find_block(h2).unwrap(), Some(meta2));
+        assert_eq!(test.cache().find_block(h2 + 1).unwrap(), None);
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
-        db_meta
-            .truncate_to_height(BlockHeight::from_u32(1))
-            .unwrap();
-        assert_eq!(
-            db_meta.get_max_cached_height().unwrap(),
-            Some(BlockHeight::from_u32(1)),
-        );
-        assert_eq!(
-            db_meta.find_block(BlockHeight::from_u32(1)).unwrap(),
-            Some(meta1),
-        );
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(2)).unwrap(), None);
-        assert_eq!(db_meta.find_block(BlockHeight::from_u32(3)).unwrap(), None);
+        test.cache().truncate_to_height(h1).unwrap();
+        assert_eq!(test.cache().get_max_cached_height().unwrap(), Some(h1));
+        assert_eq!(test.cache().find_block(h1).unwrap(), Some(meta1));
+        assert_eq!(test.cache().find_block(h2).unwrap(), None);
+        assert_eq!(test.cache().find_block(h2 + 1).unwrap(), None);
     }
 }

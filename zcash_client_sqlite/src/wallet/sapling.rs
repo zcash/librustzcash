@@ -403,14 +403,11 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
-    use rusqlite::Connection;
     use secrecy::Secret;
-    use tempfile::NamedTempFile;
 
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
-        block::BlockHash,
         consensus::BranchId,
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
@@ -429,13 +426,8 @@ pub(crate) mod tests {
         address::RecipientAddress,
         data_api::{
             self,
-            chain::scan_cached_blocks,
             error::Error,
-            wallet::{
-                create_proposed_transaction, create_spend_to_address,
-                input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-                propose_transfer, spend,
-            },
+            wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
             ShieldedProtocol, WalletRead, WalletWrite,
         },
         decrypt_transaction,
@@ -446,21 +438,15 @@ pub(crate) mod tests {
     };
 
     use crate::{
-        chain::init::init_cache_database,
         error::SqliteClientError,
-        testing::{
-            self, fake_compact_block, insert_into_cache, network, sapling_activation_height,
-            AddressType,
-        },
-        wallet::{commitment_tree, get_balance, get_balance_at, init::init_wallet_db},
-        AccountId, BlockDb, NoteId, ReceivedNoteId, WalletDb,
+        testing::{self, network, AddressType, BlockCache, TestBuilder, TestRunner},
+        wallet::{commitment_tree, get_balance, get_balance_at},
+        AccountId, NoteId, ReceivedNoteId,
     };
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_client_backend::{
-            data_api::wallet::shield_transparent_funds, wallet::WalletTransparentOutput,
-        },
+        zcash_client_backend::wallet::WalletTransparentOutput,
         zcash_primitives::transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
     };
 
@@ -475,50 +461,30 @@ pub(crate) mod tests {
 
     #[test]
     fn send_proposed_transfer() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (account, usk) = db_data.create_account(&seed).unwrap();
+        let (account, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
-        let (cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
-            0,
-        );
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            1,
-        )
-        .unwrap();
+        let (h, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        test.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data
+        let (_, anchor_height) = test
+            .wallet()
             .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
         assert_eq!(
-            get_balance_at(&db_data.conn, AccountId::from(0), anchor_height).unwrap(),
+            get_balance_at(&test.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
             value
         );
 
@@ -538,9 +504,7 @@ pub(crate) mod tests {
         let change_strategy = fixed::SingleOutputChangeStrategy::new(fee_rule);
         let input_selector =
             &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
-        let proposal_result = propose_transfer::<_, _, _, Infallible>(
-            &mut db_data,
-            &testing::network(),
+        let proposal_result = test.propose_transfer(
             account,
             input_selector,
             request,
@@ -549,10 +513,7 @@ pub(crate) mod tests {
         assert_matches!(proposal_result, Ok(_));
 
         let change_memo = "Test change memo".parse::<Memo>().unwrap();
-        let create_proposed_result = create_proposed_transaction::<_, _, Infallible, _>(
-            &mut db_data,
-            &testing::network(),
-            test_prover(),
+        let create_proposed_result = test.create_proposed_transaction(
             &usk,
             OvkPolicy::Sender,
             proposal_result.unwrap(),
@@ -564,18 +525,14 @@ pub(crate) mod tests {
         let sent_tx_id = create_proposed_result.unwrap();
 
         // Verify that the sent transaction was stored and that we can decrypt the memos
-        let tx = db_data
+        let tx = test
+            .wallet()
             .get_transaction(sent_tx_id)
             .expect("Created transaction was stored.");
         let ufvks = [(account, usk.to_unified_full_viewing_key())]
             .into_iter()
             .collect();
-        let decrypted_outputs = decrypt_transaction(
-            &testing::network(),
-            sapling_activation_height() + 1,
-            &tx,
-            &ufvks,
-        );
+        let decrypted_outputs = decrypt_transaction(&testing::network(), h + 1, &tx, &ufvks);
         assert_eq!(decrypted_outputs.len(), 2);
 
         let mut found_tx_change_memo = false;
@@ -592,7 +549,8 @@ pub(crate) mod tests {
         assert!(found_tx_empty_memo);
 
         // Verify that the stored sent notes match what we're expecting
-        let mut stmt_sent_notes = db_data
+        let mut stmt_sent_notes = test
+            .wallet()
             .conn
             .prepare(
                 "SELECT output_index
@@ -622,7 +580,8 @@ pub(crate) mod tests {
         let mut found_sent_change_memo = false;
         let mut found_sent_empty_memo = false;
         for sent_note_id in sent_note_ids {
-            match db_data
+            match test
+                .wallet()
                 .get_memo(sent_note_id)
                 .expect("Note id is valid")
                 .as_ref()
@@ -642,20 +601,19 @@ pub(crate) mod tests {
 
         // Check that querying for a nonexistent sent note returns None
         assert_matches!(
-            db_data.get_memo(NoteId::new(sent_tx_id, ShieldedProtocol::Sapling, 12345)),
+            test.wallet()
+                .get_memo(NoteId::new(sent_tx_id, ShieldedProtocol::Sapling, 12345)),
             Ok(None)
         );
     }
 
     #[test]
     fn create_to_address_fails_on_incorrect_usk() {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+        let mut test = TestBuilder::new().with_seed(Secret::new(vec![])).build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
         let to = dfvk.default_address().1.into();
 
@@ -665,10 +623,7 @@ pub(crate) mod tests {
 
         // Attempting to spend with a USK that is not in the wallet results in an error
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk1,
                 &to,
                 Amount::from_u64(1).unwrap(),
@@ -682,28 +637,23 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_with_no_blocks() {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
         let to = dfvk.default_address().1.into();
 
         // Account balance should be zero
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             Amount::zero()
         );
 
         // We cannot do anything if we aren't synchronised
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(1).unwrap(),
@@ -717,84 +667,49 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_unverified_notes() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (mut cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
-            0,
-        );
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            1,
-        )
-        .unwrap();
+        let (h1, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        test.scan_cached_blocks(h1, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data
+        let (_, anchor_height) = test
+            .wallet()
             .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
         assert_eq!(
-            get_balance_at(&db_data.conn, AccountId::from(0), anchor_height).unwrap(),
+            get_balance_at(&test.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
             value
         );
 
         // Add more funds to the wallet in a second note
-        cb = fake_compact_block(
-            sapling_activation_height() + 1,
-            cb.hash(),
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
-            1,
-        )
-        .0;
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height() + 1,
-            1,
-        )
-        .unwrap();
+        let (h2, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        test.scan_cached_blocks(h2, 1);
 
         // Verified balance does not include the second note
-        let (_, anchor_height2) = db_data
+        let (_, anchor_height2) = test
+            .wallet()
             .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             (value + value).unwrap()
         );
         assert_eq!(
-            get_balance_at(&db_data.conn, AccountId::from(0), anchor_height2).unwrap(),
+            get_balance_at(&test.wallet().conn, AccountId::from(0), anchor_height2).unwrap(),
             value
         );
 
@@ -802,10 +717,7 @@ pub(crate) mod tests {
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().1.into();
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(70000).unwrap(),
@@ -823,33 +735,14 @@ pub(crate) mod tests {
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
-        for i in 2..10 {
-            cb = fake_compact_block(
-                sapling_activation_height() + i,
-                cb.hash(),
-                &dfvk,
-                AddressType::DefaultExternal,
-                value,
-                i,
-            )
-            .0;
-            insert_into_cache(&db_cache, &cb);
+        for _ in 2..10 {
+            test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         }
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height() + 2,
-            8,
-        )
-        .unwrap();
+        test.scan_cached_blocks(h2 + 1, 8);
 
         // Second spend still fails
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(70000).unwrap(),
@@ -866,31 +759,12 @@ pub(crate) mod tests {
         );
 
         // Mine block 11 so that the second note becomes verified
-        cb = fake_compact_block(
-            sapling_activation_height() + 10,
-            cb.hash(),
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
-            10,
-        )
-        .0;
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height() + 10,
-            1,
-        )
-        .unwrap();
+        let (h11, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        test.scan_cached_blocks(h11, 1);
 
         // Second spend should now succeed
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(70000).unwrap(),
@@ -904,40 +778,22 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_locked_notes() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, Some(Secret::new(vec![]))).unwrap();
+        let mut test = TestBuilder::new()
+            .with_block_cache()
+            .with_seed(Secret::new(vec![]))
+            .build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (mut cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
-            0,
-        );
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            1,
-        )
-        .unwrap();
+        let (h1, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        test.scan_cached_blocks(h1, 1);
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
 
@@ -945,10 +801,7 @@ pub(crate) mod tests {
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().1.into();
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(15000).unwrap(),
@@ -961,10 +814,7 @@ pub(crate) mod tests {
 
         // A second spend fails because there are no usable notes
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(2000).unwrap(),
@@ -982,32 +832,17 @@ pub(crate) mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
         // until just before the first transaction expires
         for i in 1..42 {
-            cb = fake_compact_block(
-                sapling_activation_height() + i,
-                cb.hash(),
+            test.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
                 value,
-                i,
-            )
-            .0;
-            insert_into_cache(&db_cache, &cb);
+            );
         }
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height() + 1,
-            41,
-        )
-        .unwrap();
+        test.scan_cached_blocks(h1 + 1, 41);
 
         // Second spend still fails
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(2000).unwrap(),
@@ -1023,30 +858,15 @@ pub(crate) mod tests {
         );
 
         // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
-        cb = fake_compact_block(
-            sapling_activation_height() + 42,
-            cb.hash(),
+        let (h43, _, _) = test.generate_next_block(
             &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
             value,
-            42,
-        )
-        .0;
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height() + 42,
-            1,
-        )
-        .unwrap();
+        );
+        test.scan_cached_blocks(h43, 1);
 
         // Second spend should now succeed
-        create_spend_to_address(
-            &mut db_data,
-            &testing::network(),
-            test_prover(),
+        test.create_spend_to_address(
             &usk,
             &to,
             Amount::from_u64(2000).unwrap(),
@@ -1059,41 +879,19 @@ pub(crate) mod tests {
 
     #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
-        let network = testing::network();
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
-        let (mut cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
-            0,
-        );
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            1,
-        )
-        .unwrap();
+        let (h1, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        test.scan_cached_blocks(h1, 1);
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
 
@@ -1102,7 +900,7 @@ pub(crate) mod tests {
         let to = addr2.into();
 
         #[allow(clippy::type_complexity)]
-        let send_and_recover_with_policy = |db_data: &mut WalletDb<Connection, _>,
+        let send_and_recover_with_policy = |test: &mut TestRunner<BlockCache>,
                                             ovk_policy|
          -> Result<
             Option<(Note, PaymentAddress, MemoBytes)>,
@@ -1114,10 +912,7 @@ pub(crate) mod tests {
                 ReceivedNoteId,
             >,
         > {
-            let txid = create_spend_to_address(
-                db_data,
-                &testing::network(),
-                test_prover(),
+            let txid = test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(15000).unwrap(),
@@ -1127,7 +922,8 @@ pub(crate) mod tests {
             )?;
 
             // Fetch the transaction from the database
-            let raw_tx: Vec<_> = db_data
+            let raw_tx: Vec<_> = test
+                .wallet()
                 .conn
                 .query_row(
                     "SELECT raw FROM transactions
@@ -1141,8 +937,8 @@ pub(crate) mod tests {
             for output in tx.sapling_bundle().unwrap().shielded_outputs() {
                 // Find the output that decrypts with the external OVK
                 let result = try_sapling_output_recovery(
-                    &network,
-                    sapling_activation_height(),
+                    &network(),
+                    h1,
                     &dfvk.to_ovk(Scope::External),
                     output,
                 );
@@ -1158,96 +954,61 @@ pub(crate) mod tests {
         // Send some of the funds to another address, keeping history.
         // The recipient output is decryptable by the sender.
         assert_matches!(
-            send_and_recover_with_policy(&mut db_data, OvkPolicy::Sender),
+            send_and_recover_with_policy(&mut test, OvkPolicy::Sender),
             Ok(Some((_, recovered_to, _))) if recovered_to == addr2
         );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 42 (that don't send us funds)
         // so that the first transaction expires
         for i in 1..=42 {
-            cb = fake_compact_block(
-                sapling_activation_height() + i,
-                cb.hash(),
+            test.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
                 value,
-                i,
-            )
-            .0;
-            insert_into_cache(&db_cache, &cb);
+            );
         }
-        scan_cached_blocks(
-            &network,
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height() + 1,
-            42,
-        )
-        .unwrap();
+        test.scan_cached_blocks(h1 + 1, 42);
 
         // Send the funds again, discarding history.
         // Neither transaction output is decryptable by the sender.
         assert_matches!(
-            send_and_recover_with_policy(&mut db_data, OvkPolicy::Discard),
+            send_and_recover_with_policy(&mut test, OvkPolicy::Discard),
             Ok(None)
         );
     }
 
     #[test]
     fn create_to_address_succeeds_to_t_addr_zero_change() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
-        let (cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            value,
-            0,
-        );
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            1,
-        )
-        .unwrap();
+        let (h, _, _) = test.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        test.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data
+        let (_, anchor_height) = test
+            .wallet()
             .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
         assert_eq!(
-            get_balance_at(&db_data.conn, AccountId::from(0), anchor_height).unwrap(),
+            get_balance_at(&test.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
             value
         );
 
         let to = TransparentAddress::PublicKey([7; 20]).into();
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(50000).unwrap(),
@@ -1261,59 +1022,36 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_spends_a_change_note() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
-        let (cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::Internal,
-            value,
-            0,
-        );
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            1,
-        )
-        .unwrap();
+        let (h, _, _) = test.generate_next_block(&dfvk, AddressType::Internal, value);
+        test.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = db_data
+        let (_, anchor_height) = test
+            .wallet()
             .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             value
         );
         assert_eq!(
-            get_balance_at(&db_data.conn, AccountId::from(0), anchor_height).unwrap(),
+            get_balance_at(&test.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
             value
         );
 
         let to = TransparentAddress::PublicKey([7; 20]).into();
         assert_matches!(
-            create_spend_to_address(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.create_spend_to_address(
                 &usk,
                 &to,
                 Amount::from_u64(50000).unwrap(),
@@ -1327,65 +1065,44 @@ pub(crate) mod tests {
 
     #[test]
     fn zip317_spend() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = db_data.create_account(&seed).unwrap();
+        let (_, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
         // Add funds to the wallet
-        let (mut cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
+        let (h1, _, _) = test.generate_next_block(
             &dfvk,
             AddressType::Internal,
             Amount::from_u64(50000).unwrap(),
-            0,
         );
-        insert_into_cache(&db_cache, &cb);
 
         // Add 10 dust notes to the wallet
-        for i in 1..=10 {
-            cb = fake_compact_block(
-                sapling_activation_height() + i,
-                cb.hash(),
+        for _ in 1..=10 {
+            test.generate_next_block(
                 &dfvk,
                 AddressType::DefaultExternal,
                 Amount::from_u64(1000).unwrap(),
-                i,
-            )
-            .0;
-            insert_into_cache(&db_cache, &cb);
+            );
         }
 
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            11,
-        )
-        .unwrap();
+        test.scan_cached_blocks(h1, 11);
 
         // Verified balance matches total balance
         let total = Amount::from_u64(60000).unwrap();
-        let (_, anchor_height) = db_data
+        let (_, anchor_height) = test
+            .wallet()
             .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(
-            get_balance(&db_data.conn, AccountId::from(0)).unwrap(),
+            get_balance(&test.wallet().conn, AccountId::from(0)).unwrap(),
             total
         );
         assert_eq!(
-            get_balance_at(&db_data.conn, AccountId::from(0), anchor_height).unwrap(),
+            get_balance_at(&test.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
             total
         );
 
@@ -1406,10 +1123,7 @@ pub(crate) mod tests {
         .unwrap();
 
         assert_matches!(
-            spend(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.spend(
                 &input_selector,
                 &usk,
                 req,
@@ -1434,10 +1148,7 @@ pub(crate) mod tests {
         .unwrap();
 
         assert_matches!(
-            spend(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.spend(
                 &input_selector,
                 &usk,
                 req,
@@ -1451,20 +1162,26 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn shield_transparent() {
-        let cache_file = NamedTempFile::new().unwrap();
-        let db_cache = BlockDb(Connection::open(cache_file.path()).unwrap());
-        init_cache_database(&db_cache).unwrap();
-
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let mut test = TestBuilder::new().with_block_cache().build();
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let (account_id, usk) = db_data.create_account(&seed).unwrap();
+        let (account_id, usk) = test.wallet_mut().create_account(&seed).unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
-        let uaddr = db_data.get_current_address(account_id).unwrap().unwrap();
+        let uaddr = test
+            .wallet()
+            .get_current_address(account_id)
+            .unwrap()
+            .unwrap();
         let taddr = uaddr.transparent().unwrap();
+
+        // Ensure that the wallet has at least one block
+        let (h, _, _) = test.generate_next_block(
+            &dfvk,
+            AddressType::Internal,
+            Amount::from_u64(50000).unwrap(),
+        );
+        test.scan_cached_blocks(h, 1);
 
         let utxo = WalletTransparentOutput::from_parts(
             OutPoint::new([1u8; 32], 1),
@@ -1472,11 +1189,11 @@ pub(crate) mod tests {
                 value: Amount::from_u64(10000).unwrap(),
                 script_pubkey: taddr.script(),
             },
-            sapling_activation_height(),
+            h,
         )
         .unwrap();
 
-        let res0 = db_data.put_received_transparent_utxo(&utxo);
+        let res0 = test.wallet_mut().put_received_transparent_utxo(&utxo);
         assert!(matches!(res0, Ok(_)));
 
         let input_selector = GreedyInputSelector::new(
@@ -1484,30 +1201,8 @@ pub(crate) mod tests {
             DustOutputPolicy::default(),
         );
 
-        // Ensure that the wallet has at least one block
-        let (cb, _) = fake_compact_block(
-            sapling_activation_height(),
-            BlockHash([0; 32]),
-            &dfvk,
-            AddressType::Internal,
-            Amount::from_u64(50000).unwrap(),
-            0,
-        );
-        insert_into_cache(&db_cache, &cb);
-        scan_cached_blocks(
-            &testing::network(),
-            &db_cache,
-            &mut db_data,
-            sapling_activation_height(),
-            1,
-        )
-        .unwrap();
-
         assert_matches!(
-            shield_transparent_funds(
-                &mut db_data,
-                &testing::network(),
-                test_prover(),
+            test.shield_transparent_funds(
                 &input_selector,
                 NonNegativeAmount::from_u64(10000).unwrap(),
                 &usk,
