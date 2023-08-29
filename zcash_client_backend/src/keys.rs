@@ -14,6 +14,9 @@ use {
     zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey},
 };
 
+#[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
+use zcash_primitives::legacy::TransparentAddress;
+
 #[cfg(feature = "unstable")]
 use {
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
@@ -335,6 +338,20 @@ impl UnifiedSpendingKey {
                 });
             }
         }
+    }
+
+    #[cfg(feature = "test-dependencies")]
+    pub fn default_address(&self) -> (UnifiedAddress, DiversifierIndex) {
+        self.to_unified_full_viewing_key().default_address()
+    }
+
+    #[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
+    pub fn default_transparent_address(&self) -> (TransparentAddress, u32) {
+        self.transparent()
+            .to_account_pubkey()
+            .derive_external_ivk()
+            .unwrap()
+            .default_address()
     }
 }
 

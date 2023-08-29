@@ -739,6 +739,7 @@ mod tests {
 
     use incrementalmerkletree::{Hashable, Level};
     use secrecy::Secret;
+
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
         scanning::{ScanPriority, ScanRange},
@@ -752,7 +753,7 @@ mod tests {
     };
 
     use crate::{
-        testing::{sapling_activation_height, AddressType, TestBuilder},
+        testing::{birthday_at_sapling_activation, AddressType, TestBuilder},
         wallet::{init::init_blocks_table, scanning::suggest_scan_ranges},
     };
 
@@ -1085,11 +1086,11 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
+        let sapling_activation_height = st.sapling_activation_height();
 
         assert_matches!(
             // In the following, we don't care what the root hashes are, they just need to be
@@ -1098,15 +1099,15 @@ mod tests {
                 0,
                 &[
                     CommitmentTreeRoot::from_parts(
-                        sapling_activation_height() + 100,
+                        sapling_activation_height + 100,
                         Node::empty_root(Level::from(0))
                     ),
                     CommitmentTreeRoot::from_parts(
-                        sapling_activation_height() + 200,
+                        sapling_activation_height + 200,
                         Node::empty_root(Level::from(1))
                     ),
                     CommitmentTreeRoot::from_parts(
-                        sapling_activation_height() + 300,
+                        sapling_activation_height + 300,
                         Node::empty_root(Level::from(2))
                     ),
                 ]
@@ -1118,7 +1119,7 @@ mod tests {
         // of 10 blocks. After `scan_cached_blocks`, the scan queue should have a requested scan
         // range of 300..310 with `FoundNote` priority, 310..320 with `Scanned` priority.
         let initial_sapling_tree_size = (0x1 << 16) * 3 + 5;
-        let initial_height = sapling_activation_height() + 310;
+        let initial_height = sapling_activation_height + 310;
 
         let value = Amount::from_u64(50000).unwrap();
         st.generate_block_at(
@@ -1141,7 +1142,7 @@ mod tests {
         st.scan_cached_blocks(initial_height, 10);
 
         // Verify the that adjacent range needed to make the note spendable has been prioritized.
-        let sap_active = u32::from(sapling_activation_height());
+        let sap_active = u32::from(sapling_activation_height);
         assert_matches!(
             st.wallet().suggest_scan_ranges(),
             Ok(scan_ranges) if scan_ranges == vec![
@@ -1162,7 +1163,7 @@ mod tests {
         // future.
         assert_matches!(
             st.wallet_mut()
-                .update_chain_tip(sapling_activation_height() + 340),
+                .update_chain_tip(sapling_activation_height + 340),
             Ok(())
         );
 
@@ -1179,7 +1180,7 @@ mod tests {
         // Now simulate a jump ahead more than 100 blocks.
         assert_matches!(
             st.wallet_mut()
-                .update_chain_tip(sapling_activation_height() + 450),
+                .update_chain_tip(sapling_activation_height + 450),
             Ok(())
         );
 
@@ -1196,23 +1197,21 @@ mod tests {
     }
 
     #[test]
-    fn init_blocks_table_creates_ignored_range() {
+    fn create_account_creates_ignored_range() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().with_seed(Secret::new(vec![])).build();
+        let mut st = TestBuilder::new().build();
 
-        let sap_active = st
-            .wallet()
-            .params
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap();
-        // Initialise the blocks table. We use Canopy activation as an arbitrary birthday height
-        // that's greater than Sapling activation.
+        let sap_active = st.sapling_activation_height();
+
+        // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
+        // activation.
         let birthday_height = st
-            .wallet()
-            .params
+            .network()
             .activation_height(NetworkUpgrade::Canopy)
             .unwrap();
+
+        // call `init_blocks_table` to initialize the scan queue
         init_blocks_table(
             st.wallet_mut(),
             birthday_height,
@@ -1221,6 +1220,10 @@ mod tests {
             &[0x0, 0x0, 0x0],
         )
         .unwrap();
+
+        let seed = Secret::new(vec![0u8; 32]);
+        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
+        let _dfvk = usk.to_unified_full_viewing_key().sapling().unwrap().clone();
 
         let expected = vec![
             // The range up to and including the wallet's birthday height is ignored.
@@ -1289,9 +1292,7 @@ mod tests {
             ),
         ];
 
-        assert_matches!(
-            suggest_scan_ranges(&st.wallet().conn, Ignored),
-            Ok(scan_ranges) if scan_ranges == expected
-        );
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
     }
 }

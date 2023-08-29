@@ -1087,7 +1087,10 @@ extern crate assert_matches;
 mod tests {
     use zcash_client_backend::data_api::{WalletRead, WalletWrite};
 
-    use crate::{testing::TestBuilder, AccountId};
+    use crate::{
+        testing::{birthday_at_sapling_activation, TestBuilder},
+        AccountId,
+    };
 
     #[cfg(feature = "unstable")]
     use zcash_primitives::{consensus::Parameters, transaction::components::Amount};
@@ -1100,7 +1103,9 @@ mod tests {
 
     #[test]
     pub(crate) fn get_next_available_address() {
-        let mut st = TestBuilder::new().with_test_account().build();
+        let mut st = TestBuilder::new()
+            .with_test_account(birthday_at_sapling_activation)
+            .build();
 
         let account = AccountId::from(0);
         let current_addr = st.wallet().get_current_address(account).unwrap();
@@ -1117,17 +1122,15 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn transparent_receivers() {
-        use secrecy::Secret;
-
+        // Add an account to the wallet.
         let st = TestBuilder::new()
             .with_block_cache()
-            .with_seed(Secret::new(vec![]))
-            .with_test_account()
+            .with_test_account(birthday_at_sapling_activation)
             .build();
 
-        // Add an account to the wallet.
-        let (ufvk, taddr) = st.test_account().unwrap();
-        let taddr = taddr.unwrap();
+        let (_, usk, _) = st.test_account().unwrap();
+        let ufvk = usk.to_unified_full_viewing_key();
+        let (taddr, _) = usk.default_transparent_address();
 
         let receivers = st.wallet().get_transparent_receivers(0.into()).unwrap();
 

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 
-use incrementalmerkletree::Retention;
+use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
@@ -12,7 +12,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    sapling,
+    sapling::{self, Node, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
         components::{amount::Amount, OutPoint},
         Transaction, TxId,
@@ -463,6 +463,43 @@ impl SentTransactionOutput {
     /// transaction) was sent, along with the change note.
     pub fn sapling_change_to(&self) -> Option<&(AccountId, sapling::Note)> {
         self.sapling_change_to.as_ref()
+    }
+}
+
+/// A data structure used to set the birthday height for an account, and ensure that the initial
+/// note commitment tree state is recorded at that height.
+#[derive(Clone, Debug)]
+pub struct AccountBirthday {
+    height: BlockHeight,
+    sapling_frontier: Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH>,
+}
+
+impl AccountBirthday {
+    /// Constructs a new [`AccountBirthday`] from its constituent parts.
+    ///
+    /// * `height`: The birthday height of the account. This is defined as the height of the last
+    /// block that is known to contain no transactions sent to addresses belonging to the account.
+    /// * `sapling_frontier`: The Sapling note commitment tree frontier as of the end of the block
+    /// at `height`.
+    pub fn from_parts(
+        height: BlockHeight,
+        sapling_frontier: Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH>,
+    ) -> Self {
+        Self {
+            height,
+            sapling_frontier,
+        }
+    }
+
+    /// Returns the Sapling note commitment tree frontier as of the end of the block at
+    /// [`Self::height`].
+    pub fn sapling_frontier(&self) -> &Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH> {
+        &self.sapling_frontier
+    }
+
+    /// Returns the birthday height of the account.
+    pub fn height(&self) -> BlockHeight {
+        self.height
     }
 }
 

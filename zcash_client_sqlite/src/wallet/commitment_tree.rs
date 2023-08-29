@@ -985,14 +985,14 @@ mod tests {
     };
     use shardtree::ShardTree;
     use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
-    use zcash_primitives::consensus::BlockHeight;
+    use zcash_primitives::consensus::{BlockHeight, Network};
 
     use super::SqliteShardStore;
-    use crate::{testing, wallet::init::init_wallet_db, WalletDb, SAPLING_TABLES_PREFIX};
+    use crate::{wallet::init::init_wallet_db, WalletDb, SAPLING_TABLES_PREFIX};
 
     fn new_tree(m: usize) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();
@@ -1040,7 +1040,7 @@ mod tests {
     #[test]
     fn put_shard_roots() {
         let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), testing::network()).unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();
