@@ -493,7 +493,7 @@ where
             }
         };
 
-        if balance.total() >= shielding_threshold.into() {
+        if balance.total() >= shielding_threshold {
             Ok(Proposal {
                 transaction_request: TransactionRequest::empty(),
                 transparent_inputs,
@@ -506,7 +506,7 @@ where
             })
         } else {
             Err(InputSelectorError::InsufficientFunds {
-                available: balance.total(),
+                available: balance.total().into(),
                 required: shielding_threshold.into(),
             })
         }

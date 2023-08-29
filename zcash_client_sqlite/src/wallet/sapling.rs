@@ -514,8 +514,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = NonNegativeAmount::from_u64(60000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let value = NonNegativeAmount::const_from_u64(60000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
         // Spendable balance matches total balance
@@ -534,7 +534,7 @@ pub(crate) mod tests {
         let to: RecipientAddress = to_extsk.default_address().1.into();
         let request = zip321::TransactionRequest::new(vec![Payment {
             recipient_address: to,
-            amount: Amount::from_u64(10000).unwrap(),
+            amount: Amount::const_from_i64(10000),
             memo: None, // this should result in the creation of an empty memo
             label: None,
             message: None,
@@ -666,7 +666,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk1,
                 &to,
-                Amount::from_u64(1).unwrap(),
+                NonNegativeAmount::const_from_u64(1),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -693,7 +693,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(1).unwrap(),
+                NonNegativeAmount::const_from_u64(1),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -713,8 +713,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = NonNegativeAmount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let value = NonNegativeAmount::const_from_u64(50000);
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h1, 1);
 
         // Spendable balance matches total balance at 1 confirmation.
@@ -736,7 +736,7 @@ pub(crate) mod tests {
         );
 
         // Add more funds to the wallet in a second note
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h2, 1);
 
         // Verified balance does not include the second note
@@ -759,7 +759,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(70000).unwrap(),
+                NonNegativeAmount::const_from_u64(70000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(10).unwrap(),
@@ -768,14 +768,14 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::from_u64(50000).unwrap()
-                && required == Amount::from_u64(80000).unwrap()
+            if available == Amount::const_from_i64(50000)
+                && required == Amount::const_from_i64(80000)
         );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
         for _ in 2..10 {
-            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         }
         st.scan_cached_blocks(h2 + 1, 8);
 
@@ -787,7 +787,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(70000).unwrap(),
+                NonNegativeAmount::const_from_u64(70000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(10).unwrap(),
@@ -796,12 +796,12 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::from_u64(50000).unwrap()
-                && required == Amount::from_u64(80000).unwrap()
+            if available == Amount::const_from_i64(50000)
+                && required == Amount::const_from_i64(80000)
         );
 
         // Mine block 11 so that the second note becomes verified
-        let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h11, 1);
 
         // Total balance is value * number of blocks scanned (11).
@@ -819,7 +819,7 @@ pub(crate) mod tests {
             .create_spend_to_address(
                 &usk,
                 &to,
-                amount_sent.into(),
+                amount_sent,
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(10).unwrap(),
@@ -849,8 +849,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = NonNegativeAmount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let value = NonNegativeAmount::const_from_u64(50000);
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h1, 1);
 
         // Spendable balance matches total balance at 1 confirmation.
@@ -864,7 +864,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(15000).unwrap(),
+                NonNegativeAmount::const_from_u64(15000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -877,7 +877,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(2000).unwrap(),
+                NonNegativeAmount::const_from_u64(2000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -886,7 +886,7 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::zero() && required == Amount::from_u64(12000).unwrap()
+            if available == Amount::zero() && required == Amount::const_from_i64(12000)
         );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
@@ -895,7 +895,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
-                value.into(),
+                value,
             );
         }
         st.scan_cached_blocks(h1 + 1, 41);
@@ -905,7 +905,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(2000).unwrap(),
+                NonNegativeAmount::const_from_u64(2000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -914,14 +914,14 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::zero() && required == Amount::from_u64(12000).unwrap()
+            if available == Amount::zero() && required == Amount::const_from_i64(12000)
         );
 
         // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
         let (h43, _, _) = st.generate_next_block(
             &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
-            value.into(),
+            value,
         );
         st.scan_cached_blocks(h43, 1);
 
@@ -935,7 +935,7 @@ pub(crate) mod tests {
             .create_spend_to_address(
                 &usk,
                 &to,
-                amount_sent2.into(),
+                amount_sent2,
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -964,8 +964,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = NonNegativeAmount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let value = NonNegativeAmount::const_from_u64(50000);
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h1, 1);
 
         // Spendable balance matches total balance at 1 confirmation.
@@ -991,7 +991,7 @@ pub(crate) mod tests {
             let txid = st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(15000).unwrap(),
+                NonNegativeAmount::const_from_u64(15000),
                 None,
                 ovk_policy,
                 NonZeroU32::new(1).unwrap(),
@@ -1040,7 +1040,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
-                value.into(),
+                value,
             );
         }
         st.scan_cached_blocks(h1 + 1, 42);
@@ -1064,8 +1064,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = NonNegativeAmount::from_u64(60000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let value = NonNegativeAmount::const_from_u64(60000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
         // Spendable balance matches total balance at 1 confirmation.
@@ -1078,7 +1078,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(50000).unwrap(),
+                NonNegativeAmount::const_from_u64(50000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -1098,8 +1098,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note owned by the internal spending key
-        let value = NonNegativeAmount::from_u64(60000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value.into());
+        let value = NonNegativeAmount::const_from_u64(60000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
         st.scan_cached_blocks(h, 1);
 
         // Spendable balance matches total balance at 1 confirmation.
@@ -1119,7 +1119,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(50000).unwrap(),
+                NonNegativeAmount::const_from_u64(50000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
@@ -1149,7 +1149,7 @@ pub(crate) mod tests {
 
         // Add funds to the wallet in a single note
         let value = NonNegativeAmount::from_u64(100000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h, 1);
 
         // Spendable balance matches total balance
@@ -1202,8 +1202,7 @@ pub(crate) mod tests {
             )
             .unwrap();
 
-        let amount_left =
-            (value - (amount_sent + fee_rule.fixed_fee().try_into().unwrap()).unwrap()).unwrap();
+        let amount_left = (value - (amount_sent + fee_rule.fixed_fee()).unwrap()).unwrap();
         let pending_change = (amount_left - amount_legacy_change).unwrap();
 
         // The "legacy change" is not counted by get_pending_change().
@@ -1261,7 +1260,7 @@ pub(crate) mod tests {
         let (h1, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::Internal,
-            Amount::from_u64(50000).unwrap(),
+            NonNegativeAmount::const_from_u64(50000),
         );
 
         // Add 10 dust notes to the wallet
@@ -1269,14 +1268,14 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &dfvk,
                 AddressType::DefaultExternal,
-                Amount::from_u64(1000).unwrap(),
+                NonNegativeAmount::const_from_u64(1000),
             );
         }
 
         st.scan_cached_blocks(h1, 11);
 
         // Spendable balance matches total balance
-        let total = NonNegativeAmount::from_u64(60000).unwrap();
+        let total = NonNegativeAmount::const_from_u64(60000);
         assert_eq!(st.get_total_balance(account), total);
         assert_eq!(st.get_spendable_balance(account, 1), total);
 
@@ -1288,7 +1287,7 @@ pub(crate) mod tests {
         // This first request will fail due to insufficient non-dust funds
         let req = TransactionRequest::new(vec![Payment {
             recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
-            amount: Amount::from_u64(50000).unwrap(),
+            amount: Amount::const_from_i64(50000),
             memo: None,
             label: None,
             message: None,
@@ -1305,15 +1304,15 @@ pub(crate) mod tests {
                 NonZeroU32::new(1).unwrap(),
             ),
             Err(Error::InsufficientFunds { available, required })
-                if available == Amount::from_u64(51000).unwrap()
-                && required == Amount::from_u64(60000).unwrap()
+                if available == Amount::const_from_i64(51000)
+                && required == Amount::const_from_i64(60000)
         );
 
         // This request will succeed, spending a single dust input to pay the 10000
         // ZAT fee in addition to the 41000 ZAT output to the recipient
         let req = TransactionRequest::new(vec![Payment {
             recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
-            amount: Amount::from_u64(41000).unwrap(),
+            amount: Amount::const_from_i64(41000),
             memo: None,
             label: None,
             message: None,
@@ -1365,14 +1364,14 @@ pub(crate) mod tests {
         let (h, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::Internal,
-            Amount::from_u64(50000).unwrap(),
+            NonNegativeAmount::const_from_u64(50000),
         );
         st.scan_cached_blocks(h, 1);
 
         let utxo = WalletTransparentOutput::from_parts(
             OutPoint::new([1u8; 32], 1),
             TxOut {
-                value: Amount::from_u64(10000).unwrap(),
+                value: Amount::const_from_i64(10000),
                 script_pubkey: taddr.script(),
             },
             h,
@@ -1431,7 +1430,7 @@ pub(crate) mod tests {
 
         // Generate 9 blocks that have no value for us, starting at the birthday height.
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
-        let not_our_value = Amount::const_from_i64(10000);
+        let not_our_value = NonNegativeAmount::const_from_u64(10000);
         st.generate_block_at(
             birthday.height(),
             BlockHash([0; 32]),
@@ -1448,7 +1447,7 @@ pub(crate) mod tests {
         st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::const_from_i64(500000),
+            NonNegativeAmount::const_from_u64(500000),
         );
 
         // Generate some more blocks to get above our anchor height
@@ -1502,14 +1501,14 @@ pub(crate) mod tests {
         st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::const_from_i64(500000),
+            NonNegativeAmount::const_from_u64(500000),
         );
         st.scan_cached_blocks(birthday.height(), 1);
 
         // Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
         // belong to us so that we can get a checkpoint in the tree.
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
-        let not_our_value = Amount::const_from_i64(10000);
+        let not_our_value = NonNegativeAmount::const_from_u64(10000);
         st.generate_block_at(
             birthday.height() + 10,
             BlockHash([0; 32]),
@@ -1545,7 +1544,7 @@ pub(crate) mod tests {
             st.create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(10000).unwrap(),
+                NonNegativeAmount::const_from_u64(10000),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(5).unwrap(),

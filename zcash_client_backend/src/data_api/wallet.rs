@@ -13,7 +13,7 @@ use zcash_primitives::{
     },
     transaction::{
         builder::Builder,
-        components::amount::{Amount, BalanceError},
+        components::amount::{Amount, BalanceError, NonNegativeAmount},
         fees::{fixed, FeeRule},
         Transaction,
     },
@@ -42,10 +42,7 @@ use super::{NoteId, ShieldedProtocol};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::WalletTransparentOutput,
-    zcash_primitives::{
-        legacy::TransparentAddress, sapling::keys::OutgoingViewingKey,
-        transaction::components::amount::NonNegativeAmount,
-    },
+    zcash_primitives::{legacy::TransparentAddress, sapling::keys::OutgoingViewingKey},
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -195,7 +192,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     prover: impl SaplingProver,
     usk: &UnifiedSpendingKey,
     to: &RecipientAddress,
-    amount: Amount,
+    amount: NonNegativeAmount,
     memo: Option<MemoBytes>,
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
@@ -215,7 +212,7 @@ where
 {
     let req = zip321::TransactionRequest::new(vec![Payment {
         recipient_address: to.clone(),
-        amount,
+        amount: amount.into(),
         memo,
         label: None,
         message: None,
@@ -576,7 +573,7 @@ where
                 builder.add_sapling_output(
                     internal_ovk(),
                     dfvk.change_address().1,
-                    *amount,
+                    amount.into(),
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
@@ -584,7 +581,7 @@ where
                         account,
                         PoolType::Shielded(ShieldedProtocol::Sapling),
                     ),
-                    *amount,
+                    amount.into(),
                     Some(memo),
                 ))
             }
@@ -653,7 +650,7 @@ where
             created: time::OffsetDateTime::now_utc(),
             account,
             outputs: sapling_outputs.chain(transparent_outputs).collect(),
-            fee_amount: proposal.balance().fee_required(),
+            fee_amount: Amount::from(proposal.balance().fee_required()),
             #[cfg(feature = "transparent-inputs")]
             utxos_spent: utxos.iter().map(|utxo| utxo.outpoint().clone()).collect(),
         })
@@ -764,10 +761,10 @@ fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
     // to spend the note that we've used the correct key.
     let external_note = dfvk
         .diversified_address(selected.diversifier())
-        .map(|addr| addr.create_note(selected.value().into(), selected.rseed()));
+        .map(|addr| addr.create_note(selected.value().try_into().unwrap(), selected.rseed()));
     let internal_note = dfvk
         .diversified_change_address(selected.diversifier())
-        .map(|addr| addr.create_note(selected.value().into(), selected.rseed()));
+        .map(|addr| addr.create_note(selected.value().try_into().unwrap(), selected.rseed()));
 
     let expected_root = commitment_tree.root_at_checkpoint(checkpoint_depth)?;
     let merkle_path = commitment_tree

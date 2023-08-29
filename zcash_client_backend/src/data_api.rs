@@ -640,6 +640,7 @@ impl SentTransactionOutput {
             sapling_change_to,
         }
     }
+
     /// Returns the index within the transaction that contains the recipient output.
     ///
     /// - If `recipient_address` is a Sapling address, this is an index into the Sapling
