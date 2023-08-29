@@ -1200,7 +1200,7 @@ mod tests {
     fn create_account_creates_ignored_range() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new().build();
 
         let sap_active = st.sapling_activation_height();
 

@@ -136,7 +136,6 @@ impl<Cache> TestBuilder<Cache> {
         };
 
         TestState {
-            params: self.network,
             cache: self.cache,
             latest_cached_block: None,
             _data_file: data_file,
@@ -148,7 +147,6 @@ impl<Cache> TestBuilder<Cache> {
 
 /// The state for a `zcash_client_sqlite` test.
 pub(crate) struct TestState<Cache> {
-    params: Network,
     cache: Cache,
     latest_cached_block: Option<(BlockHeight, BlockHash, u32)>,
     _data_file: NamedTempFile,
@@ -177,15 +175,7 @@ where
         let (height, prev_hash, initial_sapling_tree_size) = self
             .latest_cached_block
             .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| {
-                (
-                    self.params
-                        .activation_height(NetworkUpgrade::Sapling)
-                        .unwrap(),
-                    BlockHash([0; 32]),
-                    0,
-                )
-            });
+            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
 
         let (res, nf) = self.generate_block_at(
             height,
@@ -214,7 +204,7 @@ where
         initial_sapling_tree_size: u32,
     ) -> (Cache::InsertResult, Nullifier) {
         let (cb, nf) = fake_compact_block(
-            &self.params,
+            &self.network(),
             height,
             prev_hash,
             dfvk,
@@ -246,18 +236,10 @@ where
         let (height, prev_hash, initial_sapling_tree_size) = self
             .latest_cached_block
             .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| {
-                (
-                    self.params
-                        .activation_height(NetworkUpgrade::Sapling)
-                        .unwrap(),
-                    BlockHash([0; 32]),
-                    0,
-                )
-            });
+            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
 
         let cb = fake_compact_block_spending(
-            &self.params,
+            &self.network(),
             height,
             prev_hash,
             note,
@@ -296,7 +278,7 @@ where
         >,
     > {
         scan_cached_blocks(
-            &self.params,
+            &self.network(),
             self.cache.block_source(),
             &mut self.db_data,
             from_height,
@@ -316,9 +298,9 @@ impl<Cache> TestState<Cache> {
         &mut self.db_data
     }
 
-    /// Exposes an immutable reference to the network in use.
-    pub(crate) fn network(&self) -> &Network {
-        &self.db_data.params
+    /// Exposes the network in use.
+    pub(crate) fn network(&self) -> Network {
+        self.db_data.params
     }
 
     /// Convenience method for obtaining the Sapling activation height for the network under test.
@@ -362,9 +344,10 @@ impl<Cache> TestState<Cache> {
             ReceivedNoteId,
         >,
     > {
+        let params = self.network();
         create_spend_to_address(
             &mut self.db_data,
-            &self.params,
+            &params,
             test_prover(),
             usk,
             to,
@@ -397,9 +380,10 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
     {
+        let params = self.network();
         spend(
             &mut self.db_data,
-            &self.params,
+            &params,
             test_prover(),
             input_selector,
             usk,
@@ -430,9 +414,10 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
     {
+        let params = self.network();
         propose_transfer::<_, _, _, Infallible>(
             &mut self.db_data,
-            &self.params,
+            &params,
             spend_from_account,
             input_selector,
             request,
@@ -462,9 +447,10 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
     {
+        let params = self.network();
         propose_shielding::<_, _, _, Infallible>(
             &mut self.db_data,
-            &self.params,
+            &params,
             input_selector,
             shielding_threshold,
             from_addrs,
@@ -493,9 +479,10 @@ impl<Cache> TestState<Cache> {
     where
         FeeRuleT: FeeRule,
     {
+        let params = self.network();
         create_proposed_transaction::<_, _, Infallible, _>(
             &mut self.db_data,
-            &self.params,
+            &params,
             test_prover(),
             usk,
             ovk_policy,
@@ -529,9 +516,10 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
     {
+        let params = self.network();
         shield_transparent_funds(
             &mut self.db_data,
-            &self.params,
+            &params,
             test_prover(),
             input_selector,
             shielding_threshold,

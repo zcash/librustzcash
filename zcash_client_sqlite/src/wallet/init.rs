@@ -391,7 +391,10 @@ mod tests {
         zip32::sapling::ExtendedFullViewingKey,
     };
 
-    use crate::{error::SqliteClientError, wallet::scanning::priority_code, AccountId, WalletDb};
+    use crate::{
+        error::SqliteClientError, testing::TestBuilder, wallet::scanning::priority_code, AccountId,
+        WalletDb,
+    };
 
     use super::{init_accounts_table, init_blocks_table, init_wallet_db};
 
@@ -405,9 +408,7 @@ mod tests {
 
     #[test]
     fn verify_schema() {
-        let data_file = NamedTempFile::new().unwrap();
-        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db(&mut db_data, None).unwrap();
+        let st = TestBuilder::new().build();
 
         use regex::Regex;
         let re = Regex::new(r"\s+").unwrap();
@@ -560,7 +561,8 @@ mod tests {
             )",
         ];
 
-        let mut tables_query = db_data
+        let mut tables_query = st
+            .wallet()
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY tbl_name")
             .unwrap();
@@ -600,7 +602,7 @@ mod tests {
                         AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
                     )
                 WHERE scan_queue.priority > {}",
-                u32::from(db_data.params.activation_height(NetworkUpgrade::Sapling).unwrap()),
+                u32::from(st.network().activation_height(NetworkUpgrade::Sapling).unwrap()),
                 priority_code(&ScanPriority::Scanned),
             ),
             // v_transactions
@@ -741,7 +743,8 @@ mod tests {
                OR  sapling_received_notes.is_change = 0".to_owned(),
         ];
 
-        let mut views_query = db_data
+        let mut views_query = st
+            .wallet()
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
             .unwrap();

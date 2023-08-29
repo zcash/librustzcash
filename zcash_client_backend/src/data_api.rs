@@ -466,6 +466,8 @@ impl SentTransactionOutput {
     }
 }
 
+/// A data structure used to set the birthday height for an account, and ensure that the initial
+/// note commitment tree state is recorded at that height.
 #[derive(Clone, Debug)]
 pub struct AccountBirthday {
     height: BlockHeight,
@@ -473,6 +475,12 @@ pub struct AccountBirthday {
 }
 
 impl AccountBirthday {
+    /// Constructs a new [`AccountBirthday`] from its constituent parts.
+    ///
+    /// * `height`: The birthday height of the account. This is defined as the height of the last
+    /// block that is known to contain no transactions sent to addresses belonging to the account.
+    /// * `sapling_frontier`: The Sapling note commitment tree frontier as of the end of the block
+    /// at `height`.
     pub fn from_parts(
         height: BlockHeight,
         sapling_frontier: Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH>,
@@ -483,10 +491,13 @@ impl AccountBirthday {
         }
     }
 
+    /// Returns the Sapling note commitment tree frontier as of the end of the block at
+    /// [`Self::height`].
     pub fn sapling_frontier(&self) -> &Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH> {
         &self.sapling_frontier
     }
 
+    /// Returns the birthday height of the account.
     pub fn height(&self) -> BlockHeight {
         self.height
     }
