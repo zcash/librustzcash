@@ -453,7 +453,7 @@ pub(crate) fn replace_queue_entries(
             "SELECT block_range_start, block_range_end, priority
             FROM scan_queue
             WHERE (
-                -- the start is contained within the range
+                -- the start is contained within or adjacent to the range
                 :start >= block_range_start
                 AND :start <= block_range_end
             )
