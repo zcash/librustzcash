@@ -87,8 +87,12 @@ and this library adheres to Rust's notion of
   method now takes an optional `BlockMetadata` argument instead of a base commitment
   tree and incremental witnesses for each previously-known note. In addition, the
   return type has now been updated to return a `Result<ScannedBlock, ScanError>`.
-- `proto/service.proto` has been updated to include the new GRPC endpoints
-  supported by lightwalletd v0.4.15
+- `zcash_client_backend::proto::service`:
+  - The module is no longer behind the `lightwalletd-tonic` feature flag; that
+    now only gates the `service::compact_tx_streamer_client` submodule. This
+    exposes the service types to parse messages received by other gRPC clients.
+  - The module has been updated to include the new gRPC endpoints supported by
+    `lightwalletd` v0.4.15.
 
 ### Removed
 - `zcash_client_backend::data_api`:
