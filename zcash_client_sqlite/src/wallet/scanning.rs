@@ -458,8 +458,8 @@ pub(crate) fn replace_queue_entries(
                 AND :start <= block_range_end
             )
             OR (
-                -- the end is contained within the range
-                :end > block_range_start
+                -- the end is contained within or adjacent to the range
+                :end >= block_range_start
                 AND :end <= block_range_end
             )
             OR (
@@ -1335,6 +1335,48 @@ mod tests {
             scan_range(160..200, ChainTip),
             scan_range(100..160, Scanned),
             scan_range(0..100, Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn replace_queue_entries_merges_subsequent_range() {
+        use ScanPriority::*;
+
+        let mut st = TestBuilder::new().build();
+
+        let ranges = vec![
+            scan_range(150..200, ChainTip),
+            scan_range(100..150, Scanned),
+            scan_range(0..100, Ignored),
+        ];
+
+        {
+            let tx = st.wallet_mut().conn.transaction().unwrap();
+            insert_queue_entries(&tx, ranges.iter()).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, ranges);
+
+        {
+            let tx = st.wallet_mut().conn.transaction().unwrap();
+            replace_queue_entries(
+                &tx,
+                &(BlockHeight::from(90)..BlockHeight::from(100)),
+                vec![scan_range(90..100, Scanned)].into_iter(),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let expected = vec![
+            scan_range(150..200, ChainTip),
+            scan_range(90..150, Scanned),
+            scan_range(0..90, Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
