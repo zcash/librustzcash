@@ -275,6 +275,7 @@ impl ShieldedProtocol {
     }
 }
 /// Generated client implementations.
+#[cfg(feature = "lightwalletd-tonic")]
 pub mod compact_tx_streamer_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;

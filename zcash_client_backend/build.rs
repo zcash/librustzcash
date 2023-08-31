@@ -4,8 +4,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const COMPACT_FORMATS_PROTO: &str = "proto/compact_formats.proto";
-
-#[cfg(feature = "lightwalletd-tonic")]
 const SERVICE_PROTO: &str = "proto/service.proto";
 
 fn main() -> io::Result<()> {
@@ -40,11 +38,14 @@ fn build() -> io::Result<()> {
         "src/proto/compact_formats.rs",
     )?;
 
-    #[cfg(feature = "lightwalletd-tonic")]
     {
         // Build the gRPC types and client.
         tonic_build::configure()
             .build_server(false)
+            .client_mod_attribute(
+                "cash.z.wallet.sdk.rpc",
+                r#"#[cfg(feature = "lightwalletd-tonic")]"#,
+            )
             .extern_path(
                 ".cash.z.wallet.sdk.rpc.ChainMetadata",
                 "crate::proto::compact_formats::ChainMetadata",
