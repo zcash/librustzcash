@@ -735,7 +735,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use std::{mem::replace, ops::Range};
+    use std::ops::Range;
 
     use incrementalmerkletree::{Hashable, Level};
     use secrecy::Secret;

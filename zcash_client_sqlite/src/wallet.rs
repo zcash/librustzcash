@@ -1571,8 +1571,6 @@ pub(crate) fn prune_nullifier_map(
 mod tests {
     use std::num::NonZeroU32;
 
-    use secrecy::Secret;
-
     use zcash_primitives::transaction::components::Amount;
 
     use zcash_client_backend::data_api::WalletRead;
@@ -1586,6 +1584,7 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
+        secrecy::Secret,
         zcash_client_backend::{
             data_api::WalletWrite, encoding::AddressCodec, wallet::WalletTransparentOutput,
         },

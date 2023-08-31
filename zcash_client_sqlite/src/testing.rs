@@ -38,7 +38,6 @@ use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
-    legacy::TransparentAddress,
     memo::MemoBytes,
     sapling::{
         note_encryption::{sapling_note_encryption, SaplingDomain},
@@ -66,7 +65,9 @@ use super::BlockDb;
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::data_api::wallet::{propose_shielding, shield_transparent_funds},
-    zcash_primitives::transaction::components::amount::NonNegativeAmount,
+    zcash_primitives::{
+        legacy::TransparentAddress, transaction::components::amount::NonNegativeAmount,
+    },
 };
 
 #[cfg(feature = "unstable")]
