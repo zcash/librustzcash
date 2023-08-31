@@ -455,7 +455,7 @@ pub(crate) fn replace_queue_entries(
             WHERE (
                 -- the start is contained within the range
                 :start >= block_range_start
-                AND :start < block_range_end
+                AND :start <= block_range_end
             )
             OR (
                 -- the end is contained within the range
@@ -735,7 +735,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
+    use std::{mem::replace, ops::Range};
 
     use incrementalmerkletree::{Hashable, Level};
     use secrecy::Secret;
@@ -754,7 +754,10 @@ mod tests {
 
     use crate::{
         testing::{birthday_at_sapling_activation, AddressType, TestBuilder},
-        wallet::{init::init_blocks_table, scanning::suggest_scan_ranges},
+        wallet::{
+            init::init_blocks_table,
+            scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        },
     };
 
     use super::{join_nonoverlapping, Joined, RangeOrdering, SpanningTree};
@@ -1290,6 +1293,48 @@ mod tests {
                 u32::from(sap_active)..u32::from(birthday_height - 1000),
                 Ignored,
             ),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn replace_queue_entries_merges_previous_range() {
+        use ScanPriority::*;
+
+        let mut st = TestBuilder::new().build();
+
+        let ranges = vec![
+            scan_range(150..200, ChainTip),
+            scan_range(100..150, Scanned),
+            scan_range(0..100, Ignored),
+        ];
+
+        {
+            let tx = st.wallet_mut().conn.transaction().unwrap();
+            insert_queue_entries(&tx, ranges.iter()).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, ranges);
+
+        {
+            let tx = st.wallet_mut().conn.transaction().unwrap();
+            replace_queue_entries(
+                &tx,
+                &(BlockHeight::from(150)..BlockHeight::from(160)),
+                vec![scan_range(150..160, Scanned)].into_iter(),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+
+        let expected = vec![
+            scan_range(160..200, ChainTip),
+            scan_range(100..160, Scanned),
+            scan_range(0..100, Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
