@@ -7,6 +7,8 @@ use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use jubjub::{AffinePoint, ExtendedPoint, SubgroupPoint};
 use rand_core::RngCore;
+
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::{AddAssign, MulAssign, Neg};
 
@@ -28,10 +30,19 @@ fn h_star(a: &[u8], b: &[u8]) -> jubjub::Fr {
     hash_to_scalar(b"Zcash_RedJubjubH", a, b)
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub struct Signature {
     rbar: [u8; 32],
     sbar: [u8; 32],
+}
+
+impl fmt::Debug for Signature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Signature")
+            .field("rbar", &hex::encode(self.rbar))
+            .field("sbar", &hex::encode(self.sbar))
+            .finish()
+    }
 }
 
 pub struct PrivateKey(pub jubjub::Fr);

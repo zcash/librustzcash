@@ -1,7 +1,6 @@
 use std::io::Write;
 
 use blake2b_simd::{Hash as Blake2bHash, Params, State};
-use byteorder::{LittleEndian, WriteBytesExt};
 use zcash_encoding::Array;
 
 use crate::transaction::{
@@ -16,6 +15,9 @@ use crate::transaction::{
     },
     Authorization, TransactionData, TransparentDigests, TxDigests,
 };
+
+#[cfg(feature = "zfuture")]
+use byteorder::WriteBytesExt;
 
 #[cfg(feature = "zfuture")]
 use zcash_encoding::{CompactSize, Vector};
@@ -121,7 +123,7 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
                 txin.prevout.write(&mut ch).unwrap();
                 ch.write_all(&value.to_i64_le_bytes()).unwrap();
                 script_pubkey.write(&mut ch).unwrap();
-                ch.write_u32::<LittleEndian>(txin.sequence).unwrap();
+                ch.write_all(&txin.sequence.to_le_bytes()).unwrap();
             }
             let txin_sig_digest = ch.finalize();
 

@@ -1,4 +1,5 @@
 use std::array::TryFromSliceError;
+use std::fmt;
 
 use subtle::{Choice, ConstantTimeEq};
 
@@ -9,8 +10,16 @@ use crate::sapling::{
 };
 
 /// Typesafe wrapper for nullifier values.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Nullifier(pub [u8; 32]);
+
+impl fmt::Debug for Nullifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Nullifier")
+            .field(&hex::encode(self.0))
+            .finish()
+    }
+}
 
 impl Nullifier {
     pub fn from_slice(bytes: &[u8]) -> Result<Nullifier, TryFromSliceError> {
