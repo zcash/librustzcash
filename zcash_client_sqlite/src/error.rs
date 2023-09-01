@@ -66,6 +66,9 @@ pub enum SqliteClientError {
     /// The space of allocatable diversifier indices has been exhausted for the given account.
     DiversifierIndexOutOfRange,
 
+    /// The account for which information was requested does not belong to the wallet.
+    AccountUnknown(AccountId),
+
     /// An error occurred deriving a spending key from a seed and an account
     /// identifier.
     KeyDerivationError(AccountId),
@@ -86,7 +89,15 @@ pub enum SqliteClientError {
     /// commitment trees.
     CommitmentTree(ShardTreeError<commitment_tree::Error>),
 
+    /// The block at the specified height was not available from the block cache.
     CacheMiss(BlockHeight),
+
+    /// The height of the chain was not available; a call to [`WalletWrite::update_chain_tip`] is
+    /// required before the requested operation can succeed.
+    ///
+    /// [`WalletWrite::update_chain_tip`]:
+    /// zcash_client_backend::data_api::WalletWrite::update_chain_tip
+    ChainHeightUnknown,
 }
 
 impl error::Error for SqliteClientError {
@@ -124,6 +135,8 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
+            SqliteClientError::AccountUnknown(id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*id)),
+
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
@@ -131,6 +144,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
             SqliteClientError::CacheMiss(height) => write!(f, "Requested height {} does not exist in the block cache.", height),
+            SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`")
         }
     }
 }

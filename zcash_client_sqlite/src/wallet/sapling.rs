@@ -20,7 +20,7 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, ReceivedNoteId};
 
-use super::memo_repr;
+use super::{memo_repr, wallet_birthday};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
@@ -132,6 +132,15 @@ pub(crate) fn get_spendable_sapling_notes(
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+    let birthday_height = match wallet_birthday(conn)? {
+        Some(birthday) => birthday,
+        None => {
+            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
+            // such a case, the wallet has no notes to spend.
+            return Ok(vec![]);
+        }
+    };
+
     let mut stmt_unscanned_tip = conn.prepare_cached(
         "SELECT 1 FROM v_sapling_shard_unscanned_ranges
          WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
@@ -159,8 +168,10 @@ pub(crate) fn get_spendable_sapling_notes(
             -- select all the unscanned ranges involving the shard containing this note
             WHERE sapling_received_notes.commitment_tree_position >= unscanned.start_position
             AND sapling_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-            -- exclude unscanned ranges above the anchor height which don't affect spendability
+            -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
             AND unscanned.block_range_start <= :anchor_height
+            -- exclude unscanned ranges that end below the wallet birthday
+            AND unscanned.block_range_end > :wallet_birthday
          )",
     )?;
 
@@ -169,9 +180,10 @@ pub(crate) fn get_spendable_sapling_notes(
 
     let notes = stmt_select_notes.query_and_then(
         named_params![
-            ":account": &u32::from(account),
-            ":anchor_height": &u32::from(anchor_height),
+            ":account": u32::from(account),
+            ":anchor_height": u32::from(anchor_height),
             ":exclude": &excluded_ptr,
+            ":wallet_birthday": u32::from(birthday_height)
         ],
         to_spendable_note,
     )?;
@@ -186,6 +198,15 @@ pub(crate) fn select_spendable_sapling_notes(
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+    let birthday_height = match wallet_birthday(conn)? {
+        Some(birthday) => birthday,
+        None => {
+            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
+            // such a case, the wallet has no notes to spend.
+            return Ok(vec![]);
+        }
+    };
+
     let mut stmt_unscanned_tip = conn.prepare_cached(
         "SELECT 1 FROM v_sapling_shard_unscanned_ranges
          WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
@@ -233,8 +254,10 @@ pub(crate) fn select_spendable_sapling_notes(
                 -- select all the unscanned ranges involving the shard containing this note
                 WHERE sapling_received_notes.commitment_tree_position >= unscanned.start_position
                 AND sapling_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-                -- exclude unscanned ranges above the anchor height which don't affect spendability
+                -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
                 AND unscanned.block_range_start <= :anchor_height
+                -- exclude unscanned ranges that end below the wallet birthday
+                AND unscanned.block_range_end > :wallet_birthday
              )
          )
          SELECT id_note, diversifier, value, rcm, commitment_tree_position
@@ -252,7 +275,8 @@ pub(crate) fn select_spendable_sapling_notes(
             ":account": &u32::from(account),
             ":anchor_height": &u32::from(anchor_height),
             ":target_value": &i64::from(target_value),
-            ":exclude": &excluded_ptr
+            ":exclude": &excluded_ptr,
+            ":wallet_birthday": u32::from(birthday_height)
         ],
         to_spendable_note,
     )?;
@@ -403,8 +427,6 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
-    use secrecy::Secret;
-
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
@@ -428,7 +450,7 @@ pub(crate) mod tests {
             self,
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-            ShieldedProtocol, WalletRead, WalletWrite,
+            AccountBirthday, ShieldedProtocol, WalletRead,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -446,7 +468,7 @@ pub(crate) mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_client_backend::wallet::WalletTransparentOutput,
+        zcash_client_backend::{data_api::WalletWrite, wallet::WalletTransparentOutput},
         zcash_primitives::transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
     };
 
@@ -461,12 +483,13 @@ pub(crate) mod tests {
 
     #[test]
     fn send_proposed_transfer() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (account, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (account, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
@@ -609,12 +632,10 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_incorrect_usk() {
-        let mut st = TestBuilder::new().build();
-
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let mut st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+        let dfvk = st.test_account_sapling().unwrap();
         let to = dfvk.default_address().1.into();
 
         // Create a USK that doesn't exist in the wallet
@@ -637,12 +658,12 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_with_no_blocks() {
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
         let to = dfvk.default_address().1.into();
 
         // Account balance should be zero
@@ -667,12 +688,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_unverified_notes() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -778,12 +800,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_fails_on_locked_notes() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -876,12 +899,13 @@ pub(crate) mod tests {
 
     #[test]
     fn ovk_policy_prevents_recovery_from_chain() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(50000).unwrap();
@@ -976,12 +1000,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_succeeds_to_t_addr_zero_change() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
@@ -1019,12 +1044,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_to_address_spends_a_change_note() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
         let value = Amount::from_u64(60000).unwrap();
@@ -1062,12 +1088,13 @@ pub(crate) mod tests {
 
     #[test]
     fn zip317_spend() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (_, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet
         let (h1, _, _) = st.generate_next_block(
@@ -1159,12 +1186,14 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn shield_transparent() {
-        let mut st = TestBuilder::new().with_block_cache().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let (account_id, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+        let (account_id, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
+
         let uaddr = st
             .wallet()
             .get_current_address(account_id)

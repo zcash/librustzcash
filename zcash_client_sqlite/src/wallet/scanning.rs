@@ -1,34 +1,60 @@
 use rusqlite::{self, named_params, types::Value, OptionalExtension};
+use shardtree::error::ShardTreeError;
 use std::cmp::{max, min, Ordering};
 use std::collections::BTreeSet;
 use std::ops::{Not, Range};
 use std::rc::Rc;
 use tracing::{debug, trace};
-use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 
 use incrementalmerkletree::{Address, Position};
+use zcash_client_backend::data_api::scanning::{ScanPriority, ScanRange};
 use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use zcash_client_backend::data_api::SAPLING_SHARD_HEIGHT;
 
-use crate::error::SqliteClientError;
-use crate::{PRUNING_DEPTH, VERIFY_LOOKAHEAD};
-
-use super::block_height_extrema;
+use crate::{
+    error::SqliteClientError,
+    wallet::{block_height_extrema, commitment_tree, init::WalletMigrationError},
+    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+};
 
 #[derive(Debug, Clone, Copy)]
-enum Insert {
+enum InsertOn {
     Left,
     Right,
+}
+
+struct Insert {
+    on: InsertOn,
+    force_rescan: bool,
+}
+
+impl Insert {
+    fn left(force_rescan: bool) -> Self {
+        Insert {
+            on: InsertOn::Left,
+            force_rescan,
+        }
+    }
+
+    fn right(force_rescan: bool) -> Self {
+        Insert {
+            on: InsertOn::Right,
+            force_rescan,
+        }
+    }
 }
 
 impl Not for Insert {
     type Output = Self;
 
     fn not(self) -> Self::Output {
-        match self {
-            Insert::Left => Insert::Right,
-            Insert::Right => Insert::Left,
+        Insert {
+            on: match self.on {
+                InsertOn::Left => InsertOn::Right,
+                InsertOn::Right => InsertOn::Left,
+            },
+            force_rescan: self.force_rescan,
         }
     }
 }
@@ -42,9 +68,9 @@ enum Dominance {
 
 impl From<Insert> for Dominance {
     fn from(value: Insert) -> Self {
-        match value {
-            Insert::Left => Dominance::Left,
-            Insert::Right => Dominance::Right,
+        match value.on {
+            InsertOn::Left => Dominance::Left,
+            InsertOn::Right => Dominance::Right,
         }
     }
 }
@@ -115,7 +141,7 @@ fn dominance(current: &ScanPriority, inserted: &ScanPriority, insert: Insert) ->
     match (current.cmp(inserted), (current, inserted)) {
         (Ordering::Equal, _) => Dominance::Equal,
         (_, (_, ScanPriority::Verify | ScanPriority::Scanned)) => Dominance::from(insert),
-        (_, (ScanPriority::Scanned, _)) => Dominance::from(!insert),
+        (_, (ScanPriority::Scanned, _)) if !insert.force_rescan => Dominance::from(!insert),
         (Ordering::Less, _) => Dominance::from(insert),
         (Ordering::Greater, _) => Dominance::from(!insert),
     }
@@ -197,7 +223,7 @@ fn join_nonoverlapping(left: ScanRange, right: ScanRange) -> Joined {
     }
 }
 
-fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
+fn insert(current: ScanRange, to_insert: ScanRange, force_rescans: bool) -> Joined {
     fn join_overlapping(left: ScanRange, right: ScanRange, insert: Insert) -> Joined {
         assert!(
             left.block_range().start <= right.block_range().start
@@ -205,9 +231,9 @@ fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
         );
 
         // recompute the range dominance based upon the queue entry priorities
-        let dominance = match insert {
-            Insert::Left => dominance(&right.priority(), &left.priority(), insert),
-            Insert::Right => dominance(&left.priority(), &right.priority(), insert),
+        let dominance = match insert.on {
+            InsertOn::Left => dominance(&right.priority(), &left.priority(), insert),
+            InsertOn::Right => dominance(&left.priority(), &right.priority(), insert),
         };
 
         match dominance {
@@ -237,15 +263,23 @@ fn insert(current: ScanRange, to_insert: ScanRange) -> Joined {
     use RangeOrdering::*;
     match RangeOrdering::cmp(to_insert.block_range(), current.block_range()) {
         LeftFirstDisjoint => join_nonoverlapping(to_insert, current),
-        LeftFirstOverlap | RightContained => join_overlapping(to_insert, current, Insert::Left),
+        LeftFirstOverlap | RightContained => {
+            join_overlapping(to_insert, current, Insert::left(force_rescans))
+        }
         Equal => Joined::One(ScanRange::from_parts(
             to_insert.block_range().clone(),
-            match dominance(&current.priority(), &to_insert.priority(), Insert::Right) {
+            match dominance(
+                &current.priority(),
+                &to_insert.priority(),
+                Insert::right(force_rescans),
+            ) {
                 Dominance::Left | Dominance::Equal => current.priority(),
                 Dominance::Right => to_insert.priority(),
             },
         )),
-        RightFirstOverlap | LeftContained => join_overlapping(current, to_insert, Insert::Right),
+        RightFirstOverlap | LeftContained => {
+            join_overlapping(current, to_insert, Insert::right(force_rescans))
+        }
         RightFirstDisjoint => join_nonoverlapping(current, to_insert),
     }
 }
@@ -294,9 +328,9 @@ impl SpanningTree {
         to_insert: ScanRange,
         insert: Insert,
     ) -> Self {
-        let (left, right) = match insert {
-            Insert::Left => (Box::new(left.insert(to_insert)), right),
-            Insert::Right => (left, Box::new(right.insert(to_insert))),
+        let (left, right) = match insert.on {
+            InsertOn::Left => (Box::new(left.insert(to_insert, insert.force_rescan)), right),
+            InsertOn::Right => (left, Box::new(right.insert(to_insert, insert.force_rescan))),
         };
         SpanningTree::Parent {
             span: left.span().start..right.span().end,
@@ -305,12 +339,18 @@ impl SpanningTree {
         }
     }
 
-    fn from_split(left: Self, right: Self, to_insert: ScanRange, split_point: BlockHeight) -> Self {
+    fn from_split(
+        left: Self,
+        right: Self,
+        to_insert: ScanRange,
+        split_point: BlockHeight,
+        force_rescans: bool,
+    ) -> Self {
         let (l_insert, r_insert) = to_insert
             .split_at(split_point)
             .expect("Split point is within the range of to_insert");
-        let left = Box::new(left.insert(l_insert));
-        let right = Box::new(right.insert(r_insert));
+        let left = Box::new(left.insert(l_insert, force_rescans));
+        let right = Box::new(right.insert(r_insert, force_rescans));
         SpanningTree::Parent {
             span: left.span().start..right.span().end,
             left,
@@ -318,9 +358,9 @@ impl SpanningTree {
         }
     }
 
-    fn insert(self, to_insert: ScanRange) -> Self {
+    fn insert(self, to_insert: ScanRange, force_rescans: bool) -> Self {
         match self {
-            SpanningTree::Leaf(cur) => Self::from_joined(insert(cur, to_insert)),
+            SpanningTree::Leaf(cur) => Self::from_joined(insert(cur, to_insert, force_rescans)),
             SpanningTree::Parent { span, left, right } => {
                 // This algorithm always preserves the existing partition point, and does not do
                 // any rebalancing or unification of ranges within the tree. This should be okay
@@ -331,15 +371,15 @@ impl SpanningTree {
                 match RangeOrdering::cmp(&span, to_insert.block_range()) {
                     LeftFirstDisjoint => {
                         // extend the right-hand branch
-                        Self::from_insert(left, right, to_insert, Insert::Right)
+                        Self::from_insert(left, right, to_insert, Insert::right(force_rescans))
                     }
                     LeftFirstOverlap => {
                         let split_point = left.span().end;
                         if split_point > to_insert.block_range().start {
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         } else {
                             // to_insert is fully contained in or equals the right child
-                            Self::from_insert(left, right, to_insert, Insert::Right)
+                            Self::from_insert(left, right, to_insert, Insert::right(force_rescans))
                         }
                     }
                     RightContained => {
@@ -348,42 +388,42 @@ impl SpanningTree {
                         let split_point = left.span().end;
                         if to_insert.block_range().start >= split_point {
                             // to_insert is fully contained in the right
-                            Self::from_insert(left, right, to_insert, Insert::Right)
+                            Self::from_insert(left, right, to_insert, Insert::right(force_rescans))
                         } else if to_insert.block_range().end <= split_point {
                             // to_insert is fully contained in the left
-                            Self::from_insert(left, right, to_insert, Insert::Left)
+                            Self::from_insert(left, right, to_insert, Insert::left(force_rescans))
                         } else {
                             // to_insert must be split.
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         }
                     }
                     Equal => {
                         let split_point = left.span().end;
                         if split_point > to_insert.block_range().start {
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         } else {
                             // to_insert is fully contained in the right subtree
-                            right.insert(to_insert)
+                            right.insert(to_insert, force_rescans)
                         }
                     }
                     LeftContained => {
                         // the current span is fully contained within to_insert, so we will extend
                         // or overwrite both sides
                         let split_point = left.span().end;
-                        Self::from_split(*left, *right, to_insert, split_point)
+                        Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                     }
                     RightFirstOverlap => {
                         let split_point = left.span().end;
                         if split_point < to_insert.block_range().end {
-                            Self::from_split(*left, *right, to_insert, split_point)
+                            Self::from_split(*left, *right, to_insert, split_point, force_rescans)
                         } else {
                             // to_insert is fully contained in or equals the left child
-                            Self::from_insert(left, right, to_insert, Insert::Left)
+                            Self::from_insert(left, right, to_insert, Insert::left(force_rescans))
                         }
                     }
                     RightFirstDisjoint => {
                         // extend the left-hand branch
-                        Self::from_insert(left, right, to_insert, Insert::Left)
+                        Self::from_insert(left, right, to_insert, Insert::left(force_rescans))
                     }
                 }
             }
@@ -443,14 +483,66 @@ pub(crate) fn insert_queue_entries<'a>(
     Ok(())
 }
 
-pub(crate) fn replace_queue_entries(
+/// A trait that abstracts over the construction of wallet errors.
+///
+/// In order to make it possible to use [`replace_queue_entries`] in database migrations as well as
+/// in code that returns `SqliteClientError`, it is necessary for that method to be polymorphic in
+/// the error type.
+pub(crate) trait WalletError {
+    fn db_error(err: rusqlite::Error) -> Self;
+    fn corrupt(message: String) -> Self;
+    fn chain_height_unknown() -> Self;
+    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self;
+}
+
+impl WalletError for SqliteClientError {
+    fn db_error(err: rusqlite::Error) -> Self {
+        SqliteClientError::DbError(err)
+    }
+
+    fn corrupt(message: String) -> Self {
+        SqliteClientError::CorruptedData(message)
+    }
+
+    fn chain_height_unknown() -> Self {
+        SqliteClientError::ChainHeightUnknown
+    }
+
+    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
+        SqliteClientError::CommitmentTree(err)
+    }
+}
+
+impl WalletError for WalletMigrationError {
+    fn db_error(err: rusqlite::Error) -> Self {
+        WalletMigrationError::DbError(err)
+    }
+
+    fn corrupt(message: String) -> Self {
+        WalletMigrationError::CorruptedData(message)
+    }
+
+    fn chain_height_unknown() -> Self {
+        WalletMigrationError::CorruptedData(
+            "Wallet migration requires a valid account birthday.".to_owned(),
+        )
+    }
+
+    fn commitment_tree(err: ShardTreeError<commitment_tree::Error>) -> Self {
+        WalletMigrationError::CommitmentTree(err)
+    }
+}
+
+pub(crate) fn replace_queue_entries<E: WalletError>(
     conn: &rusqlite::Transaction<'_>,
     query_range: &Range<BlockHeight>,
     entries: impl Iterator<Item = ScanRange>,
-) -> Result<(), SqliteClientError> {
+    force_rescans: bool,
+) -> Result<(), E> {
     let (to_create, to_delete_ends) = {
-        let mut suggested_stmt = conn.prepare_cached(
-            "SELECT block_range_start, block_range_end, priority
+        let mut suggested_stmt = conn
+            .prepare_cached(
+                "SELECT block_range_start, block_range_end, priority
             FROM scan_queue
             WHERE (
                 -- the start is contained within or adjacent to the range
@@ -468,12 +560,15 @@ pub(crate) fn replace_queue_entries(
                 AND block_range_end <= :end
             )
             ORDER BY block_range_end",
-        )?;
+            )
+            .map_err(E::db_error)?;
 
-        let mut rows = suggested_stmt.query(named_params![
-            ":start": u32::from(query_range.start),
-            ":end": u32::from(query_range.end),
-        ])?;
+        let mut rows = suggested_stmt
+            .query(named_params![
+                ":start": u32::from(query_range.start),
+                ":end": u32::from(query_range.end),
+            ])
+            .map_err(E::db_error)?;
 
         // Iterate over the ranges in the scan queue that overlap the range that we have
         // identified as needing to be fully scanned. For each such range add it to the
@@ -481,25 +576,22 @@ pub(crate) fn replace_queue_entries(
         // some in the process).
         let mut to_create: Option<SpanningTree> = None;
         let mut to_delete_ends: Vec<Value> = vec![];
-        while let Some(row) = rows.next()? {
+        while let Some(row) = rows.next().map_err(E::db_error)? {
             let entry = ScanRange::from_parts(
                 Range {
-                    start: BlockHeight::from(row.get::<_, u32>(0)?),
-                    end: BlockHeight::from(row.get::<_, u32>(1)?),
+                    start: BlockHeight::from(row.get::<_, u32>(0).map_err(E::db_error)?),
+                    end: BlockHeight::from(row.get::<_, u32>(1).map_err(E::db_error)?),
                 },
                 {
-                    let code = row.get::<_, i64>(2)?;
+                    let code = row.get::<_, i64>(2).map_err(E::db_error)?;
                     parse_priority_code(code).ok_or_else(|| {
-                        SqliteClientError::CorruptedData(format!(
-                            "scan priority not recognized: {}",
-                            code
-                        ))
+                        E::corrupt(format!("scan priority not recognized: {}", code))
                     })?
                 },
             );
             to_delete_ends.push(Value::from(u32::from(entry.block_range().end)));
             to_create = if let Some(cur) = to_create {
-                Some(cur.insert(entry))
+                Some(cur.insert(entry, force_rescans))
             } else {
                 Some(SpanningTree::Leaf(entry))
             };
@@ -509,7 +601,7 @@ pub(crate) fn replace_queue_entries(
         // start with the scanned range.
         for entry in entries {
             to_create = if let Some(cur) = to_create {
-                Some(cur.insert(entry))
+                Some(cur.insert(entry, force_rescans))
             } else {
                 Some(SpanningTree::Leaf(entry))
             };
@@ -523,10 +615,11 @@ pub(crate) fn replace_queue_entries(
         conn.execute(
             "DELETE FROM scan_queue WHERE block_range_end IN rarray(:ends)",
             named_params![":ends": ends_ptr],
-        )?;
+        )
+        .map_err(E::db_error)?;
 
         let scan_ranges = tree.into_vec();
-        insert_queue_entries(conn, scan_ranges.iter())?;
+        insert_queue_entries(conn, scan_ranges.iter()).map_err(E::db_error)?;
     }
 
     Ok(())
@@ -607,10 +700,11 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         vec![]
     };
 
-    replace_queue_entries(
+    replace_queue_entries::<SqliteClientError>(
         conn,
         &query_range,
         Some(scanned).into_iter().chain(extensions.into_iter()),
+        false,
     )?;
 
     Ok(())
@@ -710,10 +804,11 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     };
 
     if let Some(query_range) = query_range {
-        replace_queue_entries(
+        replace_queue_entries::<SqliteClientError>(
             conn,
             &query_range,
             shard_entry.into_iter().chain(tip_entry.into_iter()),
+            false,
         )?;
     } else {
         // If we have neither shard data nor any existing block data in the database, we should also
@@ -737,13 +832,12 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 mod tests {
     use std::ops::Range;
 
-    use incrementalmerkletree::{Hashable, Level};
-    use secrecy::Secret;
+    use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
 
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
         scanning::{ScanPriority, ScanRange},
-        WalletCommitmentTrees, WalletRead, WalletWrite,
+        AccountBirthday, WalletCommitmentTrees, WalletRead, WalletWrite,
     };
     use zcash_primitives::{
         block::BlockHash,
@@ -753,11 +847,9 @@ mod tests {
     };
 
     use crate::{
-        testing::{birthday_at_sapling_activation, AddressType, TestBuilder},
-        wallet::{
-            init::init_blocks_table,
-            scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
-        },
+        error::SqliteClientError,
+        testing::{AddressType, TestBuilder},
+        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
     };
 
     use super::{join_nonoverlapping, Joined, RangeOrdering, SpanningTree};
@@ -904,7 +996,7 @@ mod tests {
             let scan_range = scan_range(range.clone(), *priority);
             match acc {
                 None => Some(SpanningTree::Leaf(scan_range)),
-                Some(t) => Some(t.insert(scan_range)),
+                Some(t) => Some(t.insert(scan_range, false)),
             }
         })
     }
@@ -1035,7 +1127,7 @@ mod tests {
 
         // a `ChainTip` insertion should not overwrite a scanned range.
         let mut t = spanning_tree(&[(0..3, ChainTip), (3..5, Scanned), (5..7, ChainTip)]).unwrap();
-        t = t.insert(scan_range(0..7, ChainTip));
+        t = t.insert(scan_range(0..7, ChainTip), false);
         assert_eq!(
             t.into_vec(),
             vec![
@@ -1054,7 +1146,7 @@ mod tests {
                 scan_range(280310..280320, Scanned)
             ]
         );
-        t = t.insert(scan_range(280300..280340, ChainTip));
+        t = t.insert(scan_range(280300..280340, ChainTip), false);
         assert_eq!(
             t.into_vec(),
             vec![
@@ -1077,10 +1169,40 @@ mod tests {
         ])
         .unwrap();
 
-        t = t.insert(scan_range(0..3, Scanned));
-        t = t.insert(scan_range(5..8, Scanned));
+        t = t.insert(scan_range(0..3, Scanned), false);
+        t = t.insert(scan_range(5..8, Scanned), false);
 
         assert_eq!(t.into_vec(), vec![scan_range(0..10, Scanned)]);
+    }
+
+    #[test]
+    fn spanning_tree_force_rescans() {
+        use ScanPriority::*;
+
+        let mut t = spanning_tree(&[
+            (0..3, Historic),
+            (3..5, Scanned),
+            (5..7, ChainTip),
+            (7..10, Scanned),
+        ])
+        .unwrap();
+
+        t = t.insert(scan_range(4..9, OpenAdjacent), true);
+
+        let expected = vec![
+            scan_range(0..3, Historic),
+            scan_range(3..4, Scanned),
+            scan_range(4..5, OpenAdjacent),
+            scan_range(5..7, ChainTip),
+            scan_range(7..9, OpenAdjacent),
+            scan_range(9..10, Scanned),
+        ];
+        assert_eq!(t.clone().into_vec(), expected);
+
+        // An insert of an ignored range should not override a scanned range; the existing
+        // priority should prevail, and so the expected state of the tree is unchanged.
+        t = t.insert(scan_range(2..5, Ignored), true);
+        assert_eq!(t.into_vec(), expected);
     }
 
     #[test]
@@ -1089,7 +1211,7 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(birthday_at_sapling_activation)
+            .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
         let dfvk = st.test_account_sapling().unwrap();
@@ -1203,61 +1325,57 @@ mod tests {
     fn create_account_creates_ignored_range() {
         use ScanPriority::*;
 
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(|network| {
+                // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
+                // activation.
+                let birthday_height = network.activation_height(NetworkUpgrade::Canopy).unwrap();
+                let frontier_position = Position::from((0x1 << 16) + 1234);
+                let frontier = Frontier::from_parts(
+                    frontier_position,
+                    Node::empty_leaf(),
+                    vec![Node::empty_leaf(); frontier_position.past_ommer_count().into()],
+                )
+                .unwrap();
+                AccountBirthday::from_parts(birthday_height, frontier, None)
+            })
+            .build();
 
+        let (_, _, birthday) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
         let sap_active = st.sapling_activation_height();
 
-        // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
-        // activation.
-        let birthday_height = st
-            .network()
-            .activation_height(NetworkUpgrade::Canopy)
-            .unwrap();
-
-        // call `init_blocks_table` to initialize the scan queue
-        init_blocks_table(
-            st.wallet_mut(),
-            birthday_height,
-            BlockHash([1; 32]),
-            1,
-            &[0x0, 0x0, 0x0],
-        )
-        .unwrap();
-
-        let seed = Secret::new(vec![0u8; 32]);
-        let (_, usk) = st.wallet_mut().create_account(&seed).unwrap();
-        let _dfvk = usk.to_unified_full_viewing_key().sapling().unwrap().clone();
-
         let expected = vec![
-            // The range up to and including the wallet's birthday height is ignored.
-            scan_range(
-                u32::from(sap_active)..u32::from(birthday_height + 1),
-                Ignored,
-            ),
+            // The range up to the wallet's birthday height is ignored.
+            scan_range(u32::from(sap_active)..u32::from(birthday.height()), Ignored),
         ];
-        assert_matches!(
-            suggest_scan_ranges(&st.wallet().conn, Ignored),
-            Ok(scan_ranges) if scan_ranges == expected
-        );
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
 
-        // Set up some shard history
+        // Set up some shard root history before the wallet birthday
         st.wallet_mut()
             .put_sapling_subtree_roots(
                 0,
-                &[
-                    // Add the end of a commitment tree below the wallet birthday. We currently
-                    // need to scan from this height up to the tip to make notes spendable, though
-                    // this should not be necessary as we have added a frontier that should
-                    // complete the left-hand side of the required shard; this can be fixed once we
-                    // have proper account birthdays.
-                    CommitmentTreeRoot::from_parts(
-                        birthday_height - 1000,
-                        // fake a hash, the value doesn't matter
-                        Node::empty_leaf(),
-                    ),
-                ],
+                &[CommitmentTreeRoot::from_parts(
+                    birthday.height() - 1000,
+                    // fake a hash, the value doesn't matter
+                    Node::empty_leaf(),
+                )],
             )
             .unwrap();
+
+        st.generate_block_at(
+            birthday.height(),
+            BlockHash([0u8; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::const_from_i64(10000),
+            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
+                .try_into()
+                .unwrap(),
+        );
+        st.scan_cached_blocks(birthday.height(), 1);
 
         // Update the chain tip
         let tip_height = st
@@ -1269,28 +1387,28 @@ mod tests {
 
         // Verify that the suggested scan ranges match what is expected
         let expected = vec![
-            // The birthday height was "last scanned" (as the wallet birthday) so we verify 10
-            // blocks starting at that height.
+            // The birthday height is the "first to be scanned" (as the wallet birthday),
+            // so we verify 10 blocks starting at that height.
             scan_range(
-                u32::from(birthday_height)..u32::from(birthday_height + 10),
+                u32::from(birthday.height())..u32::from(birthday.height() + 10),
                 Verify,
             ),
             // The remainder of the shard after the verify segment is required in order to make
             // notes spendable, so it has priority `ChainTip`
             scan_range(
-                u32::from(birthday_height + 10)..u32::from(tip_height + 1),
+                u32::from(birthday.height() + 10)..u32::from(tip_height + 1),
                 ChainTip,
             ),
             // The remainder of the shard prior to the birthday height must be scanned because the
             // wallet doesn't know that it already has enough data from the initial frontier to
             // avoid having to scan this range.
             scan_range(
-                u32::from(birthday_height - 1000)..u32::from(birthday_height),
+                u32::from(birthday.height() - 1000)..u32::from(birthday.height()),
                 ChainTip,
             ),
             // The range below the wallet's birthday height is ignored
             scan_range(
-                u32::from(sap_active)..u32::from(birthday_height - 1000),
+                u32::from(sap_active)..u32::from(birthday.height() - 1000),
                 Ignored,
             ),
         ];
@@ -1322,10 +1440,11 @@ mod tests {
 
         {
             let tx = st.wallet_mut().conn.transaction().unwrap();
-            replace_queue_entries(
+            replace_queue_entries::<SqliteClientError>(
                 &tx,
                 &(BlockHeight::from(150)..BlockHeight::from(160)),
                 vec![scan_range(150..160, Scanned)].into_iter(),
+                false,
             )
             .unwrap();
             tx.commit().unwrap();
@@ -1364,10 +1483,11 @@ mod tests {
 
         {
             let tx = st.wallet_mut().conn.transaction().unwrap();
-            replace_queue_entries(
+            replace_queue_entries::<SqliteClientError>(
                 &tx,
                 &(BlockHeight::from(90)..BlockHeight::from(100)),
                 vec![scan_range(90..100, Scanned)].into_iter(),
+                false,
             )
             .unwrap();
             tx.commit().unwrap();

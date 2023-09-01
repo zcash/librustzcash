@@ -45,6 +45,7 @@ memuse = "0.2"
 tracing = "0.1"
 
 # - Protobuf interfaces and gRPC bindings
+hex = "0.4"
 prost = "0.11"
 tonic = { version = "0.9", optional = true }
 
@@ -80,7 +81,6 @@ which = "4"
 [dev-dependencies]
 assert_matches = "1.5"
 gumdrop = "0.8"
-hex = "0.4"
 jubjub = "0.10"
 proptest = "1.0.0"
 rand_core = "0.6"

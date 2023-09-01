@@ -26,8 +26,10 @@ and this library adheres to Rust's notion of
   wallet did not contain enough observed blocks to satisfy the `min_confirmations`
   value specified; this situation is now treated as an error.
 - `zcash_client_sqlite::error::SqliteClientError` has new error variants:
+  - `SqliteClientError::AccountUnknown`
   - `SqliteClientError::BlockConflict`
   - `SqliteClientError::CacheMiss`
+  - `SqliteClientError::ChainHeightUnknown`
 - `zcash_client_backend::FsBlockDbError` has a new error variant:
   - `FsBlockDbError::CacheMiss`
 - `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
@@ -36,8 +38,14 @@ and this library adheres to Rust's notion of
 ### Removed
 - The empty `wallet::transact` module has been removed.
 - `zcash_client_sqlite::NoteId` has been replaced with `zcash_client_sqlite::ReceivedNoteId`
-  as the `SentNoteId` variant of is now unused following changes to 
+  as the `SentNoteId` variant is now unused following changes to
   `zcash_client_backend::data_api::WalletRead`.
+- `zcash_client_sqlite::wallet::init::{init_blocks_table, init_accounts_table}`
+  have been removed. `zcash_client_backend::data_api::WalletWrite::create_account`
+  should be used instead; the initialization of the note commitment tree
+  previously performed by `init_blocks_table` is now handled by passing an
+  `AccountBirthday` containing the note commitment tree frontier as of the
+  end of the birthday height block to `create_account` instead.
 
 ### Fixed
 - Fixed an off-by-one error in the `BlockSource` implementation for the SQLite-backed

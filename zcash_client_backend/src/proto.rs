@@ -1,9 +1,13 @@
 //! Generated code for handling light client protobuf structs.
 
+use std::io;
+
+use incrementalmerkletree::frontier::CommitmentTree;
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
-    sapling::{note::ExtractedNoteCommitment, Nullifier},
+    merkle_tree::read_commitment_tree,
+    sapling::{note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{components::sapling, TxId},
 };
 
@@ -139,5 +143,18 @@ impl TryFrom<compact_formats::CompactSaplingOutput> for sapling::CompactOutputDe
 impl compact_formats::CompactSaplingSpend {
     pub fn nf(&self) -> Result<Nullifier, ()> {
         Nullifier::from_slice(&self.nf).map_err(|_| ())
+    }
+}
+
+impl service::TreeState {
+    /// Deserializes and returns the Sapling note commitment tree field of the tree state.
+    pub fn sapling_tree(&self) -> io::Result<CommitmentTree<Node, NOTE_COMMITMENT_TREE_DEPTH>> {
+        let sapling_tree_bytes = hex::decode(&self.sapling_tree).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Hex decoding of Sapling tree bytes failed: {:?}", e),
+            )
+        })?;
+        read_commitment_tree::<Node, _, NOTE_COMMITMENT_TREE_DEPTH>(&sapling_tree_bytes[..])
     }
 }
