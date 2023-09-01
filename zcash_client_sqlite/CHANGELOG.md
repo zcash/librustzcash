@@ -38,7 +38,7 @@ and this library adheres to Rust's notion of
 ### Removed
 - The empty `wallet::transact` module has been removed.
 - `zcash_client_sqlite::NoteId` has been replaced with `zcash_client_sqlite::ReceivedNoteId`
-  as the `SentNoteId` variant of is now unused following changes to
+  as the `SentNoteId` variant is now unused following changes to
   `zcash_client_backend::data_api::WalletRead`.
 - `zcash_client_sqlite::wallet::init::{init_blocks_table, init_accounts_table}`
   have been removed. `zcash_client_backend::data_api::WalletWrite::create_account`

@@ -196,7 +196,11 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         shard_tree.insert_frontier_nodes(
             frontier.clone(),
             Retention::Checkpoint {
-                // This subtraction is safe, because the non-empty frontier cannot exist at genesis
+                // This subtraction is safe, because all leaves in the tree appear in blocks, and
+                // the invariant that birthday.height() always corresponds to the block for which
+                // `frontier` is the tree state at the start of the block. Together, this means
+                // there exists a prior block for which frontier is the tree state at the end of
+                // the block.
                 id: birthday.height() - 1,
                 is_marked: false,
             },
@@ -207,7 +211,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         .activation_height(NetworkUpgrade::Sapling)
         .expect("Sapling activation height must be available.");
 
-    // Add the ignored range up to and including the birthday height.
+    // Add the ignored range up to the birthday height.
     if sapling_activation_height < birthday.height() {
         let ignored_range = sapling_activation_height..birthday.height();
 
@@ -223,8 +227,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         )?;
     };
 
-    // Rewrite the scan ranges above the birthday height so that we'll ensure we re-scan to find
-    // any notes that might belong to the newly added account.
+    // Rewrite the scan ranges starting from the birthday height so that we'll ensure we
+    // re-scan to find any notes that might belong to the newly added account.
     if let Some(t) = chain_tip {
         let rescan_range = birthday.height()..(t + 1);
 
@@ -676,10 +680,10 @@ pub(crate) fn get_sent_memo(
 }
 
 /// Returns the minimum birthday height for accounts in the wallet.
-///
-/// TODO ORCHARD: we should consider whether we want to permit protocol-restricted accounts; if so,
-/// we would then want this method to take a protocol identifier to be able to learn the wallet's
-/// "Orchard birthday" which might be different from the overall wallet birthday.
+//
+// TODO ORCHARD: we should consider whether we want to permit protocol-restricted accounts; if so,
+// we would then want this method to take a protocol identifier to be able to learn the wallet's
+// "Orchard birthday" which might be different from the overall wallet birthday.
 pub(crate) fn wallet_birthday(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, rusqlite::Error> {

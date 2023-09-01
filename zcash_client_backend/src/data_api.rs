@@ -121,8 +121,8 @@ pub trait WalletRead {
 
     /// Returns the birthday height for the wallet.
     ///
-    /// This returns earliest birthday height among accounts maintained by this wallet, or
-    /// `Ok(None)` if the wallet has no initialized accounts.
+    /// This returns the earliest birthday height among accounts maintained by this wallet,
+    /// or `Ok(None)` if the wallet has no initialized accounts.
     fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Returns the birthday height for the given account, or an error if the account is not known
@@ -487,7 +487,7 @@ pub struct AccountBirthday {
     recover_until: Option<BlockHeight>,
 }
 
-/// Errors that can occur in the construction of an [`AccountBirthday`] from a [`TreeState`]
+/// Errors that can occur in the construction of an [`AccountBirthday`] from a [`TreeState`].
 pub enum BirthdayError {
     HeightInvalid(TryFromIntError),
     Decode(io::Error),
@@ -509,7 +509,7 @@ impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
     /// * `height`: The birthday height of the account. This is defined as the height of the first
-    ///    block block to be scanned in wallet recovery.
+    ///    block to be scanned in wallet recovery.
     /// * `sapling_frontier`: The Sapling note commitment tree frontier as of the end of the block
     ///    prior to the birthday height.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
@@ -572,6 +572,12 @@ impl AccountBirthday {
     }
 
     #[cfg(feature = "test-dependencies")]
+    /// Constructs a new [`AccountBirthday`] at Sapling activation, with no
+    /// "recover until" height.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the Sapling activation height is not set.
     pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
     ) -> AccountBirthday {
@@ -597,12 +603,12 @@ pub trait WalletWrite: WalletRead {
     /// Returns the account identifier for the newly-created wallet database entry, along with the
     /// associated [`UnifiedSpendingKey`].
     ///
-    /// If a birthday height is having a height is below the current chain tip, this operation will
+    /// If `birthday.height()` is below the current chain tip, this operation will
     /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
     /// defined as the minimum block height that will be scanned for funds belonging to the wallet.
     ///
     /// For new wallets, callers should construct the [`AccountBirthday`] using
-    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - PRUNING_DEPTH`.
+    /// [`AccountBirthday::from_treestate`] for the block at height `chain_tip_height - 100`.
     /// Setting the birthday height to a tree state below the pruning depth ensures that reorgs
     /// cannot cause funds intended for the wallet to be missed; otherwise, if the chain tip height
     /// were used for the wallet birthday, a transaction targeted at a height greater than the
@@ -612,9 +618,9 @@ pub trait WalletWrite: WalletRead {
     /// wallet state, you should use this method to add all of the desired accounts before scanning
     /// the chain from the seed's birthday height.
     ///
-    /// By convention, wallets should only allow a new account to be generated after funds have
-    /// been received by the currently-available account (in order to enable automated account
-    /// recovery).
+    /// By convention, wallets should only allow a new account to be generated after confirmed
+    /// funds have been received by the currently-available account (in order to enable automated
+    /// account recovery).
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     fn create_account(

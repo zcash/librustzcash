@@ -1347,28 +1347,21 @@ mod tests {
         let sap_active = st.sapling_activation_height();
 
         let expected = vec![
-            // The range up to and including the wallet's birthday height is ignored.
+            // The range up to the wallet's birthday height is ignored.
             scan_range(u32::from(sap_active)..u32::from(birthday.height()), Ignored),
         ];
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // Set up some shard history
+        // Set up some shard root history before the wallet birthday
         st.wallet_mut()
             .put_sapling_subtree_roots(
                 0,
-                &[
-                    // Add the end of a commitment tree below the wallet birthday. We currently
-                    // need to scan from this height up to the tip to make notes spendable, though
-                    // this should not be necessary as we have added a frontier that should
-                    // complete the left-hand side of the required shard; this can be fixed once we
-                    // have proper account birthdays.
-                    CommitmentTreeRoot::from_parts(
-                        birthday.height() - 1000,
-                        // fake a hash, the value doesn't matter
-                        Node::empty_leaf(),
-                    ),
-                ],
+                &[CommitmentTreeRoot::from_parts(
+                    birthday.height() - 1000,
+                    // fake a hash, the value doesn't matter
+                    Node::empty_leaf(),
+                )],
             )
             .unwrap();
 
@@ -1394,8 +1387,8 @@ mod tests {
 
         // Verify that the suggested scan ranges match what is expected
         let expected = vec![
-            // The birthday height was "last scanned" (as the wallet birthday) so we verify 10
-            // blocks starting at that height.
+            // The birthday height is the "first to be scanned" (as the wallet birthday),
+            // so we verify 10 blocks starting at that height.
             scan_range(
                 u32::from(birthday.height())..u32::from(birthday.height() + 10),
                 Verify,

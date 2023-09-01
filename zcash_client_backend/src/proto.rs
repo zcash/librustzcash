@@ -147,6 +147,7 @@ impl compact_formats::CompactSaplingSpend {
 }
 
 impl service::TreeState {
+    /// Deserializes and returns the Sapling note commitment tree field of the tree state.
     pub fn sapling_tree(&self) -> io::Result<CommitmentTree<Node, NOTE_COMMITMENT_TREE_DEPTH>> {
         let sapling_tree_bytes = hex::decode(&self.sapling_tree).map_err(|e| {
             io::Error::new(

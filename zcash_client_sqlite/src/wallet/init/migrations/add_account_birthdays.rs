@@ -36,29 +36,28 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         transaction.execute_batch(&format!(
             "ALTER TABLE accounts ADD COLUMN birthday_height INTEGER;
-                ALTER TABLE accounts ADD COLUMN recover_until_height INTEGER;
 
-                -- set the birthday height to the height of the first block in the blocks table
-                UPDATE accounts SET birthday_height = MIN(blocks.height) FROM blocks;
-                -- if the blocks table is empty, set the birthday height to Sapling activation - 1
-                UPDATE accounts SET birthday_height = {} WHERE birthday_height IS NULL;
+            -- set the birthday height to the height of the first block in the blocks table
+            UPDATE accounts SET birthday_height = MIN(blocks.height) FROM blocks;
+            -- if the blocks table is empty, set the birthday height to Sapling activation - 1
+            UPDATE accounts SET birthday_height = {} WHERE birthday_height IS NULL;
 
-                CREATE TABLE accounts_new (
-                    account INTEGER PRIMARY KEY,
-                    ufvk TEXT NOT NULL,
-                    birthday_height INTEGER NOT NULL,
-                    recover_until_height INTEGER
-                );
+            CREATE TABLE accounts_new (
+                account INTEGER PRIMARY KEY,
+                ufvk TEXT NOT NULL,
+                birthday_height INTEGER NOT NULL,
+                recover_until_height INTEGER
+            );
 
-                INSERT INTO accounts_new (account, ufvk, birthday_height)
-                SELECT account, ufvk, birthday_height FROM accounts;
+            INSERT INTO accounts_new (account, ufvk, birthday_height)
+            SELECT account, ufvk, birthday_height FROM accounts;
 
-                PRAGMA foreign_keys=OFF;
-                PRAGMA legacy_alter_table = ON;
-                DROP TABLE accounts;
-                ALTER TABLE accounts_new RENAME TO accounts;
-                PRAGMA legacy_alter_table = OFF;
-                PRAGMA foreign_keys=ON;",
+            PRAGMA foreign_keys=OFF;
+            PRAGMA legacy_alter_table = ON;
+            DROP TABLE accounts;
+            ALTER TABLE accounts_new RENAME TO accounts;
+            PRAGMA legacy_alter_table = OFF;
+            PRAGMA foreign_keys=ON;",
             u32::from(
                 self.params
                     .activation_height(NetworkUpgrade::Sapling)
