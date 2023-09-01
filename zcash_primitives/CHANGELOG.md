@@ -37,6 +37,8 @@ and this library adheres to Rust's notion of
 - `impl {PartialEq, Eq} for transaction::builder::Error` 
   (use `assert_matches!` where error comparisons are required)
 - `zcash_primitives::transaction::components::orchard::Unauthorized`
+- `zcash_primitives::transaction::components::amount::DEFAULT_FEE` was
+  deprecated in 0.12.0 and has now been removed.
 
 ## [0.12.0] - 2023-06-06
 ### Added
