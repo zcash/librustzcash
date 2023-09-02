@@ -834,6 +834,7 @@ mod tests {
 
     use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
 
+    use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
         scanning::{ScanPriority, ScanRange},
@@ -844,12 +845,14 @@ mod tests {
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
         sapling::Node,
         transaction::components::Amount,
+        zip32::DiversifiableFullViewingKey,
     };
 
     use crate::{
         error::SqliteClientError,
-        testing::{AddressType, TestBuilder},
+        testing::{AddressType, BlockCache, TestBuilder, TestState},
         wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        VERIFY_LOOKAHEAD,
     };
 
     use super::{join_nonoverlapping, Joined, RangeOrdering, SpanningTree};
@@ -1043,6 +1046,30 @@ mod tests {
                 scan_range(5..6, Historic),
                 scan_range(6..7, ChainTip),
                 scan_range(7..10, Scanned),
+            ]
+        );
+    }
+
+    #[test]
+    fn spanning_tree_insert_gaps() {
+        use ScanPriority::*;
+
+        let t = spanning_tree(&[(0..3, Historic), (6..8, ChainTip)]).unwrap();
+
+        assert_eq!(
+            t.into_vec(),
+            vec![scan_range(0..6, Historic), scan_range(6..8, ChainTip),]
+        );
+
+        let t = spanning_tree(&[(0..3, Historic), (3..4, Verify), (6..8, ChainTip)]).unwrap();
+
+        assert_eq!(
+            t.into_vec(),
+            vec![
+                scan_range(0..3, Historic),
+                scan_range(3..4, Verify),
+                scan_range(4..6, Historic),
+                scan_range(6..8, ChainTip),
             ]
         );
     }
@@ -1321,11 +1348,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_account_creates_ignored_range() {
-        use ScanPriority::*;
-
-        let mut st = TestBuilder::new()
+    fn test_with_canopy_birthday() -> (
+        TestState<BlockCache>,
+        DiversifiableFullViewingKey,
+        AccountBirthday,
+        u32,
+    ) {
+        let st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(|network| {
                 // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
@@ -1346,27 +1375,190 @@ mod tests {
         let dfvk = st.test_account_sapling().unwrap();
         let sap_active = st.sapling_activation_height();
 
+        (st, dfvk, birthday, sap_active.into())
+    }
+
+    #[test]
+    fn create_account_creates_ignored_range() {
+        use ScanPriority::*;
+
+        let (st, _, birthday, sap_active) = test_with_canopy_birthday();
+        let birthday_height = birthday.height().into();
+
         let expected = vec![
             // The range up to the wallet's birthday height is ignored.
-            scan_range(u32::from(sap_active)..u32::from(birthday.height()), Ignored),
+            scan_range(sap_active..birthday_height, Ignored),
+        ];
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn update_chain_tip_before_create_account() {
+        use ScanPriority::*;
+
+        let mut st = TestBuilder::new().with_block_cache().build();
+        let sap_active = st.sapling_activation_height();
+
+        // Update the chain tip.
+        let new_tip = sap_active + 1000;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+        let chain_end = u32::from(new_tip + 1);
+
+        let expected = vec![
+            // The range up to the chain end is ignored.
+            scan_range(sap_active.into()..chain_end, Ignored),
         ];
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // Set up some shard root history before the wallet birthday
+        // Now add an account.
+        let wallet_birthday = sap_active + 500;
+        st.wallet_mut()
+            .create_account(
+                &SecretVec::new(vec![0; 32]),
+                AccountBirthday::from_parts(wallet_birthday, Frontier::empty(), None),
+            )
+            .unwrap();
+
+        let expected = vec![
+            // The account's birthday onward is marked for recovery.
+            scan_range(wallet_birthday.into()..chain_end, Historic),
+            // The range up to the wallet's birthday height is ignored.
+            scan_range(sap_active.into()..wallet_birthday.into(), Ignored),
+        ];
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn update_chain_tip_with_no_subtree_roots() {
+        use ScanPriority::*;
+
+        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday();
+
+        // Set up the following situation:
+        //
+        //   prior_tip      new_tip
+        //       |<--- 500 --->|
+        // wallet_birthday
+        let prior_tip = birthday.height();
+        let wallet_birthday = birthday.height().into();
+
+        // Update the chain tip.
+        let new_tip = prior_tip + 500;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+        let chain_end = u32::from(new_tip + 1);
+
+        // Verify that the suggested scan ranges match what is expected.
+        let expected = vec![
+            // The wallet's birthday onward is marked for recovery.
+            scan_range(wallet_birthday..chain_end, Historic),
+            // The range below the wallet's birthday height is ignored.
+            scan_range(sap_active..wallet_birthday, Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn update_chain_tip_when_never_scanned() {
+        use ScanPriority::*;
+
+        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday();
+
+        // Set up the following situation:
+        //
+        // last_shard_start      prior_tip      new_tip
+        //        |<----- 1000 ----->|<--- 500 --->|
+        //                    wallet_birthday
+        let prior_tip_height = birthday.height();
+
+        // Set up some shard root history before the wallet birthday.
+        let last_shard_start = birthday.height() - 1000;
         st.wallet_mut()
             .put_sapling_subtree_roots(
                 0,
                 &[CommitmentTreeRoot::from_parts(
-                    birthday.height() - 1000,
+                    last_shard_start,
                     // fake a hash, the value doesn't matter
                     Node::empty_leaf(),
                 )],
             )
             .unwrap();
 
+        // Update the chain tip.
+        let tip_height = prior_tip_height + 500;
+        st.wallet_mut().update_chain_tip(tip_height).unwrap();
+        let chain_end = u32::from(tip_height + 1);
+
+        // Verify that the suggested scan ranges match what is expected.
+        let expected = vec![
+            // The entire last (incomplete) shard's range is marked for catching up to the
+            // chain tip, to ensure that if any notes are discovered after the wallet's
+            // birthday, they will be spendable.
+            scan_range(last_shard_start.into()..chain_end, ChainTip),
+            // The range below the last shard is ignored.
+            scan_range(sap_active..last_shard_start.into(), Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn update_chain_tip_unstable_max_scanned() {
+        use ScanPriority::*;
+
+        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday();
+
+        // Set up the following situation:
+        //
+        //                            prior_tip           new_tip
+        //        |<--- 500 --->|<- 40 ->|<-- 70 -->|<- 20 ->|
+        // wallet_birthday  max_scanned     last_shard_start
+        //
+        let max_scanned = birthday.height() + 500;
+        let prior_tip = max_scanned + 40;
+
+        // Set up some shard root history before the wallet birthday.
+        let second_to_last_shard_start = birthday.height() - 1000;
+        st.wallet_mut()
+            .put_sapling_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    second_to_last_shard_start,
+                    // fake a hash, the value doesn't matter
+                    Node::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        // Set up prior chain state. This simulates us having imported a wallet
+        // with a birthday 520 blocks below the chain tip.
+        st.wallet_mut().update_chain_tip(prior_tip).unwrap();
+
+        // Verify that the suggested scan ranges match what is expected.
+        let expected = vec![
+            // The second-to-last shard is currently the last shard, so it is marked for
+            // scanning to catch up to the prior chain tip. This includes heights prior to
+            // the wallet's birthday, because the wallet doesn't know that it already has
+            // enough data from the initial frontier to avoid having to scan this range.
+            scan_range(
+                second_to_last_shard_start.into()..(prior_tip + 1).into(),
+                ChainTip,
+            ),
+            // The range below the second-to-last shard is ignored.
+            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Now, scan the max scanned block.
         st.generate_block_at(
-            birthday.height(),
+            max_scanned,
             BlockHash([0u8; 32]),
             &dfvk,
             AddressType::DefaultExternal,
@@ -1375,42 +1567,150 @@ mod tests {
                 .try_into()
                 .unwrap(),
         );
-        st.scan_cached_blocks(birthday.height(), 1);
+        st.scan_cached_blocks(max_scanned, 1);
 
-        // Update the chain tip
-        let tip_height = st
-            .wallet()
-            .params
-            .activation_height(NetworkUpgrade::Nu5)
+        // Now simulate shutting down, and then restarting 90 blocks later, after a shard
+        // has been completed.
+        let last_shard_start = prior_tip + 70;
+        st.wallet_mut()
+            .put_sapling_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    last_shard_start,
+                    // fake a hash, the value doesn't matter
+                    Node::empty_leaf(),
+                )],
+            )
             .unwrap();
-        st.wallet_mut().update_chain_tip(tip_height).unwrap();
+
+        let new_tip = last_shard_start + 20;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+        let chain_end = u32::from(new_tip + 1);
 
         // Verify that the suggested scan ranges match what is expected
         let expected = vec![
-            // The birthday height is the "first to be scanned" (as the wallet birthday),
-            // so we verify 10 blocks starting at that height.
+            // The max scanned block's connectivity is verified by scanning the next 10 blocks.
             scan_range(
-                u32::from(birthday.height())..u32::from(birthday.height() + 10),
+                (max_scanned + 1).into()..(max_scanned + 1 + VERIFY_LOOKAHEAD).into(),
                 Verify,
             ),
-            // The remainder of the shard after the verify segment is required in order to make
-            // notes spendable, so it has priority `ChainTip`
+            // The last shard needs to catch up to the chain tip in order to make notes spendable.
+            scan_range(last_shard_start.into()..chain_end, ChainTip),
+            // The range between the verification blocks and the prior tip is still in the queue.
             scan_range(
-                u32::from(birthday.height() + 10)..u32::from(tip_height + 1),
+                (max_scanned + 1 + VERIFY_LOOKAHEAD).into()..(prior_tip + 1).into(),
                 ChainTip,
             ),
-            // The remainder of the shard prior to the birthday height must be scanned because the
-            // wallet doesn't know that it already has enough data from the initial frontier to
-            // avoid having to scan this range.
+            // The remainder of the second-to-last shard's range is still in the queue.
             scan_range(
-                u32::from(birthday.height() - 1000)..u32::from(birthday.height()),
+                second_to_last_shard_start.into()..max_scanned.into(),
                 ChainTip,
             ),
-            // The range below the wallet's birthday height is ignored
+            // The gap between the prior tip and the last shard is deferred as low priority.
+            scan_range((prior_tip + 1).into()..last_shard_start.into(), Historic),
+            // The max scanned block itself is left as-is.
+            scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
+            // The range below the second-to-last shard is ignored.
+            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn update_chain_tip_stable_max_scanned() {
+        use ScanPriority::*;
+
+        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday();
+
+        // Set up the following situation:
+        //
+        //                            prior_tip           new_tip
+        //        |<--- 500 --->|<- 20 ->|<-- 50 -->|<- 20 ->|
+        // wallet_birthday  max_scanned     last_shard_start
+        //
+        let max_scanned = birthday.height() + 500;
+        let prior_tip = max_scanned + 20;
+
+        // Set up some shard root history before the wallet birthday.
+        let second_to_last_shard_start = birthday.height() - 1000;
+        st.wallet_mut()
+            .put_sapling_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    second_to_last_shard_start,
+                    // fake a hash, the value doesn't matter
+                    Node::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        // Set up prior chain state. This simulates us having imported a wallet
+        // with a birthday 520 blocks below the chain tip.
+        st.wallet_mut().update_chain_tip(prior_tip).unwrap();
+
+        // Verify that the suggested scan ranges match what is expected.
+        let expected = vec![
+            // The second-to-last shard is currently the last shard, so it is marked for
+            // scanning to catch up to the prior chain tip. This includes heights prior to
+            // the wallet's birthday, because the wallet doesn't know that it already has
+            // enough data from the initial frontier to avoid having to scan this range.
             scan_range(
-                u32::from(sap_active)..u32::from(birthday.height() - 1000),
-                Ignored,
+                second_to_last_shard_start.into()..(prior_tip + 1).into(),
+                ChainTip,
             ),
+            // The range below the second-to-last shard is ignored.
+            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Now, scan the max scanned block.
+        st.generate_block_at(
+            max_scanned,
+            BlockHash([0u8; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::const_from_i64(10000),
+            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
+                .try_into()
+                .unwrap(),
+        );
+        st.scan_cached_blocks(max_scanned, 1);
+
+        // Now simulate shutting down, and then restarting 70 blocks later, after a shard
+        // has been completed.
+        let last_shard_start = prior_tip + 50;
+        st.wallet_mut()
+            .put_sapling_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    last_shard_start,
+                    // fake a hash, the value doesn't matter
+                    Node::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        let new_tip = last_shard_start + 20;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+        let chain_end = u32::from(new_tip + 1);
+
+        // Verify that the suggested scan ranges match what is expected.
+        let expected = vec![
+            // The blocks after the max scanned block up to the chain tip are prioritised.
+            scan_range((max_scanned + 1).into()..chain_end, ChainTip),
+            // The remainder of the second-to-last shard's range is still in the queue.
+            scan_range(
+                second_to_last_shard_start.into()..max_scanned.into(),
+                ChainTip,
+            ),
+            // The max scanned block itself is left as-is.
+            scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
+            // The range below the second-to-last shard is ignored.
+            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
