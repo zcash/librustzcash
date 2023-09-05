@@ -165,9 +165,6 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     key: &UnifiedFullViewingKey,
     birthday: AccountBirthday,
 ) -> Result<(), SqliteClientError> {
-    // Set the wallet birthday, falling back to the chain tip if not specified
-    let chain_tip = scan_queue_extrema(conn)?.map(|(_, max)| max);
-
     conn.execute(
         "INSERT INTO accounts (account, ufvk, birthday_height, recover_until_height)
         VALUES (:account, :ufvk, :birthday_height, :recover_until_height)",
@@ -227,9 +224,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         )?;
     };
 
-    // Rewrite the scan ranges starting from the birthday height so that we'll ensure we
+    // Rewrite the scan ranges from the birthday height up to the chain tip so that we'll ensure we
     // re-scan to find any notes that might belong to the newly added account.
-    if let Some(t) = chain_tip {
+    if let Some(t) = scan_queue_extrema(conn)?.map(|(_, max)| max) {
         let rescan_range = birthday.height()..(t + 1);
 
         replace_queue_entries::<SqliteClientError>(
@@ -240,7 +237,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 ScanPriority::Historic,
             ))
             .into_iter(),
-            true,
+            true, // force rescan
         )?;
     }
 
@@ -1687,7 +1684,6 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        incrementalmerkletree::frontier::Frontier,
         secrecy::Secret,
         zcash_client_backend::{
             data_api::WalletWrite, encoding::AddressCodec, wallet::WalletTransparentOutput,
@@ -1738,8 +1734,7 @@ mod tests {
 
         // Add an account to the wallet
         let seed = Secret::new([0u8; 32].to_vec());
-        let birthday =
-            AccountBirthday::from_parts(st.sapling_activation_height(), Frontier::empty(), None);
+        let birthday = AccountBirthday::from_sapling_activation(&st.network());
         let (account_id, _usk) = st.wallet_mut().create_account(&seed, birthday).unwrap();
         let uaddr = st
             .wallet()
