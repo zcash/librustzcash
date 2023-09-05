@@ -810,13 +810,13 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
                     // to the chain tip. However, it may be stable or unstable relative to
                     // the prior chain tip, which we could determine by looking up the
                     // prior chain tip height from the scan queue. For simplicity we merge
-                    // these two cases together, and pretend that the max scanned block is
-                    // always unstable relative to the prior chain tip.
+                    // these two cases together, and proceed as though the max scanned
+                    // block is unstable relative to the prior chain tip.
                     //
                     // To confirm its stability, prioritize the `VERIFY_LOOKAHEAD` blocks
                     // above the max scanned height as `Verify`:
                     //
-                    // - We use `Verify` to ensure this connectivity check is performed,
+                    // - We use `Verify` to ensure that a connectivity check is performed,
                     //   along with any required rewinds, before any `ChainTip` ranges
                     //   (from this or any prior `update_chain_tip` call) are scanned.
                     //
