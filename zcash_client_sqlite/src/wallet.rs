@@ -584,6 +584,9 @@ impl ScanProgress for SubtreeScanProgress {
 ///
 /// This may be used to obtain a balance that ignores notes that have been detected so recently
 /// that they are not yet spendable, or for which it is not yet possible to construct witnesses.
+///
+/// `min_confirmations` can be 0, but that case is currently treated identically to
+/// `min_confirmations == 1` for shielded notes. This behaviour may change in the future.
 pub(crate) fn get_wallet_summary(
     conn: &rusqlite::Connection,
     min_confirmations: u32,
