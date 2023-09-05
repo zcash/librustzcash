@@ -135,9 +135,9 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
-            SqliteClientError::AccountUnknown(id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*id)),
+            SqliteClientError::AccountUnknown(acct_id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*acct_id)),
 
-            SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {:?}", acct_id),
+            SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
             #[cfg(feature = "transparent-inputs")]

@@ -14,8 +14,9 @@ and this library adheres to Rust's notion of
   birthday. The account birthday is defined as the minimum height among blocks
   to be scanned when recovering an account.
 - Account creation now requires the caller to provide account birthday information,
-  including the state of the note commitment tree at the end of the block prior to
-  the birthday height.
+  including the state of the note commitment tree at the end of the block prior
+  to the birthday height. A wallet's birthday is the earliest birthday height
+  among accounts maintained by the wallet.
 
 ### Added
 - `impl Eq for zcash_client_backend::address::RecipientAddress`
