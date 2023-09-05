@@ -4,6 +4,7 @@ use std::{
     error, fmt,
     io::{self, Cursor},
     marker::PhantomData,
+    ops::Range,
     sync::Arc,
 };
 use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
@@ -35,6 +36,13 @@ pub enum Error {
         extant_tree_state: TreeState,
         extant_marks_removed: Option<BTreeSet<Position>>,
     },
+    /// Raised when attempting to add shard roots to the database that
+    /// are discontinuous with the existing roots in the database.
+    SubtreeDiscontinuity {
+        attempted_insertion_range: Range<u64>,
+        min: u64,
+        max: u64,
+    },
 }
 
 impl fmt::Display for Error {
@@ -54,6 +62,17 @@ impl fmt::Display for Error {
                     checkpoint_id, checkpoint, extant_tree_state, extant_marks_removed
                 )
             }
+            Error::SubtreeDiscontinuity {
+                attempted_insertion_range,
+                min,
+                max,
+            } => {
+                write!(
+                    f,
+                    "Attempted to write subtree roots with indicies {:?} which is discontinuous with existing subtree range {:?}",
+                    attempted_insertion_range, *min..(*max+1)
+                )
+            }
         }
     }
 }
@@ -64,6 +83,7 @@ impl error::Error for Error {
             Error::Serialization(e) => Some(e),
             Error::Query(e) => Some(e),
             Error::CheckpointConflict { .. } => None,
+            Error::SubtreeDiscontinuity { .. } => None,
         }
     }
 }
@@ -367,6 +387,46 @@ pub(crate) fn last_shard<H: HashSer>(
     .transpose()
 }
 
+/// Returns an error iff the proposed insertion range
+/// for the tree shards would create a discontinuity
+/// in the database.
+fn check_shard_discontinuity(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+    proposed_insertion_range: Range<u64>,
+) -> Result<(), Error> {
+    if let Ok((Some(min), Some(max))) = conn
+        .query_row(
+            &format!(
+                "SELECT MIN(shard_index), MAX(shard_index) FROM {}_tree_shards",
+                table_prefix
+            ),
+            [],
+            |row| {
+                let min = row.get::<_, Option<u64>>(0)?;
+                let max = row.get::<_, Option<u64>>(1)?;
+                Ok((min, max))
+            },
+        )
+        .map_err(Error::Query)
+    {
+        if !proposed_insertion_range.contains(&min) && !proposed_insertion_range.contains(&max) {
+            // The proposed insertion range does not overlap with the existing shard indicies.
+            // This means a discontinuity is introduced if the proposed insertion range's start
+            // is not `max + 1` _and_ `min` is not the proposed insertion range's end.
+            if max + 1 != proposed_insertion_range.start && min != proposed_insertion_range.end {
+                return Err(Error::SubtreeDiscontinuity {
+                    attempted_insertion_range: proposed_insertion_range,
+                    min,
+                    max,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) fn put_shard<H: HashSer>(
     conn: &rusqlite::Transaction<'_>,
     table_prefix: &'static str,
@@ -388,6 +448,10 @@ pub(crate) fn put_shard<H: HashSer>(
     let mut subtree_data = vec![];
     write_shard(&mut subtree_data, subtree.root()).map_err(Error::Serialization)?;
 
+    let shard_index = subtree.root_addr().index();
+
+    check_shard_discontinuity(conn, table_prefix, shard_index..shard_index + 1)?;
+
     let mut stmt_put_shard = conn
         .prepare_cached(&format!(
             "INSERT INTO {}_tree_shards (shard_index, root_hash, shard_data)
@@ -401,7 +465,7 @@ pub(crate) fn put_shard<H: HashSer>(
 
     stmt_put_shard
         .execute(named_params![
-            ":shard_index": subtree.root_addr().index(),
+            ":shard_index": shard_index,
             ":root_hash": subtree_root_hash,
             ":shard_data": subtree_data
         ])
@@ -933,6 +997,13 @@ pub(crate) fn put_shard_roots<
         .expect("slice of inserted roots was verified to be nonempty");
 
     put_cap(conn, table_prefix, cap_result.subtree.take_root()).map_err(ShardTreeError::Storage)?;
+
+    check_shard_discontinuity(
+        conn,
+        table_prefix,
+        start_index..start_index + (roots.len() as u64),
+    )
+    .map_err(ShardTreeError::Storage)?;
 
     for (root, i) in roots.iter().zip(0u64..) {
         // We want to avoid deserializing the subtree just to annotate its root node, so we simply
