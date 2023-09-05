@@ -577,6 +577,115 @@ impl ScanProgress for SubtreeScanProgress {
     }
 }
 
+pub(crate) struct InterpolatingScanProgress;
+
+impl ScanProgress for InterpolatingScanProgress {
+    fn sapling_scan_progress(
+        &self,
+        conn: &rusqlite::Connection,
+        birthday_height: BlockHeight,
+        fully_scanned_height: BlockHeight,
+        chain_tip_height: BlockHeight,
+    ) -> Result<Option<Ratio<u64>>, SqliteClientError> {
+        // Get the number of notes scanned in the incomplete range directly from the blocks table
+        let scanned = conn
+            .query_row(
+                "SELECT SUM(sapling_output_count)
+                 FROM blocks
+                 WHERE height >= :fully_scanned_height",
+                named_params![":fully_scanned_height": u32::from(fully_scanned_height)],
+                |row| row.get::<_, Option<u64>>(0),
+            )
+            .optional()?
+            .flatten()
+            .unwrap_or(0);
+
+        if fully_scanned_height == chain_tip_height && scanned > 0 {
+            Ok(Some(Ratio::new(scanned, scanned)))
+        } else {
+            // We don't have complete information on how many outputs will exist in the shard at
+            // the chain tip without having scanned the chain tip block, so instead we estimate
+            // by linear regression.
+            let mut stmt_final_shards = conn.prepare(
+                "SELECT 
+                     shard_index, 
+                     start_position,
+                     subtree_start_height, 
+                     subtree_end_height
+                 FROM v_sapling_shard_scan_state
+                 ORDER BY shard_index DESC
+                 LIMIT 2",
+            )?;
+
+            struct ShardRow {
+                shard_index: u32,
+                start_position: u64,
+                subtree_start_height: u32,
+                subtree_end_height: Option<u32>,
+            }
+
+            let read_row = |row: &rusqlite::Row| -> Result<ShardRow, SqliteClientError> {
+                Ok(ShardRow {
+                    shard_index: row.get::<_, u32>(0)?,
+                    start_position: row.get::<_, u64>(1)?,
+                    subtree_start_height: row.get::<_, u32>(2)?,
+                    subtree_end_height: row.get::<_, Option<u32>>(3)?,
+                })
+            };
+
+            let mut rows = stmt_final_shards.query([])?;
+            let tip_row = rows.next()?.map(read_row).transpose()?;
+            let prev_row = rows.next()?.map(read_row).transpose()?;
+
+            if let Some(tip) = tip_row {
+                let tip_delta = u32::from(chain_tip_height) - tip.subtree_start_height;
+
+                if let Some(prev) = prev_row {
+                    // use the previous row to interpolate the recent rate of output creation
+                    let prev_end = prev
+                        .subtree_end_height
+                        .expect("End height is known for the second-to-last shard");
+                    let block_delta = prev_end - prev.subtree_start_height;
+                    let rate = f64::from(0x1 << SAPLING_SHARD_HEIGHT) / f64::from(block_delta);
+                    let tip_notes = (f64::from(tip_delta) * rate) as u64;
+
+                    let incomplete_tree_start = conn
+                        .query_row(
+                            "SELECT sapling_commitment_tree_size
+                             FROM blocks
+                             WHERE height = :fully_scanned_height",
+                            named_params![":fully_scanned_height": u32::from(fully_scanned_height)],
+                            |row| row.get::<_, u32>(0),
+                        )
+                        .optional()?;
+
+                    let incomplete_start: u64 = incomplete_tree_start.map_or_else(
+                        || conn.query_row(
+                            "SELECT start_position
+                             FROM v_sapling_shard_scan_state
+                             WHERE subtree_start_height <= :fully_scanned_height
+                             AND (subtree_end_height > :fully_scanned_height OR subtree_end_height IS NULL)", 
+                             named_params![":fully_scanned_height": u32::from(fully_scanned_height)], 
+                             |row| row.get::<_, u32>(0)
+                         ).optional()
+                        .map(|opt| opt.unwrap_or(0)),
+                        Ok
+                    )?.into();
+
+                    Ok(Some(Ratio::new(
+                        scanned,
+                        (tip.start_position - incomplete_start) + tip_notes,
+                    )))
+                } else {
+                    todo!()
+                }
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 /// Returns the spendable balance for the account at the specified height.
 ///
 /// This may be used to obtain a balance that ignores notes that have been detected so recently
