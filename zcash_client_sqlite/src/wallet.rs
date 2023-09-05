@@ -712,6 +712,7 @@ pub(crate) fn get_wallet_summary(
 
     #[cfg(feature = "transparent-inputs")]
     {
+        let zero_conf_height = (chain_tip_height + 1).saturating_sub(min_confirmations);
         let mut stmt_transparent_balances = conn.prepare(
             "SELECT u.received_by_account, SUM(u.value_zat)
              FROM utxos u
@@ -722,7 +723,7 @@ pub(crate) fn get_wallet_summary(
              GROUP BY u.received_by_account",
         )?;
         let mut rows = stmt_transparent_balances
-            .query(named_params![":max_height": u32::from(summary_height)])?;
+            .query(named_params![":max_height": u32::from(zero_conf_height)])?;
 
         while let Some(row) = rows.next()? {
             let account = AccountId::from(row.get::<_, u32>(0)?);
