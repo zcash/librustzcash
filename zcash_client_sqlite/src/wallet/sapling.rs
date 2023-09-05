@@ -465,7 +465,7 @@ pub(crate) mod tests {
     use crate::{
         error::SqliteClientError,
         testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::{commitment_tree, get_balance},
+        wallet::commitment_tree,
         AccountId, NoteId, ReceivedNoteId,
     };
 
@@ -495,19 +495,12 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(60000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(60000).unwrap();
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
-        assert_eq!(
-            st.get_total_balance(account),
-            NonNegativeAmount::try_from(value).unwrap()
-        );
+        assert_eq!(st.get_total_balance(account), value);
 
         let to_extsk = ExtendedSpendingKey::master(&[]);
         let to: RecipientAddress = to_extsk.default_address().1.into();
@@ -664,11 +657,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
         let to = dfvk.default_address().1.into();
 
-        // Account balance should be zero
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
+        // Wallet summary is not yet available
+        assert_eq!(st.get_wallet_summary(0), None);
 
         // We cannot do anything if we aren't synchronised
         assert_matches!(
@@ -700,10 +690,6 @@ pub(crate) mod tests {
         st.scan_cached_blocks(h1, 1);
 
         // Verified balance matches total balance
-        assert_eq!(
-            get_balance(&st.wallet().conn, account).unwrap(),
-            value.into()
-        );
         assert_eq!(st.get_total_balance(account), value);
 
         // Value is considered pending
@@ -711,7 +697,10 @@ pub(crate) mod tests {
 
         // Wallet is fully scanned
         let summary = st.get_wallet_summary(1);
-        assert_eq!(summary.sapling_scan_progress(), Some(Ratio::new(1, 1)));
+        assert_eq!(
+            summary.and_then(|s| s.scan_progress()),
+            Some(Ratio::new(1, 1))
+        );
 
         // Add more funds to the wallet in a second note
         let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
@@ -719,17 +708,16 @@ pub(crate) mod tests {
 
         // Verified balance does not include the second note
         let total = (value + value).unwrap();
-        assert_eq!(
-            get_balance(&st.wallet().conn, account).unwrap(),
-            total.into()
-        );
         assert_eq!(st.get_spendable_balance(account, 2), value);
         assert_eq!(st.get_pending_shielded_balance(account, 2), value);
         assert_eq!(st.get_total_balance(account), total);
 
         // Wallet is still fully scanned
         let summary = st.get_wallet_summary(1);
-        assert_eq!(summary.sapling_scan_progress(), Some(Ratio::new(2, 2)));
+        assert_eq!(
+            summary.and_then(|s| s.scan_progress()),
+            Some(Ratio::new(2, 2))
+        );
 
         // Spend fails because there are insufficient verified notes
         let extsk2 = ExtendedSpendingKey::master(&[]);
@@ -805,10 +793,10 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(50000).unwrap();
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
-        assert_eq!(get_balance(&st.wallet().conn, account).unwrap(), value);
+        assert_eq!(st.get_total_balance(account), value);
 
         // Send some of the funds to another address
         let extsk2 = ExtendedSpendingKey::master(&[]);
@@ -848,7 +836,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
-                value,
+                value.into(),
             );
         }
         st.scan_cached_blocks(h1 + 1, 41);
@@ -874,7 +862,7 @@ pub(crate) mod tests {
         let (h43, _, _) = st.generate_next_block(
             &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
-            value,
+            value.into(),
         );
         st.scan_cached_blocks(h43, 1);
 
@@ -901,10 +889,10 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(50000).unwrap();
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
-        assert_eq!(get_balance(&st.wallet().conn, account).unwrap(), value);
+        assert_eq!(st.get_total_balance(account), value);
 
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let addr2 = extsk2.default_address().1;
@@ -975,7 +963,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
-                value,
+                value.into(),
             );
         }
         st.scan_cached_blocks(h1 + 1, 42);
@@ -1004,7 +992,6 @@ pub(crate) mod tests {
         st.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        assert_eq!(get_balance(&st.wallet().conn, account).unwrap(), value);
         assert_eq!(
             st.get_total_balance(account),
             NonNegativeAmount::try_from(value).unwrap()
@@ -1040,7 +1027,6 @@ pub(crate) mod tests {
         st.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        assert_eq!(get_balance(&st.wallet().conn, account).unwrap(), value);
         assert_eq!(
             st.get_total_balance(account),
             NonNegativeAmount::try_from(value).unwrap()
@@ -1096,7 +1082,6 @@ pub(crate) mod tests {
 
         // Verified balance matches total balance
         let total = Amount::from_u64(60000).unwrap();
-        assert_eq!(get_balance(&st.wallet().conn, account).unwrap(), total);
         assert_eq!(
             st.get_total_balance(account),
             NonNegativeAmount::try_from(total).unwrap()

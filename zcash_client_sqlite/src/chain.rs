@@ -326,7 +326,10 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        transaction::{components::Amount, fees::zip317::FeeRule},
+        transaction::{
+            components::{amount::NonNegativeAmount, Amount},
+            fees::zip317::FeeRule,
+        },
         zip32::ExtendedSpendingKey,
     };
 
@@ -344,7 +347,7 @@ mod tests {
 
     use crate::{
         testing::{AddressType, TestBuilder},
-        wallet::{get_balance, truncate_to_height},
+        wallet::truncate_to_height,
         AccountId,
     };
 
@@ -441,24 +444,21 @@ mod tests {
 
         let dfvk = st.test_account_sapling().unwrap();
 
-        // Account balance should be zero
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
+        // Wallet summary is not yet available
+        assert_eq!(st.get_wallet_summary(0), None);
 
         // Create fake CompactBlocks sending value to the address
-        let value = Amount::from_u64(5).unwrap();
-        let value2 = Amount::from_u64(7).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+        let value = NonNegativeAmount::from_u64(5).unwrap();
+        let value2 = NonNegativeAmount::from_u64(7).unwrap();
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2.into());
 
         // Scan the cache
         st.scan_cached_blocks(h, 2);
 
         // Account balance should reflect both received notes
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
+            st.get_total_balance(AccountId::from(0)),
             (value + value2).unwrap()
         );
 
@@ -469,7 +469,7 @@ mod tests {
 
         // Account balance should be unaltered
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
+            st.get_total_balance(AccountId::from(0)),
             (value + value2).unwrap()
         );
 
@@ -479,17 +479,14 @@ mod tests {
             .unwrap();
 
         // Account balance should only contain the first received note
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
+        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
 
         // Scan the cache again
         st.scan_cached_blocks(h, 2);
 
         // Account balance should again reflect both received notes
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
+            st.get_total_balance(AccountId::from(0)),
             (value + value2).unwrap()
         );
     }
@@ -505,17 +502,14 @@ mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
-        let value = Amount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(50000).unwrap();
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
+        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
 
         // Create blocks to reach SAPLING_ACTIVATION_HEIGHT + 2
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
 
         // Scan the later block first
         st.scan_cached_blocks(h3, 1);
@@ -523,8 +517,8 @@ mod tests {
         // Now scan the block of height SAPLING_ACTIVATION_HEIGHT + 1
         st.scan_cached_blocks(h2, 1);
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::from_u64(150_000).unwrap()
+            st.get_total_balance(AccountId::from(0)),
+            NonNegativeAmount::from_u64(150_000).unwrap()
         );
 
         // We can spend the received notes
@@ -562,35 +556,29 @@ mod tests {
 
         let dfvk = st.test_account_sapling().unwrap();
 
-        // Account balance should be zero
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
+        // Wallet summary is not yet available
+        assert_eq!(st.get_wallet_summary(0), None);
 
         // Create a fake CompactBlock sending value to the address
-        let value = Amount::from_u64(5).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(5).unwrap();
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
 
         // Scan the cache
         st.scan_cached_blocks(h1, 1);
 
         // Account balance should reflect the received note
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
+        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
 
         // Create a second fake CompactBlock sending more value to the address
-        let value2 = Amount::from_u64(7).unwrap();
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+        let value2 = NonNegativeAmount::from_u64(7).unwrap();
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2.into());
 
         // Scan the cache again
         st.scan_cached_blocks(h2, 1);
 
         // Account balance should reflect both received notes
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
+            st.get_total_balance(AccountId::from(0)),
             (value + value2).unwrap()
         );
     }
@@ -603,38 +591,33 @@ mod tests {
             .build();
         let dfvk = st.test_account_sapling().unwrap();
 
-        // Account balance should be zero
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
+        // Wallet summary is not yet available
+        assert_eq!(st.get_wallet_summary(0), None);
 
         // Create a fake CompactBlock sending value to the address
-        let value = Amount::from_u64(5).unwrap();
+        let value = NonNegativeAmount::from_u64(5).unwrap();
         let (received_height, _, nf) =
-            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
 
         // Scan the cache
         st.scan_cached_blocks(received_height, 1);
 
         // Account balance should reflect the received note
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
+        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
         let to2 = extsk2.default_address().1;
-        let value2 = Amount::from_u64(2).unwrap();
-        let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+        let value2 = NonNegativeAmount::from_u64(2).unwrap();
+        let (spent_height, _) =
+            st.generate_next_block_spending(&dfvk, (nf, value.into()), to2, value2.into());
 
         // Scan the cache again
         st.scan_cached_blocks(spent_height, 1);
 
         // Account balance should equal the change
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
+            st.get_total_balance(AccountId::from(0)),
             (value - value2).unwrap()
         );
     }
@@ -648,29 +631,27 @@ mod tests {
 
         let dfvk = st.test_account_sapling().unwrap();
 
-        // Account balance should be zero
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
+        // Wallet summary is not yet available
+        assert_eq!(st.get_wallet_summary(0), None);
 
         // Create a fake CompactBlock sending value to the address
-        let value = Amount::from_u64(5).unwrap();
+        let value = NonNegativeAmount::from_u64(5).unwrap();
         let (received_height, _, nf) =
-            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
         let to2 = extsk2.default_address().1;
-        let value2 = Amount::from_u64(2).unwrap();
-        let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+        let value2 = NonNegativeAmount::from_u64(2).unwrap();
+        let (spent_height, _) =
+            st.generate_next_block_spending(&dfvk, (nf, value.into()), to2, value2.into());
 
         // Scan the spending block first.
         st.scan_cached_blocks(spent_height, 1);
 
         // Account balance should equal the change
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
+            st.get_total_balance(AccountId::from(0)),
             (value - value2).unwrap()
         );
 
@@ -679,7 +660,7 @@ mod tests {
 
         // Account balance should be the same.
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
+            st.get_total_balance(AccountId::from(0)),
             (value - value2).unwrap()
         );
     }

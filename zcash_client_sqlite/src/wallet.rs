@@ -493,34 +493,6 @@ pub(crate) fn is_valid_account_extfvk<P: consensus::Parameters>(
         })
 }
 
-/// Returns the balance for the account, including all mined unspent notes that we know
-/// about.
-///
-/// WARNING: This balance is potentially unreliable, as mined notes may become unmined due
-/// to chain reorgs. You should generally not show this balance to users without some
-/// caveat. Use [`get_balance_at`] where you need a more reliable indication of the
-/// wallet balance.
-#[cfg(test)]
-pub(crate) fn get_balance(
-    conn: &rusqlite::Connection,
-    account: AccountId,
-) -> Result<Amount, SqliteClientError> {
-    let balance = conn.query_row(
-        "SELECT SUM(value) FROM sapling_received_notes
-        INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-        WHERE account = ? AND spent IS NULL AND transactions.block IS NOT NULL",
-        [u32::from(account)],
-        |row| row.get(0).or(Ok(0)),
-    )?;
-
-    match Amount::from_i64(balance) {
-        Ok(amount) if !amount.is_negative() => Ok(amount),
-        _ => Err(SqliteClientError::CorruptedData(
-            "Sum of values in sapling_received_notes is out of range".to_string(),
-        )),
-    }
-}
-
 pub(crate) trait ScanProgress {
     fn sapling_scan_progress(
         &self,
@@ -629,7 +601,7 @@ pub(crate) fn get_wallet_summary(
 
     let fully_scanned_height =
         block_fully_scanned(conn)?.map_or(birthday_height - 1, |m| m.block_height());
-    let summary_height = chain_tip_height + 1 - min_confirmations;
+    let summary_height = (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
 
     let sapling_scan_progress = progress.sapling_scan_progress(
         conn,
@@ -638,10 +610,10 @@ pub(crate) fn get_wallet_summary(
         chain_tip_height,
     )?;
 
-    // If the shard containing the anchor is contains any unscanned ranges below the summary
-    // height, none of our balance is currently spendable.
+    // If the shard containing the summary height contains any unscanned ranges that start below or
+    // including that height, none of our balance is currently spendable.
     let any_spendable = conn.query_row(
-        "SELECT EXISTS(
+        "SELECT NOT EXISTS(
              SELECT 1 FROM v_sapling_shard_unscanned_ranges
              WHERE :summary_height
                 BETWEEN subtree_start_height
@@ -649,11 +621,11 @@ pub(crate) fn get_wallet_summary(
              AND block_range_start <= :summary_height
          )",
         named_params![":summary_height": u32::from(summary_height)],
-        |row| row.get::<_, bool>(0).map(|b| !b),
+        |row| row.get::<_, bool>(0),
     )?;
 
     let mut stmt_select_notes = conn.prepare_cached(
-        "SELECT n.account, n.value, n.is_change, scan_state.max_priority, t.block, t.expiry_height
+        "SELECT n.account, n.value, n.is_change, scan_state.max_priority, t.block
          FROM sapling_received_notes n
          JOIN transactions t ON t.id_tx = n.tx
          LEFT OUTER JOIN v_sapling_shards_scan_state scan_state
@@ -696,9 +668,7 @@ pub(crate) fn get_wallet_summary(
             },
         )?;
 
-        let received_height = row
-            .get::<_, Option<u32>>(4)
-            .map(|opt| opt.map(BlockHeight::from))?;
+        let received_height = row.get::<_, Option<u32>>(4)?.map(BlockHeight::from);
 
         let is_spendable = any_spendable
             && received_height.iter().any(|h| h <= &summary_height)
@@ -763,7 +733,10 @@ pub(crate) fn get_wallet_summary(
 
             account_balances
                 .entry(account)
-                .and_modify(|bal| bal.unshielded = value)
+                .and_modify(|bal| {
+                    bal.unshielded =
+                        (bal.unshielded + value).expect("Unshielded value cannot overflow")
+                })
                 .or_insert(AccountBalance {
                     sapling_balance: Balance::ZERO,
                     unshielded: value,
@@ -1924,8 +1897,6 @@ mod tests {
 
     use crate::{testing::TestBuilder, AccountId};
 
-    use super::get_balance;
-
     #[cfg(feature = "transparent-inputs")]
     use {
         incrementalmerkletree::frontier::Frontier,
@@ -1945,11 +1916,8 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        // The account should be empty
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
+        // The account should have no summary information
+        assert_eq!(st.get_wallet_summary(0), None);
 
         // We can't get an anchor height, as we have not scanned any blocks.
         assert_eq!(
@@ -1959,14 +1927,16 @@ mod tests {
             None
         );
 
-        // An invalid account has zero balance
+        // The default address is set for the test account
+        assert_matches!(
+            st.wallet().get_current_address(AccountId::from(0)),
+            Ok(Some(_))
+        );
+
+        // No default address is set for an un-initialized account
         assert_matches!(
             st.wallet().get_current_address(AccountId::from(1)),
             Ok(None)
-        );
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
         );
     }
 

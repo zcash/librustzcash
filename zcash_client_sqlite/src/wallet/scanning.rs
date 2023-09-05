@@ -1692,7 +1692,7 @@ mod tests {
 
         // We have scan ranges and a subtree, but have scanned no blocks.
         let summary = st.get_wallet_summary(1);
-        assert_eq!(summary.sapling_scan_progress(), None);
+        assert_eq!(summary.and_then(|s| s.scan_progress()), None);
 
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
@@ -1732,7 +1732,7 @@ mod tests {
         // wallet birthday but before the end of the shard.
         let summary = st.get_wallet_summary(1);
         assert_eq!(
-            summary.sapling_scan_progress(),
+            summary.and_then(|s| s.scan_progress()),
             Some(Ratio::new(1, 0x1 << SAPLING_SHARD_HEIGHT))
         );
 
@@ -1776,7 +1776,7 @@ mod tests {
         // shards worth of notes to scan.
         let summary = st.get_wallet_summary(1);
         assert_eq!(
-            summary.sapling_scan_progress(),
+            summary.and_then(|s| s.scan_progress()),
             Some(Ratio::new(1, 0x1 << (SAPLING_SHARD_HEIGHT + 1)))
         );
     }

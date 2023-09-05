@@ -290,6 +290,22 @@ impl Add<NonNegativeAmount> for Option<NonNegativeAmount> {
     }
 }
 
+impl Sub<NonNegativeAmount> for NonNegativeAmount {
+    type Output = Option<NonNegativeAmount>;
+
+    fn sub(self, rhs: NonNegativeAmount) -> Option<NonNegativeAmount> {
+        (self.0 - rhs.0).and_then(|amt| NonNegativeAmount::try_from(amt).ok())
+    }
+}
+
+impl Sub<NonNegativeAmount> for Option<NonNegativeAmount> {
+    type Output = Self;
+
+    fn sub(self, rhs: NonNegativeAmount) -> Option<NonNegativeAmount> {
+        self.and_then(|lhs| lhs - rhs)
+    }
+}
+
 /// A type for balance violations in amount addition and subtraction
 /// (overflow and underflow of allowed ranges)
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

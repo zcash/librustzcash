@@ -14,6 +14,7 @@ use tempfile::NamedTempFile;
 #[cfg(feature = "unstable")]
 use tempfile::TempDir;
 
+use zcash_client_backend::data_api::AccountBalance;
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::RecipientAddress,
@@ -290,66 +291,6 @@ where
             limit,
         )
     }
-
-    pub(crate) fn get_total_balance(&self, account: AccountId) -> NonNegativeAmount {
-        get_wallet_summary(&self.wallet().conn, 0, &SubtreeScanProgress)
-            .unwrap()
-            .unwrap()
-            .account_balances()
-            .get(&account)
-            .unwrap()
-            .total()
-    }
-
-    pub(crate) fn get_spendable_balance(
-        &self,
-        account: AccountId,
-        min_confirmations: u32,
-    ) -> NonNegativeAmount {
-        let binding =
-            get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
-                .unwrap()
-                .unwrap();
-        let balance = binding.account_balances().get(&account).unwrap();
-
-        balance.sapling_balance.spendable_value
-    }
-
-    pub(crate) fn get_pending_shielded_balance(
-        &self,
-        account: AccountId,
-        min_confirmations: u32,
-    ) -> NonNegativeAmount {
-        let binding =
-            get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
-                .unwrap()
-                .unwrap();
-        let balance = binding.account_balances().get(&account).unwrap();
-
-        (balance.sapling_balance.value_pending_spendability
-            + balance.sapling_balance.change_pending_confirmation)
-            .unwrap()
-    }
-
-    pub(crate) fn get_pending_change(
-        &self,
-        account: AccountId,
-        min_confirmations: u32,
-    ) -> NonNegativeAmount {
-        let binding =
-            get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
-                .unwrap()
-                .unwrap();
-        let balance = binding.account_balances().get(&account).unwrap();
-
-        balance.sapling_balance.change_pending_confirmation
-    }
-
-    pub(crate) fn get_wallet_summary(&self, min_confirmations: u32) -> WalletSummary {
-        get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
-            .unwrap()
-            .unwrap()
-    }
 }
 
 impl<Cache> TestState<Cache> {
@@ -593,6 +534,60 @@ impl<Cache> TestState<Cache> {
             memo,
             min_confirmations,
         )
+    }
+
+    fn with_account_balance<T, F: FnOnce(&AccountBalance) -> T>(
+        &self,
+        account: AccountId,
+        min_confirmations: u32,
+        f: F,
+    ) -> T {
+        let binding =
+            get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress)
+                .unwrap()
+                .unwrap();
+
+        f(binding.account_balances().get(&account).unwrap())
+    }
+
+    pub(crate) fn get_total_balance(&self, account: AccountId) -> NonNegativeAmount {
+        self.with_account_balance(account, 0, |balance| balance.total())
+    }
+
+    pub(crate) fn get_spendable_balance(
+        &self,
+        account: AccountId,
+        min_confirmations: u32,
+    ) -> NonNegativeAmount {
+        self.with_account_balance(account, min_confirmations, |balance| {
+            balance.sapling_balance.spendable_value
+        })
+    }
+
+    pub(crate) fn get_pending_shielded_balance(
+        &self,
+        account: AccountId,
+        min_confirmations: u32,
+    ) -> NonNegativeAmount {
+        self.with_account_balance(account, min_confirmations, |balance| {
+            balance.sapling_balance.value_pending_spendability
+                + balance.sapling_balance.change_pending_confirmation
+        })
+        .unwrap()
+    }
+
+    pub(crate) fn get_pending_change(
+        &self,
+        account: AccountId,
+        min_confirmations: u32,
+    ) -> NonNegativeAmount {
+        self.with_account_balance(account, min_confirmations, |balance| {
+            balance.sapling_balance.change_pending_confirmation
+        })
+    }
+
+    pub(crate) fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary> {
+        get_wallet_summary(&self.wallet().conn, min_confirmations, &SubtreeScanProgress).unwrap()
     }
 }
 

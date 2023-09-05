@@ -51,8 +51,8 @@ pub enum NullifierQuery {
     All,
 }
 
-/// Balance information for a value within a single shielded pool in an account.
-#[derive(Debug, Clone, Copy)]
+/// Balance information for a value within a single pool in an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
     /// The value in the account that may currently be spent; it is possible to compute witnesses
     /// for all the notes that comprise this value, and all of this value is confirmed to the
@@ -86,7 +86,7 @@ impl Balance {
 
 /// Balance information for a single account. The sum of this struct's fields is the total balance
 /// of the wallet.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountBalance {
     /// The value of unspent Sapling outputs belonging to the account.
     pub sapling_balance: Balance,
@@ -144,12 +144,12 @@ impl<T> Ratio<T> {
 /// can only be certain to be unspent in the case that [`Self::is_synced`] is true, and even in
 /// this circumstance it is possible that a newly created transaction could conflict with a
 /// not-yet-mined transaction in the mempool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletSummary {
     account_balances: BTreeMap<AccountId, AccountBalance>,
     chain_tip_height: BlockHeight,
     fully_scanned_height: BlockHeight,
-    sapling_scan_progress: Option<Ratio<u64>>,
+    scan_progress: Option<Ratio<u64>>,
 }
 
 impl WalletSummary {
@@ -158,13 +158,13 @@ impl WalletSummary {
         account_balances: BTreeMap<AccountId, AccountBalance>,
         chain_tip_height: BlockHeight,
         fully_scanned_height: BlockHeight,
-        sapling_scan_progress: Option<Ratio<u64>>,
+        scan_progress: Option<Ratio<u64>>,
     ) -> Self {
         Self {
             account_balances,
             chain_tip_height,
             fully_scanned_height,
-            sapling_scan_progress,
+            scan_progress,
         }
     }
 
@@ -178,20 +178,20 @@ impl WalletSummary {
         self.chain_tip_height
     }
 
-    /// Returns the height below which all blocks wallet have been scanned, ignoring blocks below
-    /// the wallet birthday.
+    /// Returns the height below which all blocks have been scanned by the wallet, ignoring blocks
+    /// below the wallet birthday.
     pub fn fully_scanned_height(&self) -> BlockHeight {
         self.fully_scanned_height
     }
 
-    /// Returns the progress of scanning Sapling outputs, in terms of the ratio between notes
+    /// Returns the progress of scanning shielded outputs, in terms of the ratio between notes
     /// scanned and the total number of notes added to the chain since the wallet birthday.
     ///
     /// This ratio should only be used to compute progress percentages, and the numerator and
     /// denominator should not be treated as authoritative note counts. Returns `None` if the
     /// wallet is unable to determine the size of the note commitment tree.
-    pub fn sapling_scan_progress(&self) -> Option<Ratio<u64>> {
-        self.sapling_scan_progress
+    pub fn scan_progress(&self) -> Option<Ratio<u64>> {
+        self.scan_progress
     }
 
     /// Returns whether or not wallet scanning is complete.

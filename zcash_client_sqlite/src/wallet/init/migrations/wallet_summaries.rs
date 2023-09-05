@@ -43,7 +43,7 @@ impl RusqliteMigration for Migration {
         )?;
 
         transaction.execute_batch(
-            // set the number of outputs everywhere that we have sequential Sapling blocks
+            // set the number of outputs everywhere that we have sequential blocks
             "CREATE TEMPORARY TABLE block_deltas AS
                 SELECT
                     cur.height AS height,
