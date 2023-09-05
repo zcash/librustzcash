@@ -719,8 +719,8 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     // If the caller provided a chain tip that is before Sapling activation, do nothing.
     let sapling_activation = match params.activation_height(NetworkUpgrade::Sapling) {
-        Some(h) => h,
-        None => return Ok(()),
+        Some(h) if h <= new_tip => h,
+        _ => return Ok(()),
     };
 
     // Read the previous max scanned height from the blocks table
