@@ -233,6 +233,13 @@ pub trait WalletRead {
     /// block.
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error>;
 
+    /// Returns block metadata for the maximum height that the wallet has scanned.
+    ///
+    /// If the wallet is fully synced, this will be equivalent to `block_fully_scanned`;
+    /// otherwise the maximal scanned height is likely to be greater than the fully scanned height
+    /// due to the fact that out-of-order scanning can leave gaps.
+    fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error>;
+
     /// Returns a vector of suggested scan ranges based upon the current wallet state.
     ///
     /// This method should only be used in cases where the [`CompactBlock`] data that will be made
@@ -942,6 +949,10 @@ pub mod testing {
         }
 
         fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
             Ok(None)
         }
 

@@ -180,6 +180,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::block_fully_scanned(self.conn.borrow())
     }
 
+    fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+        wallet::block_max_scanned(self.conn.borrow())
+    }
+
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
         wallet::scanning::suggest_scan_ranges(self.conn.borrow(), ScanPriority::Historic)
             .map_err(SqliteClientError::from)

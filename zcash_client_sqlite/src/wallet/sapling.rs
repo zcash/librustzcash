@@ -465,7 +465,7 @@ pub(crate) mod tests {
     use crate::{
         error::SqliteClientError,
         testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::commitment_tree,
+        wallet::{block_max_scanned, commitment_tree},
         AccountId, NoteId, ReceivedNoteId,
     };
 
@@ -501,6 +501,13 @@ pub(crate) mod tests {
 
         // Verified balance matches total balance
         assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(
+            block_max_scanned(&st.wallet().conn)
+                .unwrap()
+                .unwrap()
+                .block_height(),
+            h
+        );
 
         let to_extsk = ExtendedSpendingKey::master(&[]);
         let to: RecipientAddress = to_extsk.default_address().1.into();
