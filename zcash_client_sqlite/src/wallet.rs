@@ -524,21 +524,22 @@ impl ScanProgress for SubtreeScanProgress {
             )
             .map_err(SqliteClientError::from)
         } else {
-            // Compute the number of fully scanned notes directly from the blocks table
-            let fully_scanned_size = conn.query_row(
+            let start_height = birthday_height;
+            // Compute the starting number of notes directly from the blocks table
+            let start_size = conn.query_row(
                 "SELECT MAX(sapling_commitment_tree_size)
                  FROM blocks
-                 WHERE height <= :fully_scanned_height",
-                named_params![":fully_scanned_height": u32::from(fully_scanned_height)],
+                 WHERE height <= :start_height",
+                named_params![":start_height": u32::from(start_height)],
                 |row| row.get::<_, Option<u64>>(0),
             )?;
 
-            // Compute the total blocks scanned so far above the fully scanned height
+            // Compute the total blocks scanned so far above the starting height
             let scanned_count = conn.query_row(
                 "SELECT SUM(sapling_output_count)
                  FROM blocks
-                 WHERE height > :fully_scanned_height",
-                named_params![":fully_scanned_height": u32::from(fully_scanned_height)],
+                 WHERE height > :start_height",
+                named_params![":start_height": u32::from(start_height)],
                 |row| row.get::<_, Option<u64>>(0),
             )?;
 
@@ -552,23 +553,24 @@ impl ScanProgress for SubtreeScanProgress {
                 .query_row(
                     "SELECT MIN(shard_index), MAX(shard_index)
                      FROM sapling_tree_shards
-                     WHERE subtree_end_height > :fully_scanned_height
+                     WHERE subtree_end_height > :start_height
                      OR subtree_end_height IS NULL",
-                    named_params![":fully_scanned_height": u32::from(fully_scanned_height)],
+                    named_params![":start_height": u32::from(start_height)],
                     |row| {
                         let min_tree_size = row
                             .get::<_, Option<u64>>(0)?
                             .map(|min| min << SAPLING_SHARD_HEIGHT);
                         let max_idx = row.get::<_, Option<u64>>(1)?;
-                        Ok(fully_scanned_size.or(min_tree_size).zip(max_idx).map(
-                            |(min_tree_size, max)| {
+                        Ok(start_size
+                            .or(min_tree_size)
+                            .zip(max_idx)
+                            .map(|(min_tree_size, max)| {
                                 let max_tree_size = (max + 1) << SAPLING_SHARD_HEIGHT;
                                 Ratio::new(
                                     scanned_count.unwrap_or(0),
                                     max_tree_size - min_tree_size,
                                 )
-                            },
-                        ))
+                            }))
                     },
                 )
                 .optional()?
