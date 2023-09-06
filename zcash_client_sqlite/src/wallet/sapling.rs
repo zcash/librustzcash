@@ -126,6 +126,30 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
     })
 }
 
+/// Utility method for determining whether we have any spendable notes
+///
+/// If the tip shard has unscanned ranges below the anchor height and greater than or equal to
+/// the wallet birthday, none of our notes can be spent because we cannot construct witnesses at
+/// the provided anchor height.
+fn unscanned_tip_exists(
+    conn: &Connection,
+    anchor_height: BlockHeight,
+) -> Result<bool, rusqlite::Error> {
+    // v_sapling_shard_unscanned_ranges only returns ranges ending on or after wallet birthday, so
+    // we don't need to refer to the birthday in this query.
+    conn.query_row(
+        "SELECT EXISTS (
+             SELECT 1 FROM v_sapling_shard_unscanned_ranges range
+             WHERE range.block_range_start <= :anchor_height
+             AND :anchor_height BETWEEN 
+                range.subtree_start_height 
+                AND IFNULL(range.subtree_end_height, :anchor_height)
+         )",
+        named_params![":anchor_height": u32::from(anchor_height),],
+        |row| row.get::<_, bool>(0),
+    )
+}
+
 pub(crate) fn get_spendable_sapling_notes(
     conn: &Connection,
     account: AccountId,
@@ -141,16 +165,7 @@ pub(crate) fn get_spendable_sapling_notes(
         }
     };
 
-    let mut stmt_unscanned_tip = conn.prepare_cached(
-        "SELECT 1 FROM v_sapling_shard_unscanned_ranges
-         WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
-         AND block_range_start <= :anchor_height",
-    )?;
-    let mut unscanned =
-        stmt_unscanned_tip.query(named_params![":anchor_height": &u32::from(anchor_height),])?;
-    if unscanned.next()?.is_some() {
-        // if the tip shard has unscanned ranges below the anchor height, none of our notes can be
-        // spent
+    if unscanned_tip_exists(conn, anchor_height)? {
         return Ok(vec![]);
     }
 
@@ -207,16 +222,7 @@ pub(crate) fn select_spendable_sapling_notes(
         }
     };
 
-    let mut stmt_unscanned_tip = conn.prepare_cached(
-        "SELECT 1 FROM v_sapling_shard_unscanned_ranges
-         WHERE :anchor_height BETWEEN subtree_start_height AND IFNULL(subtree_end_height, :anchor_height)
-         AND block_range_start <= :anchor_height",
-    )?;
-    let mut unscanned =
-        stmt_unscanned_tip.query(named_params![":anchor_height": &u32::from(anchor_height),])?;
-    if unscanned.next()?.is_some() {
-        // if the tip shard has unscanned ranges below the anchor height, none of our notes can be
-        // spent
+    if unscanned_tip_exists(conn, anchor_height)? {
         return Ok(vec![]);
     }
 
@@ -427,14 +433,17 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
+    use incrementalmerkletree::Hashable;
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
+        block::BlockHash,
         consensus::BranchId,
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
         sapling::{
-            note_encryption::try_sapling_output_recovery, prover::TxProver, Note, PaymentAddress,
+            note_encryption::try_sapling_output_recovery, prover::TxProver, Node, Note,
+            PaymentAddress,
         },
         transaction::{
             components::{
@@ -451,9 +460,10 @@ pub(crate) mod tests {
         address::RecipientAddress,
         data_api::{
             self,
+            chain::CommitmentTreeRoot,
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-            AccountBirthday, Ratio, ShieldedProtocol, WalletRead,
+            AccountBirthday, Ratio, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -465,7 +475,10 @@ pub(crate) mod tests {
     use crate::{
         error::SqliteClientError,
         testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::{block_max_scanned, commitment_tree},
+        wallet::{
+            block_max_scanned, commitment_tree, sapling::select_spendable_sapling_notes,
+            scanning::tests::test_with_canopy_birthday,
+        },
         AccountId, NoteId, ReceivedNoteId,
     };
 
@@ -1202,5 +1215,93 @@ pub(crate) mod tests {
             ),
             Ok(_)
         );
+    }
+
+    #[test]
+    fn birthday_in_anchor_shard() {
+        let (mut st, dfvk, birthday, _) = test_with_canopy_birthday();
+
+        // Set up the following situation:
+        //
+        //        |<------ 500 ------->|<--- 10 --->|<--- 10 --->|
+        // last_shard_start   wallet_birthday  received_tx  anchor_height
+        //
+        // Set up some shard root history before the wallet birthday.
+        let prev_shard_start = birthday.height() - 500;
+        st.wallet_mut()
+            .put_sapling_subtree_roots(
+                0,
+                &[CommitmentTreeRoot::from_parts(
+                    prev_shard_start,
+                    // fake a hash, the value doesn't matter
+                    Node::empty_leaf(),
+                )],
+            )
+            .unwrap();
+
+        let received_tx_height = birthday.height() + 10;
+
+        let initial_sapling_tree_size =
+            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
+                .try_into()
+                .unwrap();
+
+        // Generate 9 blocks that have no value for us, starting at the birthday height.
+        let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+        let not_our_value = Amount::const_from_i64(10000);
+        st.generate_block_at(
+            birthday.height(),
+            BlockHash([0; 32]),
+            &not_our_key,
+            AddressType::DefaultExternal,
+            not_our_value,
+            initial_sapling_tree_size,
+        );
+        for _ in 1..9 {
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        }
+
+        // Now, generate a block that belongs to our wallet
+        st.generate_next_block(
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::const_from_i64(500000),
+        );
+
+        // Generate some more blocks to get above our anchor height
+        for _ in 0..15 {
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        }
+
+        // Scan a block range that includes our received note, but skips some blocks we need to
+        // make it spendable.
+        st.scan_cached_blocks(birthday.height() + 5, 20);
+
+        // Verify that the received note is not considered spendable
+        let spendable = select_spendable_sapling_notes(
+            &st.wallet().conn,
+            AccountId::from(0),
+            Amount::const_from_i64(300000),
+            received_tx_height + 10,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(spendable.len(), 0);
+
+        // Scan the blocks we skipped
+        st.scan_cached_blocks(birthday.height(), 5);
+
+        // Verify that the received note is now considered spendable
+        let spendable = select_spendable_sapling_notes(
+            &st.wallet().conn,
+            AccountId::from(0),
+            Amount::const_from_i64(300000),
+            received_tx_height + 10,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(spendable.len(), 1);
     }
 }

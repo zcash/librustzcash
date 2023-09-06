@@ -872,7 +872,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::ops::Range;
 
     use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
@@ -1392,7 +1392,7 @@ mod tests {
         );
     }
 
-    fn test_with_canopy_birthday() -> (
+    pub(crate) fn test_with_canopy_birthday() -> (
         TestState<BlockCache>,
         DiversifiableFullViewingKey,
         AccountBirthday,
