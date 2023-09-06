@@ -1086,6 +1086,33 @@ pub(crate) fn block_fully_scanned(
     }
 }
 
+pub(crate) fn block_max_scanned(
+    conn: &rusqlite::Connection,
+) -> Result<Option<BlockMetadata>, SqliteClientError> {
+    conn.query_row(
+        "SELECT blocks.height, hash, sapling_commitment_tree_size, sapling_tree
+         FROM blocks
+         JOIN (SELECT MAX(height) AS height FROM blocks) blocks_max
+         ON blocks.height = blocks_max.height",
+        [],
+        |row| {
+            let height: u32 = row.get(0)?;
+            let block_hash: Vec<u8> = row.get(1)?;
+            let sapling_tree_size: Option<u32> = row.get(2)?;
+            let sapling_tree: Vec<u8> = row.get(3)?;
+            Ok((
+                BlockHeight::from(height),
+                block_hash,
+                sapling_tree_size,
+                sapling_tree,
+            ))
+        },
+    )
+    .optional()
+    .map_err(SqliteClientError::from)
+    .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
+}
+
 /// Returns the block height at which the specified transaction was mined,
 /// if any.
 pub(crate) fn get_tx_height(
@@ -1892,8 +1919,6 @@ pub(crate) fn prune_nullifier_map(
 mod tests {
     use std::num::NonZeroU32;
 
-    use zcash_primitives::transaction::components::Amount;
-
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead};
 
     use crate::{testing::TestBuilder, AccountId};
@@ -1906,7 +1931,7 @@ mod tests {
         },
         zcash_primitives::{
             consensus::BlockHeight,
-            transaction::components::{OutPoint, TxOut},
+            transaction::components::{Amount, OutPoint, TxOut},
         },
     };
 
