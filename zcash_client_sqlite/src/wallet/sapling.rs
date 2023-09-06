@@ -437,7 +437,10 @@ pub(crate) mod tests {
             note_encryption::try_sapling_output_recovery, prover::TxProver, Note, PaymentAddress,
         },
         transaction::{
-            components::{amount::BalanceError, Amount},
+            components::{
+                amount::{BalanceError, NonNegativeAmount},
+                Amount,
+            },
             fees::{fixed::FeeRule as FixedFeeRule, zip317::FeeRule as Zip317FeeRule},
             Transaction,
         },
@@ -450,7 +453,7 @@ pub(crate) mod tests {
             self,
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-            AccountBirthday, ShieldedProtocol, WalletRead,
+            AccountBirthday, Ratio, ShieldedProtocol, WalletRead,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -462,14 +465,14 @@ pub(crate) mod tests {
     use crate::{
         error::SqliteClientError,
         testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::{commitment_tree, get_balance, get_balance_at},
+        wallet::commitment_tree,
         AccountId, NoteId, ReceivedNoteId,
     };
 
     #[cfg(feature = "transparent-inputs")]
     use {
         zcash_client_backend::{data_api::WalletWrite, wallet::WalletTransparentOutput},
-        zcash_primitives::transaction::components::{amount::NonNegativeAmount, OutPoint, TxOut},
+        zcash_primitives::transaction::components::{OutPoint, TxOut},
     };
 
     pub(crate) fn test_prover() -> impl TxProver {
@@ -492,24 +495,12 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(60000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(60000).unwrap();
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = st
-            .wallet()
-            .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
-        assert_eq!(
-            get_balance_at(&st.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
-            value
-        );
+        assert_eq!(st.get_total_balance(account), value);
 
         let to_extsk = ExtendedSpendingKey::master(&[]);
         let to: RecipientAddress = to_extsk.default_address().1.into();
@@ -666,11 +657,8 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
         let to = dfvk.default_address().1.into();
 
-        // Account balance should be zero
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            Amount::zero()
-        );
+        // Wallet summary is not yet available
+        assert_eq!(st.get_wallet_summary(0), None);
 
         // We cannot do anything if we aren't synchronised
         assert_matches!(
@@ -693,46 +681,42 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (_, usk, _) = st.test_account().unwrap();
+        let (account, usk, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(50000).unwrap();
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = st
-            .wallet()
-            .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
-            .unwrap()
-            .unwrap();
+        assert_eq!(st.get_total_balance(account), value);
+
+        // Value is considered pending
+        assert_eq!(st.get_pending_shielded_balance(account, 10), value);
+
+        // Wallet is fully scanned
+        let summary = st.get_wallet_summary(1);
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
-        assert_eq!(
-            get_balance_at(&st.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
-            value
+            summary.and_then(|s| s.scan_progress()),
+            Some(Ratio::new(1, 1))
         );
 
         // Add more funds to the wallet in a second note
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h2, 1);
 
         // Verified balance does not include the second note
-        let (_, anchor_height2) = st
-            .wallet()
-            .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
-            .unwrap()
-            .unwrap();
+        let total = (value + value).unwrap();
+        assert_eq!(st.get_spendable_balance(account, 2), value);
+        assert_eq!(st.get_pending_shielded_balance(account, 2), value);
+        assert_eq!(st.get_total_balance(account), total);
+
+        // Wallet is still fully scanned
+        let summary = st.get_wallet_summary(1);
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            (value + value).unwrap()
-        );
-        assert_eq!(
-            get_balance_at(&st.wallet().conn, AccountId::from(0), anchor_height2).unwrap(),
-            value
+            summary.and_then(|s| s.scan_progress()),
+            Some(Ratio::new(2, 2))
         );
 
         // Spend fails because there are insufficient verified notes
@@ -758,7 +742,7 @@ pub(crate) mod tests {
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
         // note is verified
         for _ in 2..10 {
-            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         }
         st.scan_cached_blocks(h2 + 1, 8);
 
@@ -781,7 +765,7 @@ pub(crate) mod tests {
         );
 
         // Mine block 11 so that the second note becomes verified
-        let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h11, 1);
 
         // Second spend should now succeed
@@ -805,17 +789,14 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (_, usk, _) = st.test_account().unwrap();
+        let (account, usk, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(50000).unwrap();
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
+        assert_eq!(st.get_total_balance(account), value);
 
         // Send some of the funds to another address
         let extsk2 = ExtendedSpendingKey::master(&[]);
@@ -855,7 +836,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
-                value,
+                value.into(),
             );
         }
         st.scan_cached_blocks(h1 + 1, 41);
@@ -881,7 +862,7 @@ pub(crate) mod tests {
         let (h43, _, _) = st.generate_next_block(
             &ExtendedSpendingKey::master(&[42]).to_diversifiable_full_viewing_key(),
             AddressType::DefaultExternal,
-            value,
+            value.into(),
         );
         st.scan_cached_blocks(h43, 1);
 
@@ -904,17 +885,14 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (_, usk, _) = st.test_account().unwrap();
+        let (account, usk, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(50000).unwrap();
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
-        assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
+        assert_eq!(st.get_total_balance(account), value);
 
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let addr2 = extsk2.default_address().1;
@@ -985,7 +963,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &ExtendedSpendingKey::master(&[i as u8]).to_diversifiable_full_viewing_key(),
                 AddressType::DefaultExternal,
-                value,
+                value.into(),
             );
         }
         st.scan_cached_blocks(h1 + 1, 42);
@@ -1005,7 +983,7 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (_, usk, _) = st.test_account().unwrap();
+        let (account, usk, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
@@ -1014,18 +992,9 @@ pub(crate) mod tests {
         st.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = st
-            .wallet()
-            .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
-            .unwrap()
-            .unwrap();
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
-        );
-        assert_eq!(
-            get_balance_at(&st.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
-            value
+            st.get_total_balance(account),
+            NonNegativeAmount::try_from(value).unwrap()
         );
 
         let to = TransparentAddress::PublicKey([7; 20]).into();
@@ -1049,27 +1018,24 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (_, usk, _) = st.test_account().unwrap();
+        let (account, usk, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
 
-        // Add funds to the wallet in a single note
+        // Add funds to the wallet in a single note owned by the internal spending key
         let value = Amount::from_u64(60000).unwrap();
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
         st.scan_cached_blocks(h, 1);
 
         // Verified balance matches total balance
-        let (_, anchor_height) = st
-            .wallet()
-            .get_target_and_anchor_heights(NonZeroU32::new(10).unwrap())
-            .unwrap()
-            .unwrap();
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            value
+            st.get_total_balance(account),
+            NonNegativeAmount::try_from(value).unwrap()
         );
+
+        // the balance is considered pending
         assert_eq!(
-            get_balance_at(&st.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
-            value
+            st.get_pending_shielded_balance(account, 10),
+            NonNegativeAmount::try_from(value).unwrap()
         );
 
         let to = TransparentAddress::PublicKey([7; 20]).into();
@@ -1093,7 +1059,7 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (_, usk, _) = st.test_account().unwrap();
+        let (account, usk, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet
@@ -1116,18 +1082,9 @@ pub(crate) mod tests {
 
         // Verified balance matches total balance
         let total = Amount::from_u64(60000).unwrap();
-        let (_, anchor_height) = st
-            .wallet()
-            .get_target_and_anchor_heights(NonZeroU32::new(1).unwrap())
-            .unwrap()
-            .unwrap();
         assert_eq!(
-            get_balance(&st.wallet().conn, AccountId::from(0)).unwrap(),
-            total
-        );
-        assert_eq!(
-            get_balance_at(&st.wallet().conn, AccountId::from(0), anchor_height).unwrap(),
-            total
+            st.get_total_balance(account),
+            NonNegativeAmount::try_from(total).unwrap()
         );
 
         let input_selector = GreedyInputSelector::new(

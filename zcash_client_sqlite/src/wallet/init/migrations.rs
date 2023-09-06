@@ -12,6 +12,7 @@ mod ufvk_support;
 mod utxos_table;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
+mod wallet_summaries;
 
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
@@ -42,6 +43,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //   add_account_birthdays
     //         |
     // v_sapling_shard_unscanned_ranges
+    //         |
+    // wallet_summaries
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -72,5 +75,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(v_sapling_shard_unscanned_ranges::Migration {
             params: params.clone(),
         }),
+        Box::new(wallet_summaries::Migration),
     ]
 }

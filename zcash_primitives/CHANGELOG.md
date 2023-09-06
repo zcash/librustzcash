@@ -16,6 +16,11 @@ and this library adheres to Rust's notion of
 - `impl HashSer for String` is provided under the `test-dependencies` feature
   flag. This is a test-only impl; the identity leaf value is `_` and the combining
   operation is concatenation.
+- `zcash_primitives::transaction::components::amount::NonNegativeAmount::ZERO`
+- Additional trait implementations for `NonNegativeAmount`:
+  - `TryFrom<Amount> for NonNegativeAmount`
+  - `Add<NonNegativeAmount> for NonNegativeAmount`
+  - `Add<NonNegativeAmount> for Option<NonNegativeAmount>`
 
 ### Changed
 - `zcash_primitives::transaction`:

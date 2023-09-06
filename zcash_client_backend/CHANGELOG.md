@@ -23,15 +23,19 @@ and this library adheres to Rust's notion of
 - `impl Eq for zcash_client_backend::zip321::{Payment, TransactionRequest}`
 - `impl Debug` for `zcash_client_backend::{data_api::wallet::input_selection::Proposal, wallet::ReceivedSaplingNote}`
 - `zcash_client_backend::data_api`:
+  - `AccountBalance`
   - `AccountBirthday`
+  - `Balance`
   - `BlockMetadata`
   - `NoteId`
   - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
+  - `Ratio`
   - `ScannedBlock`
   - `ShieldedProtocol`
   - `WalletCommitmentTrees`
+  - `WalletSummary`
   - `WalletRead::{chain_height, block_metadata, block_fully_scanned, suggest_scan_ranges,
-    get_wallet_birthday, get_account_birthday}`
+    get_wallet_birthday, get_account_birthday, get_wallet_summary}`
   - `WalletWrite::{put_blocks, update_chain_tip}`
   - `chain::CommitmentTreeRoot`
   - `scanning` A new module containing types required for `suggest_scan_ranges`
@@ -114,6 +118,8 @@ and this library adheres to Rust's notion of
     instead to obtain the wallet's view of the chain tip instead, or
     `suggest_scan_ranges` to obtain information about blocks that need to be
     scanned.
+  - `WalletRead::get_balance_at` has been removed. Use `WalletRead::get_wallet_summary`
+    instead.
   - `WalletRead::{get_all_nullifiers, get_commitment_tree, get_witnesses}` have
     been removed without replacement. The utility of these methods is now
     subsumed by those available from the `WalletCommitmentTrees` trait.
