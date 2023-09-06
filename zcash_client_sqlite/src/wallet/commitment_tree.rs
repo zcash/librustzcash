@@ -40,8 +40,7 @@ pub enum Error {
     /// are discontinuous with the existing roots in the database.
     SubtreeDiscontinuity {
         attempted_insertion_range: Range<u64>,
-        min: u64,
-        max: u64,
+        existing_range: Range<u64>,
     },
 }
 
@@ -64,13 +63,12 @@ impl fmt::Display for Error {
             }
             Error::SubtreeDiscontinuity {
                 attempted_insertion_range,
-                min,
-                max,
+                existing_range,
             } => {
                 write!(
                     f,
                     "Attempted to write subtree roots with indicies {:?} which is discontinuous with existing subtree range {:?}",
-                    attempted_insertion_range, *min..(*max+1)
+                    attempted_insertion_range, existing_range,
                 )
             }
         }
@@ -395,7 +393,7 @@ fn check_shard_discontinuity(
     table_prefix: &'static str,
     proposed_insertion_range: Range<u64>,
 ) -> Result<(), Error> {
-    if let Ok((Some(min), Some(max))) = conn
+    if let Ok((Some(stored_min), Some(stored_max))) = conn
         .query_row(
             &format!(
                 "SELECT MIN(shard_index), MAX(shard_index) FROM {}_tree_shards",
@@ -410,17 +408,20 @@ fn check_shard_discontinuity(
         )
         .map_err(Error::Query)
     {
-        if !proposed_insertion_range.contains(&min) && !proposed_insertion_range.contains(&max) {
-            // The proposed insertion range does not overlap with the existing shard indicies.
-            // This means a discontinuity is introduced if the proposed insertion range's start
-            // is not `max + 1` _and_ `min` is not the proposed insertion range's end.
-            if max + 1 != proposed_insertion_range.start && min != proposed_insertion_range.end {
-                return Err(Error::SubtreeDiscontinuity {
-                    attempted_insertion_range: proposed_insertion_range,
-                    min,
-                    max,
-                });
-            }
+        // If the ranges overlap, or are directly adjacent, then we aren't creating a
+        // discontinuity. We can check this by comparing their start-inclusive,
+        // end-exclusive bounds:
+        // - If `cur_start == ins_end` then the proposed insertion range is immediately
+        //   before the current shards. If `cur_start > ins_end` then there is a gap.
+        // - If `ins_start == cur_end` then the proposed insertion range is immediately
+        //   after the current shards. If `ins_start > cur_end` then there is a gap.
+        let (cur_start, cur_end) = (stored_min, stored_max + 1);
+        let (ins_start, ins_end) = (proposed_insertion_range.start, proposed_insertion_range.end);
+        if cur_start > ins_end || ins_start > cur_end {
+            return Err(Error::SubtreeDiscontinuity {
+                attempted_insertion_range: proposed_insertion_range,
+                existing_range: cur_start..cur_end,
+            });
         }
     }
 
