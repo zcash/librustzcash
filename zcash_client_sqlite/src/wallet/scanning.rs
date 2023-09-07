@@ -633,11 +633,15 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     range: Range<BlockHeight>,
     wallet_note_positions: &[Position],
 ) -> Result<(), SqliteClientError> {
+    // Read the wallet birthday (if known).
+    let wallet_birthday = wallet_birthday(conn)?;
+
     // Determine the range of block heights for which we will be updating the scan queue.
     let extended_range = {
-        // If notes have been detected in the scan, we need to extend any adjacent un-scanned ranges to
-        // include the blocks needed to complete the note commitment tree subtrees containing the
-        // positions of the discovered notes. We will query by subtree index to find these bounds.
+        // If notes have been detected in the scan, we need to extend any adjacent un-scanned ranges
+        // above the wallet birthday to include the blocks needed to complete the note commitment
+        // tree subtrees containing the positions of the discovered notes. We will query by subtree
+        // index to find these bounds.
         let required_subtrees = wallet_note_positions
             .iter()
             .map(|p| Address::above_position(SAPLING_SHARD_HEIGHT.into(), *p).index())
@@ -667,7 +671,8 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
         // If no notes belonging to the wallet were found, we don't need to extend the scanning
         // range suggestions to include the associated subtrees, and our bounds are just the
-        // scanned range.
+        // scanned range. Otherwise, ensure that all shard ranges above the wallet birthday
+        // are included.
         subtree_bounds
             .map(|(min_idx, max_idx)| {
                 let range_min = if *min_idx > 0 {
@@ -677,6 +682,10 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                     // our lower bound is going to be the Sapling activation height
                     params.activation_height(NetworkUpgrade::Sapling)
                 };
+
+                // bound the minimum to the wallet birthday
+                let range_min =
+                    range_min.map(|h| wallet_birthday.map_or(h, |b| std::cmp::max(b, h)));
 
                 // get the block height for the end of the current shard
                 let range_max = sapling_shard_end(*max_idx)?;
@@ -758,9 +767,10 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     )?;
 
     // Create a scanning range for the fragment of the last shard leading up to new tip.
-    let tip_shard_entry = shard_start_height
-        .filter(|h| h < &chain_end)
-        .map(|h| ScanRange::from_parts(h..chain_end, ScanPriority::ChainTip));
+    let tip_shard_entry = shard_start_height.filter(|h| h < &chain_end).map(|h| {
+        let min_to_scan = wallet_birthday.filter(|b| b > &h).unwrap_or(h);
+        ScanRange::from_parts(min_to_scan..chain_end, ScanPriority::ChainTip)
+    });
 
     // Create scan ranges to either validate potentially invalid blocks at the wallet's
     // view of the chain tip, or connect the prior tip to the new tip.
@@ -1402,7 +1412,7 @@ mod tests {
             .with_block_cache()
             .with_test_account(|network| {
                 // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
-                // activation.
+                // activation. We set the Canopy frontier to be 1234 notes into the second shard.
                 let birthday_height = network.activation_height(NetworkUpgrade::Canopy).unwrap();
                 let frontier_position = Position::from((0x1 << 16) + 1234);
                 let frontier = Frontier::from_parts(
@@ -1539,12 +1549,12 @@ mod tests {
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The entire last (incomplete) shard's range is marked for catching up to the
-            // chain tip, to ensure that if any notes are discovered after the wallet's
+            // The last (incomplete) shard's range above the wallet birthday is marked for catching
+            // up to the chain tip, to ensure that if any notes are discovered after the wallet's
             // birthday, they will be spendable.
-            scan_range(last_shard_start.into()..chain_end, ChainTip),
-            // The range below the last shard is ignored.
-            scan_range(sap_active..last_shard_start.into(), Ignored),
+            scan_range(birthday.height().into()..chain_end, ChainTip),
+            // The range below the birthday height is ignored.
+            scan_range(sap_active..birthday.height().into(), Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
@@ -1555,24 +1565,24 @@ mod tests {
     fn update_chain_tip_unstable_max_scanned() {
         use ScanPriority::*;
 
+        // this birthday is 1234 notes into the second shard
         let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday();
 
         // Set up the following situation:
         //
-        //                            prior_tip           new_tip
-        //        |<--- 500 --->|<- 40 ->|<-- 70 -->|<- 20 ->|
-        // wallet_birthday  max_scanned     last_shard_start
+        //                                                prior_tip           new_tip
+        //        |<------ 1000 ------>|<--- 500 --->|<- 40 ->|<-- 70 -->|<- 20 ->|
+        // initial_shard_end  wallet_birthday  max_scanned     last_shard_start
         //
         let max_scanned = birthday.height() + 500;
-        let prior_tip = max_scanned + 40;
 
         // Set up some shard root history before the wallet birthday.
-        let second_to_last_shard_start = birthday.height() - 1000;
+        let initial_shard_end = birthday.height() - 1000;
         st.wallet_mut()
             .put_sapling_subtree_roots(
                 0,
                 &[CommitmentTreeRoot::from_parts(
-                    second_to_last_shard_start,
+                    initial_shard_end,
                     // fake a hash, the value doesn't matter
                     Node::empty_leaf(),
                 )],
@@ -1581,37 +1591,42 @@ mod tests {
 
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
+        let prior_tip = max_scanned + 40;
         st.wallet_mut().update_chain_tip(prior_tip).unwrap();
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The second-to-last shard is currently the last shard, so it is marked for
-            // scanning to catch up to the prior chain tip. This includes heights prior to
-            // the wallet's birthday, because the wallet doesn't know that it already has
-            // enough data from the initial frontier to avoid having to scan this range.
-            scan_range(
-                second_to_last_shard_start.into()..(prior_tip + 1).into(),
-                ChainTip,
-            ),
-            // The range below the second-to-last shard is ignored.
-            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
+            scan_range(birthday.height().into()..(prior_tip + 1).into(), ChainTip),
+            scan_range(sap_active..birthday.height().into(), Ignored),
         ];
-
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // Now, scan the max scanned block.
+        // Now, scan the max scanned block. This will trigger the creation of a "FoundNote" range
+        // in the first shard that extends from the wallet birthday up to
         st.generate_block_at(
             max_scanned,
             BlockHash([0u8; 32]),
             &dfvk,
             AddressType::DefaultExternal,
             Amount::const_from_i64(10000),
+            // 1235 notes into into the second shard
             u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
                 .try_into()
                 .unwrap(),
         );
         st.scan_cached_blocks(max_scanned, 1);
+
+        // Verify that the suggested scan ranges match what is expected.
+        let expected = vec![
+            scan_range((max_scanned + 1).into()..(prior_tip + 1).into(), ChainTip),
+            scan_range(birthday.height().into()..max_scanned.into(), ChainTip),
+            scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
+            scan_range(sap_active..birthday.height().into(), Ignored),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
 
         // Now simulate shutting down, and then restarting 90 blocks later, after a shard
         // has been completed.
@@ -1646,16 +1661,13 @@ mod tests {
                 ChainTip,
             ),
             // The remainder of the second-to-last shard's range is still in the queue.
-            scan_range(
-                second_to_last_shard_start.into()..max_scanned.into(),
-                ChainTip,
-            ),
+            scan_range(birthday.height().into()..max_scanned.into(), ChainTip),
             // The gap between the prior tip and the last shard is deferred as low priority.
             scan_range((prior_tip + 1).into()..last_shard_start.into(), Historic),
             // The max scanned block itself is left as-is.
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
             // The range below the second-to-last shard is ignored.
-            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
+            scan_range(sap_active..birthday.height().into(), Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
@@ -1700,16 +1712,8 @@ mod tests {
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The second-to-last shard is currently the last shard, so it is marked for
-            // scanning to catch up to the prior chain tip. This includes heights prior to
-            // the wallet's birthday, because the wallet doesn't know that it already has
-            // enough data from the initial frontier to avoid having to scan this range.
-            scan_range(
-                second_to_last_shard_start.into()..(prior_tip + 1).into(),
-                ChainTip,
-            ),
-            // The range below the second-to-last shard is ignored.
-            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
+            scan_range(birthday.height().into()..(prior_tip + 1).into(), ChainTip),
+            scan_range(sap_active..birthday.height().into(), Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
@@ -1759,14 +1763,11 @@ mod tests {
             // The blocks after the max scanned block up to the chain tip are prioritised.
             scan_range((max_scanned + 1).into()..chain_end, ChainTip),
             // The remainder of the second-to-last shard's range is still in the queue.
-            scan_range(
-                second_to_last_shard_start.into()..max_scanned.into(),
-                ChainTip,
-            ),
+            scan_range(birthday.height().into()..max_scanned.into(), ChainTip),
             // The max scanned block itself is left as-is.
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
             // The range below the second-to-last shard is ignored.
-            scan_range(sap_active..second_to_last_shard_start.into(), Ignored),
+            scan_range(sap_active..birthday.height().into(), Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
