@@ -73,7 +73,7 @@ use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use tracing::debug;
-use zcash_client_backend::data_api::{AccountBalance, Balance, Ratio, WalletSummary};
+use zcash_client_backend::data_api::{AccountBalance, Ratio, WalletSummary};
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 
 use zcash_client_backend::data_api::{
@@ -626,6 +626,15 @@ pub(crate) fn get_wallet_summary(
         |row| row.get::<_, bool>(0),
     )?;
 
+    let mut stmt_accounts = conn.prepare_cached("SELECT account FROM accounts")?;
+    let mut account_balances = stmt_accounts
+        .query([])?
+        .mapped(|row| {
+            row.get::<_, u32>(0)
+                .map(|a| (AccountId::from(a), AccountBalance::ZERO))
+        })
+        .collect::<Result<BTreeMap<AccountId, AccountBalance>, _>>()?;
+
     let mut stmt_select_notes = conn.prepare_cached(
         "SELECT n.account, n.value, n.is_change, scan_state.max_priority, t.block
          FROM sapling_received_notes n
@@ -641,7 +650,6 @@ pub(crate) fn get_wallet_summary(
          )",
     )?;
 
-    let mut account_balances: BTreeMap<AccountId, AccountBalance> = BTreeMap::new();
     let mut rows =
         stmt_select_notes.query(named_params![":summary_height": u32::from(summary_height)])?;
     while let Some(row) = rows.next()? {
@@ -689,27 +697,17 @@ pub(crate) fn get_wallet_summary(
             }
         };
 
-        account_balances
-            .entry(account)
-            .and_modify(|bal| {
-                bal.sapling_balance.spendable_value = (bal.sapling_balance.spendable_value
-                    + spendable_value)
-                    .expect("Spendable value cannot overflow");
-                bal.sapling_balance.change_pending_confirmation =
-                    (bal.sapling_balance.change_pending_confirmation + change_pending_confirmation)
-                        .expect("Pending change value cannot overflow");
-                bal.sapling_balance.value_pending_spendability =
-                    (bal.sapling_balance.value_pending_spendability + value_pending_spendability)
-                        .expect("Value pending spendability cannot overflow");
-            })
-            .or_insert(AccountBalance {
-                sapling_balance: Balance {
-                    spendable_value,
-                    change_pending_confirmation,
-                    value_pending_spendability,
-                },
-                unshielded: NonNegativeAmount::ZERO,
-            });
+        account_balances.entry(account).and_modify(|bal| {
+            bal.sapling_balance.spendable_value = (bal.sapling_balance.spendable_value
+                + spendable_value)
+                .expect("Spendable value cannot overflow");
+            bal.sapling_balance.change_pending_confirmation =
+                (bal.sapling_balance.change_pending_confirmation + change_pending_confirmation)
+                    .expect("Pending change value cannot overflow");
+            bal.sapling_balance.value_pending_spendability =
+                (bal.sapling_balance.value_pending_spendability + value_pending_spendability)
+                    .expect("Value pending spendability cannot overflow");
+        });
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -734,16 +732,9 @@ pub(crate) fn get_wallet_summary(
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
             })?;
 
-            account_balances
-                .entry(account)
-                .and_modify(|bal| {
-                    bal.unshielded =
-                        (bal.unshielded + value).expect("Unshielded value cannot overflow")
-                })
-                .or_insert(AccountBalance {
-                    sapling_balance: Balance::ZERO,
-                    unshielded: value,
-                });
+            account_balances.entry(account).and_modify(|bal| {
+                bal.unshielded = (bal.unshielded + value).expect("Unshielded value cannot overflow")
+            });
         }
     }
 
