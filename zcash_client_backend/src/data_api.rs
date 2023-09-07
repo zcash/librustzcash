@@ -102,6 +102,12 @@ pub struct AccountBalance {
 }
 
 impl AccountBalance {
+    /// The [`Balance`] value having zero values for all its fields.
+    pub const ZERO: Self = Self {
+        sapling_balance: Balance::ZERO,
+        unshielded: NonNegativeAmount::ZERO,
+    };
+
     /// Returns the total value of funds belonging to the account.
     pub fn total(&self) -> NonNegativeAmount {
         (self.sapling_balance.total() + self.unshielded)
