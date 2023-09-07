@@ -638,10 +638,10 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
     // Determine the range of block heights for which we will be updating the scan queue.
     let extended_range = {
-        // If notes have been detected in the scan, we need to extend any adjacent un-scanned ranges
-        // above the wallet birthday to include the blocks needed to complete the note commitment
-        // tree subtrees containing the positions of the discovered notes. We will query by subtree
-        // index to find these bounds.
+        // If notes have been detected in the scan, we need to extend any adjacent un-scanned
+        // ranges starting from the wallet birthday to include the blocks needed to complete
+        // the note commitment tree subtrees containing the positions of the discovered notes.
+        // We will query by subtree index to find these bounds.
         let required_subtrees = wallet_note_positions
             .iter()
             .map(|p| Address::above_position(SAPLING_SHARD_HEIGHT.into(), *p).index())
@@ -671,8 +671,8 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
 
         // If no notes belonging to the wallet were found, we don't need to extend the scanning
         // range suggestions to include the associated subtrees, and our bounds are just the
-        // scanned range. Otherwise, ensure that all shard ranges above the wallet birthday
-        // are included.
+        // scanned range. Otherwise, ensure that all shard ranges starting from the wallet
+        // birthday are included.
         subtree_bounds
             .map(|(min_idx, max_idx)| {
                 let range_min = if *min_idx > 0 {
@@ -767,6 +767,9 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     )?;
 
     // Create a scanning range for the fragment of the last shard leading up to new tip.
+    // We set a lower bound at the wallet birthday (if known), because account creation
+    // requires specifying a tree frontier that ensures we don't need tree information
+    // prior to the birthday.
     let tip_shard_entry = shard_start_height.filter(|h| h < &chain_end).map(|h| {
         let min_to_scan = wallet_birthday.filter(|b| b > &h).unwrap_or(h);
         ScanRange::from_parts(min_to_scan..chain_end, ScanPriority::ChainTip)
@@ -1549,9 +1552,9 @@ mod tests {
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The last (incomplete) shard's range above the wallet birthday is marked for catching
-            // up to the chain tip, to ensure that if any notes are discovered after the wallet's
-            // birthday, they will be spendable.
+            // The last (incomplete) shard's range starting from the wallet birthday is
+            // marked for catching up to the chain tip, to ensure that if any notes are
+            // discovered after the wallet's birthday, they will be spendable.
             scan_range(birthday.height().into()..chain_end, ChainTip),
             // The range below the birthday height is ignored.
             scan_range(sap_active..birthday.height().into(), Ignored),
@@ -1572,7 +1575,7 @@ mod tests {
         //
         //                                                prior_tip           new_tip
         //        |<------ 1000 ------>|<--- 500 --->|<- 40 ->|<-- 70 -->|<- 20 ->|
-        // initial_shard_end  wallet_birthday  max_scanned     last_shard_start
+        // initial_shard_end    wallet_birthday  max_scanned     last_shard_start
         //
         let max_scanned = birthday.height() + 500;
 
@@ -1602,8 +1605,7 @@ mod tests {
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // Now, scan the max scanned block. This will trigger the creation of a "FoundNote" range
-        // in the first shard that extends from the wallet birthday up to
+        // Now, scan the max scanned block.
         st.generate_block_at(
             max_scanned,
             BlockHash([0u8; 32]),
