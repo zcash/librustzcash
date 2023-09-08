@@ -14,8 +14,6 @@ edition = "2021"
 rust-version = "1.65"
 
 [dependencies]
-incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
-shardtree = { version = "0.0", features = ["legacy-api"] }
 zcash_client_backend = { version = "0.9", path = "../zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_primitives = { version = "0.12", path = "../zcash_primitives", default-features = false }
@@ -31,12 +29,16 @@ tracing = "0.1"
 
 # - Serialization
 byteorder = "1"
-prost = "0.11"
+prost = "0.12"
 group = "0.13"
 jubjub = "0.10"
 
 # - Secret management
 secrecy = "0.8"
+
+# - Note commitment trees
+incrementalmerkletree = "0.5"
+shardtree = { version = "0.1", features = ["legacy-api"] }
 
 # - SQLite databases
 rusqlite = { version = "0.29.0", features = ["bundled", "time", "array"] }
@@ -51,8 +53,8 @@ maybe-rayon = {version = "0.1.0", default-features = false}
 
 [dev-dependencies]
 assert_matches = "1.5"
-incrementalmerkletree = { version = "0.4", features = ["legacy-api", "test-dependencies"] }
-shardtree = { version = "0.0", features = ["legacy-api", "test-dependencies"] }
+incrementalmerkletree = { version = "0.5", features = ["test-dependencies"] }
+shardtree = { version = "0.1", features = ["legacy-api", "test-dependencies"] }
 proptest = "1.0.0"
 rand_core = "0.6"
 regex = "1.4"
