@@ -674,8 +674,9 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                 let range_min =
                     range_min.map(|h| wallet_birthday.map_or(h, |b| std::cmp::max(b, h)));
 
-                // get the block height for the end of the current shard
-                let range_max = sapling_shard_end(*max_idx)?;
+                // Get the block height for the end of the current shard, and make it an
+                // exclusive end bound.
+                let range_max = sapling_shard_end(*max_idx)?.map(|end| end + 1);
 
                 Ok::<Range<BlockHeight>, rusqlite::Error>(Range {
                     start: range.start.min(range_min.unwrap_or(range.start)),
