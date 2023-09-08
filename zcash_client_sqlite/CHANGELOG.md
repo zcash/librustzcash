@@ -19,7 +19,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`,
-  `zcash_primitives 0.12`
+  `zcash_primitives 0.12`, `prost 0.12`.
 - A `CommitmentTree` variant has been added to `zcash_client_sqlite::wallet::init::WalletMigrationError`
 - `min_confirmations` parameter values are now more strongly enforced. Previously,
   a note could be spent with fewer than `min_confirmations` confirmations if the
