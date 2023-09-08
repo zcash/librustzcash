@@ -434,6 +434,7 @@ impl<Cache> TestState<Cache> {
     /// Invokes [`propose_shielding`] with the given arguments.
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
+    #[allow(dead_code)]
     pub(crate) fn propose_shielding<InputsT>(
         &mut self,
         input_selector: &InputsT,
@@ -576,6 +577,7 @@ impl<Cache> TestState<Cache> {
         .unwrap()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn get_pending_change(
         &self,
         account: AccountId,

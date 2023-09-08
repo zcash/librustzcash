@@ -36,9 +36,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
-        transaction.execute_batch(
-            &format!(
-                "CREATE VIEW v_sapling_shard_scan_ranges AS
+        transaction.execute_batch(&format!(
+            "CREATE VIEW v_sapling_shard_scan_ranges AS
                 SELECT
                     shard.shard_index,
                     shard.shard_index << {} AS start_position,
@@ -60,11 +59,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         shard.subtree_end_height IS NULL
                     )
                 )",
-                SAPLING_SHARD_HEIGHT,
-                SAPLING_SHARD_HEIGHT,
-                u32::from(self.params.activation_height(NetworkUpgrade::Sapling).unwrap()),
-            )
-        )?;
+            SAPLING_SHARD_HEIGHT,
+            SAPLING_SHARD_HEIGHT,
+            u32::from(
+                self.params
+                    .activation_height(NetworkUpgrade::Sapling)
+                    .unwrap()
+            ),
+        ))?;
 
         transaction.execute_batch(&format!(
             "CREATE VIEW v_sapling_shard_unscanned_ranges AS
