@@ -21,6 +21,9 @@ and this library adheres to Rust's notion of
   - `TryFrom<Amount> for NonNegativeAmount`
   - `Add<NonNegativeAmount> for NonNegativeAmount`
   - `Add<NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `Sub<NonNegativeAmount> for NonNegativeAmount`
+  - `Sub<NonNegativeAmount> for Option<NonNegativeAmount>`
+- `zcash_primitives::block::BlockHash::try_from_slice`
 
 ### Changed
 - `zcash_primitives::transaction`:
@@ -37,6 +40,14 @@ and this library adheres to Rust's notion of
     `orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>`
     instead of `zcash_primitives::transaction::components::orchard::Unauthorized`
 - `zcash_primitives::consensus::NetworkUpgrade` now implements `PartialEq`, `Eq`
+- `zcash_primitives::legacy::OpCode` now defines a complete set of transparent opcodes,
+  instead of just a minimal set.
+- `zcash_primitives::legacy::Script` now has a custom `Debug` implementation that 
+  renders script details in a much more legible fashion.
+- `zcash_primitives::sapling::redjubjub::Signature` now has a custom `Debug`
+  implementation that renders details in a much more legible fashion.
+- `zcash_primitives::sapling::tree::Node` now has a custom `Debug`
+  implementation that renders details in a much more legible fashion.
 
 ### Removed
 - `impl {PartialEq, Eq} for transaction::builder::Error` 
