@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.13.0-rc.1] - 2023-09-08
 ### Added
 - `zcash_primitives::consensus::BlockHeight::saturating_sub`
 - `zcash_primitives::transaction::builder`:

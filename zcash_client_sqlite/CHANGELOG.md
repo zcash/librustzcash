@@ -22,7 +22,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.5`, `bs58 0.5`,
-  `zcash_primitives 0.12`, `rusqlite 0.29`, `schemer-rusqlite 0.2.2`, `time 0.3.22`,
+  `zcash_primitives 0.13`, `rusqlite 0.29`, `schemer-rusqlite 0.2.2`, `time 0.3.22`,
   `tempfile 3.5`, `zcash_note_encryption 0.4`, `zcash_proofs 0.12`, `prost 0.12`
   `zcash_client_backend 0.9`, `zcash_address 0.3`
 - Added dependencies on `shardtree 0.0`, `zcash_encoding 0.2`, `byteorder 1`
