@@ -436,17 +436,19 @@ impl SpanningTree {
         fn go(acc: &mut Vec<ScanRange>, tree: SpanningTree) {
             match tree {
                 SpanningTree::Leaf(entry) => {
-                    if let Some(top) = acc.pop() {
-                        match join_nonoverlapping(top, entry) {
-                            Joined::One(merged) => acc.push(merged),
-                            Joined::Two(l, r) => {
-                                acc.push(l);
-                                acc.push(r);
+                    if !entry.is_empty() {
+                        if let Some(top) = acc.pop() {
+                            match join_nonoverlapping(top, entry) {
+                                Joined::One(merged) => acc.push(merged),
+                                Joined::Two(l, r) => {
+                                    acc.push(l);
+                                    acc.push(r);
+                                }
+                                _ => unreachable!(),
                             }
-                            _ => unreachable!(),
+                        } else {
+                            acc.push(entry);
                         }
-                    } else {
-                        acc.push(entry);
                     }
                 }
                 SpanningTree::Parent { left, right, .. } => {
@@ -690,19 +692,26 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     let query_range = extended_range.clone().unwrap_or_else(|| range.clone());
 
     let scanned = ScanRange::from_parts(range.clone(), ScanPriority::Scanned);
-    let extensions = if let Some(extended) = extended_range {
-        vec![
-            ScanRange::from_parts(extended.start..range.start, ScanPriority::FoundNote),
-            ScanRange::from_parts(range.end..extended.end, ScanPriority::FoundNote),
-        ]
-    } else {
-        vec![]
-    };
+
+    // If any of the extended range actually extends beyond the scanned range, we need to
+    // scan that extension in order to make the found note(s) spendable. We need to avoid
+    // creating empty ranges here, as that acts as an optimization barrier preventing
+    // `SpanningTree` from merging non-empty scanned ranges on either side.
+    let extended_before = extended_range
+        .as_ref()
+        .map(|extended| ScanRange::from_parts(extended.start..range.start, ScanPriority::FoundNote))
+        .filter(|range| !range.is_empty());
+    let extended_after = extended_range
+        .map(|extended| ScanRange::from_parts(range.end..extended.end, ScanPriority::FoundNote))
+        .filter(|range| !range.is_empty());
 
     replace_queue_entries::<SqliteClientError>(
         conn,
         &query_range,
-        Some(scanned).into_iter().chain(extensions.into_iter()),
+        Some(scanned)
+            .into_iter()
+            .chain(extended_before)
+            .chain(extended_after),
         false,
     )?;
 
@@ -1091,6 +1100,29 @@ pub(crate) mod tests {
                 scan_range(5..6, Historic),
                 scan_range(6..7, ChainTip),
                 scan_range(7..10, Scanned),
+            ]
+        );
+    }
+
+    #[test]
+    fn spanning_tree_insert_empty() {
+        use ScanPriority::*;
+
+        let t = spanning_tree(&[
+            (0..3, Historic),
+            (3..6, Scanned),
+            (6..6, FoundNote),
+            (6..8, Scanned),
+            (8..10, ChainTip),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            t.into_vec(),
+            vec![
+                scan_range(0..3, Historic),
+                scan_range(3..8, Scanned),
+                scan_range(8..10, ChainTip),
             ]
         );
     }
