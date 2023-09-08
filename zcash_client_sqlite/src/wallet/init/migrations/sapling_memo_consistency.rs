@@ -46,10 +46,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
         let mut stmt_raw_tx = transaction.prepare(
-            "SELECT DISTINCT 
-               transactions.id_tx, transactions.txid, 
+            "SELECT DISTINCT
+               transactions.id_tx, transactions.txid,
                accounts.account, accounts.ufvk
-             FROM sent_notes 
+             FROM sent_notes
              JOIN accounts ON sent_notes.from_account = accounts.account
              JOIN transactions ON transactions.id_tx = sent_notes.tx
              WHERE transactions.raw IS NOT NULL",
@@ -78,8 +78,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         }
 
         let mut stmt_update_sent_memo = transaction.prepare(
-            "UPDATE sent_notes 
-            SET memo = :memo 
+            "UPDATE sent_notes
+            SET memo = :memo
             WHERE tx = :id_tx
             AND output_index = :output_index",
         )?;

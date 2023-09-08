@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
+- `zcash_client_sqlite::commitment_tree` Types related to management of note
+  commitment trees using the `shardtree` crate.
 - `zcash_client_sqlite::serialization` Serialization formats for data stored
   as SQLite BLOBs in the wallet database.
 - A new default-enabled feature flag `multicore`. This allows users to disable
@@ -15,11 +17,15 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::ReceivedNoteId`
 - `zcash_client_sqlite::wallet::commitment_tree` A new module containing a
   sqlite-backed implementation of `shardtree::store::ShardStore`.
+- `impl zcash_client_backend::data_api::WalletCommitmentTrees for WalletDb`
 
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.4`, `bs58 0.5`,
-  `zcash_primitives 0.12`, `prost 0.12`.
+- Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.5`, `bs58 0.5`,
+  `zcash_primitives 0.12`, `rusqlite 0.29`, `schemer-rusqlite 0.2.2`, `time 0.3.22`,
+  `tempfile 3.5`, `zcash_note_encryption 0.4`, `zcash_proofs 0.12`, `prost 0.12`
+  `zcash_client_backend 0.9`, `zcash_address 0.3`
+- Added dependencies on `shardtree 0.0`, `zcash_encoding 0.2`, `byteorder 1`
 - A `CommitmentTree` variant has been added to `zcash_client_sqlite::wallet::init::WalletMigrationError`
 - `min_confirmations` parameter values are now more strongly enforced. Previously,
   a note could be spent with fewer than `min_confirmations` confirmations if the
@@ -30,6 +36,8 @@ and this library adheres to Rust's notion of
   - `SqliteClientError::BlockConflict`
   - `SqliteClientError::CacheMiss`
   - `SqliteClientError::ChainHeightUnknown`
+  - `SqliteClientError::CommitmentTree`
+  - `SqliteClientError::NonSequentialBlocks`
 - `zcash_client_backend::FsBlockDbError` has a new error variant:
   - `FsBlockDbError::CacheMiss`
 - `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
@@ -46,6 +54,9 @@ and this library adheres to Rust's notion of
   previously performed by `init_blocks_table` is now handled by passing an
   `AccountBirthday` containing the note commitment tree frontier as of the
   end of the birthday height block to `create_account` instead.
+- `zcash_client_sqlite::DataConnStmtCache` has been removed in favor of using
+  `rusqlite` caching for prepared statements.
+- `zcash_client_sqlite::prepared` has been entirely removed.
 
 ### Fixed
 - Fixed an off-by-one error in the `BlockSource` implementation for the SQLite-backed
