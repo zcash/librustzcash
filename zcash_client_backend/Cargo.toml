@@ -20,8 +20,6 @@ exclude = ["*.proto"]
 development = ["zcash_proofs"]
 
 [dependencies]
-incrementalmerkletree = { version = "0.4", features = ["legacy-api"] }
-shardtree = "0.0"
 zcash_address = { version = "0.3", path = "../components/zcash_address" }
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_note_encryption = "0.4"
@@ -56,7 +54,11 @@ subtle = "2.2.3"
 # - Shielded protocols
 bls12_381 = "0.8"
 group = "0.13"
-orchard = { version = "0.5", default-features = false }
+orchard = { version = "0.6", default-features = false }
+
+# - Note commitment trees
+incrementalmerkletree = "0.5"
+shardtree = "0.1"
 
 # - Test dependencies
 proptest = { version = "1.0.0", optional = true }

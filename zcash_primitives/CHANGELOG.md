@@ -26,6 +26,7 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::block::BlockHash::try_from_slice`
 
 ### Changed
+- Migrated to `incrementalmerkletree 0.5`, `orchard 0.6`.
 - `zcash_primitives::transaction`:
   - `builder::Builder::{new, new_with_rng}` now take an optional `orchard_anchor` 
     argument which must be provided in order to enable Orchard spends and recipients.

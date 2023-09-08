@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Removed
+- Unused `incrementalmerkletree` dependency.
 
 ## [0.12.1] - 2023-06-28
 ### Changed

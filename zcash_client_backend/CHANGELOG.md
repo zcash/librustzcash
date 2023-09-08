@@ -58,7 +58,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.13`, `zcash_note_encryption 0.4`,
-  `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`, `tempfile 3.5.0`, `prost 0.12`,
+  `incrementalmerkletree 0.5`, `orchard 0.6`, `bs58 0.5`, `tempfile 3.5.0`, `prost 0.12`,
   `tonic 0.10`.
 - `zcash_client_backend::data_api`:
   - `WalletRead::TxRef` has been removed in favor of consistently using `TxId` instead.
