@@ -546,21 +546,8 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
             .prepare_cached(
                 "SELECT block_range_start, block_range_end, priority
                  FROM scan_queue
-                 WHERE (
-                     -- the start is contained within or adjacent to the range
-                     :start >= block_range_start
-                     AND :start <= block_range_end
-                 )
-                 OR (
-                     -- the end is contained within or adjacent to the range
-                     :end >= block_range_start
-                     AND :end <= block_range_end
-                 )
-                 OR (
-                     -- start..end contains the entire range
-                     block_range_start >= :start
-                     AND block_range_end <= :end
-                 )
+                 -- Ignore ranges that do not overlap and are not adjacent to the query range.
+                 WHERE NOT (block_range_start > :end OR :start > block_range_end)
                  ORDER BY block_range_end",
             )
             .map_err(E::db_error)?;
