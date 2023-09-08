@@ -44,7 +44,7 @@ pub mod wallet;
 
 /// The height of subtree roots in the Sapling note commitment tree.
 ///
-/// This conforms to the structure of subtree data returned by from
+/// This conforms to the structure of subtree data returned by
 /// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
 pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 
