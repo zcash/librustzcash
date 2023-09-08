@@ -1,6 +1,4 @@
 //! Tools for scanning a compact representation of the Zcash block chain.
-//!
-//! TODO: rename this module to `block_scanner`
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;

@@ -10,6 +10,8 @@ and this library adheres to Rust's notion of
 ### Notable Changes
 
 - `zcash_client_backend` now supports out-of-order scanning of blockchain history.
+  See the module documentation for `zcash_client_backend::data_api::chain`
+  for details on how to make use of the new scanning capabilities.
 - This release of `zcash_client_backend` defines the concept of an account
   birthday. The account birthday is defined as the minimum height among blocks
   to be scanned when recovering an account.
@@ -26,6 +28,7 @@ and this library adheres to Rust's notion of
   - `AccountBalance`
   - `AccountBirthday`
   - `Balance`
+  - `BirthdayError`
   - `BlockMetadata`
   - `NoteId`
   - `NullifierQuery` for use with `WalletRead::get_sapling_nullifiers`
@@ -42,7 +45,8 @@ and this library adheres to Rust's notion of
   - `chain::CommitmentTreeRoot`
   - `scanning` A new module containing types required for `suggest_scan_ranges`
   - `testing::MockWalletDb::new`
-  - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`:
+  - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`
+  - `SAPLING_SHARD_HEIGHT` constant
 - `zcash_client_backend::wallet::WalletSaplingOutput::note_commitment_tree_position`
 - `zcash_client_backend::scanning`:
   - `ScanError`
@@ -53,8 +57,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - MSRV is now 1.65.0.
-- Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.12`, `zcash_note_encryption 0.4`,
-  `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`
+- Bumped dependencies to `hdwallet 0.4`, `zcash_primitives 0.13`, `zcash_note_encryption 0.4`,
+  `incrementalmerkletree 0.4`, `orchard 0.5`, `bs58 0.5`, `tempfile 3.5.0`
 - `zcash_client_backend::data_api`:
   - `WalletRead::TxRef` has been removed in favor of consistently using `TxId` instead.
   - `WalletRead::get_transaction` now takes a `TxId` as its argument.
@@ -84,9 +88,9 @@ and this library adheres to Rust's notion of
   - `wallet::{spend, create_spend_to_address, shield_transparent_funds,
     propose_transfer, propose_shielding, create_proposed_transaction}` now take their
     respective `min_confirmations` arguments as `NonZeroU32`
-  - `wallet::input_selection::InputSelector::{propose_transaction, propose_shielding}`
-    now take their respective `min_confirmations` arguments as `NonZeroU32`
-  - A new `Scan` variant has been added to `data_api::chain::error::Error`.
+  - A new `Scan` variant replaces the `Chain` variant of `data_api::chain::error::Error`.
+    The `NoteRef` parameter to `data_api::chain::error::Error` has been removed
+    in favor of using `NoteId` to report the specific note for which a failure occurred.
   - A new `SyncRequired` variant has been added to `data_api::wallet::input_selection::InputSelectorError`.
   - The variants of the `PoolType` enum have changed; the `PoolType::Sapling` variant has been
     removed in favor of a `PoolType::Shielded` variant that wraps a `ShieldedProtocol` value.
@@ -95,6 +99,8 @@ and this library adheres to Rust's notion of
   - Arguments to `WalletSaplingOutput::from_parts` have changed.
 - `zcash_client_backend::data_api::wallet::input_selection::InputSelector`:
   - Arguments to `{propose_transaction, propose_shielding}` have changed.
+  - `InputSelector::{propose_transaction, propose_shielding}`
+    now take their respective `min_confirmations` arguments as `NonZeroU32`
 - `zcash_client_backend::data_api::wallet::{create_spend_to_address, spend,
   create_proposed_transaction, shield_transparent_funds}` now return the `TxId`
   for the newly created transaction instead an internal database identifier.
