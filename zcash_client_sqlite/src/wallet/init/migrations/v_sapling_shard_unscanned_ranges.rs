@@ -52,14 +52,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 FROM sapling_tree_shards shard
                 LEFT OUTER JOIN sapling_tree_shards prev_shard
                     ON shard.shard_index = prev_shard.shard_index + 1
-                INNER JOIN scan_queue ON
-                    (scan_queue.block_range_start >= subtree_start_height AND shard.subtree_end_height IS NULL) OR
-                    (scan_queue.block_range_start BETWEEN subtree_start_height AND shard.subtree_end_height) OR
-                    ((scan_queue.block_range_end - 1) BETWEEN subtree_start_height AND shard.subtree_end_height) OR
+                -- Join with scan ranges that overlap with the subtree's involved blocks.
+                INNER JOIN scan_queue ON (
+                    subtree_start_height < scan_queue.block_range_end AND
                     (
-                        scan_queue.block_range_start <= prev_shard.subtree_end_height
-                        AND (scan_queue.block_range_end - 1) >= shard.subtree_end_height
-                    )",
+                        scan_queue.block_range_start <= shard.subtree_end_height OR
+                        shard.subtree_end_height IS NULL
+                    )
+                )",
                 SAPLING_SHARD_HEIGHT,
                 SAPLING_SHARD_HEIGHT,
                 u32::from(self.params.activation_height(NetworkUpgrade::Sapling).unwrap()),
