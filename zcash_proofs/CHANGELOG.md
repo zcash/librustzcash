@@ -6,6 +6,11 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.13.0-rc.1] - 2023-09-08
+### Changed
+- Bumped dependencies to `zcash_primitives 0.13`.
+
 ### Removed
 - Unused `incrementalmerkletree` dependency.
 

@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.10.0-rc.1] - 2023-09-08
 ### Notable Changes
 
 - `zcash_client_backend` now supports out-of-order scanning of blockchain history.
