@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.8.0-rc.1] - 2023-09-08
 ### Added
 - `zcash_client_sqlite::commitment_tree` Types related to management of note
   commitment trees using the `shardtree` crate.
@@ -22,9 +24,9 @@ and this library adheres to Rust's notion of
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `hdwallet 0.4`, `incrementalmerkletree 0.5`, `bs58 0.5`,
-  `zcash_primitives 0.13`, `rusqlite 0.29`, `schemer-rusqlite 0.2.2`, `time 0.3.22`,
-  `tempfile 3.5`, `zcash_note_encryption 0.4`, `zcash_proofs 0.12`, `prost 0.12`
-  `zcash_client_backend 0.10`, `zcash_address 0.3`.
+  `prost 0.12`, `rusqlite 0.29`, `schemer-rusqlite 0.2.2`, `time 0.3.22`,
+  `tempfile 3.5`, `zcash_address 0.3`, `zcash_note_encryption 0.4`,
+  `zcash_primitives 0.13`, `zcash_client_backend 0.10`.
 - Added dependencies on `shardtree 0.0`, `zcash_encoding 0.2`, `byteorder 1`
 - A `CommitmentTree` variant has been added to `zcash_client_sqlite::wallet::init::WalletMigrationError`
 - `min_confirmations` parameter values are now more strongly enforced. Previously,
