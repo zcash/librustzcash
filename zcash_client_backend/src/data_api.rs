@@ -1197,7 +1197,7 @@ pub mod testing {
             &self,
             min_confirmations: NonZeroU32,
         ) -> Result<usize, ShardTreeError<Self::Error>> {
-            Ok(usize::try_from(u32::from(min_confirmations) - 1).unwrap())
+            Ok(usize::try_from(u32::from(min_confirmations)).unwrap())
         }
     }
 }

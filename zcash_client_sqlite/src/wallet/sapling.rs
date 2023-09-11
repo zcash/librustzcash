@@ -1315,7 +1315,7 @@ pub(crate) mod tests {
         let (account, usk, birthday) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
 
-        // Generate a block that with funds belonging to our wallet.
+        // Generate a block with funds belonging to our wallet.
         st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,

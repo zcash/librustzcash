@@ -805,6 +805,9 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     ) -> Result<usize, ShardTreeError<Self::Error>> {
         get_checkpoint_depth(&self.conn, SAPLING_TABLES_PREFIX, min_confirmations)
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?
+            // `CheckpointPruned` is perhaps a little misleading; in this case it's that
+            // the chain tip is unknown, but if that were the case we should never have been
+            // calling this anyway.
             .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
     }
 }
