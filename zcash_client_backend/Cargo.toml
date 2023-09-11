@@ -103,6 +103,7 @@ test-dependencies = [
     "incrementalmerkletree/test-dependencies"
 ]
 unstable = ["byteorder"]
+unstable-serialization = ["byteorder"]
 
 [lib]
 bench = false
