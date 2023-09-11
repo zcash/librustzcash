@@ -434,6 +434,7 @@ pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
     use incrementalmerkletree::Hashable;
+    use secrecy::Secret;
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
@@ -464,6 +465,7 @@ pub(crate) mod tests {
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
             AccountBirthday, Ratio, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
+            WalletWrite,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -484,7 +486,7 @@ pub(crate) mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_client_backend::{data_api::WalletWrite, wallet::WalletTransparentOutput},
+        zcash_client_backend::wallet::WalletTransparentOutput,
         zcash_primitives::transaction::components::{OutPoint, TxOut},
     };
 
@@ -1123,6 +1125,126 @@ pub(crate) mod tests {
             ),
             Ok(_)
         );
+    }
+
+    #[test]
+    fn external_address_change_spends_detected_in_restore_from_seed() {
+        let mut st = TestBuilder::new().with_block_cache().build();
+
+        // Add two accounts to the wallet.
+        let seed = Secret::new([0u8; 32].to_vec());
+        let birthday = AccountBirthday::from_sapling_activation(&st.network());
+        let (_, usk) = st
+            .wallet_mut()
+            .create_account(&seed, birthday.clone())
+            .unwrap();
+        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+
+        let (_, usk2) = st
+            .wallet_mut()
+            .create_account(&seed, birthday.clone())
+            .unwrap();
+        let dfvk2 = usk2.sapling().to_diversifiable_full_viewing_key();
+
+        // Add funds to the wallet in a single note
+        let value = NonNegativeAmount::from_u64(100000).unwrap();
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        st.scan_cached_blocks(h, 1);
+
+        // Spendable balance matches total balance
+        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
+        assert_eq!(st.get_spendable_balance(AccountId::from(0), 1), value);
+        assert_eq!(
+            st.get_total_balance(AccountId::from(1)),
+            NonNegativeAmount::ZERO
+        );
+
+        let amount_sent = NonNegativeAmount::from_u64(20000).unwrap();
+        let amount_legacy_change = NonNegativeAmount::from_u64(30000).unwrap();
+        let addr = dfvk.default_address().1;
+        let addr2 = dfvk2.default_address().1;
+        let req = TransactionRequest::new(vec![
+            // payment to an external recipient
+            Payment {
+                recipient_address: RecipientAddress::Shielded(addr2),
+                amount: amount_sent.into(),
+                memo: None,
+                label: None,
+                message: None,
+                other_params: vec![],
+            },
+            // payment back to the originating wallet, simulating legacy change
+            Payment {
+                recipient_address: RecipientAddress::Shielded(addr),
+                amount: amount_legacy_change.into(),
+                memo: None,
+                label: None,
+                message: None,
+                other_params: vec![],
+            },
+        ])
+        .unwrap();
+
+        let fee_rule = FixedFeeRule::standard();
+        let input_selector = GreedyInputSelector::new(
+            fixed::SingleOutputChangeStrategy::new(fee_rule),
+            DustOutputPolicy::default(),
+        );
+
+        let txid = st
+            .spend(
+                &input_selector,
+                &usk,
+                req,
+                OvkPolicy::Sender,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
+        let tx = &st.wallet().get_transaction(txid).unwrap();
+
+        let amount_left =
+            (value - (amount_sent + fee_rule.fixed_fee().try_into().unwrap()).unwrap()).unwrap();
+        let pending_change = (amount_left - amount_legacy_change).unwrap();
+
+        // The "legacy change" is not counted by get_pending_change().
+        assert_eq!(st.get_pending_change(AccountId::from(0), 1), pending_change);
+        // We spent the only note so we only have pending change.
+        assert_eq!(st.get_total_balance(AccountId::from(0)), pending_change);
+
+        let (h, _) = st.generate_next_block_from_tx(tx);
+        st.scan_cached_blocks(h, 1);
+
+        assert_eq!(st.get_total_balance(AccountId::from(1)), amount_sent);
+        assert_eq!(st.get_total_balance(AccountId::from(0)), amount_left);
+
+        st.reset();
+
+        // Account creation and DFVK derivation should be deterministic.
+        let (_, restored_usk) = st
+            .wallet_mut()
+            .create_account(&seed, birthday.clone())
+            .unwrap();
+        assert_eq!(
+            restored_usk
+                .sapling()
+                .to_diversifiable_full_viewing_key()
+                .to_bytes(),
+            dfvk.to_bytes()
+        );
+
+        let (_, restored_usk2) = st.wallet_mut().create_account(&seed, birthday).unwrap();
+        assert_eq!(
+            restored_usk2
+                .sapling()
+                .to_diversifiable_full_viewing_key()
+                .to_bytes(),
+            dfvk2.to_bytes()
+        );
+
+        st.scan_cached_blocks(st.sapling_activation_height(), 2);
+
+        assert_eq!(st.get_total_balance(AccountId::from(1)), amount_sent);
+        assert_eq!(st.get_total_balance(AccountId::from(0)), amount_left);
     }
 
     #[test]
