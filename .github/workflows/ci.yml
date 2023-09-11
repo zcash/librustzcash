@@ -34,7 +34,25 @@ jobs:
       - name: Verify working directory is clean
         run: git diff --exit-code
 
-  build:
+  build-latest:
+    name: Latest build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
+      - run: rustup override set ${{steps.toolchain.outputs.name}}
+      - name: Remove lockfile to build with latest dependencies
+        run: rm Cargo.lock
+      - name: Build crates
+        run: cargo build --workspace --all-targets --all-features --verbose
+      - name: Verify working directory is clean (excluding lockfile)
+        run: git diff --exit-code ':!Cargo.lock'
+
+  build-nodefault:
     name: Build target ${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
