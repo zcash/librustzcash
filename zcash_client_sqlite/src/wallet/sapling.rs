@@ -1304,4 +1304,70 @@ pub(crate) mod tests {
 
         assert_eq!(spendable.len(), 1);
     }
+
+    #[test]
+    fn checkpoint_gaps() {
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+
+        let (account, usk, birthday) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
+
+        // Generate a block that with funds belonging to our wallet.
+        st.generate_next_block(
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::const_from_i64(500000),
+        );
+        st.scan_cached_blocks(birthday.height(), 1);
+
+        // Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
+        // belong to us so that we can get a checkpoint in the tree.
+        let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+        let not_our_value = Amount::const_from_i64(10000);
+        st.generate_block_at(
+            birthday.height() + 10,
+            BlockHash([0; 32]),
+            &not_our_key,
+            AddressType::DefaultExternal,
+            not_our_value,
+            st.latest_cached_block().unwrap().2,
+        );
+
+        // Scan the block
+        st.scan_cached_blocks(birthday.height() + 10, 1);
+
+        // Fake that everything has been scanned
+        st.wallet()
+            .conn
+            .execute_batch("UPDATE scan_queue SET priority = 10")
+            .unwrap();
+
+        // Verify that our note is considered spendable
+        let spendable = select_spendable_sapling_notes(
+            &st.wallet().conn,
+            account,
+            Amount::const_from_i64(300000),
+            birthday.height() + 5,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(spendable.len(), 1);
+
+        // Attempt to spend the note with 5 confirmations
+        let to = not_our_key.default_address().1.into();
+        assert_matches!(
+            st.create_spend_to_address(
+                &usk,
+                &to,
+                Amount::from_u64(10000).unwrap(),
+                None,
+                OvkPolicy::Sender,
+                NonZeroU32::new(5).unwrap(),
+            ),
+            Ok(_)
+        );
+    }
 }
