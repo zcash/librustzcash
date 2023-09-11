@@ -85,7 +85,7 @@ use {
 
 pub mod chain;
 pub mod error;
-pub mod serialization;
+pub(crate) mod serialization;
 
 pub mod wallet;
 use wallet::{
