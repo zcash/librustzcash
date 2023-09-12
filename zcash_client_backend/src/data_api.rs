@@ -867,6 +867,16 @@ pub trait WalletCommitmentTrees {
         Error = Self::Error,
     >;
 
+    /// Returns the depth of the checkpoint in the tree that can be used to create a witness at the
+    /// anchor having the given number of confirmations.
+    ///
+    /// This assumes that at any time a note is added to the tree, a checkpoint is created for the
+    /// end of the block in which that note was discovered.
+    fn get_checkpoint_depth(
+        &self,
+        min_confirmations: NonZeroU32,
+    ) -> Result<usize, ShardTreeError<Self::Error>>;
+
     fn with_sapling_tree_mut<F, A, E>(&mut self, callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
@@ -1181,6 +1191,13 @@ pub mod testing {
             })?;
 
             Ok(())
+        }
+
+        fn get_checkpoint_depth(
+            &self,
+            min_confirmations: NonZeroU32,
+        ) -> Result<usize, ShardTreeError<Self::Error>> {
+            Ok(usize::try_from(u32::from(min_confirmations)).unwrap())
         }
     }
 }

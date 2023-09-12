@@ -170,6 +170,10 @@ where
         self.cache.block_source()
     }
 
+    pub(crate) fn latest_cached_block(&self) -> &Option<(BlockHeight, BlockHash, u32)> {
+        &self.latest_cached_block
+    }
+
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
     pub(crate) fn generate_next_block(

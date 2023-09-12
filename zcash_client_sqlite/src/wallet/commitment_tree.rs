@@ -4,6 +4,7 @@ use std::{
     error, fmt,
     io::{self, Cursor},
     marker::PhantomData,
+    num::NonZeroU32,
     ops::Range,
     sync::Arc,
 };
@@ -19,6 +20,8 @@ use shardtree::{
 use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};
 
 use zcash_client_backend::serialization::shardtree::{read_shard, write_shard};
+
+use super::scan_queue_extrema;
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
@@ -724,8 +727,8 @@ pub(crate) fn get_checkpoint(
         .query_row(
             &format!(
                 "SELECT position
-            FROM {}_tree_checkpoints
-            WHERE checkpoint_id = ?",
+                 FROM {}_tree_checkpoints
+                 WHERE checkpoint_id = ?",
                 table_prefix
             ),
             [u32::from(checkpoint_id)],
@@ -743,6 +746,33 @@ pub(crate) fn get_checkpoint(
                 pos_opt.map_or(TreeState::Empty, TreeState::AtPosition),
                 get_marks_removed(conn, table_prefix, checkpoint_id)?,
             ))
+        })
+        .transpose()
+}
+
+pub(crate) fn get_checkpoint_depth(
+    conn: &rusqlite::Connection,
+    table_prefix: &'static str,
+    min_confirmations: NonZeroU32,
+) -> Result<Option<usize>, rusqlite::Error> {
+    scan_queue_extrema(conn)?
+        .map(|(_, max)| max)
+        .map(|chain_tip| {
+            let max_checkpoint_height =
+                u32::from(chain_tip).saturating_sub(u32::from(min_confirmations) - 1);
+
+            // We exclude from consideration all checkpoints having heights greater than the maximum
+            // checkpoint height. The checkpoint depth is the number of excluded checkpoints + 1.
+            conn.query_row(
+                &format!(
+                    "SELECT COUNT(*) 
+                     FROM {}_tree_checkpoints
+                     WHERE checkpoint_id > :max_checkpoint_height",
+                    table_prefix
+                ),
+                named_params![":max_checkpoint_height": max_checkpoint_height],
+                |row| row.get::<_, usize>(0).map(|s| s + 1),
+            )
         })
         .transpose()
 }
