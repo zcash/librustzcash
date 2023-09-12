@@ -20,6 +20,9 @@ pub mod scanning;
 pub mod wallet;
 pub mod zip321;
 
+#[cfg(feature = "unstable-serialization")]
+pub mod serialization;
+
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
 
 #[cfg(test)]

@@ -18,7 +18,7 @@ use shardtree::{
 
 use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};
 
-use crate::serialization::{read_shard, write_shard};
+use zcash_client_backend::serialization::shardtree::{read_shard, write_shard};
 
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
