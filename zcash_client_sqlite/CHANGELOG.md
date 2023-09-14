@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.8.0-rc.1] - 2023-09-08
+## [0.8.0-rc.3] - 2023-09-12
 ### Added
 - `zcash_client_sqlite::commitment_tree` Types related to management of note
   commitment trees using the `shardtree` crate.
