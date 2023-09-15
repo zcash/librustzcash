@@ -104,6 +104,7 @@ test-dependencies = [
 ]
 unstable = ["byteorder"]
 unstable-serialization = ["byteorder"]
+unstable-spanning-tree = []
 
 [lib]
 bench = false

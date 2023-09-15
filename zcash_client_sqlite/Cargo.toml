@@ -14,7 +14,7 @@ edition = "2021"
 rust-version = "1.65"
 
 [dependencies]
-zcash_client_backend = { version = "=0.10.0-rc.2", path = "../zcash_client_backend", features = ["unstable-serialization"]}
+zcash_client_backend = { version = "=0.10.0-rc.2", path = "../zcash_client_backend", features = ["unstable-serialization", "unstable-spanning-tree"]}
 zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
 zcash_primitives = { version = "=0.13.0-rc.1", path = "../zcash_primitives", default-features = false }
 
