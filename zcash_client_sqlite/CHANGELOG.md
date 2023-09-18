@@ -42,6 +42,9 @@ and this library adheres to Rust's notion of
   - `FsBlockDbError::CacheMiss`
 - `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
   existing metadata entries that have the same height as a new entry.
+- The `v_transactions` and `v_tx_outputs` views now return the 32-byte
+  transaction identifier for transactions instead of the internal database
+  id.
 
 ### Removed
 - The empty `wallet::transact` module has been removed.
