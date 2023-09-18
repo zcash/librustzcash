@@ -42,9 +42,10 @@ and this library adheres to Rust's notion of
   - `FsBlockDbError::CacheMiss`
 - `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
   existing metadata entries that have the same height as a new entry.
-- The `v_transactions` and `v_tx_outputs` views now return the 32-byte
-  transaction identifier for transactions instead of the internal database
-  id.
+- The `v_transactions` and `v_tx_outputs` views no longer return the
+  internal database identifier for the transaction. The `txid` column
+  should be used instead. The `tx_index`, `expiry_height`, `raw` and
+  `fee_paid` columns may now be null for received transparent transactions.
 
 ### Removed
 - The empty `wallet::transact` module has been removed.
@@ -70,6 +71,8 @@ and this library adheres to Rust's notion of
 - `WalletDb::get_transaction` no longer returns an error when called on a transaction
   that has not yet been mined, unless the transaction's consensus branch ID cannot be
   determined by other means.
+- Fixed an error in `v_transactions` wherein received transparent outputs did not
+  result in a transaction entry appearing in the transaction history.
 
 ## [0.7.1] - 2023-05-17
 

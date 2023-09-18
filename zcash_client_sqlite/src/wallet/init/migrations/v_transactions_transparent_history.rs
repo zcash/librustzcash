@@ -82,7 +82,6 @@ impl RusqliteMigration for Migration {
                 FROM sapling_received_notes
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.spent
-                WHERE  sapling_received_notes.spent IS NOT NULL
             ),
             sent_note_counts AS (
                 SELECT sent_notes.from_account AS account_id,
@@ -101,8 +100,7 @@ impl RusqliteMigration for Migration {
                 LEFT JOIN sapling_received_notes
                           ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                              (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-                WHERE  sapling_received_notes.is_change IS NULL
-                   OR  sapling_received_notes.is_change = 0
+                WHERE COALESCE(sapling_received_notes.is_change, 0) = 0
                 GROUP BY account_id, txid
             ),
             blocks_max_height AS (
@@ -179,8 +177,7 @@ impl RusqliteMigration for Migration {
             LEFT JOIN sapling_received_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-            WHERE  sapling_received_notes.is_change IS NULL
-               OR  sapling_received_notes.is_change = 0;"
+            WHERE COALESCE(sapling_received_notes.is_change, 0) = 0;"
         ).map_err(WalletMigrationError::from)
     }
 
