@@ -12,6 +12,7 @@ mod ufvk_support;
 mod utxos_table;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
+mod v_transactions_transparent_history;
 mod wallet_summaries;
 
 use schemer_rusqlite::RusqliteMigration;
@@ -39,12 +40,13 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                  received_notes_nullable_nf
     //                 /          |           \
     // shardtree_support    nullifier_map    sapling_memo_consistency
-    //         |
-    //   add_account_birthdays
-    //         |
-    // v_sapling_shard_unscanned_ranges
-    //         |
-    // wallet_summaries
+    //         |                                        |
+    //   add_account_birthdays                          |
+    //         |                                        |
+    // v_sapling_shard_unscanned_ranges                 |
+    //         |                                        |
+    // wallet_summaries                                 |
+    //                                   v_transactions_transparent_history
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -76,5 +78,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(wallet_summaries::Migration),
+        Box::new(v_transactions_transparent_history::Migration),
     ]
 }

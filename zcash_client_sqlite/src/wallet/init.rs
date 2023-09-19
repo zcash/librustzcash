@@ -436,8 +436,9 @@ mod tests {
             WITH
             notes AS (
                 SELECT sapling_received_notes.account        AS account_id,
-                       sapling_received_notes.tx             AS id_tx,
-                       2                             AS pool,
+                       transactions.block                    AS block,
+                       transactions.txid                     AS txid,
+                       2                                     AS pool,
                        sapling_received_notes.value          AS value,
                        CASE
                             WHEN sapling_received_notes.is_change THEN 1
@@ -452,56 +453,59 @@ mod tests {
                            THEN 0
                          ELSE 1
                        END AS memo_present
-                FROM   sapling_received_notes
+                FROM sapling_received_notes
+                JOIN transactions
+                     ON transactions.id_tx = sapling_received_notes.tx
                 UNION
                 SELECT utxos.received_by_account     AS account_id,
-                       transactions.id_tx            AS id_tx,
+                       utxos.height                  AS block,
+                       utxos.prevout_txid            AS txid,
                        0                             AS pool,
                        utxos.value_zat               AS value,
                        0                             AS is_change,
                        1                             AS received_count,
                        0                             AS memo_present
                 FROM utxos
-                JOIN transactions
-                     ON transactions.txid = utxos.prevout_txid
                 UNION
                 SELECT sapling_received_notes.account        AS account_id,
-                       sapling_received_notes.spent          AS id_tx,
-                       2                             AS pool,
+                       transactions.block                    AS block,
+                       transactions.txid                     AS txid,
+                       2                                     AS pool,
                        -sapling_received_notes.value         AS value,
                        0                             AS is_change,
                        0                             AS received_count,
                        0                             AS memo_present
-                FROM   sapling_received_notes
-                WHERE  sapling_received_notes.spent IS NOT NULL
+                FROM sapling_received_notes
+                JOIN transactions
+                     ON transactions.id_tx = sapling_received_notes.spent
             ),
             sent_note_counts AS (
                 SELECT sent_notes.from_account AS account_id,
-                       sent_notes.tx AS id_tx,
+                       transactions.txid       AS txid,
                        COUNT(DISTINCT sent_notes.id_note) as sent_notes,
                        SUM(
                          CASE
-                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6')
+                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR sapling_received_notes.tx IS NOT NULL)
                              THEN 0
                            ELSE 1
                          END
                        ) AS memo_count
                 FROM sent_notes
+                JOIN transactions
+                     ON transactions.id_tx = sent_notes.tx
                 LEFT JOIN sapling_received_notes
                           ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                              (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-                WHERE  sapling_received_notes.is_change IS NULL
-                   OR  sapling_received_notes.is_change = 0
-                GROUP BY account_id, id_tx
+                WHERE COALESCE(sapling_received_notes.is_change, 0) = 0
+                GROUP BY account_id, txid
             ),
             blocks_max_height AS (
                 SELECT MAX(blocks.height) as max_height FROM blocks
             )
             SELECT notes.account_id                  AS account_id,
-                   transactions.id_tx                AS id_tx,
-                   transactions.block                AS mined_height,
+                   notes.block                       AS mined_height,
+                   notes.txid                        AS txid,
                    transactions.tx_index             AS tx_index,
-                   transactions.txid                 AS txid,
                    transactions.expiry_height        AS expiry_height,
                    transactions.raw                  AS raw,
                    SUM(notes.value)                  AS account_balance_delta,
@@ -513,19 +517,20 @@ mod tests {
                    blocks.time                       AS block_time,
                    (
                         blocks.height IS NULL
-                        AND transactions.expiry_height <= blocks_max_height.max_height
+                        AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
                    ) AS expired_unmined
-            FROM transactions
-            JOIN notes ON notes.id_tx = transactions.id_tx
+            FROM notes
+            LEFT JOIN transactions
+                 ON notes.txid = transactions.txid
             JOIN blocks_max_height
-            LEFT JOIN blocks ON blocks.height = transactions.block
+            LEFT JOIN blocks ON blocks.height = notes.block
             LEFT JOIN sent_note_counts
                       ON sent_note_counts.account_id = notes.account_id
-                      AND sent_note_counts.id_tx = notes.id_tx
-            GROUP BY notes.account_id, transactions.id_tx".to_owned(),
+                      AND sent_note_counts.txid = notes.txid
+            GROUP BY notes.account_id, notes.txid".to_owned(),
             // v_tx_outputs
             "CREATE VIEW v_tx_outputs AS
-            SELECT sapling_received_notes.tx           AS id_tx,
+            SELECT transactions.txid                   AS txid,
                    2                                   AS output_pool,
                    sapling_received_notes.output_index AS output_index,
                    sent_notes.from_account             AS from_account,
@@ -535,11 +540,13 @@ mod tests {
                    sapling_received_notes.is_change    AS is_change,
                    sapling_received_notes.memo         AS memo
             FROM sapling_received_notes
+            JOIN transactions
+                 ON transactions.id_tx = sapling_received_notes.tx
             LEFT JOIN sent_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (sapling_received_notes.tx, 2, sent_notes.output_index)
             UNION
-            SELECT transactions.id_tx          AS id_tx,
+            SELECT utxos.prevout_txid          AS txid,
                    0                           AS output_pool,
                    utxos.prevout_idx           AS output_index,
                    NULL                        AS from_account,
@@ -549,10 +556,8 @@ mod tests {
                    false                       AS is_change,
                    NULL                        AS memo
             FROM utxos
-            JOIN transactions
-                 ON transactions.txid = utxos.prevout_txid
             UNION
-            SELECT sent_notes.tx                  AS id_tx,
+            SELECT transactions.txid              AS txid,
                    sent_notes.output_pool         AS output_pool,
                    sent_notes.output_index        AS output_index,
                    sent_notes.from_account        AS from_account,
@@ -562,11 +567,12 @@ mod tests {
                    false                          AS is_change,
                    sent_notes.memo                AS memo
             FROM sent_notes
+            JOIN transactions
+                 ON transactions.id_tx = sent_notes.tx
             LEFT JOIN sapling_received_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-            WHERE  sapling_received_notes.is_change IS NULL
-               OR  sapling_received_notes.is_change = 0".to_owned(),
+            WHERE COALESCE(sapling_received_notes.is_change, 0) = 0".to_owned(),
         ];
 
         let mut views_query = st
