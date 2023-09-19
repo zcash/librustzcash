@@ -89,7 +89,7 @@ impl RusqliteMigration for Migration {
                        COUNT(DISTINCT sent_notes.id_note) as sent_notes,
                        SUM(
                          CASE
-                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6')
+                           WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR sapling_received_notes.tx IS NOT NULL)
                              THEN 0
                            ELSE 1
                          END
@@ -121,19 +121,21 @@ impl RusqliteMigration for Migration {
                    blocks.time                       AS block_time,
                    (
                         blocks.height IS NULL
-                        AND transactions.expiry_height <= blocks_max_height.max_height
+                        AND transactions.expiry_height BETWEEN 1 AND blocks_max_height.max_height
                    ) AS expired_unmined
             FROM notes
-            LEFT OUTER JOIN transactions
+            LEFT JOIN transactions
                  ON notes.txid = transactions.txid
             JOIN blocks_max_height
-            LEFT JOIN blocks ON blocks.height = transactions.block
+            LEFT JOIN blocks ON blocks.height = notes.block
             LEFT JOIN sent_note_counts
                       ON sent_note_counts.account_id = notes.account_id
                       AND sent_note_counts.txid = notes.txid
-            GROUP BY notes.account_id, notes.txid;
+            GROUP BY notes.account_id, notes.txid;"
+        )?;
 
-            DROP VIEW v_tx_outputs;
+        transaction.execute_batch(
+            "DROP VIEW v_tx_outputs;
             CREATE VIEW v_tx_outputs AS
             SELECT transactions.txid                   AS txid,
                    2                                   AS output_pool,
@@ -177,8 +179,10 @@ impl RusqliteMigration for Migration {
             LEFT JOIN sapling_received_notes
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
-            WHERE COALESCE(sapling_received_notes.is_change, 0) = 0;"
-        ).map_err(WalletMigrationError::from)
+            WHERE COALESCE(sapling_received_notes.is_change, 0) = 0;",
+        )?;
+
+        Ok(())
     }
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
