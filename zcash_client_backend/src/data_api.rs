@@ -264,6 +264,7 @@ pub trait WalletRead {
     /// case of a reorg.
     ///
     /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
+    /// [`ScanPriority::Verify`]: crate::data_api::scanning::ScanPriority
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error>;
 
     /// Returns the default target height (for the block in which a new
