@@ -257,7 +257,11 @@ pub trait WalletRead {
     /// tree size information for each block; or else the scan is likely to fail if notes belonging
     /// to the wallet are detected.
     ///
-    /// The returned range(s) may include block heights beyond the current chain tip.
+    /// The returned range(s) may include block heights beyond the current chain tip. Ranges are
+    /// returned in order of descending priority, and higher-priority ranges should always be
+    /// scanned before lower-priority ranges; in particular, ranges with [`ScanPriority::Verify`]
+    /// priority must always be scanned first in order to avoid blockchain continuity errors in the
+    /// case of a reorg.
     ///
     /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error>;
