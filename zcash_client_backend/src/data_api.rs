@@ -483,7 +483,7 @@ impl<Nf> ScannedBlock<Nf> {
         self.metadata.block_hash
     }
 
-    /// Returns the block time of the block that was scanned.
+    /// Returns the block time of the block that was scanned, as a Unix timestamp in seconds.
     pub fn block_time(&self) -> u32 {
         self.block_time
     }
