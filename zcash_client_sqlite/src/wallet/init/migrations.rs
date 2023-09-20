@@ -13,6 +13,7 @@ mod utxos_table;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
 mod v_transactions_transparent_history;
+mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
 use schemer_rusqlite::RusqliteMigration;
@@ -47,6 +48,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //         |                                        |
     // wallet_summaries                                 |
     //                                   v_transactions_transparent_history
+    //                                                  |
+    //                                     v_tx_outputs_use_legacy_false
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -79,5 +82,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(wallet_summaries::Migration),
         Box::new(v_transactions_transparent_history::Migration),
+        Box::new(v_tx_outputs_use_legacy_false::Migration),
     ]
 }
