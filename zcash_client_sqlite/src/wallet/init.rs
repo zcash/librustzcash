@@ -553,7 +553,7 @@ mod tests {
                    utxos.received_by_account   AS to_account,
                    utxos.address               AS to_address,
                    utxos.value_zat             AS value,
-                   false                       AS is_change,
+                   0                           AS is_change,
                    NULL                        AS memo
             FROM utxos
             UNION
@@ -564,7 +564,7 @@ mod tests {
                    sapling_received_notes.account AS to_account,
                    sent_notes.to_address          AS to_address,
                    sent_notes.value               AS value,
-                   false                          AS is_change,
+                   0                              AS is_change,
                    sent_notes.memo                AS memo
             FROM sent_notes
             JOIN transactions
