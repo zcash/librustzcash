@@ -1918,7 +1918,6 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        secrecy::Secret,
         zcash_client_backend::{
             data_api::WalletWrite, encoding::AddressCodec, wallet::WalletTransparentOutput,
         },
@@ -1963,12 +1962,11 @@ mod tests {
     fn put_received_transparent_utxo() {
         use crate::testing::TestBuilder;
 
-        let mut st = TestBuilder::new().build();
+        let mut st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
 
-        // Add an account to the wallet
-        let seed = Secret::new([0u8; 32].to_vec());
-        let birthday = AccountBirthday::from_sapling_activation(&st.network());
-        let (account_id, _usk) = st.wallet_mut().create_account(&seed, birthday).unwrap();
+        let (account_id, _, _) = st.test_account().unwrap();
         let uaddr = st
             .wallet()
             .get_current_address(account_id)
@@ -1976,63 +1974,63 @@ mod tests {
             .unwrap();
         let taddr = uaddr.transparent().unwrap();
 
+        let height_1 = BlockHeight::from_u32(12345);
         let bal_absent = st
             .wallet()
-            .get_transparent_balances(account_id, BlockHeight::from_u32(12345))
+            .get_transparent_balances(account_id, height_1)
             .unwrap();
         assert!(bal_absent.is_empty());
 
-        let utxo = WalletTransparentOutput::from_parts(
-            OutPoint::new([1u8; 32], 1),
-            TxOut {
-                value: Amount::from_u64(100000).unwrap(),
-                script_pubkey: taddr.script(),
-            },
-            BlockHeight::from_u32(12345),
-        )
-        .unwrap();
+        // Create a fake transparent output.
+        let value = Amount::from_u64(100000).unwrap();
+        let outpoint = OutPoint::new([1u8; 32], 1);
+        let txout = TxOut {
+            value,
+            script_pubkey: taddr.script(),
+        };
 
+        // Pretend the output's transaction was mined at `height_1`.
+        let utxo =
+            WalletTransparentOutput::from_parts(outpoint.clone(), txout.clone(), height_1).unwrap();
         let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
         assert_matches!(res0, Ok(_));
 
+        // Confirm that we see the output unspent as of `height_1`.
+        assert_matches!(
+            st.wallet().get_unspent_transparent_outputs(
+                taddr,
+                height_1,
+                &[]
+            ).as_deref(),
+            Ok(&[ref ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
+        );
+
         // Change the mined height of the UTXO and upsert; we should get back
-        // the same utxoid
-        let utxo2 = WalletTransparentOutput::from_parts(
-            OutPoint::new([1u8; 32], 1),
-            TxOut {
-                value: Amount::from_u64(100000).unwrap(),
-                script_pubkey: taddr.script(),
-            },
-            BlockHeight::from_u32(34567),
-        )
-        .unwrap();
+        // the same `UtxoId`.
+        let height_2 = BlockHeight::from_u32(34567);
+        let utxo2 = WalletTransparentOutput::from_parts(outpoint, txout, height_2).unwrap();
         let res1 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res1, Ok(id) if id == res0.unwrap());
 
+        // Confirm that we no longer see any unspent outputs as of `height_1`.
         assert_matches!(
-            st.wallet().get_unspent_transparent_outputs(
-                taddr,
-                BlockHeight::from_u32(12345),
-                &[]
-            ),
-            Ok(utxos) if utxos.is_empty()
+            st.wallet()
+                .get_unspent_transparent_outputs(taddr, height_1, &[])
+                .as_deref(),
+            Ok(&[])
+        );
+
+        // If we include `height_2` then the output is returned.
+        assert_matches!(
+            st.wallet()
+                .get_unspent_transparent_outputs(taddr, height_2, &[])
+                .as_deref(),
+            Ok(&[ref ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_2)
         );
 
         assert_matches!(
-            st.wallet().get_unspent_transparent_outputs(
-                taddr,
-                BlockHeight::from_u32(34567),
-                &[]
-            ),
-            Ok(utxos) if {
-                utxos.len() == 1 &&
-                utxos.iter().any(|rutxo| rutxo.height() == utxo2.height())
-            }
-        );
-
-        assert_matches!(
-            st.wallet().get_transparent_balances(account_id, BlockHeight::from_u32(34567)),
-            Ok(h) if h.get(taddr) == Amount::from_u64(100000).ok().as_ref()
+            st.wallet().get_transparent_balances(account_id, height_2),
+            Ok(h) if h.get(taddr) == Some(&value)
         );
 
         // Artificially delete the address from the addresses table so that
