@@ -1083,14 +1083,25 @@ mod tests {
             check_append, check_checkpoint_rewind, check_remove_mark, check_rewind_remove_mark,
             check_root_hashes, check_witness_consistency, check_witnesses,
         },
-        Position, Retention,
+        Address, Level, Position, Retention,
     };
-    use shardtree::ShardTree;
-    use zcash_client_backend::data_api::chain::CommitmentTreeRoot;
-    use zcash_primitives::consensus::{BlockHeight, Network};
+    use shardtree::{store::ShardStore, ShardTree};
+    use zcash_client_backend::data_api::{
+        chain::CommitmentTreeRoot, WalletWrite, SAPLING_SHARD_HEIGHT,
+    };
+    use zcash_primitives::{
+        block::BlockHash,
+        consensus::{BlockHeight, Network},
+        sapling::Node,
+        transaction::components::Amount,
+    };
 
     use super::SqliteShardStore;
-    use crate::{wallet::init::init_wallet_db, WalletDb, SAPLING_TABLES_PREFIX};
+    use crate::{
+        testing::AddressType,
+        wallet::{init::init_wallet_db, scanning::tests::test_with_canopy_birthday},
+        WalletDb, SAPLING_TABLES_PREFIX,
+    };
 
     fn new_tree(m: usize) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
         let data_file = NamedTempFile::new().unwrap();
@@ -1199,5 +1210,86 @@ mod tests {
                 "________________________________"
             ]
         );
+    }
+
+    #[test]
+    fn truncate_across_shard_boundaries() {
+        let (mut st, dfvk, birthday, _) = test_with_canopy_birthday();
+
+        // Set up the following situation:
+        //
+        //                  scan_start      chain_tip
+        //        |<--- 495 --->|<- 5 ->|<- 5 ->|
+        // wallet_birthday           shard_end
+
+        st.wallet_mut()
+            .update_chain_tip(birthday.height() + 505)
+            .unwrap();
+
+        // Scan the 10 blocks that span the shard boundary
+        let start_height = birthday.height() + 495;
+        let just_before_shard_end = (0x1u32 << 17) - 5;
+        st.generate_block_at(
+            start_height,
+            BlockHash([0u8; 32]),
+            &dfvk,
+            AddressType::DefaultExternal,
+            Amount::const_from_i64(10000),
+            just_before_shard_end,
+        );
+        for _ in 0..9 {
+            st.generate_next_block(
+                &dfvk,
+                AddressType::DefaultExternal,
+                Amount::const_from_i64(10000),
+            );
+        }
+        st.scan_cached_blocks(start_height, 10);
+
+        // Verify that the wallet has a checkpoint at the height we're goint to rewind to:
+        {
+            let tx = st.wallet_mut().conn.transaction().unwrap();
+            let shard_store: SqliteShardStore<_, Node, SAPLING_SHARD_HEIGHT> =
+                SqliteShardStore::from_connection(&tx, SAPLING_TABLES_PREFIX).unwrap();
+
+            assert_matches!(shard_store.get_checkpoint(&(start_height + 3)), Ok(Some(_)));
+
+            // final shard should be present
+            assert_matches!(
+                shard_store.get_shard(Address::from_parts(Level::from(SAPLING_SHARD_HEIGHT), 2)),
+                Ok(Some(_))
+            );
+        }
+
+        // Simulate a reorg of 7 blocks
+        st.wallet_mut()
+            .truncate_to_height(start_height + 3)
+            .unwrap();
+
+        {
+            let tx = st.wallet_mut().conn.transaction().unwrap();
+            let shard_store: SqliteShardStore<_, Node, SAPLING_SHARD_HEIGHT> =
+                SqliteShardStore::from_connection(&tx, SAPLING_TABLES_PREFIX).unwrap();
+
+            // second-to-last shard should have data up to the rewind position
+            let prev_shard = shard_store
+                .get_shard(Address::from_parts(Level::from(SAPLING_SHARD_HEIGHT), 1))
+                .unwrap()
+                .unwrap();
+            assert_matches!(
+                prev_shard.value_at_position(Position::from(u64::from(just_before_shard_end) + 3)),
+                Some(_)
+            );
+            assert_matches!(
+                prev_shard.value_at_position(Position::from(u64::from(just_before_shard_end) + 4)),
+                None
+            );
+
+            // final shard should be absent
+            assert_matches!(
+                shard_store.get_shard(Address::from_parts(Level::from(SAPLING_SHARD_HEIGHT), 2)),
+                Ok(None)
+            );
+        }
     }
 }

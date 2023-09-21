@@ -1208,7 +1208,16 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             params: params.clone(),
         };
         wdb.with_sapling_tree_mut(|tree| {
-            tree.truncate_removing_checkpoint(&block_height).map(|_| ())
+            let truncate_succeeded = tree.truncate_removing_checkpoint(&block_height)?;
+
+            if truncate_succeeded {
+                Ok(())
+            } else {
+                Err(SqliteClientError::RequestedRewindInvalid(
+                    last_scanned_height - PRUNING_DEPTH,
+                    block_height,
+                ))
+            }
         })?;
 
         // Remove any legacy Sapling witnesses
