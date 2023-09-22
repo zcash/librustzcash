@@ -105,8 +105,8 @@ use zcash_client_backend::{
 use crate::wallet::commitment_tree::SqliteShardStore;
 use crate::{
     error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
+    SAPLING_TABLES_PREFIX,
 };
-use crate::{SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD};
 
 use self::scanning::{parse_priority_code, replace_queue_entries};
 
@@ -1275,8 +1275,8 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             named_params![":end_height": u32::from(block_height + 1)],
         )?;
 
-        // Prioritize the range starting at the height we just rewound to for verification
-        let query_range = block_height..(block_height + VERIFY_LOOKAHEAD);
+        // Prioritize the height we just rewound to for verification.
+        let query_range = block_height..(block_height + 1);
         let scan_range = ScanRange::from_parts(query_range.clone(), ScanPriority::Verify);
         replace_queue_entries::<SqliteClientError>(
             conn,
@@ -2167,6 +2167,7 @@ mod tests {
         st.wallet_mut()
             .truncate_to_height(mined_height - 1)
             .unwrap();
+        assert_eq!(st.wallet().chain_height().unwrap(), Some(mined_height - 1));
 
         // The wallet should still have zero transparent balance.
         check_balance(&st, 0, NonNegativeAmount::ZERO);
