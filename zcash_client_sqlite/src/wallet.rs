@@ -716,10 +716,8 @@ pub(crate) fn get_wallet_summary(
         let mut stmt_transparent_balances = conn.prepare(
             "SELECT u.received_by_account, SUM(u.value_zat)
              FROM utxos u
-             LEFT OUTER JOIN transactions tx
-             ON tx.id_tx = u.spent_in_tx
              WHERE u.height <= :max_height
-             AND tx.block IS NULL
+             AND u.spent_in_tx IS NULL
              GROUP BY u.received_by_account",
         )?;
         let mut rows = stmt_transparent_balances
@@ -1304,13 +1302,11 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
     let mut stmt_blocks = conn.prepare(
         "SELECT u.prevout_txid, u.prevout_idx, u.script,
-                u.value_zat, u.height, tx.block as block
+                u.value_zat, u.height
          FROM utxos u
-         LEFT OUTER JOIN transactions tx
-         ON tx.id_tx = u.spent_in_tx
          WHERE u.address = :address
          AND u.height <= :max_height
-         AND tx.block IS NULL",
+         AND u.spent_in_tx IS NULL",
     )?;
 
     let addr_str = address.encode(params);
@@ -1370,11 +1366,9 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     let mut stmt_blocks = conn.prepare(
         "SELECT u.address, SUM(u.value_zat)
          FROM utxos u
-         LEFT OUTER JOIN transactions tx
-         ON tx.id_tx = u.spent_in_tx
          WHERE u.received_by_account = :account_id
          AND u.height <= :max_height
-         AND tx.block IS NULL
+         AND u.spent_in_tx IS NULL
          GROUP BY u.address",
     )?;
 
