@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.10.0-rc.3] - 2023-09-19
+## [0.10.0-rc.4] - 2023-09-22
 ### Notable Changes
 
 - `zcash_client_backend` now supports out-of-order scanning of blockchain history.
@@ -48,6 +48,10 @@ and this library adheres to Rust's notion of
   - `testing::MockWalletDb::new`
   - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`
   - `SAPLING_SHARD_HEIGHT` constant
+- `zcash_client_backend::proto::compact_formats`:
+  - `impl<A: sapling::Authorization> From<&sapling::SpendDescription<A>> for CompactSaplingSpend`
+  - `impl<A: sapling::Authorization> From<&sapling::OutputDescription<A>> for CompactSaplingOutput`
+  - `impl<SpendAuth> From<&orchard::Action<SpendAuth>> for CompactOrchardAction`
 - `zcash_client_backend::wallet::WalletSaplingOutput::note_commitment_tree_position`
 - `zcash_client_backend::scanning`:
   - `ScanError`
@@ -143,6 +147,9 @@ and this library adheres to Rust's notion of
   `chain::scan_cached_blocks`.
 - `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been
   replaced by `zcash_client_backend::scanning::ScanError`
+- `zcash_client_backend::proto::compact_formats`:
+  - `impl<A> From<sapling::OutputDescription<A>> for CompactSaplingOutput`
+    (use `From<&sapling::OutputDescription<A>>` instead).
 - `zcash_client_backend::wallet::WalletSaplingOutput::{witness, witness_mut}`
   have been removed as individual incremental witnesses are no longer tracked on a
   per-note basis. The global note commitment tree for the wallet should be used
