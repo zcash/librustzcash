@@ -137,7 +137,7 @@ jobs:
         run: cargo run --release --example download-params --features download-params
 
       - name: Generate coverage report
-        run: cargo tarpaulin --engine llvm --all-features --release --timeout 600 --out Xml
+        run: cargo tarpaulin --engine llvm --all-features --release --timeout 600 --out xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.1.4
 
