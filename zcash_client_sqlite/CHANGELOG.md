@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.8.0-rc.4] - 2023-09-19
+## [0.8.0-rc.5] - 2023-09-22
 
 ### Notable Changes
 - The `v_transactions` and `v_tx_outputs` views have changed in terms of what
