@@ -713,17 +713,21 @@ pub(crate) fn get_wallet_summary(
     #[cfg(feature = "transparent-inputs")]
     {
         let zero_conf_height = (chain_tip_height + 1).saturating_sub(min_confirmations);
+        let stable_height = chain_tip_height.saturating_sub(PRUNING_DEPTH);
+
         let mut stmt_transparent_balances = conn.prepare(
             "SELECT u.received_by_account, SUM(u.value_zat)
              FROM utxos u
              LEFT OUTER JOIN transactions tx
              ON tx.id_tx = u.spent_in_tx
              WHERE u.height <= :max_height
-             AND tx.block IS NULL
+             AND (u.spent_in_tx IS NULL OR (tx.block IS NULL AND tx.expiry_height <= :stable_height))
              GROUP BY u.received_by_account",
         )?;
-        let mut rows = stmt_transparent_balances
-            .query(named_params![":max_height": u32::from(zero_conf_height)])?;
+        let mut rows = stmt_transparent_balances.query(named_params![
+            ":max_height": u32::from(zero_conf_height),
+            ":stable_height": u32::from(stable_height)
+        ])?;
 
         while let Some(row) = rows.next()? {
             let account = AccountId::from(row.get::<_, u32>(0)?);
@@ -1302,15 +1306,20 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     max_height: BlockHeight,
     exclude: &[OutPoint],
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
+    let chain_tip_height = scan_queue_extrema(conn)?.map(|(_, max)| max);
+    let stable_height = chain_tip_height
+        .unwrap_or(max_height)
+        .saturating_sub(PRUNING_DEPTH);
+
     let mut stmt_blocks = conn.prepare(
         "SELECT u.prevout_txid, u.prevout_idx, u.script,
-                u.value_zat, u.height, tx.block as block
+                u.value_zat, u.height
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
          WHERE u.address = :address
          AND u.height <= :max_height
-         AND tx.block IS NULL",
+         AND (u.spent_in_tx IS NULL OR (tx.block IS NULL AND tx.expiry_height <= :stable_height))",
     )?;
 
     let addr_str = address.encode(params);
@@ -1318,7 +1327,8 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     let mut utxos = Vec::<WalletTransparentOutput>::new();
     let mut rows = stmt_blocks.query(named_params![
         ":address": addr_str,
-        ":max_height": u32::from(max_height)
+        ":max_height": u32::from(max_height),
+        ":stable_height": u32::from(stable_height),
     ])?;
     let excluded: BTreeSet<OutPoint> = exclude.iter().cloned().collect();
     while let Some(row) = rows.next()? {
@@ -1367,6 +1377,11 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     account: AccountId,
     max_height: BlockHeight,
 ) -> Result<HashMap<TransparentAddress, Amount>, SqliteClientError> {
+    let chain_tip_height = scan_queue_extrema(conn)?.map(|(_, max)| max);
+    let stable_height = chain_tip_height
+        .unwrap_or(max_height)
+        .saturating_sub(PRUNING_DEPTH);
+
     let mut stmt_blocks = conn.prepare(
         "SELECT u.address, SUM(u.value_zat)
          FROM utxos u
@@ -1374,14 +1389,15 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          ON tx.id_tx = u.spent_in_tx
          WHERE u.received_by_account = :account_id
          AND u.height <= :max_height
-         AND tx.block IS NULL
+         AND (u.spent_in_tx IS NULL OR (tx.block IS NULL AND tx.expiry_height <= :stable_height))
          GROUP BY u.address",
     )?;
 
     let mut res = HashMap::new();
     let mut rows = stmt_blocks.query(named_params![
         ":account_id": u32::from(account),
-        ":max_height": u32::from(max_height)
+        ":max_height": u32::from(max_height),
+        ":stable_height": u32::from(stable_height),
     ])?;
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get(0)?;
@@ -1918,7 +1934,10 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::testing::{AddressType, TestState},
+        crate::{
+            testing::{AddressType, TestState},
+            PRUNING_DEPTH,
+        },
         zcash_client_backend::{
             data_api::{wallet::input_selection::GreedyInputSelector, WalletWrite},
             encoding::AddressCodec,
@@ -2182,6 +2201,19 @@ mod tests {
         // Expire the shielding transaction.
         let expiry_height = st.wallet().get_transaction(txid).unwrap().expiry_height();
         st.wallet_mut().update_chain_tip(expiry_height).unwrap();
+
+        // TODO: Making the transparent output spendable in this situation requires
+        // changes to the transparent data model, so for now the wallet should still have
+        // zero transparent balance. https://github.com/zcash/librustzcash/issues/986
+        check_balance(&st, 0, NonNegativeAmount::ZERO);
+        check_balance(&st, 1, NonNegativeAmount::ZERO);
+        check_balance(&st, 2, NonNegativeAmount::ZERO);
+
+        // Roll forward the chain tip until the transaction's expiry height is in the
+        // stable block range (so a reorg won't make it spendable again).
+        st.wallet_mut()
+            .update_chain_tip(expiry_height + PRUNING_DEPTH)
+            .unwrap();
 
         // The transparent output should be spendable again, with more confirmations.
         check_balance(&st, 0, value);
