@@ -306,6 +306,14 @@ impl Sub<NonNegativeAmount> for Option<NonNegativeAmount> {
     }
 }
 
+impl Mul<usize> for NonNegativeAmount {
+    type Output = Option<Self>;
+
+    fn mul(self, rhs: usize) -> Option<NonNegativeAmount> {
+        (self.0 * rhs).map(NonNegativeAmount)
+    }
+}
+
 /// A type for balance violations in amount addition and subtraction
 /// (overflow and underflow of allowed ranges)
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

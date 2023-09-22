@@ -35,7 +35,7 @@ use zcash_client_backend::{
     wallet::OvkPolicy,
     zip321,
 };
-use zcash_note_encryption::Domain;
+use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
@@ -52,7 +52,7 @@ use zcash_primitives::{
             Amount,
         },
         fees::FeeRule,
-        TxId,
+        Transaction, TxId,
     },
     zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
 };
@@ -270,6 +270,34 @@ where
         (height, res)
     }
 
+    /// Creates a fake block at the expected next height containing only the given
+    /// transaction, and inserts it into the cache.
+    /// This assumes that the transaction only has Sapling spends and outputs.
+    ///
+    /// This generated block will be treated as the latest block, and subsequent calls to
+    /// [`Self::generate_next_block`] will build on it.
+    pub(crate) fn generate_next_block_from_tx(
+        &mut self,
+        tx: &Transaction,
+    ) -> (BlockHeight, Cache::InsertResult) {
+        let (height, prev_hash, initial_sapling_tree_size) = self
+            .latest_cached_block
+            .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
+            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
+
+        let cb = fake_compact_block_from_tx(height, prev_hash, tx, initial_sapling_tree_size);
+        let res = self.cache.insert(&cb);
+
+        self.latest_cached_block = Some((
+            height,
+            cb.hash(),
+            initial_sapling_tree_size
+                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+        ));
+
+        (height, res)
+    }
+
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
     pub(crate) fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) {
         assert_matches!(self.try_scan_cached_blocks(from_height, limit), Ok(_));
@@ -294,6 +322,38 @@ where
             from_height,
             limit,
         )
+    }
+
+    /// Resets the wallet using a new wallet database but with the same cache of blocks,
+    /// and returns the old wallet database file.
+    ///
+    /// This does not recreate accounts, nor does it rescan the cached blocks.
+    /// The resulting wallet has no test account.
+    /// Before using any `generate_*` method on the reset state, call `reset_latest_cached_block()`.
+    pub(crate) fn reset(&mut self) -> NamedTempFile {
+        let network = self.network();
+        self.latest_cached_block = None;
+        let tf = std::mem::replace(&mut self._data_file, NamedTempFile::new().unwrap());
+        self.db_data = WalletDb::for_path(self._data_file.path(), network).unwrap();
+        self.test_account = None;
+        init_wallet_db(&mut self.db_data, None).unwrap();
+        tf
+    }
+
+    /// Reset the latest cached block to the most recent one in the cache database.
+    #[allow(dead_code)]
+    pub(crate) fn reset_latest_cached_block(&mut self) {
+        self.cache
+            .block_source()
+            .with_blocks::<_, Infallible>(None, None, |block: CompactBlock| {
+                self.latest_cached_block = Some((
+                    BlockHeight::from_u32(block.height.try_into().unwrap()),
+                    BlockHash::from_slice(block.hash.as_slice()),
+                    block.chain_metadata.unwrap().sapling_commitment_tree_size,
+                ));
+                Ok(())
+            })
+            .unwrap();
     }
 }
 
@@ -667,6 +727,38 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
     (cb, note.nf(&dfvk.fvk().vk.nk, 0))
 }
 
+/// Create a fake CompactBlock at the given height containing only the given transaction.
+/// This assumes that the transaction only has Sapling spends and outputs.
+pub(crate) fn fake_compact_block_from_tx(
+    height: BlockHeight,
+    prev_hash: BlockHash,
+    tx: &Transaction,
+    initial_sapling_tree_size: u32,
+) -> CompactBlock {
+    // Create a fake CompactTx
+    let mut ctx = CompactTx {
+        hash: tx.txid().as_ref().to_vec(),
+        ..Default::default()
+    };
+
+    if let Some(bundle) = tx.sapling_bundle() {
+        for spend in bundle.shielded_spends() {
+            ctx.spends.push(CompactSaplingSpend {
+                nf: spend.nullifier().to_vec(),
+            });
+        }
+        for output in bundle.shielded_outputs() {
+            ctx.outputs.push(CompactSaplingOutput {
+                cmu: output.cmu().to_bytes().to_vec(),
+                ephemeral_key: output.ephemeral_key().0.to_vec(),
+                ciphertext: output.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
+            });
+        }
+    }
+
+    fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size)
+}
+
 /// Create a fake CompactBlock at the given height, spending a single note from the
 /// given address.
 #[allow(clippy::too_many_arguments)]
@@ -741,6 +833,16 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         }
     });
 
+    fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size)
+}
+
+pub(crate) fn fake_compact_block_from_compact_tx(
+    ctx: CompactTx,
+    height: BlockHeight,
+    prev_hash: BlockHash,
+    initial_sapling_tree_size: u32,
+) -> CompactBlock {
+    let mut rng = OsRng;
     let mut cb = CompactBlock {
         hash: {
             let mut hash = vec![0; 32];

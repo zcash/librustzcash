@@ -434,6 +434,7 @@ pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
     use incrementalmerkletree::Hashable;
+    use secrecy::Secret;
     use zcash_proofs::prover::LocalTxProver;
 
     use zcash_primitives::{
@@ -464,6 +465,7 @@ pub(crate) mod tests {
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
             AccountBirthday, Ratio, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
+            WalletWrite,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -484,7 +486,7 @@ pub(crate) mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_client_backend::{data_api::WalletWrite, wallet::WalletTransparentOutput},
+        zcash_client_backend::wallet::WalletTransparentOutput,
         zcash_primitives::transaction::components::{OutPoint, TxOut},
     };
 
@@ -512,8 +514,10 @@ pub(crate) mod tests {
         let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h, 1);
 
-        // Verified balance matches total balance
+        // Spendable balance matches total balance
         assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
+
         assert_eq!(
             block_max_scanned(&st.wallet().conn)
                 .unwrap()
@@ -709,11 +713,16 @@ pub(crate) mod tests {
         let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
 
-        // Verified balance matches total balance
+        // Spendable balance matches total balance at 1 confirmation.
         assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
 
-        // Value is considered pending
+        // Value is considered pending at 10 confirmations.
         assert_eq!(st.get_pending_shielded_balance(account, 10), value);
+        assert_eq!(
+            st.get_spendable_balance(account, 10),
+            NonNegativeAmount::ZERO
+        );
 
         // Wallet is fully scanned
         let summary = st.get_wallet_summary(1);
@@ -766,7 +775,10 @@ pub(crate) mod tests {
         }
         st.scan_cached_blocks(h2 + 1, 8);
 
-        // Second spend still fails
+        // Total balance is value * number of blocks scanned (10).
+        assert_eq!(st.get_total_balance(account), (value * 10).unwrap());
+
+        // Spend still fails
         assert_matches!(
             st.create_spend_to_address(
                 &usk,
@@ -788,17 +800,38 @@ pub(crate) mod tests {
         let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h11, 1);
 
-        // Second spend should now succeed
-        assert_matches!(
-            st.create_spend_to_address(
+        // Total balance is value * number of blocks scanned (11).
+        assert_eq!(st.get_total_balance(account), (value * 11).unwrap());
+        // Spendable balance at 10 confirmations is value * 2.
+        assert_eq!(st.get_spendable_balance(account, 10), (value * 2).unwrap());
+        assert_eq!(
+            st.get_pending_shielded_balance(account, 10),
+            (value * 9).unwrap()
+        );
+
+        // Spend should now succeed
+        let amount_sent = NonNegativeAmount::from_u64(70000).unwrap();
+        let txid = st
+            .create_spend_to_address(
                 &usk,
                 &to,
-                Amount::from_u64(70000).unwrap(),
+                amount_sent.into(),
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(10).unwrap(),
-            ),
-            Ok(_)
+            )
+            .unwrap();
+        let tx = &st.wallet().get_transaction(txid).unwrap();
+
+        let (h, _) = st.generate_next_block_from_tx(tx);
+        st.scan_cached_blocks(h, 1);
+
+        // TODO: send to an account so that we can check its balance.
+        assert_eq!(
+            st.get_total_balance(account),
+            ((value * 11).unwrap()
+                - (amount_sent + NonNegativeAmount::from_u64(10000).unwrap()).unwrap())
+            .unwrap()
         );
     }
 
@@ -816,9 +849,12 @@ pub(crate) mod tests {
         let value = NonNegativeAmount::from_u64(50000).unwrap();
         let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
-        assert_eq!(st.get_total_balance(account), value);
 
-        // Send some of the funds to another address
+        // Spendable balance matches total balance at 1 confirmation.
+        assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
+
+        // Send some of the funds to another address, but don't mine the tx.
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().1.into();
         assert_matches!(
@@ -886,16 +922,33 @@ pub(crate) mod tests {
         );
         st.scan_cached_blocks(h43, 1);
 
+        // Spendable balance matches total balance at 1 confirmation.
+        assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
+
         // Second spend should now succeed
-        st.create_spend_to_address(
-            &usk,
-            &to,
-            Amount::from_u64(2000).unwrap(),
-            None,
-            OvkPolicy::Sender,
-            NonZeroU32::new(1).unwrap(),
-        )
-        .unwrap();
+        let amount_sent2 = NonNegativeAmount::from_u64(2000).unwrap();
+        let txid2 = st
+            .create_spend_to_address(
+                &usk,
+                &to,
+                amount_sent2.into(),
+                None,
+                OvkPolicy::Sender,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
+        let tx2 = &st.wallet().get_transaction(txid2).unwrap();
+
+        let (h, _) = st.generate_next_block_from_tx(tx2);
+        st.scan_cached_blocks(h, 1);
+
+        // TODO: send to an account so that we can check its balance.
+        assert_eq!(
+            st.get_total_balance(account),
+            (value - (amount_sent2 + NonNegativeAmount::from_u64(10000).unwrap()).unwrap())
+                .unwrap()
+        );
     }
 
     #[test]
@@ -912,7 +965,10 @@ pub(crate) mod tests {
         let value = NonNegativeAmount::from_u64(50000).unwrap();
         let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h1, 1);
+
+        // Spendable balance matches total balance at 1 confirmation.
         assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
 
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let addr2 = extsk2.default_address().1;
@@ -1007,16 +1063,15 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note
-        let value = Amount::from_u64(60000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let value = NonNegativeAmount::from_u64(60000).unwrap();
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
         st.scan_cached_blocks(h, 1);
 
-        // Verified balance matches total balance
-        assert_eq!(
-            st.get_total_balance(account),
-            NonNegativeAmount::try_from(value).unwrap()
-        );
+        // Spendable balance matches total balance at 1 confirmation.
+        assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
 
+        // TODO: generate_next_block_from_tx does not currently support transparent outputs.
         let to = TransparentAddress::PublicKey([7; 20]).into();
         assert_matches!(
             st.create_spend_to_address(
@@ -1042,22 +1097,22 @@ pub(crate) mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Add funds to the wallet in a single note owned by the internal spending key
-        let value = Amount::from_u64(60000).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
+        let value = NonNegativeAmount::from_u64(60000).unwrap();
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value.into());
         st.scan_cached_blocks(h, 1);
 
-        // Verified balance matches total balance
+        // Spendable balance matches total balance at 1 confirmation.
+        assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
+
+        // Value is considered pending at 10 confirmations.
+        assert_eq!(st.get_pending_shielded_balance(account, 10), value);
         assert_eq!(
-            st.get_total_balance(account),
-            NonNegativeAmount::try_from(value).unwrap()
+            st.get_spendable_balance(account, 10),
+            NonNegativeAmount::ZERO
         );
 
-        // the balance is considered pending
-        assert_eq!(
-            st.get_pending_shielded_balance(account, 10),
-            NonNegativeAmount::try_from(value).unwrap()
-        );
-
+        // TODO: generate_next_block_from_tx does not currently support transparent outputs.
         let to = TransparentAddress::PublicKey([7; 20]).into();
         assert_matches!(
             st.create_spend_to_address(
@@ -1070,6 +1125,126 @@ pub(crate) mod tests {
             ),
             Ok(_)
         );
+    }
+
+    #[test]
+    fn external_address_change_spends_detected_in_restore_from_seed() {
+        let mut st = TestBuilder::new().with_block_cache().build();
+
+        // Add two accounts to the wallet.
+        let seed = Secret::new([0u8; 32].to_vec());
+        let birthday = AccountBirthday::from_sapling_activation(&st.network());
+        let (_, usk) = st
+            .wallet_mut()
+            .create_account(&seed, birthday.clone())
+            .unwrap();
+        let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
+
+        let (_, usk2) = st
+            .wallet_mut()
+            .create_account(&seed, birthday.clone())
+            .unwrap();
+        let dfvk2 = usk2.sapling().to_diversifiable_full_viewing_key();
+
+        // Add funds to the wallet in a single note
+        let value = NonNegativeAmount::from_u64(100000).unwrap();
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        st.scan_cached_blocks(h, 1);
+
+        // Spendable balance matches total balance
+        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
+        assert_eq!(st.get_spendable_balance(AccountId::from(0), 1), value);
+        assert_eq!(
+            st.get_total_balance(AccountId::from(1)),
+            NonNegativeAmount::ZERO
+        );
+
+        let amount_sent = NonNegativeAmount::from_u64(20000).unwrap();
+        let amount_legacy_change = NonNegativeAmount::from_u64(30000).unwrap();
+        let addr = dfvk.default_address().1;
+        let addr2 = dfvk2.default_address().1;
+        let req = TransactionRequest::new(vec![
+            // payment to an external recipient
+            Payment {
+                recipient_address: RecipientAddress::Shielded(addr2),
+                amount: amount_sent.into(),
+                memo: None,
+                label: None,
+                message: None,
+                other_params: vec![],
+            },
+            // payment back to the originating wallet, simulating legacy change
+            Payment {
+                recipient_address: RecipientAddress::Shielded(addr),
+                amount: amount_legacy_change.into(),
+                memo: None,
+                label: None,
+                message: None,
+                other_params: vec![],
+            },
+        ])
+        .unwrap();
+
+        let fee_rule = FixedFeeRule::standard();
+        let input_selector = GreedyInputSelector::new(
+            fixed::SingleOutputChangeStrategy::new(fee_rule),
+            DustOutputPolicy::default(),
+        );
+
+        let txid = st
+            .spend(
+                &input_selector,
+                &usk,
+                req,
+                OvkPolicy::Sender,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
+        let tx = &st.wallet().get_transaction(txid).unwrap();
+
+        let amount_left =
+            (value - (amount_sent + fee_rule.fixed_fee().try_into().unwrap()).unwrap()).unwrap();
+        let pending_change = (amount_left - amount_legacy_change).unwrap();
+
+        // The "legacy change" is not counted by get_pending_change().
+        assert_eq!(st.get_pending_change(AccountId::from(0), 1), pending_change);
+        // We spent the only note so we only have pending change.
+        assert_eq!(st.get_total_balance(AccountId::from(0)), pending_change);
+
+        let (h, _) = st.generate_next_block_from_tx(tx);
+        st.scan_cached_blocks(h, 1);
+
+        assert_eq!(st.get_total_balance(AccountId::from(1)), amount_sent);
+        assert_eq!(st.get_total_balance(AccountId::from(0)), amount_left);
+
+        st.reset();
+
+        // Account creation and DFVK derivation should be deterministic.
+        let (_, restored_usk) = st
+            .wallet_mut()
+            .create_account(&seed, birthday.clone())
+            .unwrap();
+        assert_eq!(
+            restored_usk
+                .sapling()
+                .to_diversifiable_full_viewing_key()
+                .to_bytes(),
+            dfvk.to_bytes()
+        );
+
+        let (_, restored_usk2) = st.wallet_mut().create_account(&seed, birthday).unwrap();
+        assert_eq!(
+            restored_usk2
+                .sapling()
+                .to_diversifiable_full_viewing_key()
+                .to_bytes(),
+            dfvk2.to_bytes()
+        );
+
+        st.scan_cached_blocks(st.sapling_activation_height(), 2);
+
+        assert_eq!(st.get_total_balance(AccountId::from(1)), amount_sent);
+        assert_eq!(st.get_total_balance(AccountId::from(0)), amount_left);
     }
 
     #[test]
@@ -1100,12 +1275,10 @@ pub(crate) mod tests {
 
         st.scan_cached_blocks(h1, 11);
 
-        // Verified balance matches total balance
-        let total = Amount::from_u64(60000).unwrap();
-        assert_eq!(
-            st.get_total_balance(account),
-            NonNegativeAmount::try_from(total).unwrap()
-        );
+        // Spendable balance matches total balance
+        let total = NonNegativeAmount::from_u64(60000).unwrap();
+        assert_eq!(st.get_total_balance(account), total);
+        assert_eq!(st.get_spendable_balance(account, 1), total);
 
         let input_selector = GreedyInputSelector::new(
             zip317::SingleOutputChangeStrategy::new(Zip317FeeRule::standard()),
@@ -1148,15 +1321,26 @@ pub(crate) mod tests {
         }])
         .unwrap();
 
-        assert_matches!(
-            st.spend(
+        let txid = st
+            .spend(
                 &input_selector,
                 &usk,
                 req,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
-            ),
-            Ok(_)
+            )
+            .unwrap();
+        let tx = &st.wallet().get_transaction(txid).unwrap();
+
+        let (h, _) = st.generate_next_block_from_tx(tx);
+        st.scan_cached_blocks(h, 1);
+
+        // TODO: send to an account so that we can check its balance.
+        // We sent back to the same account so the amount_sent should be included
+        // in the total balance.
+        assert_eq!(
+            st.get_total_balance(account),
+            (total - NonNegativeAmount::from_u64(10000).unwrap()).unwrap()
         );
     }
 
