@@ -490,7 +490,7 @@ impl<Nf> ScannedBlock<Nf> {
     }
 
     /// Returns the metadata describing the state of the note commitment trees as of the end of the
-    /// scanned block. 
+    /// scanned block.
     ///
     /// The metadata returned from this method is guaranteed to be consistent with what is returned
     /// by [`Self::height`] and [`Self::block_hash`].

@@ -821,9 +821,8 @@ pub(crate) mod tests {
                 NonZeroU32::new(10).unwrap(),
             )
             .unwrap();
-        let tx = &st.wallet().get_transaction(txid).unwrap();
 
-        let (h, _) = st.generate_next_block_from_tx(tx);
+        let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);
 
         // TODO: send to an account so that we can check its balance.
@@ -938,9 +937,8 @@ pub(crate) mod tests {
                 NonZeroU32::new(1).unwrap(),
             )
             .unwrap();
-        let tx2 = &st.wallet().get_transaction(txid2).unwrap();
 
-        let (h, _) = st.generate_next_block_from_tx(tx2);
+        let (h, _) = st.generate_next_block_including(txid2);
         st.scan_cached_blocks(h, 1);
 
         // TODO: send to an account so that we can check its balance.
@@ -1200,7 +1198,6 @@ pub(crate) mod tests {
                 NonZeroU32::new(1).unwrap(),
             )
             .unwrap();
-        let tx = &st.wallet().get_transaction(txid).unwrap();
 
         let amount_left =
             (value - (amount_sent + fee_rule.fixed_fee().try_into().unwrap()).unwrap()).unwrap();
@@ -1211,7 +1208,7 @@ pub(crate) mod tests {
         // We spent the only note so we only have pending change.
         assert_eq!(st.get_total_balance(AccountId::from(0)), pending_change);
 
-        let (h, _) = st.generate_next_block_from_tx(tx);
+        let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);
 
         assert_eq!(st.get_total_balance(AccountId::from(1)), amount_sent);
@@ -1330,9 +1327,8 @@ pub(crate) mod tests {
                 NonZeroU32::new(1).unwrap(),
             )
             .unwrap();
-        let tx = &st.wallet().get_transaction(txid).unwrap();
 
-        let (h, _) = st.generate_next_block_from_tx(tx);
+        let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);
 
         // TODO: send to an account so that we can check its balance.

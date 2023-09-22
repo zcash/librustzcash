@@ -14,7 +14,7 @@ use tempfile::NamedTempFile;
 #[cfg(feature = "unstable")]
 use tempfile::TempDir;
 
-use zcash_client_backend::data_api::AccountBalance;
+use zcash_client_backend::data_api::{AccountBalance, WalletRead};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::RecipientAddress,
@@ -35,7 +35,7 @@ use zcash_client_backend::{
     wallet::OvkPolicy,
     zip321,
 };
-use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
+use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
@@ -270,14 +270,34 @@ where
         (height, res)
     }
 
+    /// Creates a fake block at the expected next height containing only the wallet
+    /// transaction with the given txid, and inserts it into the cache.
+    ///
+    /// This generated block will be treated as the latest block, and subsequent calls to
+    /// [`Self::generate_next_block`] (or similar) will build on it.
+    pub(crate) fn generate_next_block_including(
+        &mut self,
+        txid: TxId,
+    ) -> (BlockHeight, Cache::InsertResult) {
+        let tx = self
+            .wallet()
+            .get_transaction(txid)
+            .expect("TxId should exist in the wallet");
+
+        // Index 0 is by definition a coinbase transaction, and the wallet doesn't
+        // construct coinbase transactions. So we pretend here that the block has a
+        // coinbase transaction that does not have shielded coinbase outputs.
+        self.generate_next_block_from_tx(1, &tx)
+    }
+
     /// Creates a fake block at the expected next height containing only the given
     /// transaction, and inserts it into the cache.
-    /// This assumes that the transaction only has Sapling spends and outputs.
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
     pub(crate) fn generate_next_block_from_tx(
         &mut self,
+        tx_index: usize,
         tx: &Transaction,
     ) -> (BlockHeight, Cache::InsertResult) {
         let (height, prev_hash, initial_sapling_tree_size) = self
@@ -285,7 +305,14 @@ where
             .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
             .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
 
-        let cb = fake_compact_block_from_tx(height, prev_hash, tx, initial_sapling_tree_size);
+        let cb = fake_compact_block_from_tx(
+            height,
+            prev_hash,
+            tx_index,
+            tx,
+            initial_sapling_tree_size,
+            0,
+        );
         let res = self.cache.insert(&cb);
 
         self.latest_cached_block = Some((
@@ -728,35 +755,42 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
 }
 
 /// Create a fake CompactBlock at the given height containing only the given transaction.
-/// This assumes that the transaction only has Sapling spends and outputs.
 pub(crate) fn fake_compact_block_from_tx(
     height: BlockHeight,
     prev_hash: BlockHash,
+    tx_index: usize,
     tx: &Transaction,
     initial_sapling_tree_size: u32,
+    initial_orchard_tree_size: u32,
 ) -> CompactBlock {
-    // Create a fake CompactTx
+    // Create a fake CompactTx containing the transaction.
     let mut ctx = CompactTx {
+        index: tx_index as u64,
         hash: tx.txid().as_ref().to_vec(),
         ..Default::default()
     };
 
     if let Some(bundle) = tx.sapling_bundle() {
         for spend in bundle.shielded_spends() {
-            ctx.spends.push(CompactSaplingSpend {
-                nf: spend.nullifier().to_vec(),
-            });
+            ctx.spends.push(spend.into());
         }
         for output in bundle.shielded_outputs() {
-            ctx.outputs.push(CompactSaplingOutput {
-                cmu: output.cmu().to_bytes().to_vec(),
-                ephemeral_key: output.ephemeral_key().0.to_vec(),
-                ciphertext: output.enc_ciphertext()[..COMPACT_NOTE_SIZE].to_vec(),
-            });
+            ctx.outputs.push(output.into());
+        }
+    }
+    if let Some(bundle) = tx.orchard_bundle() {
+        for action in bundle.actions() {
+            ctx.actions.push(action.into());
         }
     }
 
-    fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size)
+    fake_compact_block_from_compact_tx(
+        ctx,
+        height,
+        prev_hash,
+        initial_sapling_tree_size,
+        initial_orchard_tree_size,
+    )
 }
 
 /// Create a fake CompactBlock at the given height, spending a single note from the
@@ -833,7 +867,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         }
     });
 
-    fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size)
+    fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
 }
 
 pub(crate) fn fake_compact_block_from_compact_tx(
@@ -841,6 +875,7 @@ pub(crate) fn fake_compact_block_from_compact_tx(
     height: BlockHeight,
     prev_hash: BlockHash,
     initial_sapling_tree_size: u32,
+    initial_orchard_tree_size: u32,
 ) -> CompactBlock {
     let mut rng = OsRng;
     let mut cb = CompactBlock {
@@ -857,7 +892,8 @@ pub(crate) fn fake_compact_block_from_compact_tx(
     cb.chain_metadata = Some(compact::ChainMetadata {
         sapling_commitment_tree_size: initial_sapling_tree_size
             + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ..Default::default()
+        orchard_commitment_tree_size: initial_orchard_tree_size
+            + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
     });
     cb
 }
