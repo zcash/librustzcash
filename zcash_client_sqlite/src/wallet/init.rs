@@ -478,6 +478,18 @@ mod tests {
                 FROM sapling_received_notes
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.spent
+                UNION
+                SELECT utxos.received_by_account     AS account_id,
+                       transactions.block            AS block,
+                       transactions.txid             AS txid,
+                       0                             AS pool,
+                       -utxos.value_zat              AS value,
+                       0                             AS is_change,
+                       0                             AS received_count,
+                       0                             AS memo_present
+                FROM utxos
+                JOIN transactions
+                     ON transactions.id_tx = utxos.spent_in_tx
             ),
             sent_note_counts AS (
                 SELECT sent_notes.from_account AS account_id,
