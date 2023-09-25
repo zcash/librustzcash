@@ -159,3 +159,35 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+  uuid:
+    name: UUID validity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract UUIDs
+        id: extract
+        run: |
+          {
+            echo 'UUIDS<<EOF'
+            git grep -h "Uuid::from_u128" zcash_client_sqlite/ |
+              sed -e "s,.*Uuid::from_u128(0x,," -e "s,_,-,g" -e "s,);,,"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - name: Check UUID validity
+        env:
+          UUIDS: ${{ steps.extract.outputs.UUIDS }}
+        run: uuidparse -n -o type $UUIDS | xargs -L 1 test "invalid" !=
+      - name: Check UUID type
+        env:
+          UUIDS: ${{ steps.extract.outputs.UUIDS }}
+        run: uuidparse -n -o type $UUIDS | xargs -L 1 test "random" =
+      - name: Check UUID uniqueness
+        env:
+          UUIDS: ${{ steps.extract.outputs.UUIDS }}
+        run: >
+          test $(
+            uuidparse -n -o uuid $U4 | wc -l
+          ) -eq $(
+            uuidparse -n -o uuid $U4 | sort | uniq | wc -l
+          )

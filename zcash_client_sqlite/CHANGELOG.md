@@ -7,7 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.8.0-rc.3] - 2023-09-12
+## [0.8.0] - 2023-09-25
+
+### Notable Changes
+- The `v_transactions` and `v_tx_outputs` views have changed in terms of what
+  columns are returned, and which result columns may be null. Please see the
+  `Changed` section below for additional details.
+
 ### Added
 - `zcash_client_sqlite::commitment_tree` Types related to management of note
   commitment trees using the `shardtree` crate.
@@ -42,6 +48,12 @@ and this library adheres to Rust's notion of
   - `FsBlockDbError::CacheMiss`
 - `zcash_client_sqlite::FsBlockDb::write_block_metadata` now overwrites any
   existing metadata entries that have the same height as a new entry.
+- The `v_transactions` and `v_tx_outputs` views no longer return the
+  internal database identifier for the transaction. The `txid` column should
+  be used instead. The `tx_index`, `expiry_height`, `raw`, `fee_paid`, and
+  `expired_unmined` columns will be null for received transparent
+  transactions, in addition to the other columns that were previously
+  permitted to be null.
 
 ### Removed
 - The empty `wallet::transact` module has been removed.
@@ -67,6 +79,8 @@ and this library adheres to Rust's notion of
 - `WalletDb::get_transaction` no longer returns an error when called on a transaction
   that has not yet been mined, unless the transaction's consensus branch ID cannot be
   determined by other means.
+- Fixed an error in `v_transactions` wherein received transparent outputs did not
+  result in a transaction entry appearing in the transaction history.
 
 ## [0.7.1] - 2023-05-17
 

@@ -20,14 +20,7 @@ use {
 };
 
 /// This migration adds an account identifier column to the UTXOs table.
-///
-/// 761884d6-30d8-44ef-b204-0b82551c4ca1
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0x761884d6,
-    0x30d8,
-    0x44ef,
-    b"\xb2\x04\x0b\x82\x55\x1c\x4c\xa1",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x761884d6_30d8_44ef_b204_0b82551c4ca1);
 
 pub(super) struct Migration<P> {
     pub(super) _params: P,

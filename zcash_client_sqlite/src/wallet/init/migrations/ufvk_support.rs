@@ -25,12 +25,7 @@ use crate::wallet::{
     pool_code,
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0xbe57ef3b,
-    0x388e,
-    0x42ea,
-    b"\x97\xe2\x67\x8d\xaf\xcf\x97\x54",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_678dafcf9754);
 
 pub(super) struct Migration<P> {
     pub(super) params: P,

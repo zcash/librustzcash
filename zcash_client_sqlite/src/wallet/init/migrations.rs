@@ -12,6 +12,9 @@ mod ufvk_support;
 mod utxos_table;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
+mod v_transactions_shielding_balance;
+mod v_transactions_transparent_history;
+mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
 use schemer_rusqlite::RusqliteMigration;
@@ -24,27 +27,27 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     params: &P,
     seed: Option<SecretVec<u8>>,
 ) -> Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>> {
-    //      initial_setup
-    //      /           \
-    // utxos_table    ufvk_support ---------
-    //      \              |                \
-    //       \       addresses_table   sent_notes_to_internal
-    //        \            /                /
-    //        add_utxo_account             /
-    //                     \              /
-    //                  add_transaction_views
-    //                            |
-    //                    v_transactions_net
-    //                            |
-    //                  received_notes_nullable_nf
-    //                 /          |           \
-    // shardtree_support    nullifier_map    sapling_memo_consistency
-    //         |
-    //   add_account_birthdays
-    //         |
-    // v_sapling_shard_unscanned_ranges
-    //         |
-    // wallet_summaries
+    //                         initial_setup
+    //                         /           \
+    //                utxos_table         ufvk_support
+    //                   |                 /         \
+    //                   |    addresses_table   sent_notes_to_internal
+    //                   |          /                /
+    //                 add_utxo_account             /
+    //                              \              /
+    //                           add_transaction_views
+    //                                     |
+    //                             v_transactions_net
+    //                                     |
+    //                         received_notes_nullable_nf
+    //                        /            |             \
+    //        shardtree_support      nullifier_map       sapling_memo_consistency
+    //                |                                             |
+    //      add_account_birthdays                   v_transactions_transparent_history
+    //                |                                             |
+    // v_sapling_shard_unscanned_ranges               v_tx_outputs_use_legacy_false
+    //                |                                             |
+    //        wallet_summaries                       v_transactions_shielding_balance
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -76,5 +79,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(wallet_summaries::Migration),
+        Box::new(v_transactions_transparent_history::Migration),
+        Box::new(v_tx_outputs_use_legacy_false::Migration),
+        Box::new(v_transactions_shielding_balance::Migration),
     ]
 }

@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.13.0-rc.1"
+version = "0.13.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -17,7 +17,7 @@ categories = ["cryptography::cryptocurrencies"]
 all-features = true
 
 [dependencies]
-zcash_primitives = { version = "=0.13.0-rc.1", path = "../zcash_primitives", default-features = false }
+zcash_primitives = { version = "0.13", path = "../zcash_primitives", default-features = false }
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
