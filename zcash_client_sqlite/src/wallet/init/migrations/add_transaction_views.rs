@@ -17,12 +17,7 @@ use zcash_primitives::{
 use super::{add_utxo_account, sent_notes_to_internal};
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0x282fad2e,
-    0x8372,
-    0x4ca0,
-    b"\x8b\xed\x71\x82\x13\x20\x90\x9f",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x282fad2e_8372_4ca0_8bed_71821320909f);
 
 pub(crate) struct Migration;
 

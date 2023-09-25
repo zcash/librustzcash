@@ -11,12 +11,7 @@ use zcash_client_backend::data_api::{PoolType, ShieldedProtocol};
 use super::add_transaction_views;
 use crate::wallet::{init::WalletMigrationError, pool_code};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0x2aa4d24f,
-    0x51aa,
-    0x4a4c,
-    b"\x8d\x9b\xe5\xb8\xa7\x62\x86\x5f",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x2aa4d24f_51aa_4a4c_8d9b_e5b8a762865f);
 
 pub(crate) struct Migration;
 

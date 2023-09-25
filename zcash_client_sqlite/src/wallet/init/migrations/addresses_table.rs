@@ -16,14 +16,7 @@ use super::ufvk_support;
 
 /// The migration that removed the address columns from the `accounts` table, and created
 /// the `accounts` table.
-///
-/// d956978c-9c87-4d6e-815d-fb8f088d094c
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0xd956978c,
-    0x9c87,
-    0x4d6e,
-    b"\x81\x5d\xfb\x8f\x08\x8d\x09\x4c",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xd956978c_9c87_4d6e_815d_fb8f088d094c);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(crate) params: P,
