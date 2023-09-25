@@ -3,6 +3,9 @@ use std::ops::Range;
 
 use zcash_primitives::consensus::BlockHeight;
 
+#[cfg(feature = "unstable-spanning-tree")]
+pub mod spanning_tree;
+
 /// Scanning range priority levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScanPriority {

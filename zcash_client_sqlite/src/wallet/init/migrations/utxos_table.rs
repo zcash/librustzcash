@@ -8,12 +8,7 @@ use uuid::Uuid;
 
 use crate::wallet::init::{migrations::initial_setup, WalletMigrationError};
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0xa2e0ed2e,
-    0x8852,
-    0x475e,
-    b"\xb0\xa4\xf1\x54\xb1\x5b\x9d\xbe",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xa2e0ed2e_8852_475e_b0a4_f154b15b9dbe);
 
 pub(super) struct Migration;
 

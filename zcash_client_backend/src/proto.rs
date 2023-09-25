@@ -116,10 +116,8 @@ impl compact_formats::CompactSaplingOutput {
     }
 }
 
-impl<A: sapling::Authorization> From<sapling::OutputDescription<A>>
-    for compact_formats::CompactSaplingOutput
-{
-    fn from(out: sapling::OutputDescription<A>) -> compact_formats::CompactSaplingOutput {
+impl<Proof> From<&sapling::OutputDescription<Proof>> for compact_formats::CompactSaplingOutput {
+    fn from(out: &sapling::OutputDescription<Proof>) -> compact_formats::CompactSaplingOutput {
         compact_formats::CompactSaplingOutput {
             cmu: out.cmu().to_bytes().to_vec(),
             ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
@@ -143,6 +141,27 @@ impl TryFrom<compact_formats::CompactSaplingOutput> for sapling::CompactOutputDe
 impl compact_formats::CompactSaplingSpend {
     pub fn nf(&self) -> Result<Nullifier, ()> {
         Nullifier::from_slice(&self.nf).map_err(|_| ())
+    }
+}
+
+impl<A: sapling::Authorization> From<&sapling::SpendDescription<A>>
+    for compact_formats::CompactSaplingSpend
+{
+    fn from(spend: &sapling::SpendDescription<A>) -> compact_formats::CompactSaplingSpend {
+        compact_formats::CompactSaplingSpend {
+            nf: spend.nullifier().to_vec(),
+        }
+    }
+}
+
+impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOrchardAction {
+    fn from(action: &orchard::Action<SpendAuth>) -> compact_formats::CompactOrchardAction {
+        compact_formats::CompactOrchardAction {
+            nullifier: action.nullifier().to_bytes().to_vec(),
+            cmx: action.cmx().to_bytes().to_vec(),
+            ephemeral_key: action.encrypted_note().epk_bytes.to_vec(),
+            ciphertext: action.encrypted_note().enc_ciphertext[..COMPACT_NOTE_SIZE].to_vec(),
+        }
     }
 }
 
