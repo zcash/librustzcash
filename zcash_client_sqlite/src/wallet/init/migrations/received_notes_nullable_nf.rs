@@ -11,12 +11,7 @@ use uuid::Uuid;
 use super::v_transactions_net;
 use crate::wallet::init::WalletMigrationError;
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0xbdcdcedc,
-    0x7b29,
-    0x4f1c,
-    b"\x83\x07\x35\xf9\x37\xf0\xd3\x2a",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbdcdcedc_7b29_4f1c_8307_35f937f0d32a);
 
 pub(crate) struct Migration;
 

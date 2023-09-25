@@ -32,12 +32,7 @@ use crate::{
     PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
 };
 
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_fields(
-    0x7da6489d,
-    0xe835,
-    0x4657,
-    b"\x8b\xe5\xf5\x12\xbc\xce\x6c\xbf",
-);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x7da6489d_e835_4657_8be5_f512bcce6cbf);
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
