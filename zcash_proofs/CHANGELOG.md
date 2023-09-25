@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.13.0-rc.1] - 2023-09-08
+## [0.13.0] - 2023-09-25
 ### Changed
 - Bumped dependencies to `zcash_primitives 0.13`.
 

@@ -6,10 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### Added
-- Trait implementation `Mul<usize>` for `NonNegativeAmount`.
 
-## [0.13.0-rc.1] - 2023-09-08
+## [0.13.0] - 2023-09-25
 ### Added
 - `zcash_primitives::consensus::BlockHeight::saturating_sub`
 - `zcash_primitives::transaction::builder`:
@@ -26,6 +24,7 @@ and this library adheres to Rust's notion of
   - `Add<NonNegativeAmount> for Option<NonNegativeAmount>`
   - `Sub<NonNegativeAmount> for NonNegativeAmount`
   - `Sub<NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `Mul<usize> for NonNegativeAmount`
 - `zcash_primitives::block::BlockHash::try_from_slice`
 
 ### Changed
