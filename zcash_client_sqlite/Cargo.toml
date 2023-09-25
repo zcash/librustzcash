@@ -60,7 +60,7 @@ rand_core = "0.6"
 regex = "1.4"
 tempfile = "3.5.0"
 zcash_note_encryption = "0.4"
-zcash_proofs = { version = "=0.13.0-rc.1", path = "../zcash_proofs" }
+zcash_proofs = { version = "0.13", path = "../zcash_proofs" }
 zcash_primitives = { version = "0.13", path = "../zcash_primitives", features = ["test-dependencies"] }
 zcash_client_backend = { version = "=0.10.0-rc.4", path = "../zcash_client_backend", features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
