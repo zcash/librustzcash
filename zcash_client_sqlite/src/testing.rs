@@ -14,6 +14,7 @@ use tempfile::NamedTempFile;
 #[cfg(feature = "unstable")]
 use tempfile::TempDir;
 
+use zcash_client_backend::data_api::chain::ScanSummary;
 use zcash_client_backend::data_api::{AccountBalance, WalletRead};
 #[allow(deprecated)]
 use zcash_client_backend::{
@@ -326,8 +327,14 @@ where
     }
 
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
-    pub(crate) fn scan_cached_blocks(&mut self, from_height: BlockHeight, limit: usize) {
-        assert_matches!(self.try_scan_cached_blocks(from_height, limit), Ok(_));
+    pub(crate) fn scan_cached_blocks(
+        &mut self,
+        from_height: BlockHeight,
+        limit: usize,
+    ) -> ScanSummary {
+        let result = self.try_scan_cached_blocks(from_height, limit);
+        assert_matches!(result, Ok(_));
+        result.unwrap()
     }
 
     /// Invokes [`scan_cached_blocks`] with the given arguments.
@@ -336,7 +343,7 @@ where
         from_height: BlockHeight,
         limit: usize,
     ) -> Result<
-        (),
+        ScanSummary,
         data_api::chain::error::Error<
             SqliteClientError,
             <Cache::BlockSource as BlockSource>::Error,

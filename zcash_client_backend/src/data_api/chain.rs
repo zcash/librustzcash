@@ -144,6 +144,8 @@
 //! # }
 //! ```
 
+use std::ops::Range;
+
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -199,8 +201,6 @@ pub trait BlockSource {
     /// `from_height`, applying the provided callback to each block. If `from_height`
     /// is `None` then scanning will begin at the first available block.
     ///
-    /// Returns an error if `from_height` is set to a block that does not exist in `self`.
-    ///
     /// * `WalletErrT`: the types of errors produced by the wallet operations performed
     ///   as part of processing each row.
     /// * `NoteRefT`: the type of note identifiers in the wallet data store, for use in
@@ -209,29 +209,63 @@ pub trait BlockSource {
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
-        with_row: F,
+        with_block: F,
     ) -> Result<(), error::Error<WalletErrT, Self::Error>>
     where
         F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
 }
 
-/// Scans at most `limit` new blocks added to the block source for any transactions received by the
-/// tracked accounts.
-///
-/// If the `from_height` argument is not `None`, then this method block source will begin
-/// requesting blocks from the provided block source at the specified height; if `from_height` is
-/// `None then this will begin scanning at first block after the position to which the wallet has
-/// previously fully scanned the chain, thereby beginning or continuing a linear scan over all
+/// Metadata about modifications to the wallet state made in the course of scanning a set of
 /// blocks.
+#[derive(Clone, Debug)]
+pub struct ScanSummary {
+    scanned_range: Range<BlockHeight>,
+    spent_sapling_note_count: usize,
+    received_sapling_note_count: usize,
+}
+
+impl ScanSummary {
+    /// Constructs a new [`ScanSummary`] from its constituent parts.
+    pub fn from_parts(
+        scanned_range: Range<BlockHeight>,
+        spent_sapling_note_count: usize,
+        received_sapling_note_count: usize,
+    ) -> Self {
+        Self {
+            scanned_range,
+            spent_sapling_note_count,
+            received_sapling_note_count,
+        }
+    }
+
+    /// Returns the range of blocks successfully scanned.
+    pub fn scanned_range(&self) -> Range<BlockHeight> {
+        self.scanned_range.clone()
+    }
+
+    /// Returns the number of our previously-detected Sapling notes that were spent in transactions
+    /// in blocks in the scanned range. If we have not yet detected a particular note as ours, for
+    /// example because we are scanning the chain in reverse height order, we will not detect it
+    /// being spent at this time.
+    pub fn spent_sapling_note_count(&self) -> usize {
+        self.spent_sapling_note_count
+    }
+
+    /// Returns the number of notes belonging to the wallet that were received in blocks in the
+    /// scanned range. Note that depending upon the scanning order, it is possible that some of the
+    /// received notes counted here may already have been spent in later blocks closer to the chain
+    /// tip.
+    pub fn received_sapling_note_count(&self) -> usize {
+        self.received_sapling_note_count
+    }
+}
+
+/// Scans at most `limit` blocks from the provided block source for in order to find transactions
+/// received by the accounts tracked in the provided wallet database.
 ///
-/// This function will return without error after scanning at most `limit` new blocks, to enable
-/// the caller to update their UI with scanning progress. Repeatedly calling this function with
-/// `from_height == None` will process sequential ranges of blocks.
-///
-/// For brand-new light client databases, if `from_height == None` this function starts scanning
-/// from the Sapling activation height. This height can be fast-forwarded to a more recent block by
-/// initializing the client database with a starting block (for example, calling
-/// `init_blocks_table` before this function if using `zcash_client_sqlite`).
+/// This function will return after scanning at most `limit` new blocks, to enable the caller to
+/// update their UI with scanning progress. Repeatedly calling this function with `from_height ==
+/// None` will process sequential ranges of blocks.
 #[tracing::instrument(skip(params, block_source, data_db))]
 #[allow(clippy::type_complexity)]
 pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
@@ -240,7 +274,7 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     data_db: &mut DbT,
     from_height: BlockHeight,
     limit: usize,
-) -> Result<(), Error<DbT::Error, BlockSourceT::Error>>
+) -> Result<ScanSummary, Error<DbT::Error, BlockSourceT::Error>>
 where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
@@ -341,10 +375,14 @@ where
     batch_runner.flush();
 
     let mut scanned_blocks = vec![];
+    let mut scan_end_height = from_height;
+    let mut received_note_count = 0;
+    let mut spent_note_count = 0;
     block_source.with_blocks::<_, DbT::Error>(
         Some(from_height),
         Some(limit),
         |block: CompactBlock| {
+            scan_end_height = block.height() + 1;
             let scanned_block = scan_block_with_runner(
                 params,
                 block,
@@ -354,6 +392,15 @@ where
                 Some(&mut batch_runner),
             )
             .map_err(Error::Scan)?;
+
+            let (s, r) = scanned_block
+                .transactions
+                .iter()
+                .fold((0, 0), |(s, r), wtx| {
+                    (s + wtx.sapling_spends.len(), r + wtx.sapling_outputs.len())
+                });
+            spent_note_count += s;
+            received_note_count += r;
 
             let spent_nf: Vec<&sapling::Nullifier> = scanned_block
                 .transactions
@@ -370,12 +417,17 @@ where
 
             prior_block_metadata = Some(*scanned_block.metadata());
             scanned_blocks.push(scanned_block);
+
             Ok(())
         },
     )?;
 
     data_db.put_blocks(scanned_blocks).map_err(Error::Wallet)?;
-    Ok(())
+    Ok(ScanSummary::from_parts(
+        from_height..scan_end_height,
+        spent_note_count,
+        received_note_count,
+    ))
 }
 
 #[cfg(feature = "test-dependencies")]

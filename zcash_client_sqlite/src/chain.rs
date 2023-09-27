@@ -564,7 +564,10 @@ mod tests {
         let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
 
         // Scan the cache
-        st.scan_cached_blocks(h1, 1);
+        let summary = st.scan_cached_blocks(h1, 1);
+        assert_eq!(summary.scanned_range().start, h1);
+        assert_eq!(summary.scanned_range().end, h1 + 1);
+        assert_eq!(summary.received_sapling_note_count(), 1);
 
         // Account balance should reflect the received note
         assert_eq!(st.get_total_balance(AccountId::from(0)), value);
@@ -574,7 +577,10 @@ mod tests {
         let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2.into());
 
         // Scan the cache again
-        st.scan_cached_blocks(h2, 1);
+        let summary = st.scan_cached_blocks(h2, 1);
+        assert_eq!(summary.scanned_range().start, h2);
+        assert_eq!(summary.scanned_range().end, h2 + 1);
+        assert_eq!(summary.received_sapling_note_count(), 1);
 
         // Account balance should reflect both received notes
         assert_eq!(

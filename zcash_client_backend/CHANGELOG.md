@@ -7,9 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
-## [0.10.0] - 2023-09-25
-### Notable Changes
+### Changed
+- `zcash_client_backend::data_api::chain::scan_cached_blocks` now returns
+  a `ScanSummary` containing metadata about the scanned blocks on success.
 
+## [0.10.0] - 2023-09-25
+
+### Notable Changes
 - `zcash_client_backend` now supports out-of-order scanning of blockchain history.
   See the module documentation for `zcash_client_backend::data_api::chain`
   for details on how to make use of the new scanning capabilities.
