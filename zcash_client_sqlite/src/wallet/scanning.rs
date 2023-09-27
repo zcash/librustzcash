@@ -346,7 +346,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     };
 
     // Read the previous max scanned height from the blocks table
-    let max_scanned = block_height_extrema(conn)?.map(|(_, max_scanned)| max_scanned);
+    let max_scanned = block_height_extrema(conn)?.map(|range| *range.end());
 
     // Read the wallet birthday (if known).
     let wallet_birthday = wallet_birthday(conn)?;

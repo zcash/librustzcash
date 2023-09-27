@@ -756,7 +756,7 @@ pub(crate) fn get_checkpoint_depth(
     min_confirmations: NonZeroU32,
 ) -> Result<Option<usize>, rusqlite::Error> {
     scan_queue_extrema(conn)?
-        .map(|(_, max)| max)
+        .map(|range| *range.end())
         .map(|chain_tip| {
             let max_checkpoint_height =
                 u32::from(chain_tip).saturating_sub(u32::from(min_confirmations) - 1);

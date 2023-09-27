@@ -157,13 +157,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 // `PRUNING_DEPTH`, and we won't be finding notes in earlier blocks), and
                 // hurts performance (as frontier importing has a significant Merkle tree
                 // hashing cost).
-                if let Some((nonempty_frontier, (_, latest_height))) = block_end_tree
+                if let Some((nonempty_frontier, scanned_range)) = block_end_tree
                     .to_frontier()
                     .value()
-                    .zip(block_height_extrema)
+                    .zip(block_height_extrema.as_ref())
                 {
                     let block_height = BlockHeight::from(block_height);
-                    if block_height + PRUNING_DEPTH >= latest_height {
+                    if block_height + PRUNING_DEPTH >= *scanned_range.end() {
                         trace!(
                             height = u32::from(block_height),
                             frontier = ?nonempty_frontier,
@@ -256,9 +256,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             );",
         )?;
 
-        if let Some((start, end)) = block_height_extrema {
+        if let Some(scanned_range) = block_height_extrema {
             // `ScanRange` uses an exclusive upper bound.
-            let chain_end = end + 1;
+            let start = *scanned_range.start();
+            let chain_end = *scanned_range.end() + 1;
             let ignored_range =
                 self.params
                     .activation_height(NetworkUpgrade::Sapling)
