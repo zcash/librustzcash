@@ -127,7 +127,6 @@ where
 /// ```
 /// # #[cfg(all(feature = "test-dependencies", feature = "local-prover"))]
 /// # {
-/// use tempfile::NamedTempFile;
 /// use zcash_primitives::{
 ///     consensus::{self, Network},
 ///     constants::testnet::COIN_TYPE,

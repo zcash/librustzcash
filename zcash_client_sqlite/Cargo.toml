@@ -7,38 +7,39 @@ authors = [
     "Kris Nuttycombe <kris@electriccoin.co>"
 ]
 homepage = "https://github.com/zcash/librustzcash"
-repository = "https://github.com/zcash/librustzcash"
+repository.workspace = true
 readme = "README.md"
-license = "MIT OR Apache-2.0"
-edition = "2021"
-rust-version = "1.65"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
 
 [dependencies]
-zcash_client_backend = { version = "0.10", path = "../zcash_client_backend", features = ["unstable-serialization", "unstable-spanning-tree"]}
-zcash_encoding = { version = "0.2", path = "../components/zcash_encoding" }
-zcash_primitives = { version = "0.13", path = "../zcash_primitives", default-features = false }
+zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
+zcash_encoding.workspace = true
+zcash_primitives.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Errors
-bs58 = { version = "0.5", features = ["check"] }
-hdwallet = { version = "0.4", optional = true }
+bs58.workspace = true
+hdwallet = { workspace = true, optional = true }
 
 # - Logging and metrics
-tracing = "0.1"
+tracing.workspace = true
 
 # - Serialization
-byteorder = "1"
-prost = "0.12"
-group = "0.13"
-jubjub = "0.10"
+byteorder.workspace = true
+prost.workspace = true
+group.workspace = true
+jubjub.workspace = true
 
 # - Secret management
-secrecy = "0.8"
+secrecy.workspace = true
 
 # - Note commitment trees
-incrementalmerkletree = "0.5"
-shardtree = { version = "0.1", features = ["legacy-api"] }
+incrementalmerkletree.workspace = true
+shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
 rusqlite = { version = "0.29.0", features = ["bundled", "time", "array"] }
@@ -49,21 +50,21 @@ uuid = "1.1"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
-maybe-rayon = {version = "0.1.0", default-features = false}
+maybe-rayon.workspace = true
 
 [dev-dependencies]
-assert_matches = "1.5"
-incrementalmerkletree = { version = "0.5", features = ["test-dependencies"] }
-shardtree = { version = "0.1", features = ["legacy-api", "test-dependencies"] }
-proptest = "1.0.0"
-rand_core = "0.6"
+assert_matches.workspace = true
+incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
+shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
+proptest.workspace = true
+rand_core.workspace = true
 regex = "1.4"
 tempfile = "3.5.0"
-zcash_note_encryption = "0.4"
-zcash_proofs = { version = "0.13", path = "../zcash_proofs" }
-zcash_primitives = { version = "0.13", path = "../zcash_primitives", features = ["test-dependencies"] }
-zcash_client_backend = { version = "0.10", path = "../zcash_client_backend", features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
-zcash_address = { version = "0.3", path = "../components/zcash_address", features = ["test-dependencies"] }
+zcash_note_encryption.workspace = true
+zcash_proofs.workspace = true
+zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
+zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 default = ["multicore"]
