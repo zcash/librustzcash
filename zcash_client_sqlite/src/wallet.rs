@@ -72,6 +72,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
+use std::ops::RangeInclusive;
 use tracing::debug;
 use zcash_client_backend::data_api::{AccountBalance, Ratio, WalletSummary};
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
@@ -228,7 +229,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 
     // Rewrite the scan ranges from the birthday height up to the chain tip so that we'll ensure we
     // re-scan to find any notes that might belong to the newly added account.
-    if let Some(t) = scan_queue_extrema(conn)?.map(|(_, max)| max) {
+    if let Some(t) = scan_queue_extrema(conn)?.map(|range| *range.end()) {
         let rescan_range = birthday.height()..(t + 1);
 
         replace_queue_entries::<SqliteClientError>(
@@ -592,7 +593,7 @@ pub(crate) fn get_wallet_summary(
     progress: &impl ScanProgress,
 ) -> Result<Option<WalletSummary>, SqliteClientError> {
     let chain_tip_height = match scan_queue_extrema(conn)? {
-        Some((_, max)) => max,
+        Some(range) => *range.end(),
         None => {
             return Ok(None);
         }
@@ -925,20 +926,20 @@ pub(crate) fn account_birthday(
 /// Returns the minimum and maximum heights for blocks stored in the wallet database.
 pub(crate) fn block_height_extrema(
     conn: &rusqlite::Connection,
-) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+) -> Result<Option<RangeInclusive<BlockHeight>>, rusqlite::Error> {
     conn.query_row("SELECT MIN(height), MAX(height) FROM blocks", [], |row| {
         let min_height: Option<u32> = row.get(0)?;
         let max_height: Option<u32> = row.get(1)?;
         Ok(min_height
-            .map(BlockHeight::from)
-            .zip(max_height.map(BlockHeight::from)))
+            .zip(max_height)
+            .map(|(min, max)| RangeInclusive::new(min.into(), max.into())))
     })
 }
 
 /// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
 pub(crate) fn scan_queue_extrema(
     conn: &rusqlite::Connection,
-) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
+) -> Result<Option<RangeInclusive<BlockHeight>>, rusqlite::Error> {
     conn.query_row(
         "SELECT MIN(block_range_start), MAX(block_range_end) FROM scan_queue",
         [],
@@ -949,8 +950,8 @@ pub(crate) fn scan_queue_extrema(
             // Scan ranges are end-exclusive, so we subtract 1 from `max_height` to obtain the
             // height of the last known chain tip;
             Ok(min_height
-                .map(BlockHeight::from)
-                .zip(max_height.map(|h| BlockHeight::from(h.saturating_sub(1)))))
+                .zip(max_height.map(|h| h.saturating_sub(1)))
+                .map(|(min, max)| RangeInclusive::new(min.into(), max.into())))
         },
     )
 }
@@ -960,13 +961,13 @@ pub(crate) fn get_target_and_anchor_heights(
     min_confirmations: NonZeroU32,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
     scan_queue_extrema(conn).map(|heights| {
-        heights.map(|(min_height, max_height)| {
-            let target_height = max_height + 1;
+        heights.map(|range| {
+            let target_height = *range.end() + 1;
             // Select an anchor min_confirmations back from the target block,
             // unless that would be before the earliest block we have.
             let anchor_height = BlockHeight::from(cmp::max(
                 u32::from(target_height).saturating_sub(min_confirmations.into()),
-                u32::from(min_height),
+                u32::from(*range.start()),
             ));
 
             (target_height, anchor_height)
@@ -1306,7 +1307,7 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     max_height: BlockHeight,
     exclude: &[OutPoint],
 ) -> Result<Vec<WalletTransparentOutput>, SqliteClientError> {
-    let chain_tip_height = scan_queue_extrema(conn)?.map(|(_, max)| max);
+    let chain_tip_height = scan_queue_extrema(conn)?.map(|range| *range.end());
     let stable_height = chain_tip_height
         .unwrap_or(max_height)
         .saturating_sub(PRUNING_DEPTH);
@@ -1377,7 +1378,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     account: AccountId,
     max_height: BlockHeight,
 ) -> Result<HashMap<TransparentAddress, Amount>, SqliteClientError> {
-    let chain_tip_height = scan_queue_extrema(conn)?.map(|(_, max)| max);
+    let chain_tip_height = scan_queue_extrema(conn)?.map(|range| *range.end());
     let stable_height = chain_tip_height
         .unwrap_or(max_height)
         .saturating_sub(PRUNING_DEPTH);

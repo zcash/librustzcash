@@ -170,7 +170,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
-            .map(|h| h.map(|(_, max)| max))
+            .map(|h| h.map(|range| *range.end()))
             .map_err(SqliteClientError::from)
     }
 
