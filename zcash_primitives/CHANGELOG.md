@@ -6,6 +6,13 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_primitives::sapling`:
+  - `constants` module.
+
+### Removed
+- `zcash_primitives::constants`:
+  - All `const` values (moved to `zcash_primitives::sapling::constants`).
 
 ## [0.13.0] - 2023-09-25
 ### Added

@@ -1,6 +1,7 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
 mod address;
+pub mod constants;
 pub mod group_hash;
 pub mod keys;
 pub mod note;
@@ -16,7 +17,7 @@ pub mod value;
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
 
-use crate::constants::SPENDING_KEY_GENERATOR;
+use constants::SPENDING_KEY_GENERATOR;
 
 use self::redjubjub::{PrivateKey, PublicKey, Signature};
 

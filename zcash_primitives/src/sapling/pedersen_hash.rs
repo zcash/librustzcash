@@ -8,7 +8,7 @@ use ff::PrimeField;
 use group::Group;
 use std::ops::{AddAssign, Neg};
 
-use crate::constants::{
+use super::constants::{
     PEDERSEN_HASH_CHUNKS_PER_GENERATOR, PEDERSEN_HASH_EXP_TABLE, PEDERSEN_HASH_EXP_WINDOW_SIZE,
 };
 

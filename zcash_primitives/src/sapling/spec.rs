@@ -4,12 +4,12 @@ use blake2s_simd::Params as Blake2sParams;
 use group::{cofactor::CofactorGroup, ff::PrimeField, Curve, GroupEncoding, WnafBase, WnafScalar};
 
 use super::{
+    constants::{
+        CRH_IVK_PERSONALIZATION, KEY_DIVERSIFICATION_PERSONALIZATION,
+        NOTE_COMMITMENT_RANDOMNESS_GENERATOR, NULLIFIER_POSITION_GENERATOR, PRF_NF_PERSONALIZATION,
+    },
     group_hash::group_hash,
     pedersen_hash::{pedersen_hash, Personalization},
-};
-use crate::constants::{
-    CRH_IVK_PERSONALIZATION, KEY_DIVERSIFICATION_PERSONALIZATION,
-    NOTE_COMMITMENT_RANDOMNESS_GENERATOR, NULLIFIER_POSITION_GENERATOR, PRF_NF_PERSONALIZATION,
 };
 
 const PREPARED_WINDOW_SIZE: usize = 4;

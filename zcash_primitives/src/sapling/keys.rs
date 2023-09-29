@@ -8,6 +8,7 @@ use std::io::{self, Read, Write};
 
 use super::{
     address::PaymentAddress,
+    constants::{self, PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
     note_encryption::KDF_SAPLING_PERSONALIZATION,
     spec::{
         crh_ivk, diversify_hash, ka_sapling_agree, ka_sapling_agree_prepared,
@@ -15,10 +16,7 @@ use super::{
         PreparedBaseSubgroup, PreparedScalar,
     },
 };
-use crate::{
-    constants::{self, PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
-    keys::prf_expand,
-};
+use crate::keys::prf_expand;
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
@@ -509,7 +507,7 @@ mod tests {
     use group::{Group, GroupEncoding};
 
     use super::FullViewingKey;
-    use crate::constants::SPENDING_KEY_GENERATOR;
+    use crate::sapling::constants::SPENDING_KEY_GENERATOR;
 
     #[test]
     fn ak_must_be_prime_order() {

@@ -715,8 +715,8 @@ pub mod testing {
     use rand::{rngs::StdRng, SeedableRng};
 
     use crate::{
-        constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         sapling::{
+            constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
             note::ExtractedNoteCommitment,
             redjubjub::{PrivateKey, PublicKey},
             value::{

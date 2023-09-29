@@ -43,7 +43,7 @@ use group::GroupEncoding;
 use rand::RngCore;
 use subtle::CtOption;
 
-use crate::constants::{VALUE_COMMITMENT_RANDOMNESS_GENERATOR, VALUE_COMMITMENT_VALUE_GENERATOR};
+use super::constants::{VALUE_COMMITMENT_RANDOMNESS_GENERATOR, VALUE_COMMITMENT_VALUE_GENERATOR};
 
 mod sums;
 pub use sums::{CommitmentSum, OverflowError, TrapdoorSum, ValueSum};

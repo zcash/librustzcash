@@ -4,9 +4,7 @@ use group::{ff::PrimeField, Curve};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
-use zcash_primitives::constants;
-
-use zcash_primitives::sapling::{PaymentAddress, ProofGenerationKey};
+use zcash_primitives::sapling::{constants, PaymentAddress, ProofGenerationKey};
 
 use super::ecc;
 use super::pedersen_hash;

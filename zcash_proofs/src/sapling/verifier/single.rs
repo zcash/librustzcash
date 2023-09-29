@@ -1,8 +1,8 @@
 use bellman::groth16::{verify_proof, PreparedVerifyingKey, Proof};
 use bls12_381::Bls12;
 use zcash_primitives::{
-    constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
     sapling::{
+        constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         note::ExtractedNoteCommitment,
         redjubjub::{PublicKey, Signature},
         value::ValueCommitment,

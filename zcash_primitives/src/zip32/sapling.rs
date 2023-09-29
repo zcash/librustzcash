@@ -16,10 +16,12 @@ use super::{
     Scope, ViewingKey,
 };
 use crate::{
-    constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
     keys::{prf_expand, prf_expand_vec},
-    sapling::keys::{DecodingError, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey},
-    sapling::SaplingIvk,
+    sapling::{
+        constants::{PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
+        keys::{DecodingError, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey},
+        SaplingIvk,
+    },
 };
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";

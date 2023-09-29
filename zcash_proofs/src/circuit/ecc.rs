@@ -732,7 +732,7 @@ mod test {
         for _ in 0..100 {
             let mut cs = TestConstraintSystem::<bls12_381::Scalar>::new();
 
-            let p = zcash_primitives::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR;
+            let p = zcash_primitives::sapling::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR;
             let s = jubjub::Fr::random(&mut rng);
             let q = jubjub::ExtendedPoint::from(p * s).to_affine();
             let (u1, v1) = (q.get_u(), q.get_v());
