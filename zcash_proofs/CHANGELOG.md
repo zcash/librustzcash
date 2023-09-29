@@ -6,6 +6,10 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Removed
+- `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).
+- `zcash_proofs::circuit::{ecc, pedersen_hash}`
+- `zcash_proofs::constants`
 
 ## [0.13.0] - 2023-09-25
 ### Changed

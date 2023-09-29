@@ -41,11 +41,6 @@ xdg = { version = "2.5", optional = true }
 
 [dev-dependencies]
 byteorder.workspace = true
-criterion.workspace = true
-rand_xorshift.workspace = true
-
-[target.'cfg(unix)'.dev-dependencies]
-pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
 
 [features]
 default = ["local-prover", "multicore"]
@@ -57,11 +52,6 @@ multicore = ["bellman/multicore", "zcash_primitives/multicore"]
 
 [lib]
 bench = false
-
-[[bench]]
-name = "sapling"
-harness = false
-required-features = ["local-prover"]
 
 [[example]]
 name = "get-params-path"

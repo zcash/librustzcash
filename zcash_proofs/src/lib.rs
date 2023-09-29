@@ -19,7 +19,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub mod circuit;
-pub mod constants;
 mod hashreader;
 pub mod sapling;
 pub mod sprout;

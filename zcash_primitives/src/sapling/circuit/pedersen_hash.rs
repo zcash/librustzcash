@@ -1,12 +1,12 @@
 //! Gadget for Zcash's Pedersen hash.
 
 use super::ecc::{EdwardsPoint, MontgomeryPoint};
+pub use crate::sapling::pedersen_hash::Personalization;
 use bellman::gadgets::boolean::Boolean;
 use bellman::gadgets::lookup::*;
 use bellman::{ConstraintSystem, SynthesisError};
-pub use zcash_primitives::sapling::pedersen_hash::Personalization;
 
-use crate::constants::PEDERSEN_CIRCUIT_GENERATORS;
+use super::constants::PEDERSEN_CIRCUIT_GENERATORS;
 
 fn get_constant_bools(person: &Personalization) -> Vec<Boolean> {
     person
@@ -105,12 +105,12 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::sapling::pedersen_hash;
     use bellman::gadgets::boolean::{AllocatedBit, Boolean};
     use bellman::gadgets::test::*;
     use group::{ff::PrimeField, Curve};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use zcash_primitives::sapling::pedersen_hash;
 
     /// Predict the number of constraints of a Pedersen hash
     fn ph_num_constraints(input_bits: usize) -> usize {

@@ -7,7 +7,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
+- Dependency on `bellman 0.14`.
 - `zcash_primitives::sapling`:
+  - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `constants` module.
 
 ### Removed
