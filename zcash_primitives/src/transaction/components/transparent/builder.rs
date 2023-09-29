@@ -43,6 +43,7 @@ impl fmt::Display for Error {
 /// An uninhabited type that allows the type of [`TransparentBuilder::inputs`]
 /// to resolve when the transparent-inputs feature is not turned on.
 #[cfg(not(feature = "transparent-inputs"))]
+#[derive(Debug)]
 enum InvalidTransparentInput {}
 
 #[cfg(not(feature = "transparent-inputs"))]

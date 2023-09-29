@@ -219,6 +219,7 @@ pub(crate) mod tests {
         transparent::{fees as transparent, OutPoint, TxOut},
     };
 
+    #[derive(Debug)]
     pub(crate) struct TestTransparentInput {
         pub outpoint: OutPoint,
         pub coin: TxOut,
