@@ -6,7 +6,7 @@ use zcash_primitives::{
     sapling::{
         circuit::{Output, Spend, ValueCommitmentOpening},
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
-        prover::SpendProver,
+        prover::{OutputProver, SpendProver},
         redjubjub::{PublicKey, Signature},
         value::{CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment},
         Diversifier, MerklePath, Note, PaymentAddress, ProofGenerationKey, Rseed,
@@ -62,6 +62,36 @@ impl SpendProver for SpendParameters {
     }
 
     fn create_proof<R: RngCore>(&self, circuit: Spend, rng: &mut R) -> Self::Proof {
+        create_random_proof(circuit, &self.0, rng).expect("proving should not fail")
+    }
+}
+
+impl OutputProver for OutputParameters {
+    type Proof = Proof<Bls12>;
+
+    fn prepare_circuit(
+        esk: jubjub::Fr,
+        payment_address: PaymentAddress,
+        rcm: jubjub::Fr,
+        value: NoteValue,
+        rcv: ValueCommitTrapdoor,
+    ) -> Output {
+        // Construct the value commitment for the proof instance
+        let value_commitment_opening = ValueCommitmentOpening {
+            value: value.inner(),
+            randomness: rcv.inner(),
+        };
+
+        // We now have a full witness for the output proof.
+        Output {
+            value_commitment_opening: Some(value_commitment_opening),
+            payment_address: Some(payment_address),
+            commitment_randomness: Some(rcm),
+            esk: Some(esk),
+        }
+    }
+
+    fn create_proof<R: RngCore>(&self, circuit: Output, rng: &mut R) -> Self::Proof {
         create_random_proof(circuit, &self.0, rng).expect("proving should not fail")
     }
 }
@@ -163,23 +193,14 @@ impl SaplingProvingContext {
         self.bsk -= &rcv; // Outputs subtract from the total.
 
         // Construct the value commitment for the proof instance
-        let value_commitment_opening = ValueCommitmentOpening {
-            value,
-            randomness: rcv.inner(),
-        };
-        let value_commitment = ValueCommitment::derive(NoteValue::from_raw(value), rcv);
+        let value = NoteValue::from_raw(value);
+        let value_commitment = ValueCommitment::derive(value, rcv.clone());
 
         // We now have a full witness for the output proof.
-        let instance = Output {
-            value_commitment_opening: Some(value_commitment_opening),
-            payment_address: Some(payment_address),
-            commitment_randomness: Some(rcm),
-            esk: Some(esk),
-        };
+        let instance = OutputParameters::prepare_circuit(esk, payment_address, rcm, value, rcv);
 
         // Create proof
-        let proof = create_random_proof(instance, &proving_key.0, &mut rng)
-            .expect("proving should not fail");
+        let proof = proving_key.create_proof(instance, &mut rng);
 
         // Accumulate the value commitment in the context. We do this to check internal consistency.
         self.cv_sum -= &value_commitment; // Outputs subtract from the total.

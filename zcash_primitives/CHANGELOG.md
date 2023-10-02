@@ -11,7 +11,7 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::sapling`:
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `constants` module.
-  - `prover::SpendProver`
+  - `prover::{SpendProver, OutputProver}`
 
 ### Removed
 - `zcash_primitives::constants`:
