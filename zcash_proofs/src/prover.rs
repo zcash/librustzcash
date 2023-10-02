@@ -22,6 +22,9 @@ use crate::{default_params_folder, SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME};
 /// locally-accessible paths.
 pub struct LocalTxProver {
     spend_params: Parameters<Bls12>,
+    // TODO: Either re-introduce verification-after-proving (once the verifier is
+    // refactored), or remove this.
+    #[allow(unused)]
     spend_vk: PreparedVerifyingKey<Bls12>,
     output_params: Parameters<Bls12>,
 }
@@ -164,7 +167,6 @@ impl TxProver for LocalTxProver {
             anchor,
             merkle_path,
             &self.spend_params,
-            &self.spend_vk,
         )?;
 
         let mut zkproof = [0u8; GROTH_PROOF_SIZE];

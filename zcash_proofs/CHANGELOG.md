@@ -6,6 +6,12 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- `zcash_proofs::sapling::prover`:
+  - The `verifying_key` argument `SaplingProvingContext::spend_proof` has been
+    removed. Callers should instead use `SaplingVerifyingContext` to verify
+    proofs after they have been created.
+
 ### Removed
 - `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).
 - `zcash_proofs::circuit::{ecc, pedersen_hash}`

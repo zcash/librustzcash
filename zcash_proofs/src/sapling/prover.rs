@@ -1,9 +1,6 @@
-use bellman::{
-    gadgets::multipack,
-    groth16::{create_random_proof, verify_proof, Parameters, PreparedVerifyingKey, Proof},
-};
+use bellman::groth16::{create_random_proof, Parameters, Proof};
 use bls12_381::Bls12;
-use group::{Curve, GroupEncoding};
+use group::GroupEncoding;
 use rand_core::OsRng;
 use zcash_primitives::{
     sapling::{
@@ -52,7 +49,6 @@ impl SaplingProvingContext {
         anchor: bls12_381::Scalar,
         merkle_path: MerklePath,
         proving_key: &Parameters<Bls12>,
-        verifying_key: &PreparedVerifyingKey<Bls12>,
     ) -> Result<(Proof<Bls12>, ValueCommitment, PublicKey), ()> {
         // Initialize secure RNG
         let mut rng = OsRng;
@@ -82,12 +78,6 @@ impl SaplingProvingContext {
         // Let's compute the nullifier while we have the position
         let note = Note::from_parts(payment_address, NoteValue::from_raw(value), rseed);
 
-        let nullifier = note.nf(
-            &viewing_key.nk,
-            u64::try_from(merkle_path.position())
-                .expect("Sapling note commitment tree position must fit into a u64"),
-        );
-
         // We now have the full witness for our circuit
         let pos: u64 = merkle_path.position().into();
         let instance = Spend {
@@ -108,37 +98,6 @@ impl SaplingProvingContext {
         // Create proof
         let proof =
             create_random_proof(instance, proving_key, &mut rng).expect("proving should not fail");
-
-        // Try to verify the proof:
-        // Construct public input for circuit
-        let mut public_input = [bls12_381::Scalar::zero(); 7];
-        {
-            let affine = rk.0.to_affine();
-            let (u, v) = (affine.get_u(), affine.get_v());
-            public_input[0] = u;
-            public_input[1] = v;
-        }
-        {
-            let affine = value_commitment.as_inner().to_affine();
-            let (u, v) = (affine.get_u(), affine.get_v());
-            public_input[2] = u;
-            public_input[3] = v;
-        }
-        public_input[4] = anchor;
-
-        // Add the nullifier through multiscalar packing
-        {
-            let nullifier = multipack::bytes_to_bits_le(&nullifier.0);
-            let nullifier = multipack::compute_multipacking(&nullifier);
-
-            assert_eq!(nullifier.len(), 2);
-
-            public_input[5] = nullifier[0];
-            public_input[6] = nullifier[1];
-        }
-
-        // Verify the proof
-        verify_proof(verifying_key, &proof, &public_input[..]).map_err(|_| ())?;
 
         // Accumulate the value commitment in the context
         self.cv_sum += &value_commitment;
