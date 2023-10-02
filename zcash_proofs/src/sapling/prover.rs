@@ -1,4 +1,4 @@
-use bellman::groth16::{create_random_proof, Parameters, Proof};
+use bellman::groth16::{create_random_proof, Proof};
 use bls12_381::Bls12;
 use group::GroupEncoding;
 use rand_core::OsRng;
@@ -12,6 +12,8 @@ use zcash_primitives::{
     },
     transaction::components::Amount,
 };
+
+use crate::{OutputParameters, SpendParameters};
 
 /// A context object for creating the Sapling components of a Zcash transaction.
 pub struct SaplingProvingContext {
@@ -48,7 +50,7 @@ impl SaplingProvingContext {
         value: u64,
         anchor: bls12_381::Scalar,
         merkle_path: MerklePath,
-        proving_key: &Parameters<Bls12>,
+        proving_key: &SpendParameters,
     ) -> Result<(Proof<Bls12>, ValueCommitment, PublicKey), ()> {
         // Initialize secure RNG
         let mut rng = OsRng;
@@ -96,8 +98,8 @@ impl SaplingProvingContext {
         };
 
         // Create proof
-        let proof =
-            create_random_proof(instance, proving_key, &mut rng).expect("proving should not fail");
+        let proof = create_random_proof(instance, &proving_key.0, &mut rng)
+            .expect("proving should not fail");
 
         // Accumulate the value commitment in the context
         self.cv_sum += &value_commitment;
@@ -114,7 +116,7 @@ impl SaplingProvingContext {
         payment_address: PaymentAddress,
         rcm: jubjub::Fr,
         value: u64,
-        proving_key: &Parameters<Bls12>,
+        proving_key: &OutputParameters,
     ) -> (Proof<Bls12>, ValueCommitment) {
         // Initialize secure RNG
         let mut rng = OsRng;
@@ -143,8 +145,8 @@ impl SaplingProvingContext {
         };
 
         // Create proof
-        let proof =
-            create_random_proof(instance, proving_key, &mut rng).expect("proving should not fail");
+        let proof = create_random_proof(instance, &proving_key.0, &mut rng)
+            .expect("proving should not fail");
 
         // Accumulate the value commitment in the context. We do this to check internal consistency.
         self.cv_sum -= &value_commitment; // Outputs subtract from the total.
