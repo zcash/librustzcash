@@ -1,11 +1,12 @@
 use bellman::groth16::{create_random_proof, Proof};
 use bls12_381::Bls12;
 use group::GroupEncoding;
-use rand_core::OsRng;
+use rand_core::{OsRng, RngCore};
 use zcash_primitives::{
     sapling::{
         circuit::{Output, Spend, ValueCommitmentOpening},
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
+        prover::SpendProver,
         redjubjub::{PublicKey, Signature},
         value::{CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment},
         Diversifier, MerklePath, Note, PaymentAddress, ProofGenerationKey, Rseed,
@@ -14,6 +15,56 @@ use zcash_primitives::{
 };
 
 use crate::{OutputParameters, SpendParameters};
+
+impl SpendProver for SpendParameters {
+    type Proof = Proof<Bls12>;
+
+    fn prepare_circuit(
+        proof_generation_key: ProofGenerationKey,
+        diversifier: Diversifier,
+        rseed: Rseed,
+        value: NoteValue,
+        alpha: jubjub::Fr,
+        rcv: ValueCommitTrapdoor,
+        anchor: bls12_381::Scalar,
+        merkle_path: MerklePath,
+    ) -> Option<Spend> {
+        // Construct the value commitment
+        let value_commitment_opening = ValueCommitmentOpening {
+            value: value.inner(),
+            randomness: rcv.inner(),
+        };
+
+        // Construct the viewing key
+        let viewing_key = proof_generation_key.to_viewing_key();
+
+        // Construct the payment address with the viewing key / diversifier
+        let payment_address = viewing_key.to_payment_address(diversifier)?;
+
+        let note = Note::from_parts(payment_address, value, rseed);
+
+        // We now have the full witness for our circuit
+        let pos: u64 = merkle_path.position().into();
+        Some(Spend {
+            value_commitment_opening: Some(value_commitment_opening),
+            proof_generation_key: Some(proof_generation_key),
+            payment_address: Some(payment_address),
+            commitment_randomness: Some(note.rcm()),
+            ar: Some(alpha),
+            auth_path: merkle_path
+                .path_elems()
+                .iter()
+                .enumerate()
+                .map(|(i, node)| Some(((*node).into(), pos >> i & 0x1 == 1)))
+                .collect(),
+            anchor: Some(anchor),
+        })
+    }
+
+    fn create_proof<R: RngCore>(&self, circuit: Spend, rng: &mut R) -> Self::Proof {
+        create_random_proof(circuit, &self.0, rng).expect("proving should not fail")
+    }
+}
 
 /// A context object for creating the Sapling components of a Zcash transaction.
 pub struct SaplingProvingContext {
@@ -62,44 +113,26 @@ impl SaplingProvingContext {
         self.bsk += &rcv;
 
         // Construct the value commitment
-        let value_commitment_opening = ValueCommitmentOpening {
-            value,
-            randomness: rcv.inner(),
-        };
-        let value_commitment = ValueCommitment::derive(NoteValue::from_raw(value), rcv);
-
-        // Construct the viewing key
-        let viewing_key = proof_generation_key.to_viewing_key();
-
-        // Construct the payment address with the viewing key / diversifier
-        let payment_address = viewing_key.to_payment_address(diversifier).ok_or(())?;
+        let value = NoteValue::from_raw(value);
+        let value_commitment = ValueCommitment::derive(value, rcv.clone());
 
         // This is the result of the re-randomization, we compute it for the caller
         let rk = PublicKey(proof_generation_key.ak.into()).randomize(ar, SPENDING_KEY_GENERATOR);
 
-        // Let's compute the nullifier while we have the position
-        let note = Note::from_parts(payment_address, NoteValue::from_raw(value), rseed);
-
-        // We now have the full witness for our circuit
-        let pos: u64 = merkle_path.position().into();
-        let instance = Spend {
-            value_commitment_opening: Some(value_commitment_opening),
-            proof_generation_key: Some(proof_generation_key),
-            payment_address: Some(payment_address),
-            commitment_randomness: Some(note.rcm()),
-            ar: Some(ar),
-            auth_path: merkle_path
-                .path_elems()
-                .iter()
-                .enumerate()
-                .map(|(i, node)| Some(((*node).into(), pos >> i & 0x1 == 1)))
-                .collect(),
-            anchor: Some(anchor),
-        };
+        let instance = SpendParameters::prepare_circuit(
+            proof_generation_key,
+            diversifier,
+            rseed,
+            value,
+            ar,
+            rcv,
+            anchor,
+            merkle_path,
+        )
+        .ok_or(())?;
 
         // Create proof
-        let proof = create_random_proof(instance, &proving_key.0, &mut rng)
-            .expect("proving should not fail");
+        let proof = proving_key.create_proof(instance, &mut rng);
 
         // Accumulate the value commitment in the context
         self.cv_sum += &value_commitment;
