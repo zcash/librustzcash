@@ -283,11 +283,17 @@ fn stream_params_downloads_to_disk(
     Ok(())
 }
 
+/// The parameters for the Sapling Spend circuit.
+pub struct SpendParameters(Parameters<Bls12>);
+
+/// The parameters for the Sapling Output circuit.
+pub struct OutputParameters(Parameters<Bls12>);
+
 /// Zcash Sprout and Sapling groth16 circuit parameters.
 pub struct ZcashParameters {
-    pub spend_params: Parameters<Bls12>,
+    pub spend_params: SpendParameters,
     pub spend_vk: PreparedVerifyingKey<Bls12>,
-    pub output_params: Parameters<Bls12>,
+    pub output_params: OutputParameters,
     pub output_vk: PreparedVerifyingKey<Bls12>,
     pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
 }
@@ -429,9 +435,9 @@ pub fn parse_parameters<R: io::Read>(
     let sprout_vk = sprout_vk.map(|vk| prepare_verifying_key(&vk));
 
     ZcashParameters {
-        spend_params,
+        spend_params: SpendParameters(spend_params),
         spend_vk,
-        output_params,
+        output_params: OutputParameters(output_params),
         output_vk,
         sprout_vk,
     }

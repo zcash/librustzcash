@@ -1,6 +1,6 @@
 //! Abstractions over the proving system and parameters for ease of use.
 
-use bellman::groth16::{Parameters, PreparedVerifyingKey};
+use bellman::groth16::PreparedVerifyingKey;
 use bls12_381::Bls12;
 use std::path::Path;
 use zcash_primitives::{
@@ -13,7 +13,10 @@ use zcash_primitives::{
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
 
-use crate::{load_parameters, parse_parameters, sapling::SaplingProvingContext};
+use crate::{
+    load_parameters, parse_parameters, sapling::SaplingProvingContext, OutputParameters,
+    SpendParameters,
+};
 
 #[cfg(feature = "local-prover")]
 use crate::{default_params_folder, SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME};
@@ -21,9 +24,12 @@ use crate::{default_params_folder, SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME};
 /// An implementation of [`TxProver`] using Sapling Spend and Output parameters from
 /// locally-accessible paths.
 pub struct LocalTxProver {
-    spend_params: Parameters<Bls12>,
+    spend_params: SpendParameters,
+    // TODO: Either re-introduce verification-after-proving (once the verifier is
+    // refactored), or remove this.
+    #[allow(unused)]
     spend_vk: PreparedVerifyingKey<Bls12>,
-    output_params: Parameters<Bls12>,
+    output_params: OutputParameters,
 }
 
 impl LocalTxProver {
@@ -164,7 +170,6 @@ impl TxProver for LocalTxProver {
             anchor,
             merkle_path,
             &self.spend_params,
-            &self.spend_vk,
         )?;
 
         let mut zkproof = [0u8; GROTH_PROOF_SIZE];

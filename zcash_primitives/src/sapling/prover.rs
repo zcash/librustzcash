@@ -1,15 +1,74 @@
 //! Abstractions over the proving system and parameters.
 
+use rand_core::RngCore;
+
 use crate::{
     sapling::{
         self,
         redjubjub::{PublicKey, Signature},
-        value::ValueCommitment,
+        value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+        MerklePath,
     },
     transaction::components::{Amount, GROTH_PROOF_SIZE},
 };
 
 use super::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed};
+
+/// Interface for creating Sapling Spend proofs.
+pub trait SpendProver {
+    /// The proof type created by this prover.
+    type Proof;
+
+    /// Prepares an instance of the Sapling Spend circuit for the given inputs.
+    ///
+    /// Returns `None` if `diversifier` is not a valid Sapling diversifier.
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_circuit(
+        proof_generation_key: ProofGenerationKey,
+        diversifier: Diversifier,
+        rseed: Rseed,
+        value: NoteValue,
+        alpha: jubjub::Fr,
+        rcv: ValueCommitTrapdoor,
+        anchor: bls12_381::Scalar,
+        merkle_path: MerklePath,
+    ) -> Option<sapling::circuit::Spend>;
+
+    /// Create the proof for a Sapling [`SpendDescription`].
+    ///
+    /// [`SpendDescription`]: crate::transaction::components::SpendDescription
+    fn create_proof<R: RngCore>(
+        &self,
+        circuit: sapling::circuit::Spend,
+        rng: &mut R,
+    ) -> Self::Proof;
+}
+
+/// Interface for creating Sapling Output proofs.
+pub trait OutputProver {
+    /// The proof type created by this prover.
+    type Proof;
+
+    /// Prepares an instance of the Sapling Output circuit for the given inputs.
+    ///
+    /// Returns `None` if `diversifier` is not a valid Sapling diversifier.
+    fn prepare_circuit(
+        esk: jubjub::Fr,
+        payment_address: PaymentAddress,
+        rcm: jubjub::Fr,
+        value: NoteValue,
+        rcv: ValueCommitTrapdoor,
+    ) -> sapling::circuit::Output;
+
+    /// Create the proof for a Sapling [`OutputDescription`].
+    ///
+    /// [`OutputDescription`]: crate::transaction::components::OutputDescription
+    fn create_proof<R: RngCore>(
+        &self,
+        circuit: sapling::circuit::Output,
+        rng: &mut R,
+    ) -> Self::Proof;
+}
 
 /// Interface for creating zero-knowledge proofs for shielded transactions.
 pub trait TxProver {

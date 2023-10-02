@@ -6,6 +6,21 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_proofs::{SpendParameters, OutputParameters}`
+
+### Changed
+- The new `SpendParameters` and `OutputParameters` types are used in the
+  following places:
+  - `zcash_proofs::ZcashParameters::{spend_params, output_params}` fields.
+  - `zcash_proofs::sapling::prover`:
+    - `SaplingProvingContext::{spend_proof, output_proof}` (the `proving_key`
+      arguments).
+- `zcash_proofs::sapling::prover`:
+  - The `verifying_key` argument `SaplingProvingContext::spend_proof` has been
+    removed. Callers should instead use `SaplingVerifyingContext` to verify
+    proofs after they have been created.
+
 ### Removed
 - `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).
 - `zcash_proofs::circuit::{ecc, pedersen_hash}`
