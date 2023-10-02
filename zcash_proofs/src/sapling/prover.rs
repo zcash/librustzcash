@@ -6,16 +6,15 @@ use bls12_381::Bls12;
 use group::{Curve, GroupEncoding};
 use rand_core::OsRng;
 use zcash_primitives::{
-    constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
     sapling::{
+        circuit::{Output, Spend, ValueCommitmentOpening},
+        constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         redjubjub::{PublicKey, Signature},
         value::{CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment},
         Diversifier, MerklePath, Note, PaymentAddress, ProofGenerationKey, Rseed,
     },
     transaction::components::Amount,
 };
-
-use crate::circuit::sapling::{Output, Spend, ValueCommitmentOpening};
 
 /// A context object for creating the Sapling components of a Zcash transaction.
 pub struct SaplingProvingContext {

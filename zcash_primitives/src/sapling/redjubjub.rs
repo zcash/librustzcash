@@ -228,7 +228,7 @@ mod tests {
     use rand_xorshift::XorShiftRng;
 
     use super::*;
-    use crate::constants::SPENDING_KEY_GENERATOR;
+    use crate::sapling::constants::SPENDING_KEY_GENERATOR;
 
     #[test]
     fn test_batch_verify() {

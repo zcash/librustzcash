@@ -39,6 +39,7 @@ memuse.workspace = true
 subtle.workspace = true
 
 # - Shielded protocols
+bellman = { version = "0.14", default-features = false, features = ["groth16"] }
 bls12_381.workspace = true
 ff.workspace = true
 group = { workspace = true, features = ["wnaf-memuse"] }
@@ -115,6 +116,11 @@ harness = false
 [[bench]]
 name = "pedersen_hash"
 harness = false
+
+[[bench]]
+name = "sapling_circuit"
+harness = false
+required-features = ["local-prover"]
 
 [badges]
 maintenance = { status = "actively-developed" }

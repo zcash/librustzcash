@@ -571,10 +571,10 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},
-        constants::SPENDING_KEY_GENERATOR,
         memo::MemoBytes,
         sapling::{
             self,
+            constants::SPENDING_KEY_GENERATOR,
             note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
             util::generate_random_rseed,
             value::NoteValue,

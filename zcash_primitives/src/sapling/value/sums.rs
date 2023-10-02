@@ -3,8 +3,7 @@ use core::iter::Sum;
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 
 use super::{NoteValue, ValueCommitTrapdoor, ValueCommitment};
-use crate::constants::VALUE_COMMITMENT_VALUE_GENERATOR;
-use crate::sapling::redjubjub;
+use crate::sapling::{constants::VALUE_COMMITMENT_VALUE_GENERATOR, redjubjub};
 
 /// A value operation overflowed.
 #[derive(Debug)]

@@ -5,7 +5,7 @@
 use ff::PrimeField;
 use group::{cofactor::CofactorGroup, Group, GroupEncoding};
 
-use crate::constants;
+use super::constants;
 use blake2s_simd::Params;
 
 /// Produces a random point in the Jubjub curve.

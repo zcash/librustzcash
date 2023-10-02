@@ -4,28 +4,29 @@ use group::{ff::PrimeField, Curve};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
-use zcash_primitives::constants;
+use super::{PaymentAddress, ProofGenerationKey};
 
-use zcash_primitives::sapling::{PaymentAddress, ProofGenerationKey};
-
-use super::ecc;
-use super::pedersen_hash;
-use crate::constants::{
-    NOTE_COMMITMENT_RANDOMNESS_GENERATOR, NULLIFIER_POSITION_GENERATOR,
-    PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
-    VALUE_COMMITMENT_VALUE_GENERATOR,
-};
 use bellman::gadgets::blake2s;
 use bellman::gadgets::boolean;
 use bellman::gadgets::multipack;
 use bellman::gadgets::num;
 use bellman::gadgets::Assignment;
 
+use self::constants::{
+    NOTE_COMMITMENT_RANDOMNESS_GENERATOR, NULLIFIER_POSITION_GENERATOR,
+    PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+    VALUE_COMMITMENT_VALUE_GENERATOR,
+};
+
 #[cfg(test)]
 use group::ff::PrimeFieldBits;
 
 #[cfg(test)]
-use zcash_primitives::sapling::value::NoteValue;
+use super::value::NoteValue;
+
+mod constants;
+mod ecc;
+mod pedersen_hash;
 
 /// The opening (value and randomness) of a Sapling value commitment.
 #[derive(Clone)]
@@ -37,8 +38,9 @@ pub struct ValueCommitmentOpening {
 #[cfg(test)]
 impl ValueCommitmentOpening {
     fn commitment(&self) -> jubjub::ExtendedPoint {
-        let cv = (constants::VALUE_COMMITMENT_VALUE_GENERATOR * jubjub::Fr::from(self.value))
-            + (constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR * self.randomness);
+        let cv = (super::constants::VALUE_COMMITMENT_VALUE_GENERATOR
+            * jubjub::Fr::from(self.value))
+            + (super::constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR * self.randomness);
         cv.into()
     }
 }
@@ -209,7 +211,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
         let mut ivk = blake2s::blake2s(
             cs.namespace(|| "computation of ivk"),
             &ivk_preimage,
-            constants::CRH_IVK_PERSONALIZATION,
+            super::constants::CRH_IVK_PERSONALIZATION,
         )?;
 
         // drop_5 to ensure it's in the field
@@ -402,7 +404,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
         let nf = blake2s::blake2s(
             cs.namespace(|| "nf computation"),
             &nf_preimage,
-            constants::PRF_NF_PERSONALIZATION,
+            super::constants::PRF_NF_PERSONALIZATION,
         )?;
 
         multipack::pack_into_inputs(cs.namespace(|| "pack nullifier"), &nf)
@@ -536,11 +538,11 @@ impl Circuit<bls12_381::Scalar> for Output {
 
 #[test]
 fn test_input_circuit_with_bls12_381() {
+    use crate::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
     use bellman::gadgets::test::*;
     use group::{ff::Field, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
         0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -682,11 +684,11 @@ fn test_input_circuit_with_bls12_381() {
 
 #[test]
 fn test_input_circuit_with_bls12_381_external_test_vectors() {
+    use crate::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
     use bellman::gadgets::test::*;
     use group::{ff::Field, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use zcash_primitives::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
         0x59, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,
@@ -862,11 +864,11 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
 #[test]
 fn test_output_circuit_with_bls12_381() {
+    use crate::sapling::{Diversifier, ProofGenerationKey, Rseed};
     use bellman::gadgets::test::*;
     use group::{ff::Field, Group};
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
-    use zcash_primitives::sapling::{Diversifier, ProofGenerationKey, Rseed};
 
     let mut rng = XorShiftRng::from_seed([
         0x58, 0x62, 0xbe, 0x3d, 0x76, 0x3d, 0x31, 0x8d, 0x17, 0xdb, 0x37, 0x32, 0x54, 0x06, 0xbc,

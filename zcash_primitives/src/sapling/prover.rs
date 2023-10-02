@@ -68,9 +68,9 @@ pub mod mock {
 
     use super::TxProver;
     use crate::{
-        constants::SPENDING_KEY_GENERATOR,
         sapling::{
             self,
+            constants::SPENDING_KEY_GENERATOR,
             redjubjub::{PublicKey, Signature},
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
             Diversifier, PaymentAddress, ProofGenerationKey, Rseed,

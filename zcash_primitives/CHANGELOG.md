@@ -6,6 +6,15 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- Dependency on `bellman 0.14`.
+- `zcash_primitives::sapling`:
+  - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
+  - `constants` module.
+
+### Removed
+- `zcash_primitives::constants`:
+  - All `const` values (moved to `zcash_primitives::sapling::constants`).
 
 ## [0.13.0] - 2023-09-25
 ### Added
