@@ -35,13 +35,18 @@ use crate::{
 };
 
 pub mod input_selection;
-use input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector};
+use input_selection::{
+    GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
+};
 
-use super::{NoteId, ShieldedProtocol};
+use super::{NoteId, SaplingInputSource, ShieldedProtocol};
 
 #[cfg(feature = "transparent-inputs")]
 use {
+    super::TransparentInputSource,
     crate::wallet::WalletTransparentOutput,
+    input_selection::ShieldingSelector,
+    std::convert::Infallible,
     zcash_primitives::{legacy::TransparentAddress, sapling::keys::OutgoingViewingKey},
 };
 
@@ -216,7 +221,9 @@ pub fn create_spend_to_address<DbT, ParamsT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletWrite + WalletCommitmentTrees,
+    DbT: WalletWrite
+        + WalletCommitmentTrees
+        + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let account = wallet_db
@@ -324,10 +331,12 @@ pub fn spend<DbT, ParamsT, InputsT>(
     >,
 >
 where
-    DbT: WalletWrite + WalletCommitmentTrees,
+    DbT: WalletWrite
+        + WalletCommitmentTrees
+        + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
     DbT::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
-    InputsT: InputSelector<DataSource = DbT>,
+    InputsT: InputSelector<InputSource = DbT>,
 {
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
@@ -368,21 +377,32 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     min_confirmations: NonZeroU32,
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
-    Error<DbT::Error, CommitmentTreeErrT, InputsT::Error, <InputsT::FeeRule as FeeRule>::Error>,
+    Error<
+        <DbT as WalletRead>::Error,
+        CommitmentTreeErrT,
+        InputsT::Error,
+        <InputsT::FeeRule as FeeRule>::Error,
+    >,
 >
 where
-    DbT: WalletWrite,
+    DbT: WalletRead + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
     DbT::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
-    InputsT: InputSelector<DataSource = DbT>,
+    InputsT: InputSelector<InputSource = DbT>,
 {
+    let (target_height, anchor_height) = wallet_db
+        .get_target_and_anchor_heights(min_confirmations)
+        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+
     input_selector
         .propose_transaction(
             params,
             wallet_db,
+            target_height,
+            anchor_height,
             spend_from_account,
             request,
-            min_confirmations,
         )
         .map_err(Error::from)
 }
@@ -421,7 +441,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
     Error<
-        DbT::Error,
+        <DbT as WalletRead>::Error,
         CommitmentTreeErrT,
         GreedyInputSelectorError<Zip317FeeError, DbT::NoteRef>,
         Zip317FeeError,
@@ -429,7 +449,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletWrite,
+    DbT: WalletRead + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![Payment {
@@ -467,23 +487,33 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     input_selector: &InputsT,
     shielding_threshold: NonNegativeAmount,
     from_addrs: &[TransparentAddress],
-    min_confirmations: NonZeroU32,
+    min_confirmations: u32,
 ) -> Result<
-    Proposal<InputsT::FeeRule, DbT::NoteRef>,
-    Error<DbT::Error, CommitmentTreeErrT, InputsT::Error, <InputsT::FeeRule as FeeRule>::Error>,
+    Proposal<InputsT::FeeRule, Infallible>,
+    Error<
+        <DbT as WalletRead>::Error,
+        CommitmentTreeErrT,
+        InputsT::Error,
+        <InputsT::FeeRule as FeeRule>::Error,
+    >,
 >
 where
     ParamsT: consensus::Parameters,
-    DbT: WalletWrite,
-    DbT::NoteRef: Copy + Eq + Ord,
-    InputsT: InputSelector<DataSource = DbT>,
+    DbT: WalletRead + TransparentInputSource<Error = <DbT as WalletRead>::Error>,
+    InputsT: ShieldingSelector<InputSource = DbT>,
 {
+    let chain_tip_height = wallet_db
+        .chain_height()
+        .map_err(|e| Error::from(InputSelectorError::DataSource(e)))?
+        .ok_or_else(|| Error::from(InputSelectorError::SyncRequired))?;
+
     input_selector
         .propose_shielding(
             params,
             wallet_db,
             shielding_threshold,
             from_addrs,
+            chain_tip_height + 1,
             min_confirmations,
         )
         .map_err(Error::from)
@@ -499,14 +529,14 @@ where
 /// to fall back to the transparent receiver until full Orchard support is implemented.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
+pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
-    proposal: &Proposal<FeeRuleT, DbT::NoteRef>,
+    proposal: &Proposal<FeeRuleT, N>,
 ) -> Result<
     TxId,
     Error<
@@ -518,7 +548,6 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
 >
 where
     DbT: WalletWrite + WalletCommitmentTrees,
-    DbT::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
@@ -557,28 +586,29 @@ where
     // are no possible transparent inputs, so we ignore those
     let mut builder = Builder::new(params.clone(), proposal.min_target_height(), None);
 
-    let checkpoint_depth = wallet_db.get_checkpoint_depth(proposal.min_confirmations())?;
-    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
-        for selected in proposal.sapling_inputs() {
-            let (note, key, merkle_path) = select_key_for_note(
-                sapling_tree,
-                selected,
-                usk.sapling(),
-                &dfvk,
-                checkpoint_depth,
-            )?
-            .ok_or_else(|| {
-                Error::NoteMismatch(NoteId {
-                    txid: *selected.txid(),
-                    protocol: ShieldedProtocol::Sapling,
-                    output_index: selected.output_index(),
-                })
-            })?;
+    if let Some(sapling_inputs) = proposal.sapling_inputs() {
+        wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
+            for selected in sapling_inputs.notes() {
+                let (note, key, merkle_path) = select_key_for_note(
+                    sapling_tree,
+                    selected,
+                    usk.sapling(),
+                    &dfvk,
+                    sapling_inputs.anchor_height(),
+                )?
+                .ok_or_else(|| {
+                    Error::NoteMismatch(NoteId {
+                        txid: *selected.txid(),
+                        protocol: ShieldedProtocol::Sapling,
+                        output_index: selected.output_index(),
+                    })
+                })?;
 
-            builder.add_sapling_spend(key, selected.diversifier(), note, merkle_path)?;
-        }
-        Ok(())
-    })?;
+                builder.add_sapling_spend(key, selected.diversifier(), note, merkle_path)?;
+            }
+            Ok(())
+        })?;
+    }
 
     #[cfg(feature = "transparent-inputs")]
     let utxos = {
@@ -807,7 +837,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
     shielding_threshold: NonNegativeAmount,
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
-    min_confirmations: NonZeroU32,
+    min_confirmations: u32,
 ) -> Result<
     TxId,
     Error<
@@ -819,9 +849,10 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
 >
 where
     ParamsT: consensus::Parameters,
-    DbT: WalletWrite + WalletCommitmentTrees,
-    DbT::NoteRef: Copy + Eq + Ord,
-    InputsT: InputSelector<DataSource = DbT>,
+    DbT: WalletWrite
+        + WalletCommitmentTrees
+        + TransparentInputSource<Error = <DbT as WalletRead>::Error>,
+    InputsT: ShieldingSelector<InputSource = DbT>,
 {
     let proposal = propose_shielding(
         wallet_db,
@@ -853,7 +884,7 @@ fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
     selected: &ReceivedSaplingNote<N>,
     extsk: &ExtendedSpendingKey,
     dfvk: &DiversifiableFullViewingKey,
-    checkpoint_depth: usize,
+    anchor_height: BlockHeight,
 ) -> Result<
     Option<(sapling::Note, ExtendedSpendingKey, sapling::MerklePath)>,
     ShardTreeError<S::Error>,
@@ -868,9 +899,11 @@ fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
         .diversified_change_address(selected.diversifier())
         .map(|addr| addr.create_note(selected.value().try_into().unwrap(), selected.rseed()));
 
-    let expected_root = commitment_tree.root_at_checkpoint(checkpoint_depth)?;
-    let merkle_path = commitment_tree
-        .witness_caching(selected.note_commitment_tree_position(), checkpoint_depth)?;
+    let expected_root = commitment_tree.root_at_checkpoint_id(&anchor_height)?;
+    let merkle_path = commitment_tree.witness_at_checkpoint_id_caching(
+        selected.note_commitment_tree_position(),
+        &anchor_height,
+    )?;
 
     Ok(external_note
         .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))

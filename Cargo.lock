@@ -2183,9 +2183,9 @@ dependencies = [
 
 [[package]]
 name = "shardtree"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c19f96dde3a8693874f7e7c53d95616569b4009379a903789efbd448f4ea9cc7"
+checksum = "dbf20c7a2747d9083092e3a3eeb9a7ed75577ae364896bebbc5e0bdcd4e97735"
 dependencies = [
  "assert_matches",
  "bitflags 2.4.0",
@@ -2963,6 +2963,7 @@ dependencies = [
  "jubjub",
  "memuse",
  "nom",
+ "nonempty",
  "orchard",
  "percent-encoding",
  "proptest",

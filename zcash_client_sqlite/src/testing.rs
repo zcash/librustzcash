@@ -70,7 +70,9 @@ use super::BlockDb;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::data_api::wallet::{propose_shielding, shield_transparent_funds},
+    zcash_client_backend::data_api::wallet::{
+        input_selection::ShieldingSelector, propose_shielding, shield_transparent_funds,
+    },
     zcash_primitives::legacy::TransparentAddress,
 };
 
@@ -483,7 +485,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
     {
         let params = self.network();
         let prover = test_prover();
@@ -518,7 +520,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
     {
         let params = self.network();
         propose_transfer::<_, _, _, Infallible>(
@@ -575,9 +577,9 @@ impl<Cache> TestState<Cache> {
         input_selector: &InputsT,
         shielding_threshold: NonNegativeAmount,
         from_addrs: &[TransparentAddress],
-        min_confirmations: NonZeroU32,
+        min_confirmations: u32,
     ) -> Result<
-        Proposal<InputsT::FeeRule, ReceivedNoteId>,
+        Proposal<InputsT::FeeRule, Infallible>,
         data_api::error::Error<
             SqliteClientError,
             Infallible,
@@ -586,7 +588,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
     {
         let params = self.network();
         propose_shielding::<_, _, _, Infallible>(
@@ -639,7 +641,7 @@ impl<Cache> TestState<Cache> {
         shielding_threshold: NonNegativeAmount,
         usk: &UnifiedSpendingKey,
         from_addrs: &[TransparentAddress],
-        min_confirmations: NonZeroU32,
+        min_confirmations: u32,
     ) -> Result<
         TxId,
         data_api::error::Error<
@@ -650,7 +652,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<DataSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
     {
         let params = self.network();
         let prover = test_prover();

@@ -39,7 +39,7 @@ zcash_proofs = { version = "0.13", path = "zcash_proofs", default-features = fal
 ff = "0.13"
 group = "0.13"
 incrementalmerkletree = "0.5"
-shardtree = "0.1"
+shardtree = "0.2"
 
 # Payment protocols
 # - Sapling

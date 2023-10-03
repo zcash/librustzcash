@@ -67,7 +67,6 @@
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, OptionalExtension};
 use shardtree::ShardTree;
-use std::cmp;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
@@ -100,7 +99,7 @@ use zcash_client_backend::{
     wallet::WalletTx,
 };
 
-use crate::wallet::commitment_tree::SqliteShardStore;
+use crate::wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore};
 use crate::{
     error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
     SAPLING_TABLES_PREFIX,
@@ -932,19 +931,19 @@ pub(crate) fn get_target_and_anchor_heights(
     conn: &rusqlite::Connection,
     min_confirmations: NonZeroU32,
 ) -> Result<Option<(BlockHeight, BlockHeight)>, rusqlite::Error> {
-    scan_queue_extrema(conn).map(|heights| {
-        heights.map(|range| {
-            let target_height = *range.end() + 1;
-            // Select an anchor min_confirmations back from the target block,
-            // unless that would be before the earliest block we have.
-            let anchor_height = BlockHeight::from(cmp::max(
-                u32::from(target_height).saturating_sub(min_confirmations.into()),
-                u32::from(*range.start()),
-            ));
+    match scan_queue_extrema(conn)?.map(|range| *range.end()) {
+        Some(chain_tip_height) => {
+            let sapling_anchor_height = get_max_checkpointed_height(
+                conn,
+                SAPLING_TABLES_PREFIX,
+                chain_tip_height,
+                min_confirmations,
+            )?;
 
-            (target_height, anchor_height)
-        })
-    })
+            Ok(sapling_anchor_height.map(|h| (chain_tip_height + 1, h)))
+        }
+        None => Ok(None),
+    }
 }
 
 fn parse_block_metadata(
@@ -1915,7 +1914,9 @@ mod tests {
             PRUNING_DEPTH,
         },
         zcash_client_backend::{
-            data_api::{wallet::input_selection::GreedyInputSelector, WalletWrite},
+            data_api::{
+                wallet::input_selection::GreedyInputSelector, TransparentInputSource, WalletWrite,
+            },
             encoding::AddressCodec,
             fees::{fixed, DustOutputPolicy},
             wallet::WalletTransparentOutput,
@@ -2141,13 +2142,7 @@ mod tests {
             DustOutputPolicy::default(),
         );
         let txid = st
-            .shield_transparent_funds(
-                &input_selector,
-                value,
-                &usk,
-                &[*taddr],
-                NonZeroU32::new(1).unwrap(),
-            )
+            .shield_transparent_funds(&input_selector, value, &usk, &[*taddr], 1)
             .unwrap();
 
         // The wallet should have zero transparent balance, because the shielding

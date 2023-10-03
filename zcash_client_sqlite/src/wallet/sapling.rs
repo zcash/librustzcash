@@ -159,62 +159,6 @@ fn unscanned_tip_exists(
     )
 }
 
-pub(crate) fn get_spendable_sapling_notes(
-    conn: &Connection,
-    account: AccountId,
-    anchor_height: BlockHeight,
-    exclude: &[ReceivedNoteId],
-) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
-    let birthday_height = match wallet_birthday(conn)? {
-        Some(birthday) => birthday,
-        None => {
-            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
-            // such a case, the wallet has no notes to spend.
-            return Ok(vec![]);
-        }
-    };
-
-    if unscanned_tip_exists(conn, anchor_height)? {
-        return Ok(vec![]);
-    }
-
-    let mut stmt_select_notes = conn.prepare_cached(
-        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
-         FROM sapling_received_notes
-         INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-         WHERE account = :account
-         AND commitment_tree_position IS NOT NULL
-         AND spent IS NULL
-         AND transactions.block <= :anchor_height
-         AND id_note NOT IN rarray(:exclude)
-         AND NOT EXISTS (
-            SELECT 1 FROM v_sapling_shard_unscanned_ranges unscanned
-            -- select all the unscanned ranges involving the shard containing this note
-            WHERE sapling_received_notes.commitment_tree_position >= unscanned.start_position
-            AND sapling_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-            -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-            AND unscanned.block_range_start <= :anchor_height
-            -- exclude unscanned ranges that end below the wallet birthday
-            AND unscanned.block_range_end > :wallet_birthday
-         )",
-    )?;
-
-    let excluded: Vec<Value> = exclude.iter().map(|n| Value::from(n.0)).collect();
-    let excluded_ptr = Rc::new(excluded);
-
-    let notes = stmt_select_notes.query_and_then(
-        named_params![
-            ":account": u32::from(account),
-            ":anchor_height": u32::from(anchor_height),
-            ":exclude": &excluded_ptr,
-            ":wallet_birthday": u32::from(birthday_height)
-        ],
-        to_spendable_note,
-    )?;
-
-    notes.collect::<Result<_, _>>()
-}
-
 pub(crate) fn select_spendable_sapling_notes(
     conn: &Connection,
     account: AccountId,
@@ -769,7 +713,7 @@ pub(crate) mod tests {
             st.propose_standard_transfer::<Infallible>(
                 account,
                 StandardFeeRule::Zip317,
-                NonZeroU32::new(10).unwrap(),
+                NonZeroU32::new(2).unwrap(),
                 &to,
                 NonNegativeAmount::const_from_u64(70000),
                 None,
@@ -1468,7 +1412,7 @@ pub(crate) mod tests {
                 NonNegativeAmount::from_u64(10000).unwrap(),
                 &usk,
                 &[*taddr],
-                NonZeroU32::new(1).unwrap()
+                1
             ),
             Ok(_)
         );

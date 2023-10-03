@@ -30,6 +30,7 @@ zcash_primitives.workspace = true
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
 # - Data Access API
 time = "0.3.22"
+nonempty.workspace = true
 
 # - Encodings
 base64.workspace = true
@@ -87,6 +88,7 @@ gumdrop = "0.8"
 jubjub.workspace = true
 proptest.workspace = true
 rand_core.workspace = true
+shardtree = { workspace = true, features = ["test-dependencies"] }
 zcash_proofs.workspace = true
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 

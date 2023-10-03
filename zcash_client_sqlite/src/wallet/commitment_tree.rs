@@ -21,8 +21,6 @@ use zcash_primitives::{consensus::BlockHeight, merkle_tree::HashSer};
 
 use zcash_client_backend::serialization::shardtree::{read_shard, write_shard};
 
-use super::scan_queue_extrema;
-
 /// Errors that can appear in SQLite-back [`ShardStore`] implementation operations.
 #[derive(Debug)]
 pub enum Error {
@@ -173,6 +171,7 @@ impl<'conn, 'a: 'conn, H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         checkpoint_depth: usize,
     ) -> Result<Option<(Self::CheckpointId, Checkpoint)>, Self::Error> {
         get_checkpoint_at_depth(self.conn, self.table_prefix, checkpoint_depth)
+            .map_err(Error::Query)
     }
 
     fn get_checkpoint(
@@ -280,6 +279,7 @@ impl<H: HashSer, const SHARD_HEIGHT: u8> ShardStore
         checkpoint_depth: usize,
     ) -> Result<Option<(Self::CheckpointId, Checkpoint)>, Self::Error> {
         get_checkpoint_at_depth(&self.conn, self.table_prefix, checkpoint_depth)
+            .map_err(Error::Query)
     }
 
     fn get_checkpoint(
@@ -750,38 +750,37 @@ pub(crate) fn get_checkpoint(
         .transpose()
 }
 
-pub(crate) fn get_checkpoint_depth(
+pub(crate) fn get_max_checkpointed_height(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,
+    chain_tip_height: BlockHeight,
     min_confirmations: NonZeroU32,
-) -> Result<Option<usize>, rusqlite::Error> {
-    scan_queue_extrema(conn)?
-        .map(|range| *range.end())
-        .map(|chain_tip| {
-            let max_checkpoint_height =
-                u32::from(chain_tip).saturating_sub(u32::from(min_confirmations) - 1);
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    let max_checkpoint_height =
+        u32::from(chain_tip_height).saturating_sub(u32::from(min_confirmations) - 1);
 
-            // We exclude from consideration all checkpoints having heights greater than the maximum
-            // checkpoint height. The checkpoint depth is the number of excluded checkpoints + 1.
-            conn.query_row(
-                &format!(
-                    "SELECT COUNT(*) 
-                     FROM {}_tree_checkpoints
-                     WHERE checkpoint_id > :max_checkpoint_height",
-                    table_prefix
-                ),
-                named_params![":max_checkpoint_height": max_checkpoint_height],
-                |row| row.get::<_, usize>(0).map(|s| s + 1),
-            )
-        })
-        .transpose()
+    // We exclude from consideration all checkpoints having heights greater than the maximum
+    // checkpoint height. The checkpoint depth is the number of excluded checkpoints + 1.
+    conn.query_row(
+        &format!(
+            "SELECT checkpoint_id
+             FROM {}_tree_checkpoints
+             WHERE checkpoint_id <= :max_checkpoint_height
+             ORDER BY checkpoint_id DESC
+             LIMIT 1",
+            table_prefix
+        ),
+        named_params![":max_checkpoint_height": max_checkpoint_height],
+        |row| row.get::<_, u32>(0).map(BlockHeight::from),
+    )
+    .optional()
 }
 
 pub(crate) fn get_checkpoint_at_depth(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,
     checkpoint_depth: usize,
-) -> Result<Option<(BlockHeight, Checkpoint)>, Error> {
+) -> Result<Option<(BlockHeight, Checkpoint)>, rusqlite::Error> {
     if checkpoint_depth == 0 {
         return Ok(None);
     }
@@ -806,27 +805,21 @@ pub(crate) fn get_checkpoint_at_depth(
                 ))
             },
         )
-        .optional()
-        .map_err(Error::Query)?;
+        .optional()?;
 
     checkpoint_parts
         .map(|(checkpoint_id, pos_opt)| {
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT mark_removed_position
+            let mut stmt = conn.prepare_cached(&format!(
+                "SELECT mark_removed_position
                     FROM {}_tree_checkpoint_marks_removed
                     WHERE checkpoint_id = ?",
-                    table_prefix
-                ))
-                .map_err(Error::Query)?;
-            let mark_removed_rows = stmt
-                .query([u32::from(checkpoint_id)])
-                .map_err(Error::Query)?;
+                table_prefix
+            ))?;
+            let mark_removed_rows = stmt.query([u32::from(checkpoint_id)])?;
 
             let marks_removed = mark_removed_rows
                 .mapped(|row| row.get::<_, u64>(0).map(Position::from))
-                .collect::<Result<BTreeSet<_>, _>>()
-                .map_err(Error::Query)?;
+                .collect::<Result<BTreeSet<_>, _>>()?;
 
             Ok((
                 checkpoint_id,
@@ -1168,6 +1161,7 @@ mod tests {
 
         // simulate discovery of a note
         let mut tree = ShardTree::<_, 6, 3>::new(store, 10);
+        let checkpoint_height = BlockHeight::from(3);
         tree.batch_insert(
             Position::from(24),
             ('a'..='h').into_iter().map(|c| {
@@ -1176,7 +1170,7 @@ mod tests {
                     match c {
                         'c' => Retention::Marked,
                         'h' => Retention::Checkpoint {
-                            id: BlockHeight::from(3),
+                            id: checkpoint_height,
                             is_marked: false,
                         },
                         _ => Retention::Ephemeral,
@@ -1187,7 +1181,9 @@ mod tests {
         .unwrap();
 
         // construct a witness for the note
-        let witness = tree.witness(Position::from(26), 0).unwrap();
+        let witness = tree
+            .witness_at_checkpoint_id(Position::from(26), &checkpoint_height)
+            .unwrap();
         assert_eq!(
             witness.path_elems(),
             &[
