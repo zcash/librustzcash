@@ -403,16 +403,12 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             .ok_or(BalanceError::Overflow)
     }
 
-    /// Builds a transaction from the configured spends and outputs.
+    /// Reports the calculated fee given the specified fee rule.
     ///
-    /// Upon success, returns a tuple containing the final transaction, and the
-    /// [`SaplingMetadata`] generated during the build process.
-    pub fn build<FR: FeeRule>(
-        self,
-        prover: &impl TxProver,
-        fee_rule: &FR,
-    ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
-        let fee = fee_rule
+    /// This fee is a function of the spends and outputs that have been added to the builder,
+    /// pursuant to the specified [`FeeRule`].
+    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<Amount, Error<FR::Error>> {
+        fee_rule
             .fee_required(
                 &self.params,
                 self.target_height,
@@ -432,7 +428,19 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                     n => n,
                 },
             )
-            .map_err(Error::Fee)?;
+            .map_err(Error::Fee)
+    }
+
+    /// Builds a transaction from the configured spends and outputs.
+    ///
+    /// Upon success, returns a tuple containing the final transaction, and the
+    /// [`SaplingMetadata`] generated during the build process.
+    pub fn build<FR: FeeRule>(
+        self,
+        prover: &impl TxProver,
+        fee_rule: &FR,
+    ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
+        let fee = self.get_fee(fee_rule)?;
         self.build_internal(prover, fee)
     }
 
