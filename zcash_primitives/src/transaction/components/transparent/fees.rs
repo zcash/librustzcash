@@ -9,7 +9,7 @@ use crate::{
 
 /// This trait provides a minimized view of a transparent input suitable for use in
 /// fee and change computation.
-pub trait InputView {
+pub trait InputView: std::fmt::Debug {
     /// The outpoint to which the input refers.
     fn outpoint(&self) -> &OutPoint;
     /// The previous output being spent.
@@ -18,7 +18,7 @@ pub trait InputView {
 
 /// This trait provides a minimized view of a transparent output suitable for use in
 /// fee and change computation.
-pub trait OutputView {
+pub trait OutputView: std::fmt::Debug {
     /// Returns the value of the output being created.
     fn value(&self) -> Amount;
     /// Returns the script corresponding to the newly created output.
