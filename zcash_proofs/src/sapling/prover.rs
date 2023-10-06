@@ -11,7 +11,7 @@ use zcash_primitives::{
         value::{CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment},
         Diversifier, MerklePath, Note, PaymentAddress, ProofGenerationKey, Rseed,
     },
-    transaction::components::Amount,
+    transaction::components::{sapling::GrothProofBytes, Amount, GROTH_PROOF_SIZE},
 };
 
 use crate::{OutputParameters, SpendParameters};
@@ -64,6 +64,14 @@ impl SpendProver for SpendParameters {
     fn create_proof<R: RngCore>(&self, circuit: Spend, rng: &mut R) -> Self::Proof {
         create_random_proof(circuit, &self.0, rng).expect("proving should not fail")
     }
+
+    fn encode_proof(proof: Self::Proof) -> GrothProofBytes {
+        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
+        proof
+            .write(&mut zkproof[..])
+            .expect("should be able to serialize a proof");
+        zkproof
+    }
 }
 
 impl OutputProver for OutputParameters {
@@ -93,6 +101,14 @@ impl OutputProver for OutputParameters {
 
     fn create_proof<R: RngCore>(&self, circuit: Output, rng: &mut R) -> Self::Proof {
         create_random_proof(circuit, &self.0, rng).expect("proving should not fail")
+    }
+
+    fn encode_proof(proof: Self::Proof) -> GrothProofBytes {
+        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
+        proof
+            .write(&mut zkproof[..])
+            .expect("should be able to serialize a proof");
+        zkproof
     }
 }
 

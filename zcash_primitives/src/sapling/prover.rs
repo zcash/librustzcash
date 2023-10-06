@@ -9,7 +9,7 @@ use crate::{
         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
         MerklePath,
     },
-    transaction::components::{Amount, GROTH_PROOF_SIZE},
+    transaction::components::{sapling::GrothProofBytes, Amount, GROTH_PROOF_SIZE},
 };
 
 use super::{Diversifier, PaymentAddress, ProofGenerationKey, Rseed};
@@ -42,6 +42,11 @@ pub trait SpendProver {
         circuit: sapling::circuit::Spend,
         rng: &mut R,
     ) -> Self::Proof;
+
+    /// Encodes the given Sapling [`SpendDescription`] proof, erasing its type.
+    ///
+    /// [`SpendDescription`]: crate::transaction::components::SpendDescription
+    fn encode_proof(proof: Self::Proof) -> GrothProofBytes;
 }
 
 /// Interface for creating Sapling Output proofs.
@@ -68,6 +73,11 @@ pub trait OutputProver {
         circuit: sapling::circuit::Output,
         rng: &mut R,
     ) -> Self::Proof;
+
+    /// Encodes the given Sapling [`OutputDescription`] proof, erasing its type.
+    ///
+    /// [`OutputDescription`]: crate::transaction::components::OutputDescription
+    fn encode_proof(proof: Self::Proof) -> GrothProofBytes;
 }
 
 /// Interface for creating zero-knowledge proofs for shielded transactions.
