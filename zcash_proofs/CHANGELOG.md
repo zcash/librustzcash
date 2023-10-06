@@ -8,6 +8,8 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - `zcash_proofs::{SpendParameters, OutputParameters}`
+- `impl zcash_primitives::sapling::prover::{SpendProver, OutputProver}` for
+  `zcash_proofs::prover::LocalTxProver`
 
 ### Changed
 - The new `SpendParameters` and `OutputParameters` types are used in the
@@ -110,7 +112,7 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_proofs::ZcashParameters`
 - `zcash_proofs::parse_parameters`
-- `zcash_proofs::prover::LocalProver::from_bytes`
+- `zcash_proofs::prover::LocalTxProver::from_bytes`
 - The `zcash_proofs::constants` module, containing constants and helpers used by
   the `zcash_proofs::circuit::ecc::fixed_base_multiplication` gadget:
   - The `FixedGeneratorOwned` type alias.

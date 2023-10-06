@@ -1,16 +1,17 @@
 //! Abstractions over the proving system and parameters for ease of use.
 
-use bellman::groth16::PreparedVerifyingKey;
+use bellman::groth16::{PreparedVerifyingKey, Proof};
 use bls12_381::Bls12;
 use std::path::Path;
 use zcash_primitives::{
     sapling::{
-        prover::TxProver,
+        self,
+        prover::{OutputProver, SpendProver, TxProver},
         redjubjub::{PublicKey, Signature},
-        value::ValueCommitment,
+        value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
         Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
     },
-    transaction::components::{Amount, GROTH_PROOF_SIZE},
+    transaction::components::{sapling::GrothProofBytes, Amount, GROTH_PROOF_SIZE},
 };
 
 use crate::{
@@ -140,6 +141,78 @@ impl LocalTxProver {
             spend_vk: p.spend_vk,
             output_params: p.output_params,
         }
+    }
+}
+
+impl SpendProver for LocalTxProver {
+    type Proof = Proof<Bls12>;
+
+    fn prepare_circuit(
+        proof_generation_key: ProofGenerationKey,
+        diversifier: Diversifier,
+        rseed: Rseed,
+        value: NoteValue,
+        alpha: jubjub::Fr,
+        rcv: ValueCommitTrapdoor,
+        anchor: bls12_381::Scalar,
+        merkle_path: MerklePath,
+    ) -> Option<sapling::circuit::Spend> {
+        SpendParameters::prepare_circuit(
+            proof_generation_key,
+            diversifier,
+            rseed,
+            value,
+            alpha,
+            rcv,
+            anchor,
+            merkle_path,
+        )
+    }
+
+    fn create_proof<R: rand_core::RngCore>(
+        &self,
+        circuit: sapling::circuit::Spend,
+        rng: &mut R,
+    ) -> Self::Proof {
+        self.spend_params.create_proof(circuit, rng)
+    }
+
+    fn encode_proof(proof: Self::Proof) -> GrothProofBytes {
+        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
+        proof
+            .write(&mut zkproof[..])
+            .expect("should be able to serialize a proof");
+        zkproof
+    }
+}
+
+impl OutputProver for LocalTxProver {
+    type Proof = Proof<Bls12>;
+
+    fn prepare_circuit(
+        esk: jubjub::Fr,
+        payment_address: PaymentAddress,
+        rcm: jubjub::Fr,
+        value: NoteValue,
+        rcv: ValueCommitTrapdoor,
+    ) -> sapling::circuit::Output {
+        OutputParameters::prepare_circuit(esk, payment_address, rcm, value, rcv)
+    }
+
+    fn create_proof<R: rand_core::RngCore>(
+        &self,
+        circuit: sapling::circuit::Output,
+        rng: &mut R,
+    ) -> Self::Proof {
+        self.output_params.create_proof(circuit, rng)
+    }
+
+    fn encode_proof(proof: Self::Proof) -> GrothProofBytes {
+        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
+        proof
+            .write(&mut zkproof[..])
+            .expect("should be able to serialize a proof");
+        zkproof
     }
 }
 
