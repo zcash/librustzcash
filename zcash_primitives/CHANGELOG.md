@@ -16,6 +16,9 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::components::sapling`:
   - `Bundle::try_map_authorization`
   - `TryMapAuth`
+  - `impl {MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)` helpers to
+    enable calling `Bundle::{map_authorization, try_map_authorization}` with a
+    set of closures.
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
 
