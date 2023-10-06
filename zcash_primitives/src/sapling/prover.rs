@@ -133,19 +133,103 @@ pub trait TxProver {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod mock {
+    use ff::Field;
     use rand_core::OsRng;
 
-    use super::TxProver;
+    use super::{OutputProver, SpendProver, TxProver};
     use crate::{
         sapling::{
             self,
+            circuit::ValueCommitmentOpening,
             constants::SPENDING_KEY_GENERATOR,
             redjubjub::{PublicKey, Signature},
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
             Diversifier, PaymentAddress, ProofGenerationKey, Rseed,
         },
-        transaction::components::{Amount, GROTH_PROOF_SIZE},
+        transaction::components::{sapling::GrothProofBytes, Amount, GROTH_PROOF_SIZE},
     };
+
+    pub struct MockSpendProver;
+
+    impl SpendProver for MockSpendProver {
+        type Proof = GrothProofBytes;
+
+        fn prepare_circuit(
+            proof_generation_key: ProofGenerationKey,
+            diversifier: Diversifier,
+            _rseed: Rseed,
+            value: NoteValue,
+            alpha: jubjub::Fr,
+            rcv: ValueCommitTrapdoor,
+            anchor: bls12_381::Scalar,
+            _merkle_path: sapling::MerklePath,
+        ) -> Option<sapling::circuit::Spend> {
+            let payment_address = proof_generation_key
+                .to_viewing_key()
+                .ivk()
+                .to_payment_address(diversifier);
+            Some(sapling::circuit::Spend {
+                value_commitment_opening: Some(ValueCommitmentOpening {
+                    value: value.inner(),
+                    randomness: rcv.inner(),
+                }),
+                proof_generation_key: Some(proof_generation_key),
+                payment_address,
+                commitment_randomness: Some(jubjub::Scalar::ZERO),
+                ar: Some(alpha),
+                auth_path: vec![],
+                anchor: Some(anchor),
+            })
+        }
+
+        fn create_proof<R: rand_core::RngCore>(
+            &self,
+            _circuit: sapling::circuit::Spend,
+            _rng: &mut R,
+        ) -> Self::Proof {
+            [0u8; GROTH_PROOF_SIZE]
+        }
+
+        fn encode_proof(proof: Self::Proof) -> GrothProofBytes {
+            proof
+        }
+    }
+
+    pub struct MockOutputProver;
+
+    impl OutputProver for MockOutputProver {
+        type Proof = GrothProofBytes;
+
+        fn prepare_circuit(
+            esk: jubjub::Fr,
+            payment_address: PaymentAddress,
+            rcm: jubjub::Fr,
+            value: NoteValue,
+            rcv: ValueCommitTrapdoor,
+        ) -> sapling::circuit::Output {
+            sapling::circuit::Output {
+                value_commitment_opening: Some(ValueCommitmentOpening {
+                    value: value.inner(),
+                    randomness: rcv.inner(),
+                }),
+                payment_address: Some(payment_address),
+                commitment_randomness: Some(rcm),
+                esk: Some(esk),
+            }
+        }
+
+        fn create_proof<R: rand_core::RngCore>(
+            &self,
+            _circuit: sapling::circuit::Output,
+            _rng: &mut R,
+        ) -> Self::Proof {
+            [0u8; GROTH_PROOF_SIZE]
+        }
+
+        fn encode_proof(proof: Self::Proof) -> GrothProofBytes {
+            proof
+        }
+    }
 
     pub struct MockTxProver;
 
