@@ -20,6 +20,11 @@ use crate::{
 /// [ZIP 317]: https//zips.z.cash/zip-0317
 pub const MINIMUM_FEE: Amount = Amount::const_from_i64(10_000);
 
+/// The marginal fee using the standard [ZIP 317] constants.
+///
+/// [ZIP 317]: https//zips.z.cash/zip-0317
+pub const MARGINAL_FEE: Amount = Amount::const_from_i64(5_000);
+
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
 /// This fee rule supports only P2pkh transparent inputs; an error will be returned if a coin
@@ -42,7 +47,7 @@ impl FeeRule {
     /// [ZIP 317]: https//zips.z.cash/zip-0317
     pub fn standard() -> Self {
         Self {
-            marginal_fee: Amount::from_u64(5000).unwrap(),
+            marginal_fee: MARGINAL_FEE,
             grace_actions: 2,
             p2pkh_standard_input_size: 150,
             p2pkh_standard_output_size: 34,
