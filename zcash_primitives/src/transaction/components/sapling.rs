@@ -99,6 +99,17 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
+/// A fallible map from one bundle authorization to another.
+///
+/// For use with [`Bundle::try_map_authorization`].
+pub trait TryMapAuth<A: Authorization, B: Authorization> {
+    type Error;
+    fn try_map_spend_proof(&mut self, p: A::SpendProof) -> Result<B::SpendProof, Self::Error>;
+    fn try_map_output_proof(&mut self, p: A::OutputProof) -> Result<B::OutputProof, Self::Error>;
+    fn try_map_auth_sig(&mut self, s: A::AuthSig) -> Result<B::AuthSig, Self::Error>;
+    fn try_map_authorization(&mut self, a: A) -> Result<B, Self::Error>;
+}
+
 #[derive(Debug, Clone)]
 pub struct Bundle<A: Authorization> {
     shielded_spends: Vec<SpendDescription<A>>,
@@ -193,6 +204,45 @@ impl<A: Authorization> Bundle<A> {
             value_balance: self.value_balance,
             authorization: f.map_authorization(self.authorization),
         }
+    }
+
+    /// Transitions this bundle from one authorization state to another.
+    pub fn try_map_authorization<B: Authorization, F: TryMapAuth<A, B>>(
+        self,
+        mut f: F,
+    ) -> Result<Bundle<B>, F::Error> {
+        Ok(Bundle {
+            shielded_spends: self
+                .shielded_spends
+                .into_iter()
+                .map(|d| {
+                    Ok(SpendDescription {
+                        cv: d.cv,
+                        anchor: d.anchor,
+                        nullifier: d.nullifier,
+                        rk: d.rk,
+                        zkproof: f.try_map_spend_proof(d.zkproof)?,
+                        spend_auth_sig: f.try_map_auth_sig(d.spend_auth_sig)?,
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+            shielded_outputs: self
+                .shielded_outputs
+                .into_iter()
+                .map(|o| {
+                    Ok(OutputDescription {
+                        cv: o.cv,
+                        cmu: o.cmu,
+                        ephemeral_key: o.ephemeral_key,
+                        enc_ciphertext: o.enc_ciphertext,
+                        out_ciphertext: o.out_ciphertext,
+                        zkproof: f.try_map_output_proof(o.zkproof)?,
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+            value_balance: self.value_balance,
+            authorization: f.try_map_authorization(self.authorization)?,
+        })
     }
 }
 

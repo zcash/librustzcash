@@ -13,6 +13,9 @@ and this library adheres to Rust's notion of
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`
   - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
+- `zcash_primitives::transaction::components::sapling`:
+  - `Bundle::try_map_authorization`
+  - `TryMapAuth`
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
 
