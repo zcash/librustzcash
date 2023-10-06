@@ -4,6 +4,7 @@
 //!
 //! [section 4.2.2]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
 
+use std::fmt;
 use std::io::{self, Read, Write};
 
 use super::{
@@ -44,6 +45,13 @@ pub struct ExpandedSpendingKey {
     pub ask: jubjub::Fr,
     pub nsk: jubjub::Fr,
     pub ovk: OutgoingViewingKey,
+}
+
+impl fmt::Debug for ExpandedSpendingKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExpandedSpendingKey")
+            .finish_non_exhaustive()
+    }
 }
 
 impl ExpandedSpendingKey {
@@ -117,6 +125,14 @@ impl ExpandedSpendingKey {
 pub struct ProofGenerationKey {
     pub ak: jubjub::SubgroupPoint,
     pub nsk: jubjub::Fr,
+}
+
+impl fmt::Debug for ProofGenerationKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProofGenerationKey")
+            .field("ak", &self.ak)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ProofGenerationKey {
@@ -473,15 +489,8 @@ impl SharedSecret {
 pub mod testing {
     use proptest::collection::vec;
     use proptest::prelude::*;
-    use std::fmt::{self, Debug, Formatter};
 
     use super::{ExpandedSpendingKey, FullViewingKey, SaplingIvk};
-
-    impl Debug for ExpandedSpendingKey {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            write!(f, "Spending keys cannot be Debug-formatted.")
-        }
-    }
 
     prop_compose! {
         pub fn arb_expanded_spending_key()(v in vec(any::<u8>(), 32..252)) -> ExpandedSpendingKey {

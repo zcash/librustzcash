@@ -12,6 +12,7 @@ and this library adheres to Rust's notion of
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`
+  - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
 
