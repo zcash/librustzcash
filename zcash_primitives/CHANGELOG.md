@@ -16,6 +16,10 @@ and this library adheres to Rust's notion of
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
 
+### Changed
+- `zcash_primitives::transaction::components::sapling`:
+  - `MapAuth` trait methods now take `&mut self` instead of `&self`.
+
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).

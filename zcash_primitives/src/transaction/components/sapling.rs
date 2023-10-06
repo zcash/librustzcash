@@ -56,11 +56,14 @@ impl Authorization for Authorized {
     type AuthSig = redjubjub::Signature;
 }
 
+/// A map from one bundle authorization to another.
+///
+/// For use with [`Bundle::map_authorization`].
 pub trait MapAuth<A: Authorization, B: Authorization> {
-    fn map_spend_proof(&self, p: A::SpendProof) -> B::SpendProof;
-    fn map_output_proof(&self, p: A::OutputProof) -> B::OutputProof;
-    fn map_auth_sig(&self, s: A::AuthSig) -> B::AuthSig;
-    fn map_authorization(&self, a: A) -> B;
+    fn map_spend_proof(&mut self, p: A::SpendProof) -> B::SpendProof;
+    fn map_output_proof(&mut self, p: A::OutputProof) -> B::OutputProof;
+    fn map_auth_sig(&mut self, s: A::AuthSig) -> B::AuthSig;
+    fn map_authorization(&mut self, a: A) -> B;
 }
 
 /// The identity map.
@@ -71,27 +74,27 @@ pub trait MapAuth<A: Authorization, B: Authorization> {
 /// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
 impl MapAuth<Authorized, Authorized> for () {
     fn map_spend_proof(
-        &self,
+        &mut self,
         p: <Authorized as Authorization>::SpendProof,
     ) -> <Authorized as Authorization>::SpendProof {
         p
     }
 
     fn map_output_proof(
-        &self,
+        &mut self,
         p: <Authorized as Authorization>::OutputProof,
     ) -> <Authorized as Authorization>::OutputProof {
         p
     }
 
     fn map_auth_sig(
-        &self,
+        &mut self,
         s: <Authorized as Authorization>::AuthSig,
     ) -> <Authorized as Authorization>::AuthSig {
         s
     }
 
-    fn map_authorization(&self, a: Authorized) -> Authorized {
+    fn map_authorization(&mut self, a: Authorized) -> Authorized {
         a
     }
 }
@@ -160,7 +163,8 @@ impl<A: Authorization> Bundle<A> {
         &self.authorization
     }
 
-    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, f: F) -> Bundle<B> {
+    /// Transitions this bundle from one authorization state to another.
+    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, mut f: F) -> Bundle<B> {
         Bundle {
             shielded_spends: self
                 .shielded_spends
