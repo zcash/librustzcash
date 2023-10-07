@@ -546,12 +546,26 @@ where
                     .memo
                     .as_ref()
                     .map_or_else(MemoBytes::empty, |m| m.clone());
-                builder.add_sapling_output(
-                    external_ovk,
-                    *ua.sapling().expect("TODO: Add Orchard support to builder"),
-                    payment.amount,
-                    memo.clone(),
-                )?;
+
+                if ua.sapling().is_some() {
+                    builder.add_sapling_output(
+                        external_ovk,
+                        *ua.sapling().unwrap(),
+                        payment.amount,
+                        memo.clone(),
+                    )?;
+                } else if ua.transparent().is_some() {
+                    if payment.memo.is_some() {
+                        return Err(Error::MemoForbidden);
+                    } else {
+                        builder.add_transparent_output(
+                            ua.transparent().unwrap(), 
+                            payment.amount
+                        )?;
+                    }
+                } else {
+                    return Err(Error::UnsupportedOutputType);
+                }
                 sapling_output_meta.push((
                     Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),
                     payment.amount,
