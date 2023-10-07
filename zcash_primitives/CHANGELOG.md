@@ -12,8 +12,19 @@ and this library adheres to Rust's notion of
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`
+  - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
+- `zcash_primitives::transaction::components::sapling`:
+  - `Bundle::try_map_authorization`
+  - `TryMapAuth`
+  - `impl {MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)` helpers to
+    enable calling `Bundle::{map_authorization, try_map_authorization}` with a
+    set of closures.
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
+
+### Changed
+- `zcash_primitives::transaction::components::sapling`:
+  - `MapAuth` trait methods now take `&mut self` instead of `&self`.
 
 ### Removed
 - `zcash_primitives::constants`:

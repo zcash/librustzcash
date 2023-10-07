@@ -1,5 +1,7 @@
 //! The Sapling circuits.
 
+use core::fmt;
+
 use group::{ff::PrimeField, Curve};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
@@ -46,6 +48,7 @@ impl ValueCommitmentOpening {
 }
 
 /// This is an instance of the `Spend` circuit.
+#[derive(Clone)]
 pub struct Spend {
     /// The opening of a Pedersen commitment to the value being spent.
     pub value_commitment_opening: Option<ValueCommitmentOpening>,
@@ -71,7 +74,16 @@ pub struct Spend {
     pub anchor: Option<bls12_381::Scalar>,
 }
 
+impl fmt::Debug for Spend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Spend")
+            .field("anchor", &self.anchor)
+            .finish_non_exhaustive()
+    }
+}
+
 /// This is an output circuit instance.
+#[derive(Clone)]
 pub struct Output {
     /// The opening of a Pedersen commitment to the value being spent.
     pub value_commitment_opening: Option<ValueCommitmentOpening>,
@@ -84,6 +96,12 @@ pub struct Output {
 
     /// The ephemeral secret key for DH with recipient
     pub esk: Option<jubjub::Fr>,
+}
+
+impl fmt::Debug for Output {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Output").finish_non_exhaustive()
+    }
 }
 
 /// Exposes a Pedersen commitment to the value as an
