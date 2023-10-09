@@ -428,6 +428,9 @@ where
 ///
 /// Returns the database identifier for the newly constructed transaction, or an error if
 /// an error occurs in transaction construction, proving, or signing.
+/// 
+/// Note: If the payment includes a recipient with an Orchard-only UA, this will attempt to fallback
+/// to the transparent receiver until full Orchard support is implemented
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
