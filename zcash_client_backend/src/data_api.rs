@@ -556,7 +556,8 @@ pub struct SentTransaction<'a> {
 pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
-    // TODO: Orchard
+    /// The Orchard protocol
+    Orchard
 }
 
 /// A unique identifier for a shielded transaction output

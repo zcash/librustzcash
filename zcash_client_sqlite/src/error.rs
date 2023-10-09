@@ -4,6 +4,7 @@ use std::error;
 use std::fmt;
 
 use shardtree::error::ShardTreeError;
+use zcash_client_backend::data_api::PoolType;
 use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
 use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
 
@@ -98,6 +99,9 @@ pub enum SqliteClientError {
     /// [`WalletWrite::update_chain_tip`]:
     /// zcash_client_backend::data_api::WalletWrite::update_chain_tip
     ChainHeightUnknown,
+
+    /// Unsupported pool type
+    UnsupportedPoolType(PoolType)
 }
 
 impl error::Error for SqliteClientError {
@@ -144,7 +148,8 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AddressNotRecognized(_) => write!(f, "The address associated with a received txo is not identifiable as belonging to the wallet."),
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
             SqliteClientError::CacheMiss(height) => write!(f, "Requested height {} does not exist in the block cache.", height),
-            SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`")
+            SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
+            SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {:?}", t)
         }
     }
 }

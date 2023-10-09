@@ -136,6 +136,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     match pool_type {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
+        PoolType::Shielded(ShieldedProtocol::Orchard) => 4i64
     }
 }
 
@@ -758,7 +759,12 @@ pub(crate) fn get_received_memo(
     conn: &rusqlite::Connection,
     note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
-    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
+    let protocol = note_id.protocol();
+    if let ShieldedProtocol::Orchard = protocol {
+        return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(protocol)));
+    }
+
+    let memo_bytes: Option<Vec<_>> = match protocol {
         ShieldedProtocol::Sapling => conn
             .query_row(
                 "SELECT memo FROM sapling_received_notes
@@ -773,6 +779,7 @@ pub(crate) fn get_received_memo(
             )
             .optional()?
             .flatten(),
+        ShieldedProtocol::Orchard => None
     };
 
     memo_bytes

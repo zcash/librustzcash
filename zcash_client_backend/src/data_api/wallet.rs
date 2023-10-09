@@ -207,6 +207,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
         GreedyInputSelectorError<BalanceError, DbT::NoteRef>,
         Infallible,
         DbT::NoteRef,
+        PoolType,
     >,
 >
 where
@@ -310,6 +311,7 @@ pub fn spend<DbT, ParamsT, InputsT>(
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
         DbT::NoteRef,
+        PoolType,
     >,
 >
 where
@@ -364,6 +366,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
         DbT::NoteRef,
+        PoolType,
     >,
 >
 where
@@ -444,6 +447,7 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
         InputsErrT,
         FeeRuleT::Error,
         DbT::NoteRef,
+        PoolType,
     >,
 >
 where
@@ -489,7 +493,7 @@ where
 
     let checkpoint_depth = wallet_db.get_checkpoint_depth(min_confirmations)?;
 
-    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _>>(|sapling_tree| {
+    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|sapling_tree| {
         for selected in proposal.sapling_inputs() {
             let (note, key, merkle_path) = select_key_for_note(
                 sapling_tree,
@@ -547,24 +551,24 @@ where
                     .as_ref()
                     .map_or_else(MemoBytes::empty, |m| m.clone());
 
-                if ua.sapling().is_some() {
+                if let Some(sapling_receiver) = ua.sapling() {
                     builder.add_sapling_output(
                         external_ovk,
-                        *ua.sapling().unwrap(),
+                        *sapling_receiver,
                         payment.amount,
                         memo.clone(),
                     )?;
-                } else if ua.transparent().is_some() {
+                } else if let Some(taddr) = ua.transparent() {
                     if payment.memo.is_some() {
                         return Err(Error::MemoForbidden);
                     } else {
                         builder.add_transparent_output(
-                            ua.transparent().unwrap(), 
+                            taddr, 
                             payment.amount
                         )?;
                     }
                 } else {
-                    return Err(Error::UnsupportedOutputType);
+                    return Err(Error::UnsupportedPoolType(PoolType::Shielded(ShieldedProtocol::Orchard)));
                 }
                 sapling_output_meta.push((
                     Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),

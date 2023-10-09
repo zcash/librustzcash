@@ -22,7 +22,7 @@ use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
-pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, NoteRef> {
+pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, NoteRef, PoolType> {
     /// An error occurred retrieving data from the underlying data source
     DataSource(DataSourceError),
 
@@ -54,8 +54,8 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, N
     /// It is forbidden to provide a memo when constructing a transparent output.
     MemoForbidden,
 
-    /// Attempted to create a spend to an unsupported output type (i.e. Orchard)
-    UnsupportedOutputType,
+    /// Attempted to create a spend to an unsupported pool type (currently, Orchard).
+    UnsupportedPoolType(PoolType),
 
     /// A note being spent does not correspond to either the internal or external
     /// full viewing key for an account.
@@ -68,13 +68,14 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError, N
     ChildIndexOutOfRange(DiversifierIndex),
 }
 
-impl<DE, CE, SE, FE, N> fmt::Display for Error<DE, CE, SE, FE, N>
+impl<DE, CE, SE, FE, N, PT> fmt::Display for Error<DE, CE, SE, FE, N, PT>
 where
     DE: fmt::Display,
     CE: fmt::Display,
     SE: fmt::Display,
     FE: fmt::Display,
     N: fmt::Display,
+    PT: fmt::Display
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
@@ -114,7 +115,7 @@ where
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
-            Error::UnsupportedOutputType => write!(f, "Attempted to create spend to an unsupported output type"),
+            Error::UnsupportedPoolType(t) => write!(f, "Attempted to create spend to an unsupported pool type: {}", t),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
             #[cfg(feature = "transparent-inputs")]
@@ -133,13 +134,14 @@ where
     }
 }
 
-impl<DE, CE, SE, FE, N> error::Error for Error<DE, CE, SE, FE, N>
+impl<DE, CE, SE, FE, N, PT> error::Error for Error<DE, CE, SE, FE, N, PT>
 where
     DE: Debug + Display + error::Error + 'static,
     CE: Debug + Display + error::Error + 'static,
     SE: Debug + Display + error::Error + 'static,
     FE: Debug + Display + 'static,
     N: Debug + Display,
+    PT: Debug + Display
 {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
@@ -152,19 +154,19 @@ where
     }
 }
 
-impl<DE, CE, SE, FE, N> From<builder::Error<FE>> for Error<DE, CE, SE, FE, N> {
+impl<DE, CE, SE, FE, N, PT> From<builder::Error<FE>> for Error<DE, CE, SE, FE, N, PT> {
     fn from(e: builder::Error<FE>) -> Self {
         Error::Builder(e)
     }
 }
 
-impl<DE, CE, SE, FE, N> From<BalanceError> for Error<DE, CE, SE, FE, N> {
+impl<DE, CE, SE, FE, N, PT> From<BalanceError> for Error<DE, CE, SE, FE, N, PT> {
     fn from(e: BalanceError) -> Self {
         Error::BalanceError(e)
     }
 }
 
-impl<DE, CE, SE, FE, N> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE, N> {
+impl<DE, CE, SE, FE, N, PT> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE, N, PT> {
     fn from(e: InputSelectorError<DE, SE>) -> Self {
         match e {
             InputSelectorError::DataSource(e) => Error::DataSource(e),
@@ -181,19 +183,19 @@ impl<DE, CE, SE, FE, N> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, F
     }
 }
 
-impl<DE, CE, SE, FE, N> From<sapling::builder::Error> for Error<DE, CE, SE, FE, N> {
+impl<DE, CE, SE, FE, N, PT> From<sapling::builder::Error> for Error<DE, CE, SE, FE, N, PT> {
     fn from(e: sapling::builder::Error) -> Self {
         Error::Builder(builder::Error::SaplingBuild(e))
     }
 }
 
-impl<DE, CE, SE, FE, N> From<transparent::builder::Error> for Error<DE, CE, SE, FE, N> {
+impl<DE, CE, SE, FE, N, PT> From<transparent::builder::Error> for Error<DE, CE, SE, FE, N, PT> {
     fn from(e: transparent::builder::Error) -> Self {
         Error::Builder(builder::Error::TransparentBuild(e))
     }
 }
 
-impl<DE, CE, SE, FE, N> From<ShardTreeError<CE>> for Error<DE, CE, SE, FE, N> {
+impl<DE, CE, SE, FE, N, PT> From<ShardTreeError<CE>> for Error<DE, CE, SE, FE, N, PT> {
     fn from(e: ShardTreeError<CE>) -> Self {
         Error::CommitmentTree(e)
     }
