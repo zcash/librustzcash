@@ -15,7 +15,7 @@ use tempfile::NamedTempFile;
 use tempfile::TempDir;
 
 use zcash_client_backend::data_api::chain::ScanSummary;
-use zcash_client_backend::data_api::{AccountBalance, WalletRead};
+use zcash_client_backend::data_api::{AccountBalance, WalletRead, PoolType};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::RecipientAddress,
@@ -446,6 +446,7 @@ impl<Cache> TestState<Cache> {
             GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
             Infallible,
             ReceivedNoteId,
+            PoolType,
         >,
     > {
         let params = self.network();
@@ -479,6 +480,7 @@ impl<Cache> TestState<Cache> {
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
             ReceivedNoteId,
+            PoolType,
         >,
     >
     where
@@ -513,6 +515,7 @@ impl<Cache> TestState<Cache> {
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
             ReceivedNoteId,
+            PoolType,
         >,
     >
     where
@@ -579,6 +582,7 @@ impl<Cache> TestState<Cache> {
             Infallible,
             FeeRuleT::Error,
             ReceivedNoteId,
+            PoolType,
         >,
     >
     where
