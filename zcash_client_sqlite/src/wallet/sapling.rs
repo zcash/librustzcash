@@ -465,7 +465,7 @@ pub(crate) mod tests {
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
             AccountBirthday, Ratio, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
-            WalletWrite, PoolType,
+            WalletWrite,
         },
         decrypt_transaction,
         fees::{fixed, zip317, DustOutputPolicy},
@@ -983,7 +983,6 @@ pub(crate) mod tests {
                 GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
                 Infallible,
                 ReceivedNoteId,
-                PoolType,
             >,
         > {
             let txid = st.create_spend_to_address(

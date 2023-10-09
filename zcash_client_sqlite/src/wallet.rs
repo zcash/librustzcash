@@ -136,7 +136,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     match pool_type {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
-        PoolType::Shielded(ShieldedProtocol::Orchard) => 4i64
+        PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64
     }
 }
 

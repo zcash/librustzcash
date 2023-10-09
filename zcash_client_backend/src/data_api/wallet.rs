@@ -207,7 +207,6 @@ pub fn create_spend_to_address<DbT, ParamsT>(
         GreedyInputSelectorError<BalanceError, DbT::NoteRef>,
         Infallible,
         DbT::NoteRef,
-        PoolType,
     >,
 >
 where
@@ -311,7 +310,6 @@ pub fn spend<DbT, ParamsT, InputsT>(
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
         DbT::NoteRef,
-        PoolType,
     >,
 >
 where
@@ -366,7 +364,6 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
         DbT::NoteRef,
-        PoolType,
     >,
 >
 where
@@ -450,7 +447,6 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
         InputsErrT,
         FeeRuleT::Error,
         DbT::NoteRef,
-        PoolType,
     >,
 >
 where
@@ -496,7 +492,7 @@ where
 
     let checkpoint_depth = wallet_db.get_checkpoint_depth(min_confirmations)?;
 
-    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _, _>>(|sapling_tree| {
+    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _>>(|sapling_tree| {
         for selected in proposal.sapling_inputs() {
             let (note, key, merkle_path) = select_key_for_note(
                 sapling_tree,
