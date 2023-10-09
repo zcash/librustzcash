@@ -37,7 +37,7 @@ use crate::{
 pub mod input_selection;
 use input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector};
 
-use super::ShieldedProtocol;
+use super::{NoteId, ShieldedProtocol};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -206,7 +206,6 @@ pub fn create_spend_to_address<DbT, ParamsT>(
         <DbT as WalletCommitmentTrees>::Error,
         GreedyInputSelectorError<BalanceError, DbT::NoteRef>,
         Infallible,
-        DbT::NoteRef,
     >,
 >
 where
@@ -309,7 +308,6 @@ pub fn spend<DbT, ParamsT, InputsT>(
         <DbT as WalletCommitmentTrees>::Error,
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
     >,
 >
 where
@@ -358,13 +356,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     min_confirmations: NonZeroU32,
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
-    Error<
-        DbT::Error,
-        CommitmentTreeErrT,
-        InputsT::Error,
-        <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
-    >,
+    Error<DbT::Error, CommitmentTreeErrT, InputsT::Error, <InputsT::FeeRule as FeeRule>::Error>,
 >
 where
     DbT: WalletWrite,
@@ -395,13 +387,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     min_confirmations: NonZeroU32,
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
-    Error<
-        DbT::Error,
-        CommitmentTreeErrT,
-        InputsT::Error,
-        <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
-    >,
+    Error<DbT::Error, CommitmentTreeErrT, InputsT::Error, <InputsT::FeeRule as FeeRule>::Error>,
 >
 where
     ParamsT: consensus::Parameters,
@@ -443,7 +429,6 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
         <DbT as WalletCommitmentTrees>::Error,
         InputsErrT,
         FeeRuleT::Error,
-        DbT::NoteRef,
     >,
 >
 where
@@ -488,8 +473,7 @@ where
     let mut builder = Builder::new(params.clone(), proposal.min_target_height(), None);
 
     let checkpoint_depth = wallet_db.get_checkpoint_depth(min_confirmations)?;
-
-    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _>>(|sapling_tree| {
+    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
         for selected in proposal.sapling_inputs() {
             let (note, key, merkle_path) = select_key_for_note(
                 sapling_tree,
@@ -498,7 +482,14 @@ where
                 &dfvk,
                 checkpoint_depth,
             )?
-            .ok_or(Error::NoteMismatch(selected.internal_note_id().clone()))?;
+            .ok_or_else(|| {
+                Error::NoteMismatch(NoteId {
+                    txid: *selected.txid(),
+                    protocol: ShieldedProtocol::Sapling,
+                    output_index: selected.output_index(),
+                })
+            })?;
+
             builder.add_sapling_spend(key, selected.diversifier(), note, merkle_path)?;
         }
         Ok(())
@@ -724,7 +715,6 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
         <DbT as WalletCommitmentTrees>::Error,
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
     >,
 >
 where

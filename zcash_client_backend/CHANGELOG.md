@@ -18,6 +18,10 @@ and this library adheres to Rust's notion of
 - The fields of `zcash_client_backend::wallet::ReceivedSaplingNote` are now
   private. Use `ReceivedSaplingNote::from_parts` for construction instead.
   Accessor methods are provided for each previously-public field.
+- `zcash_client_backend::data_api` changes:
+  - The `NoteMismatch` variant of `data_api::error::Error` now wraps a
+    `data_api::NoteId` instead of a backend-specific note identifier. The
+    related `NoteRef` type parameter has been removed from `data_api::error::Error`.
 
 ## [0.10.0] - 2023-09-25
 

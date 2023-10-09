@@ -986,7 +986,6 @@ pub(crate) mod tests {
                 commitment_tree::Error,
                 GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
                 Infallible,
-                ReceivedNoteId,
             >,
         > {
             let txid = st.create_spend_to_address(
