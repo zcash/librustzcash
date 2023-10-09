@@ -2,7 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt::Debug,
+    fmt::{self, Debug},
     io,
     num::{NonZeroU32, TryFromIntError},
 };
@@ -602,6 +602,16 @@ pub enum PoolType {
     Transparent,
     /// A shielded value pool.
     Shielded(ShieldedProtocol),
+}
+
+impl fmt::Display for PoolType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PoolType::Transparent => f.write_str("Transparent"),
+            PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
+            PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
+        }
+    }
 }
 
 /// A type that represents the recipient of a transaction output; a recipient address (and, for

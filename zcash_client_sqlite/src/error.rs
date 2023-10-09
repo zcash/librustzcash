@@ -149,7 +149,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::CommitmentTree(err) => write!(f, "An error occurred accessing or updating note commitment tree data: {}.", err),
             SqliteClientError::CacheMiss(height) => write!(f, "Requested height {} does not exist in the block cache.", height),
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
-            SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {:?}", t)
+            SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t)
         }
     }
 }
