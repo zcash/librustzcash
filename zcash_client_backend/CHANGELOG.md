@@ -8,7 +8,9 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::ShieldedProtocol` has a new variant for `Orchard`, allowing for better reporting to callers trying to perform actions using `Orchard` before it is fully supported.
+- `zcash_client_backend::data_api::ShieldedProtocol` has a new variant for `Orchard`,
+  allowing for better reporting to callers trying to perform actions using `Orchard`
+  before it is fully supported.
 - `zcash_client_backend::data_api::error::Error` has new error variant:
   - `Error::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
 
