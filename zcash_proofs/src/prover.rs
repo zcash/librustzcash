@@ -99,7 +99,7 @@ impl LocalTxProver {
     ///
     /// match LocalTxProver::with_default_location() {
     ///     Some(tx_prover) => (),
-    ///     None => println!("Please run zcash-fetch-params or fetch-params.sh to download the parameters."),
+    ///     None => println!("Cannot locate the Zcash parameters. Please copy sapling-spend.params and sapling-output.params into the default location."),
     /// }
     /// ```
     ///

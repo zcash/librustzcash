@@ -156,7 +156,7 @@ where
 /// let tx_prover = match LocalTxProver::with_default_location() {
 ///     Some(tx_prover) => tx_prover,
 ///     None => {
-///         panic!("Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.");
+///         panic!("Cannot locate the Zcash parameters. Please copy sapling-spend.params and sapling-output.params into the default location.");
 ///     }
 /// };
 ///
