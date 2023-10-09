@@ -21,6 +21,8 @@ and this library adheres to Rust's notion of
     set of closures.
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
+- MARGINAL_FEE pub const Amount:
+  - `zcash_primitives::transaction::fees::zip317::MARGINAL_FEE`
 
 ### Changed
 - `zcash_primitives::transaction::components::sapling`:
