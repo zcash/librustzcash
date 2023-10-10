@@ -557,7 +557,7 @@ pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
     /// The Orchard protocol
-    Orchard
+    Orchard,
 }
 
 /// A unique identifier for a shielded transaction output

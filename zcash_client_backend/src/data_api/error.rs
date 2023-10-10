@@ -15,8 +15,8 @@ use zcash_primitives::{
     zip32::AccountId,
 };
 
-use crate::data_api::PoolType;
 use crate::data_api::wallet::input_selection::InputSelectorError;
+use crate::data_api::PoolType;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};

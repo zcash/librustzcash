@@ -425,7 +425,7 @@ where
 ///
 /// Returns the database identifier for the newly constructed transaction, or an error if
 /// an error occurs in transaction construction, proving, or signing.
-/// 
+///
 /// Note: If the payment includes a recipient with an Orchard-only UA, this will attempt
 /// to fall back to the transparent receiver until full Orchard support is implemented.
 #[allow(clippy::too_many_arguments)]
@@ -558,7 +558,10 @@ where
                         memo.clone(),
                     )?;
                     sapling_output_meta.push((
-                        Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),
+                        Recipient::Unified(
+                            ua.clone(),
+                            PoolType::Shielded(ShieldedProtocol::Sapling),
+                        ),
                         payment.amount,
                         Some(memo),
                     ));
@@ -566,13 +569,12 @@ where
                     if payment.memo.is_some() {
                         return Err(Error::MemoForbidden);
                     } else {
-                        builder.add_transparent_output(
-                            taddr, 
-                            payment.amount
-                        )?;
+                        builder.add_transparent_output(taddr, payment.amount)?;
                     }
                 } else {
-                    return Err(Error::UnsupportedPoolType(PoolType::Shielded(ShieldedProtocol::Orchard)));
+                    return Err(Error::UnsupportedPoolType(PoolType::Shielded(
+                        ShieldedProtocol::Orchard,
+                    )));
                 }
             }
             RecipientAddress::Shielded(addr) => {

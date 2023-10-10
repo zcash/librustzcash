@@ -101,7 +101,7 @@ pub enum SqliteClientError {
     ChainHeightUnknown,
 
     /// Unsupported pool type
-    UnsupportedPoolType(PoolType)
+    UnsupportedPoolType(PoolType),
 }
 
 impl error::Error for SqliteClientError {
