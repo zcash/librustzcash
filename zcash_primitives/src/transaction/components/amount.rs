@@ -5,7 +5,7 @@ use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 use memuse::DynamicUsage;
 use orchard::value as orchard;
 
-use crate::sapling::value::NoteValue;
+use crate::sapling;
 
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
@@ -316,9 +316,9 @@ impl From<NonNegativeAmount> for u64 {
     }
 }
 
-impl From<NonNegativeAmount> for NoteValue {
+impl From<NonNegativeAmount> for sapling::value::NoteValue {
     fn from(n: NonNegativeAmount) -> Self {
-        NoteValue::from_raw(n.0.try_into().unwrap())
+        sapling::value::NoteValue::from_raw(n.into())
     }
 }
 

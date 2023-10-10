@@ -31,7 +31,7 @@ impl SpendProver for SpendParameters {
     ) -> Option<Spend> {
         // Construct the value commitment
         let value_commitment_opening = ValueCommitmentOpening {
-            value: value.inner(),
+            value,
             randomness: rcv.inner(),
         };
 
@@ -86,7 +86,7 @@ impl OutputProver for OutputParameters {
     ) -> Output {
         // Construct the value commitment for the proof instance
         let value_commitment_opening = ValueCommitmentOpening {
-            value: value.inner(),
+            value,
             randomness: rcv.inner(),
         };
 

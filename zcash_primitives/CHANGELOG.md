@@ -39,6 +39,10 @@ and this library adheres to Rust's notion of
   - `impl From<NonNegativeAmount> for zcash_primitives::sapling::value::NoteValue`
   - `impl Sum<NonNegativeAmount> for Option<NonNegativeAmount>`
   - `impl<'a> Sum<&'a NonNegativeAmount> for Option<NonNegativeAmount>`
+- `zcash_primitives::sapling::circuit::ValueCommitmentOpening::value` is
+  now represented as a `NoteValue` instead of as a bare `u64`.
+- `zcash_primitives::sapling::address::PaymentAddress::create_note` now
+  takes its `value` argument as a `NoteValue` instead of as a bare `u64`.
 
 ### Changed
 - `zcash_primitives::transaction::fees`:

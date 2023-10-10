@@ -170,7 +170,7 @@ pub mod mock {
                 .to_payment_address(diversifier);
             Some(sapling::circuit::Spend {
                 value_commitment_opening: Some(ValueCommitmentOpening {
-                    value: value.inner(),
+                    value,
                     randomness: rcv.inner(),
                 }),
                 proof_generation_key: Some(proof_generation_key),
@@ -209,7 +209,7 @@ pub mod mock {
         ) -> sapling::circuit::Output {
             sapling::circuit::Output {
                 value_commitment_opening: Some(ValueCommitmentOpening {
-                    value: value.inner(),
+                    value,
                     randomness: rcv.inner(),
                 }),
                 payment_address: Some(payment_address),
