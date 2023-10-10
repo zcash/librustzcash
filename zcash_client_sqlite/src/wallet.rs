@@ -779,7 +779,7 @@ pub(crate) fn get_received_memo(
             )
             .optional()?
             .flatten(),
-        ShieldedProtocol::Orchard => None
+        _ => return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(protocol)));
     };
 
     memo_bytes
