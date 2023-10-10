@@ -759,8 +759,7 @@ pub(crate) fn get_received_memo(
     conn: &rusqlite::Connection,
     note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
-    let protocol = note_id.protocol();
-    let memo_bytes: Option<Vec<_>> = match protocol {
+    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
         ShieldedProtocol::Sapling => conn
             .query_row(
                 "SELECT memo FROM sapling_received_notes
@@ -777,7 +776,7 @@ pub(crate) fn get_received_memo(
             .flatten(),
         _ => {
             return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
-                protocol,
+                note_id.protocol(),
             )))
         }
     };
