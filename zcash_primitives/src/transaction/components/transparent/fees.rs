@@ -4,7 +4,7 @@
 use super::TxOut;
 use crate::{
     legacy::Script,
-    transaction::{components::amount::Amount, OutPoint},
+    transaction::{components::amount::NonNegativeAmount, OutPoint},
 };
 
 /// This trait provides a minimized view of a transparent input suitable for use in
@@ -20,13 +20,13 @@ pub trait InputView: std::fmt::Debug {
 /// fee and change computation.
 pub trait OutputView: std::fmt::Debug {
     /// Returns the value of the output being created.
-    fn value(&self) -> Amount;
+    fn value(&self) -> NonNegativeAmount;
     /// Returns the script corresponding to the newly created output.
     fn script_pubkey(&self) -> &Script;
 }
 
 impl OutputView for TxOut {
-    fn value(&self) -> Amount {
+    fn value(&self) -> NonNegativeAmount {
         self.value
     }
 

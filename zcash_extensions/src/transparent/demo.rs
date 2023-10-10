@@ -489,7 +489,7 @@ mod tests {
         transaction::{
             builder::Builder,
             components::{
-                amount::Amount,
+                amount::{Amount, NonNegativeAmount},
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
             },
             fees::fixed,
@@ -828,10 +828,10 @@ mod tests {
             .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
             .unwrap();
 
-        let value = Amount::from_u64(100000).unwrap();
+        let value = NonNegativeAmount::const_from_u64(100000);
         let (h1, h2) = demo_hashes(&preimage_1, &preimage_2);
         builder_a
-            .demo_open(value, h1)
+            .demo_open(value.into(), h1)
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
         let (tx_a, _) = builder_a
@@ -847,9 +847,9 @@ mod tests {
 
         let mut builder_b = demo_builder(tx_height + 1);
         let prevout_a = (OutPoint::new(tx_a.txid(), 0), tze_a.vout[0].clone());
-        let value_xfr = (value - fee_rule.fixed_fee().into()).unwrap();
+        let value_xfr = (value - fee_rule.fixed_fee()).unwrap();
         builder_b
-            .demo_transfer_to_close(prevout_a, value_xfr, preimage_1, h2)
+            .demo_transfer_to_close(prevout_a, value_xfr.into(), preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
         let (tx_b, _) = builder_b
@@ -873,7 +873,7 @@ mod tests {
         builder_c
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                (value_xfr - fee_rule.fixed_fee().into()).unwrap(),
+                (value_xfr - fee_rule.fixed_fee()).unwrap(),
             )
             .unwrap();
 

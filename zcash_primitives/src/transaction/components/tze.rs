@@ -253,7 +253,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_tzeout()(value in arb_nonnegative_amount(), precondition in arb_precondition()) -> TzeOut {
-            TzeOut { value, precondition }
+            TzeOut { value: value.into(), precondition }
         }
     }
 

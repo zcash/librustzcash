@@ -1,12 +1,11 @@
 //! Change strategies designed for use with a fixed fee.
-use std::cmp::Ordering;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
         components::{
-            amount::{Amount, BalanceError, NonNegativeAmount},
+            amount::{BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
             transparent::fees as transparent,
         },
@@ -89,9 +88,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             )
             .unwrap(); // fixed::FeeRule::fee_required is infallible.
 
-        let total_in = (t_in + sapling_in)
-            .and_then(|v| NonNegativeAmount::try_from(v).ok())
-            .ok_or(BalanceError::Overflow)?;
+        let total_in = (t_in + sapling_in).ok_or(BalanceError::Overflow)?;
 
         if (!transparent_inputs.is_empty() || !sapling_inputs.is_empty()) && fee_amount > total_in {
             // For the fixed-fee selection rule, the only time we consider inputs dust is when the fee
@@ -109,62 +106,57 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                     .collect(),
             })
         } else {
-            let total_out = [t_out, sapling_out, fee_amount.into()]
+            let total_out = [t_out, sapling_out, fee_amount]
                 .iter()
-                .sum::<Option<Amount>>()
+                .sum::<Option<NonNegativeAmount>>()
                 .ok_or(BalanceError::Overflow)?;
 
             let overflow = |_| ChangeError::StrategyError(BalanceError::Overflow);
-            let proposed_change =
-                (Amount::from(total_in) - total_out).ok_or(BalanceError::Underflow)?;
-            match proposed_change.cmp(&Amount::zero()) {
-                Ordering::Less => Err(ChangeError::InsufficientFunds {
-                    available: total_in.into(),
-                    required: total_out,
-                }),
-                Ordering::Equal => TransactionBalance::new(vec![], fee_amount).map_err(overflow),
-                Ordering::Greater => {
-                    let proposed_change = NonNegativeAmount::try_from(proposed_change).unwrap();
-                    let dust_threshold = dust_output_policy
-                        .dust_threshold()
-                        .unwrap_or_else(|| self.fee_rule.fixed_fee());
 
-                    if dust_threshold > proposed_change {
-                        match dust_output_policy.action() {
-                            DustAction::Reject => {
-                                let shortfall = (dust_threshold - proposed_change)
-                                    .ok_or(BalanceError::Underflow)?;
-                                Err(ChangeError::InsufficientFunds {
-                                    available: total_in.into(),
-                                    required: (total_in + shortfall)
-                                        .ok_or(BalanceError::Overflow)?
-                                        .into(),
-                                })
-                            }
-                            DustAction::AllowDustChange => TransactionBalance::new(
-                                vec![ChangeValue::sapling(
-                                    proposed_change,
-                                    self.change_memo.clone(),
-                                )],
-                                fee_amount,
-                            )
-                            .map_err(overflow),
-                            DustAction::AddDustToFee => TransactionBalance::new(
-                                vec![],
-                                (fee_amount + proposed_change).ok_or(BalanceError::Overflow)?,
-                            )
-                            .map_err(overflow),
+            let proposed_change = (total_in - total_out).ok_or(ChangeError::InsufficientFunds {
+                available: total_in,
+                required: total_out,
+            })?;
+            if proposed_change == NonNegativeAmount::ZERO {
+                TransactionBalance::new(vec![], fee_amount).map_err(overflow)
+            } else {
+                let dust_threshold = dust_output_policy
+                    .dust_threshold()
+                    .unwrap_or_else(|| self.fee_rule.fixed_fee());
+
+                if dust_threshold > proposed_change {
+                    match dust_output_policy.action() {
+                        DustAction::Reject => {
+                            let shortfall = (dust_threshold - proposed_change)
+                                .ok_or(BalanceError::Underflow)?;
+                            Err(ChangeError::InsufficientFunds {
+                                available: total_in,
+                                required: (total_in + shortfall).ok_or(BalanceError::Overflow)?,
+                            })
                         }
-                    } else {
-                        TransactionBalance::new(
+                        DustAction::AllowDustChange => TransactionBalance::new(
                             vec![ChangeValue::sapling(
                                 proposed_change,
                                 self.change_memo.clone(),
                             )],
                             fee_amount,
                         )
-                        .map_err(overflow)
+                        .map_err(overflow),
+                        DustAction::AddDustToFee => TransactionBalance::new(
+                            vec![],
+                            (fee_amount + proposed_change).ok_or(BalanceError::Overflow)?,
+                        )
+                        .map_err(overflow),
                     }
+                } else {
+                    TransactionBalance::new(
+                        vec![ChangeValue::sapling(
+                            proposed_change,
+                            self.change_memo.clone(),
+                        )],
+                        fee_amount,
+                    )
+                    .map_err(overflow)
                 }
             }
         }
@@ -176,10 +168,7 @@ mod tests {
     use zcash_primitives::{
         consensus::{Network, NetworkUpgrade, Parameters},
         transaction::{
-            components::{
-                amount::{Amount, NonNegativeAmount},
-                transparent::TxOut,
-            },
+            components::{amount::NonNegativeAmount, transparent::TxOut},
             fees::fixed::FeeRule as FixedFeeRule,
         },
     };
@@ -209,9 +198,11 @@ mod tests {
             &Vec::<TxOut>::new(),
             &[TestSaplingInput {
                 note_id: 0,
-                value: Amount::from_u64(60000).unwrap(),
+                value: NonNegativeAmount::const_from_u64(60000),
             }],
-            &[SaplingPayment::new(Amount::from_u64(40000).unwrap())],
+            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                40000,
+            ))],
             &DustOutputPolicy::default(),
         );
 
@@ -240,22 +231,24 @@ mod tests {
             &[
                 TestSaplingInput {
                     note_id: 0,
-                    value: Amount::from_u64(40000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(40000),
                 },
                 // enough to pay a fee, plus dust
                 TestSaplingInput {
                     note_id: 0,
-                    value: Amount::from_u64(10100).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(10100),
                 },
             ],
-            &[SaplingPayment::new(Amount::from_u64(40000).unwrap())],
+            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                40000,
+            ))],
             &DustOutputPolicy::default(),
         );
 
         assert_matches!(
             result,
             Err(ChangeError::InsufficientFunds { available, required })
-            if available == Amount::from_u64(50100).unwrap() && required == Amount::from_u64(60000).unwrap()
+            if available == NonNegativeAmount::const_from_u64(50100) && required == NonNegativeAmount::const_from_u64(60000)
         );
     }
 }

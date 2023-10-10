@@ -337,21 +337,14 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         &mut self,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
-        value: Amount,
+        value: NonNegativeAmount,
         memo: MemoBytes,
     ) -> Result<(), sapling_builder::Error> {
-        if value.is_negative() {
-            return Err(sapling_builder::Error::InvalidAmount);
-        }
         self.sapling_builder.add_output(
             &mut self.rng,
             ovk,
             to,
-            NoteValue::from_raw(
-                value
-                    .try_into()
-                    .expect("Cannot create Sapling outputs with negative note values."),
-            ),
+            NoteValue::from_raw(value.into()),
             memo,
         )
     }
@@ -372,7 +365,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     pub fn add_transparent_output(
         &mut self,
         to: &TransparentAddress,
-        value: Amount,
+        value: NonNegativeAmount,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_output(to, value)
     }
@@ -720,7 +713,6 @@ mod tests {
         transaction::components::{
             amount::{Amount, NonNegativeAmount},
             sapling::builder::{self as sapling_builder},
-            transparent::builder::{self as transparent_builder},
         },
         zip32::ExtendedSpendingKey,
     };
@@ -740,29 +732,6 @@ mod tests {
         },
         zip32::AccountId,
     };
-
-    #[test]
-    fn fails_on_negative_output() {
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let ovk = dfvk.fvk().ovk;
-        let to = dfvk.default_address().1;
-
-        let sapling_activation_height = TEST_NETWORK
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap();
-
-        let mut builder = Builder::new(TEST_NETWORK, sapling_activation_height, None);
-        assert_eq!(
-            builder.add_sapling_output(
-                Some(ovk),
-                to,
-                Amount::from_i64(-1).unwrap(),
-                MemoBytes::empty()
-            ),
-            Err(sapling_builder::Error::InvalidAmount)
-        );
-    }
 
     // This test only works with the transparent_inputs feature because we have to
     // be able to create a tx with a valid balance, without using Sapling inputs.
@@ -795,7 +764,7 @@ mod tests {
 
         let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::from(0)).unwrap();
         let prev_coin = TxOut {
-            value: Amount::from_u64(50000).unwrap(),
+            value: NonNegativeAmount::const_from_u64(50000),
             script_pubkey: tsk
                 .to_account_pubkey()
                 .derive_external_ivk()
@@ -816,7 +785,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_u64(40000).unwrap(),
+                NonNegativeAmount::const_from_u64(40000),
             )
             .unwrap();
 
@@ -852,7 +821,7 @@ mod tests {
         builder
             .add_transparent_output(
                 &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_u64(40000).unwrap(),
+                NonNegativeAmount::const_from_u64(40000),
             )
             .unwrap();
 
@@ -861,21 +830,6 @@ mod tests {
         assert_matches!(
             builder.mock_build(),
             Err(Error::SaplingBuild(sapling_builder::Error::BindingSig))
-        );
-    }
-
-    #[test]
-    fn fails_on_negative_transparent_output() {
-        let tx_height = TEST_NETWORK
-            .activation_height(NetworkUpgrade::Sapling)
-            .unwrap();
-        let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
-        assert_eq!(
-            builder.add_transparent_output(
-                &TransparentAddress::PublicKey([0; 20]),
-                Amount::from_i64(-1).unwrap(),
-            ),
-            Err(transparent_builder::Error::InvalidAmount)
         );
     }
 
@@ -913,7 +867,7 @@ mod tests {
                 .add_sapling_output(
                     ovk,
                     to,
-                    Amount::from_u64(50000).unwrap(),
+                    NonNegativeAmount::const_from_u64(50000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
@@ -931,7 +885,7 @@ mod tests {
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
-                    Amount::from_u64(50000).unwrap(),
+                    NonNegativeAmount::const_from_u64(50000),
                 )
                 .unwrap();
             assert_matches!(
@@ -963,14 +917,14 @@ mod tests {
                 .add_sapling_output(
                     ovk,
                     to,
-                    Amount::from_u64(30000).unwrap(),
+                    NonNegativeAmount::const_from_u64(30000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
-                    Amount::from_u64(20000).unwrap(),
+                    NonNegativeAmount::const_from_u64(20000),
                 )
                 .unwrap();
             assert_matches!(
@@ -1007,14 +961,14 @@ mod tests {
                 .add_sapling_output(
                     ovk,
                     to,
-                    Amount::from_u64(30000).unwrap(),
+                    NonNegativeAmount::const_from_u64(30000),
                     MemoBytes::empty(),
                 )
                 .unwrap();
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
-                    Amount::from_u64(20000).unwrap(),
+                    NonNegativeAmount::const_from_u64(20000),
                 )
                 .unwrap();
             assert_matches!(

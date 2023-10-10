@@ -326,10 +326,7 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        transaction::{
-            components::{amount::NonNegativeAmount, Amount},
-            fees::zip317::FeeRule,
-        },
+        transaction::{components::amount::NonNegativeAmount, fees::zip317::FeeRule},
         zip32::ExtendedSpendingKey,
     };
 
@@ -518,13 +515,13 @@ mod tests {
         st.scan_cached_blocks(h2, 1);
         assert_eq!(
             st.get_total_balance(AccountId::from(0)),
-            NonNegativeAmount::from_u64(150_000).unwrap()
+            NonNegativeAmount::const_from_u64(150_000)
         );
 
         // We can spend the received notes
         let req = TransactionRequest::new(vec![Payment {
             recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
-            amount: Amount::from_u64(110_000).unwrap(),
+            amount: NonNegativeAmount::const_from_u64(110_000),
             memo: None,
             label: None,
             message: None,

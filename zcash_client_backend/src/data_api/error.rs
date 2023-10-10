@@ -4,13 +4,11 @@ use std::error;
 use std::fmt::{self, Debug, Display};
 
 use shardtree::error::ShardTreeError;
+use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 use zcash_primitives::{
     transaction::{
         builder,
-        components::{
-            amount::{Amount, BalanceError},
-            sapling, transparent,
-        },
+        components::{amount::BalanceError, sapling, transparent},
     },
     zip32::AccountId,
 };
@@ -45,7 +43,10 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     BalanceError(BalanceError),
 
     /// Unable to create a new spend because the wallet balance is not sufficient.
-    InsufficientFunds { available: Amount, required: Amount },
+    InsufficientFunds {
+        available: NonNegativeAmount,
+        required: NonNegativeAmount,
+    },
 
     /// The wallet must first perform a scan of the blockchain before other
     /// operations can be performed.
@@ -110,8 +111,8 @@ where
             Error::InsufficientFunds { available, required } => write!(
                 f,
                 "Insufficient balance (have {}, need {} including fee)",
-                i64::from(*available),
-                i64::from(*required)
+                u64::from(*available),
+                u64::from(*required)
             ),
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),

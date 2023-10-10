@@ -5,7 +5,7 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         components::{
-            amount::{Amount, BalanceError, NonNegativeAmount},
+            amount::{BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
             transparent::fees as transparent,
             OutPoint,
@@ -100,10 +100,10 @@ pub enum ChangeError<E, NoteRefT> {
     /// required outputs and fees.
     InsufficientFunds {
         /// The total of the inputs provided to change selection
-        available: Amount,
+        available: NonNegativeAmount,
         /// The total amount of input value required to fund the requested outputs,
         /// including the required fees.
-        required: Amount,
+        required: NonNegativeAmount,
     },
     /// Some of the inputs provided to the transaction were determined to currently have no
     /// economic value (i.e. their inclusion in a transaction causes fees to rise in an amount
@@ -127,8 +127,8 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
             } => write!(
                 f,
                 "Insufficient funds: required {} zatoshis, but only {} zatoshis were available.",
-                i64::from(required),
-                i64::from(available)
+                u64::from(*required),
+                u64::from(*available)
             ),
             ChangeError::DustInputs {
                 transparent,
@@ -235,7 +235,7 @@ pub trait ChangeStrategy {
 #[cfg(test)]
 pub(crate) mod tests {
     use zcash_primitives::transaction::components::{
-        amount::Amount,
+        amount::NonNegativeAmount,
         sapling::fees as sapling,
         transparent::{fees as transparent, OutPoint, TxOut},
     };
@@ -257,14 +257,14 @@ pub(crate) mod tests {
 
     pub(crate) struct TestSaplingInput {
         pub note_id: u32,
-        pub value: Amount,
+        pub value: NonNegativeAmount,
     }
 
     impl sapling::InputView<u32> for TestSaplingInput {
         fn note_id(&self) -> &u32 {
             &self.note_id
         }
-        fn value(&self) -> Amount {
+        fn value(&self) -> NonNegativeAmount {
             self.value
         }
     }

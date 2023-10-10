@@ -23,7 +23,7 @@ use crate::{
     transaction::{
         builder::Progress,
         components::{
-            amount::Amount,
+            amount::{Amount, NonNegativeAmount},
             sapling::{
                 fees, Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
                 SpendDescription,
@@ -75,9 +75,9 @@ impl fees::InputView<()> for SpendDescriptionInfo {
         &()
     }
 
-    fn value(&self) -> Amount {
+    fn value(&self) -> NonNegativeAmount {
         // An existing note to be spent must have a valid amount value.
-        Amount::from_u64(self.note.value().inner()).unwrap()
+        NonNegativeAmount::from_u64(self.note.value().inner()).unwrap()
     }
 }
 
@@ -144,8 +144,8 @@ impl SaplingOutputInfo {
 }
 
 impl fees::OutputView for SaplingOutputInfo {
-    fn value(&self) -> Amount {
-        Amount::from_u64(self.note.value().inner())
+    fn value(&self) -> NonNegativeAmount {
+        NonNegativeAmount::from_u64(self.note.value().inner())
             .expect("Note values should be checked at construction.")
     }
 }
