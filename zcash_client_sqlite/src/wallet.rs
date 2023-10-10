@@ -760,10 +760,6 @@ pub(crate) fn get_received_memo(
     note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
     let protocol = note_id.protocol();
-    if let ShieldedProtocol::Orchard = protocol {
-        return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(protocol)));
-    }
-
     let memo_bytes: Option<Vec<_>> = match protocol {
         ShieldedProtocol::Sapling => conn
             .query_row(
