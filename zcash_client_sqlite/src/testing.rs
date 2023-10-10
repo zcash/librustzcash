@@ -445,7 +445,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
             Infallible,
-            ReceivedNoteId,
         >,
     > {
         let params = self.network();
@@ -478,7 +477,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -512,7 +510,6 @@ impl<Cache> TestState<Cache> {
             Infallible,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -546,7 +543,6 @@ impl<Cache> TestState<Cache> {
             Infallible,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -578,7 +574,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             Infallible,
             FeeRuleT::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -615,7 +610,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where

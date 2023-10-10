@@ -9,7 +9,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::MemoBytes,
     sapling::{self, Diversifier, Note, Nullifier, Rseed},
-    transaction::components::Amount,
+    transaction::{components::Amount, TxId},
     zip32::AccountId,
 };
 
@@ -83,8 +83,10 @@ impl ReceivedSaplingOutput for DecryptedOutput<Note> {
 
 fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, SqliteClientError> {
     let note_id = ReceivedNoteId(row.get(0)?);
+    let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
+    let output_index = row.get(2)?;
     let diversifier = {
-        let d: Vec<_> = row.get(1)?;
+        let d: Vec<_> = row.get(3)?;
         if d.len() != 11 {
             return Err(SqliteClientError::CorruptedData(
                 "Invalid diversifier length".to_string(),
@@ -95,10 +97,10 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
         Diversifier(tmp)
     };
 
-    let note_value = Amount::from_i64(row.get(2)?).unwrap();
+    let note_value = Amount::from_i64(row.get(4)?).unwrap();
 
     let rseed = {
-        let rcm_bytes: Vec<_> = row.get(3)?;
+        let rcm_bytes: Vec<_> = row.get(5)?;
 
         // We store rcm directly in the data DB, regardless of whether the note
         // used a v1 or v2 note plaintext, so for the purposes of spending let's
@@ -113,17 +115,19 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
     };
 
     let note_commitment_tree_position =
-        Position::from(u64::try_from(row.get::<_, i64>(4)?).map_err(|_| {
+        Position::from(u64::try_from(row.get::<_, i64>(6)?).map_err(|_| {
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
         })?);
 
-    Ok(ReceivedSaplingNote {
+    Ok(ReceivedSaplingNote::from_parts(
         note_id,
+        txid,
+        output_index,
         diversifier,
         note_value,
         rseed,
         note_commitment_tree_position,
-    })
+    ))
 }
 
 /// Utility method for determining whether we have any spendable notes
@@ -170,7 +174,7 @@ pub(crate) fn get_spendable_sapling_notes(
     }
 
     let mut stmt_select_notes = conn.prepare_cached(
-        "SELECT id_note, diversifier, value, rcm, commitment_tree_position
+        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
          FROM sapling_received_notes
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
          WHERE account = :account
@@ -244,7 +248,7 @@ pub(crate) fn select_spendable_sapling_notes(
     // 4) Match the selected notes against the witnesses at the desired height.
     let mut stmt_select_notes = conn.prepare_cached(
         "WITH eligible AS (
-             SELECT id_note, diversifier, value, rcm, commitment_tree_position,
+             SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
                     OVER (PARTITION BY account, spent ORDER BY id_note) AS so_far
              FROM sapling_received_notes
@@ -266,10 +270,10 @@ pub(crate) fn select_spendable_sapling_notes(
                 AND unscanned.block_range_end > :wallet_birthday
              )
          )
-         SELECT id_note, diversifier, value, rcm, commitment_tree_position
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
          FROM eligible WHERE so_far < :target_value
          UNION
-         SELECT id_note, diversifier, value, rcm, commitment_tree_position
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
@@ -982,7 +986,6 @@ pub(crate) mod tests {
                 commitment_tree::Error,
                 GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
                 Infallible,
-                ReceivedNoteId,
             >,
         > {
             let txid = st.create_spend_to_address(
