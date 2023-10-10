@@ -557,6 +557,11 @@ where
                         payment.amount,
                         memo.clone(),
                     )?;
+                    sapling_output_meta.push((
+                        Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),
+                        payment.amount,
+                        Some(memo),
+                    ));
                 } else if let Some(taddr) = ua.transparent() {
                     if payment.memo.is_some() {
                         return Err(Error::MemoForbidden);
@@ -569,11 +574,6 @@ where
                 } else {
                     return Err(Error::UnsupportedPoolType(PoolType::Shielded(ShieldedProtocol::Orchard)));
                 }
-                sapling_output_meta.push((
-                    Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),
-                    payment.amount,
-                    Some(memo),
-                ));
             }
             RecipientAddress::Shielded(addr) => {
                 let memo = payment
