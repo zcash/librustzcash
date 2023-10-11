@@ -512,7 +512,7 @@ pub(crate) mod tests {
         block::BlockHash,
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
         sapling::Node,
-        transaction::components::Amount,
+        transaction::components::amount::NonNegativeAmount,
         zip32::DiversifiableFullViewingKey,
     };
 
@@ -564,7 +564,7 @@ pub(crate) mod tests {
         let initial_sapling_tree_size = (0x1 << 16) * 3 + 5;
         let initial_height = sapling_activation_height + 310;
 
-        let value = Amount::from_u64(50000).unwrap();
+        let value = NonNegativeAmount::const_from_u64(50000);
         st.generate_block_at(
             initial_height,
             BlockHash([0; 32]),
@@ -578,7 +578,7 @@ pub(crate) mod tests {
             st.generate_next_block(
                 &dfvk,
                 AddressType::DefaultExternal,
-                Amount::from_u64(10000).unwrap(),
+                NonNegativeAmount::const_from_u64(10000),
             );
         }
 
@@ -845,8 +845,8 @@ pub(crate) mod tests {
             BlockHash([0u8; 32]),
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::const_from_i64(10000),
             // 1235 notes into into the second shard
+            NonNegativeAmount::const_from_u64(10000),
             u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
                 .try_into()
                 .unwrap(),
@@ -961,7 +961,7 @@ pub(crate) mod tests {
             BlockHash([0u8; 32]),
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::const_from_i64(10000),
+            NonNegativeAmount::const_from_u64(10000),
             u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
                 .try_into()
                 .unwrap(),

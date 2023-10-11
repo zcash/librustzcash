@@ -22,6 +22,12 @@ and this library adheres to Rust's notion of
   - The `NoteMismatch` variant of `data_api::error::Error` now wraps a
     `data_api::NoteId` instead of a backend-specific note identifier. The
     related `NoteRef` type parameter has been removed from `data_api::error::Error`.
+  - `wallet::create_spend_to_address` now takes a `NonNegativeAmount` rather than
+    an `Amount`.
+  - All uses of `Amount` in `data_api::wallet::input_selection` have been replaced
+    with `NonNegativeAmount`.
+- All uses of `Amount` in `zcash_client_backend::fees` have been replaced
+  with `NonNegativeAmount`.
 
 ## [0.10.0] - 2023-09-25
 

@@ -5,10 +5,12 @@ use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 use memuse::DynamicUsage;
 use orchard::value as orchard;
 
+use crate::sapling::value::NoteValue;
+
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
 
-/// A type-safe representation of some quantity of Zcash.
+/// A type-safe representation of a Zcash value delta, in zatoshis.
 ///
 /// An Amount can only be constructed from an integer that is within the valid monetary
 /// range of `{-MAX_MONEY..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
@@ -36,6 +38,14 @@ impl Amount {
     pub const fn const_from_i64(amount: i64) -> Self {
         assert!(-MAX_MONEY <= amount && amount <= MAX_MONEY); // contains is not const
         Amount(amount)
+    }
+
+    /// Creates a constant Amount from a u64.
+    ///
+    /// Panics: if the amount is outside the range `{0..MAX_MONEY}`.
+    const fn const_from_u64(amount: u64) -> Self {
+        assert!(amount <= (MAX_MONEY as u64)); // contains is not const
+        Amount(amount as i64)
     }
 
     /// Creates an Amount from an i64.
@@ -141,9 +151,11 @@ impl From<&Amount> for i64 {
     }
 }
 
-impl From<Amount> for u64 {
-    fn from(amount: Amount) -> u64 {
-        amount.0 as u64
+impl TryFrom<Amount> for u64 {
+    type Error = ();
+
+    fn try_from(value: Amount) -> Result<Self, Self::Error> {
+        value.0.try_into().map_err(|_| ())
     }
 }
 
@@ -248,17 +260,50 @@ impl NonNegativeAmount {
         Amount::from_u64(amount).map(NonNegativeAmount)
     }
 
+    /// Creates a constant NonNegativeAmount from a u64.
+    ///
+    /// Panics: if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    pub const fn const_from_u64(amount: u64) -> Self {
+        NonNegativeAmount(Amount::const_from_u64(amount))
+    }
+
     /// Creates a NonNegativeAmount from an i64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
         Amount::from_nonnegative_i64(amount).map(NonNegativeAmount)
     }
+
+    /// Reads an NonNegativeAmount from an unsigned 64-bit little-endian integer.
+    ///
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    pub fn from_u64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
+        let amount = u64::from_le_bytes(bytes);
+        Self::from_u64(amount)
+    }
 }
 
 impl From<NonNegativeAmount> for Amount {
     fn from(n: NonNegativeAmount) -> Self {
         n.0
+    }
+}
+
+impl From<&NonNegativeAmount> for Amount {
+    fn from(n: &NonNegativeAmount) -> Self {
+        n.0
+    }
+}
+
+impl From<NonNegativeAmount> for u64 {
+    fn from(n: NonNegativeAmount) -> Self {
+        n.0.try_into().unwrap()
+    }
+}
+
+impl From<NonNegativeAmount> for NoteValue {
+    fn from(n: NonNegativeAmount) -> Self {
+        NoteValue::from_raw(n.0.try_into().unwrap())
     }
 }
 
@@ -310,7 +355,19 @@ impl Mul<usize> for NonNegativeAmount {
     type Output = Option<Self>;
 
     fn mul(self, rhs: usize) -> Option<NonNegativeAmount> {
-        (self.0 * rhs).map(NonNegativeAmount)
+        (self.0 * rhs).and_then(|v| NonNegativeAmount::try_from(v).ok())
+    }
+}
+
+impl Sum<NonNegativeAmount> for Option<NonNegativeAmount> {
+    fn sum<I: Iterator<Item = NonNegativeAmount>>(iter: I) -> Self {
+        iter.fold(Some(NonNegativeAmount::ZERO), |acc, a| acc? + a)
+    }
+}
+
+impl<'a> Sum<&'a NonNegativeAmount> for Option<NonNegativeAmount> {
+    fn sum<I: Iterator<Item = &'a NonNegativeAmount>>(iter: I) -> Self {
+        iter.fold(Some(NonNegativeAmount::ZERO), |acc, a| acc? + *a)
     }
 }
 

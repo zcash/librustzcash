@@ -9,7 +9,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     transaction::{
         components::{
-            amount::{Amount, BalanceError},
+            amount::{Amount, BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
             transparent::fees as transparent,
         },
@@ -61,7 +61,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             .filter_map(|i| {
                 // for now, we're just assuming p2pkh inputs, so we don't check the size of the input
                 // script
-                if i.coin().value < self.fee_rule.marginal_fee() {
+                if i.coin().value < self.fee_rule.marginal_fee().into() {
                     Some(i.outpoint().clone())
                 } else {
                     None
@@ -72,7 +72,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         let mut sapling_dust: Vec<_> = sapling_inputs
             .iter()
             .filter_map(|i| {
-                if i.value() < self.fee_rule.marginal_fee() {
+                if i.value() < self.fee_rule.marginal_fee().into() {
                     Some(i.note_id().clone())
                 } else {
                     None
@@ -174,7 +174,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
 
         let total_in = (t_in + sapling_in).ok_or_else(overflow)?;
 
-        let total_out = [t_out, sapling_out, fee_amount]
+        let total_out = [t_out, sapling_out, fee_amount.into()]
             .iter()
             .sum::<Option<Amount>>()
             .ok_or_else(overflow)?;
@@ -185,8 +185,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 available: total_in,
                 required: total_out,
             }),
-            Ordering::Equal => TransactionBalance::new(vec![], fee_amount).ok_or_else(overflow),
+            Ordering::Equal => TransactionBalance::new(vec![], fee_amount).map_err(|_| overflow()),
             Ordering::Greater => {
+                let proposed_change = NonNegativeAmount::try_from(proposed_change).unwrap();
                 let dust_threshold = dust_output_policy
                     .dust_threshold()
                     .unwrap_or_else(|| self.fee_rule.marginal_fee());
@@ -199,22 +200,23 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
 
                             Err(ChangeError::InsufficientFunds {
                                 available: total_in,
-                                required: (total_in + shortfall).ok_or_else(overflow)?,
+                                required: (total_in + shortfall.into()).ok_or_else(overflow)?,
                             })
                         }
                         DustAction::AllowDustChange => TransactionBalance::new(
                             vec![ChangeValue::Sapling(proposed_change)],
                             fee_amount,
                         )
-                        .ok_or_else(overflow),
-                        DustAction::AddDustToFee => {
-                            TransactionBalance::new(vec![], (fee_amount + proposed_change).unwrap())
-                                .ok_or_else(overflow)
-                        }
+                        .map_err(|_| overflow()),
+                        DustAction::AddDustToFee => TransactionBalance::new(
+                            vec![],
+                            (fee_amount + proposed_change).ok_or_else(overflow)?,
+                        )
+                        .map_err(|_| overflow()),
                     }
                 } else {
                     TransactionBalance::new(vec![ChangeValue::Sapling(proposed_change)], fee_amount)
-                        .ok_or_else(overflow)
+                        .map_err(|_| overflow())
                 }
             }
         }
@@ -228,7 +230,10 @@ mod tests {
         consensus::{Network, NetworkUpgrade, Parameters},
         legacy::Script,
         transaction::{
-            components::{amount::Amount, transparent::TxOut},
+            components::{
+                amount::{Amount, NonNegativeAmount},
+                transparent::TxOut,
+            },
             fees::zip317::FeeRule as Zip317FeeRule,
         },
     };
@@ -264,8 +269,8 @@ mod tests {
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(Amount::from_u64(5000).unwrap())]
-                && balance.fee_required() == Amount::from_u64(10000).unwrap()
+            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(NonNegativeAmount::const_from_u64(5000))]
+                && balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
     }
 
@@ -295,7 +300,7 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if balance.proposed_change().is_empty()
-                && balance.fee_required() == Amount::from_u64(15000).unwrap()
+                && balance.fee_required() == NonNegativeAmount::const_from_u64(15000)
         );
     }
 
@@ -328,7 +333,7 @@ mod tests {
         assert_matches!(
             result,
             Ok(balance) if balance.proposed_change().is_empty()
-                && balance.fee_required() == Amount::from_u64(10000).unwrap()
+                && balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
     }
 

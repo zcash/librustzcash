@@ -367,7 +367,7 @@ mod tests {
         let (h1, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(5).unwrap(),
+            NonNegativeAmount::const_from_u64(5),
         );
 
         // Scan the cache
@@ -377,7 +377,7 @@ mod tests {
         let (h2, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(7).unwrap(),
+            NonNegativeAmount::const_from_u64(7),
         );
 
         // Scanning should detect no inconsistencies
@@ -397,12 +397,12 @@ mod tests {
         let (h, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(5).unwrap(),
+            NonNegativeAmount::const_from_u64(5),
         );
         let (last_contiguous_height, _, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(7).unwrap(),
+            NonNegativeAmount::const_from_u64(7),
         );
 
         // Scanning the cache should find no inconsistencies
@@ -415,13 +415,13 @@ mod tests {
             BlockHash([1; 32]),
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(8).unwrap(),
+            NonNegativeAmount::const_from_u64(8),
             2,
         );
         st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(3).unwrap(),
+            NonNegativeAmount::const_from_u64(3),
         );
 
         // Data+cache chain should be invalid at the data/cache boundary
@@ -448,10 +448,10 @@ mod tests {
         assert_eq!(st.get_wallet_summary(0), None);
 
         // Create fake CompactBlocks sending value to the address
-        let value = NonNegativeAmount::from_u64(5).unwrap();
-        let value2 = NonNegativeAmount::from_u64(7).unwrap();
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
-        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2.into());
+        let value = NonNegativeAmount::const_from_u64(5);
+        let value2 = NonNegativeAmount::const_from_u64(7);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
         // Scan the cache
         st.scan_cached_blocks(h, 2);
@@ -502,14 +502,14 @@ mod tests {
         let dfvk = st.test_account_sapling().unwrap();
 
         // Create a block with height SAPLING_ACTIVATION_HEIGHT
-        let value = NonNegativeAmount::from_u64(50000).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let value = NonNegativeAmount::const_from_u64(50000);
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h1, 1);
         assert_eq!(st.get_total_balance(AccountId::from(0)), value);
 
         // Create blocks to reach SAPLING_ACTIVATION_HEIGHT + 2
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
-        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Scan the later block first
         st.scan_cached_blocks(h3, 1);
@@ -560,8 +560,8 @@ mod tests {
         assert_eq!(st.get_wallet_summary(0), None);
 
         // Create a fake CompactBlock sending value to the address
-        let value = NonNegativeAmount::from_u64(5).unwrap();
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+        let value = NonNegativeAmount::const_from_u64(5);
+        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Scan the cache
         let summary = st.scan_cached_blocks(h1, 1);
@@ -573,8 +573,8 @@ mod tests {
         assert_eq!(st.get_total_balance(AccountId::from(0)), value);
 
         // Create a second fake CompactBlock sending more value to the address
-        let value2 = NonNegativeAmount::from_u64(7).unwrap();
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2.into());
+        let value2 = NonNegativeAmount::const_from_u64(7);
+        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
         // Scan the cache again
         let summary = st.scan_cached_blocks(h2, 1);
@@ -601,9 +601,9 @@ mod tests {
         assert_eq!(st.get_wallet_summary(0), None);
 
         // Create a fake CompactBlock sending value to the address
-        let value = NonNegativeAmount::from_u64(5).unwrap();
+        let value = NonNegativeAmount::const_from_u64(5);
         let (received_height, _, nf) =
-            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Scan the cache
         st.scan_cached_blocks(received_height, 1);
@@ -614,9 +614,8 @@ mod tests {
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
         let to2 = extsk2.default_address().1;
-        let value2 = NonNegativeAmount::from_u64(2).unwrap();
-        let (spent_height, _) =
-            st.generate_next_block_spending(&dfvk, (nf, value.into()), to2, value2.into());
+        let value2 = NonNegativeAmount::const_from_u64(2);
+        let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
         // Scan the cache again
         st.scan_cached_blocks(spent_height, 1);
@@ -641,16 +640,15 @@ mod tests {
         assert_eq!(st.get_wallet_summary(0), None);
 
         // Create a fake CompactBlock sending value to the address
-        let value = NonNegativeAmount::from_u64(5).unwrap();
+        let value = NonNegativeAmount::const_from_u64(5);
         let (received_height, _, nf) =
-            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value.into());
+            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
         let to2 = extsk2.default_address().1;
-        let value2 = NonNegativeAmount::from_u64(2).unwrap();
-        let (spent_height, _) =
-            st.generate_next_block_spending(&dfvk, (nf, value.into()), to2, value2.into());
+        let value2 = NonNegativeAmount::const_from_u64(2);
+        let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
         // Scan the spending block first.
         st.scan_cached_blocks(spent_height, 1);

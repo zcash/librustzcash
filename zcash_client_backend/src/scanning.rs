@@ -580,7 +580,7 @@ mod tests {
             value::NoteValue,
             Nullifier, SaplingIvk,
         },
-        transaction::components::Amount,
+        transaction::components::amount::NonNegativeAmount,
         zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},
     };
 
@@ -637,7 +637,7 @@ mod tests {
         prev_hash: BlockHash,
         nf: Nullifier,
         dfvk: &DiversifiableFullViewingKey,
-        value: Amount,
+        value: NonNegativeAmount,
         tx_after: bool,
         initial_sapling_tree_size: Option<u32>,
     ) -> CompactBlock {
@@ -646,7 +646,7 @@ mod tests {
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
-        let note = sapling::Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
+        let note = sapling::Note::from_parts(to, NoteValue::from(value), rseed);
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -724,7 +724,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &dfvk,
-                Amount::from_u64(5).unwrap(),
+                NonNegativeAmount::const_from_u64(5),
                 false,
                 None,
             );
@@ -808,7 +808,7 @@ mod tests {
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
                 &dfvk,
-                Amount::from_u64(5).unwrap(),
+                NonNegativeAmount::const_from_u64(5),
                 true,
                 Some(0),
             );
@@ -884,7 +884,7 @@ mod tests {
             BlockHash([0; 32]),
             nf,
             &dfvk,
-            Amount::from_u64(5).unwrap(),
+            NonNegativeAmount::const_from_u64(5),
             false,
             Some(0),
         );

@@ -27,7 +27,7 @@ use crate::{
         Diversifier, Note, PaymentAddress, Rseed,
     },
     transaction::components::{
-        amount::Amount,
+        amount::NonNegativeAmount,
         sapling::{self, OutputDescription},
     },
 };
@@ -82,9 +82,20 @@ where
     }
 
     // The unwraps below are guaranteed to succeed by the assertion above
-    let diversifier = Diversifier(plaintext[1..12].try_into().unwrap());
-    let value = Amount::from_u64_le_bytes(plaintext[12..20].try_into().unwrap()).ok()?;
-    let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE].try_into().unwrap();
+    let diversifier = Diversifier(
+        plaintext[1..12]
+            .try_into()
+            .expect("Note plaintext is checked to have length >= COMPACT_NOTE_SIZE."),
+    );
+    let value = NonNegativeAmount::from_u64_le_bytes(
+        plaintext[12..20]
+            .try_into()
+            .expect("Note plaintext is checked to have length >= COMPACT_NOTE_SIZE."),
+    )
+    .ok()?;
+    let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE]
+        .try_into()
+        .expect("Note plaintext is checked to have length >= COMPACT_NOTE_SIZE.");
 
     let rseed = if plaintext[0] == 0x01 {
         let rcm = Option::from(jubjub::Fr::from_repr(r))?;
@@ -97,7 +108,7 @@ where
 
     // `diversifier` was checked by `get_pk_d`.
     let to = PaymentAddress::from_parts_unchecked(diversifier, pk_d)?;
-    let note = to.create_note(value.into(), rseed);
+    let note = to.create_note(value.try_into().unwrap(), rseed);
     Some((note, to))
 }
 
