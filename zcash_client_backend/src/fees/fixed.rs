@@ -26,7 +26,8 @@ pub struct SingleOutputChangeStrategy {
 }
 
 impl SingleOutputChangeStrategy {
-    /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule.
+    /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule
+    /// and change memo.
     pub fn new(fee_rule: FixedFeeRule, change_memo: Option<MemoBytes>) -> Self {
         Self {
             fee_rule,

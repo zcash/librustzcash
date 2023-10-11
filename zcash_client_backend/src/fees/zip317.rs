@@ -34,7 +34,7 @@ pub struct SingleOutputChangeStrategy {
 
 impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
-    /// fee parameters.
+    /// fee parameters and change memo.
     pub fn new(fee_rule: Zip317FeeRule, change_memo: Option<MemoBytes>) -> Self {
         Self {
             fee_rule,

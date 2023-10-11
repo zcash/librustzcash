@@ -118,6 +118,7 @@ where
 ///   received note must have in the blockchain in order to be considered for being
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
+/// * `change_memo`: A memo to be included in the change output
 ///
 /// # Examples
 ///
@@ -174,7 +175,8 @@ where
 ///     Amount::from_u64(1).unwrap(),
 ///     None,
 ///     OvkPolicy::Sender,
-///     10
+///     10,
+///     None
 /// )
 ///
 /// # }

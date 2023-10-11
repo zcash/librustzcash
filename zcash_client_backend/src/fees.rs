@@ -76,7 +76,7 @@ impl TransactionBalance {
         })
     }
 
-    /// The change values proposed by the [`ChangeStrategy`] that computed this balance.  
+    /// The change values proposed by the [`ChangeStrategy`] that computed this balance.
     pub fn proposed_change(&self) -> &[ChangeValue] {
         &self.proposed_change
     }
