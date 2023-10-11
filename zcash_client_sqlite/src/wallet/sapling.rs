@@ -499,12 +499,7 @@ pub(crate) mod tests {
     };
 
     pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
-        match LocalTxProver::with_default_location() {
-            Some(tx_prover) => tx_prover,
-            None => {
-                panic!("Cannot locate the Zcash parameters. Please run zcash-fetch-params or fetch-params.sh to download the parameters, and then re-run the tests.");
-            }
-        }
+        LocalTxProver::bundled()
     }
 
     #[test]
