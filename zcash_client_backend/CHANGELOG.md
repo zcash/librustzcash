@@ -15,6 +15,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::error::Error` has new error variant:
   - `Error::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
 - Added module `zcash_client_backend::fees::standard`
+- Added `zcash_client_backend::wallet::input_selection::Proposal::min_confirmations`
 - Added methods to `zcash_client_backend::wallet::ReceivedSaplingNote`:
   `{from_parts, txid, output_index, diversifier, rseed, note_commitment_tree_position}`.
 
@@ -45,10 +46,12 @@ and this library adheres to Rust's notion of
     `change_memo` argument; instead, change memos are represented in the
     individual values of the `proposed_change` field of the `Proposal`'s
     `TransactionBalance`.
+  - `wallet::create_proposed_transaction` now takes its `proposal` argument
+    by reference instead of as an owned value.
+  - `wallet::create_proposed_transaction` no longer takes a `min_confirmations`
+    argument. Instead, `min_confirmations` is stored in the `Proposal`
   - `wallet::create_spend_to_address` now takes an additional
     `change_memo` argument.
-  - `wallet::create_proposed_transaction` now takes its `proposal` argument
-      by reference instead of as an owned value.
 - `zcash_client_backend::fees::ChangeValue::Sapling` is now a structured variant.
   In addition to the existing change value, it now also carries an optional memo
   to be associated with the change output.

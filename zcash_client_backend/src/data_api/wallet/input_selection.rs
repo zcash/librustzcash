@@ -81,6 +81,7 @@ pub struct Proposal<FeeRuleT, NoteRef> {
     sapling_inputs: Vec<ReceivedSaplingNote<NoteRef>>,
     balance: TransactionBalance,
     fee_rule: FeeRuleT,
+    min_confirmations: NonZeroU32,
     min_target_height: BlockHeight,
     min_anchor_height: BlockHeight,
     is_shielding: bool,
@@ -106,6 +107,10 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// Returns the fee rule to be used by the transaction builder.
     pub fn fee_rule(&self) -> &FeeRuleT {
         &self.fee_rule
+    }
+    /// Returns the value of `min_confirmations` used in input selection.
+    pub fn min_confirmations(&self) -> NonZeroU32 {
+        self.min_confirmations
     }
     /// Returns the target height for which the proposal was prepared.
     ///
@@ -399,6 +404,7 @@ where
                         sapling_inputs,
                         balance,
                         fee_rule: (*self.change_strategy.fee_rule()).clone(),
+                        min_confirmations,
                         min_target_height: target_height,
                         min_anchor_height: anchor_height,
                         is_shielding: false,
@@ -505,6 +511,7 @@ where
                 sapling_inputs: vec![],
                 balance,
                 fee_rule: (*self.change_strategy.fee_rule()).clone(),
+                min_confirmations,
                 min_target_height: target_height,
                 min_anchor_height: latest_anchor,
                 is_shielding: true,
