@@ -458,9 +458,7 @@ pub(crate) mod tests {
         transaction::{
             components::{amount::NonNegativeAmount, Amount},
             fees::{
-                fixed::FeeRule as FixedFeeRule,
-                zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
-                StandardFeeRule,
+                fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
             },
             Transaction,
         },
@@ -478,7 +476,7 @@ pub(crate) mod tests {
             WalletWrite,
         },
         decrypt_transaction,
-        fees::{fixed, standard, zip317, DustOutputPolicy},
+        fees::{fixed, standard, DustOutputPolicy},
         keys::UnifiedSpendingKey,
         wallet::OvkPolicy,
         zip321::{self, Payment, TransactionRequest},
@@ -486,7 +484,7 @@ pub(crate) mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::{AddressType, BlockCache, TestBuilder, TestState},
+        testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
         wallet::{
             block_max_scanned, commitment_tree, sapling::select_spendable_sapling_notes,
             scanning::tests::test_with_canopy_birthday,
@@ -689,7 +687,7 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (_, usk, _) = st.test_account().unwrap();
+        let (account, _, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
         let to = dfvk.default_address().1.into();
 
@@ -698,13 +696,13 @@ pub(crate) mod tests {
 
         // We cannot do anything if we aren't synchronised
         assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+            st.propose_standard_transfer::<Infallible>(
+                account,
+                StandardFeeRule::PreZip313,
+                NonZeroU32::new(1).unwrap(),
                 &to,
                 NonNegativeAmount::const_from_u64(1),
                 None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
                 None
             ),
             Err(data_api::error::Error::ScanRequired)
@@ -712,7 +710,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn create_to_address_fails_on_unverified_notes() {
+    fn spend_fails_on_unverified_notes() {
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -765,13 +763,13 @@ pub(crate) mod tests {
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().1.into();
         assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+            st.propose_standard_transfer::<Infallible>(
+                account,
+                StandardFeeRule::Zip317,
+                NonZeroU32::new(10).unwrap(),
                 &to,
                 NonNegativeAmount::const_from_u64(70000),
                 None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(10).unwrap(),
                 None
             ),
             Err(data_api::error::Error::InsufficientFunds {
@@ -794,13 +792,13 @@ pub(crate) mod tests {
 
         // Spend still fails
         assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+            st.propose_standard_transfer::<Infallible>(
+                account,
+                StandardFeeRule::Zip317,
+                NonZeroU32::new(10).unwrap(),
                 &to,
                 NonNegativeAmount::const_from_u64(70000),
                 None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(10).unwrap(),
                 None
             ),
             Err(data_api::error::Error::InsufficientFunds {
@@ -824,17 +822,28 @@ pub(crate) mod tests {
             (value * 9).unwrap()
         );
 
-        // Spend should now succeed
+        // Should now be able to generate a proposal
         let amount_sent = NonNegativeAmount::from_u64(70000).unwrap();
-        let txid = st
-            .create_spend_to_address(
-                &usk,
+        let min_confirmations = NonZeroU32::new(10).unwrap();
+        let proposal = st
+            .propose_standard_transfer::<Infallible>(
+                account,
+                StandardFeeRule::Zip317,
+                min_confirmations,
                 &to,
                 amount_sent,
                 None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(10).unwrap(),
                 None,
+            )
+            .unwrap();
+
+        // Executing the proposal should succeed
+        let txid = st
+            .create_proposed_transaction::<Infallible, _>(
+                &usk,
+                OvkPolicy::Sender,
+                proposal,
+                min_confirmations,
             )
             .unwrap();
 
@@ -851,7 +860,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn create_to_address_fails_on_locked_notes() {
+    fn spend_fails_on_locked_notes() {
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -859,6 +868,11 @@ pub(crate) mod tests {
 
         let (account, usk, _) = st.test_account().unwrap();
         let dfvk = st.test_account_sapling().unwrap();
+
+        // TODO: This test was originally written to use the pre-zip-313 fee rule
+        // and has not yet been updated.
+        #[allow(deprecated)]
+        let fee_rule = StandardFeeRule::PreZip313;
 
         // Add funds to the wallet in a single note
         let value = NonNegativeAmount::const_from_u64(50000);
@@ -872,28 +886,39 @@ pub(crate) mod tests {
         // Send some of the funds to another address, but don't mine the tx.
         let extsk2 = ExtendedSpendingKey::master(&[]);
         let to = extsk2.default_address().1.into();
-        assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+        let min_confirmations = NonZeroU32::new(1).unwrap();
+        let proposal = st
+            .propose_standard_transfer::<Infallible>(
+                account,
+                fee_rule,
+                min_confirmations,
                 &to,
                 NonNegativeAmount::const_from_u64(15000),
                 None,
+                None,
+            )
+            .unwrap();
+
+        // Executing the proposal should succeed
+        assert_matches!(
+            st.create_proposed_transaction::<Infallible, _>(
+                &usk,
                 OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
-                None
+                proposal,
+                min_confirmations
             ),
             Ok(_)
         );
 
-        // A second spend fails because there are no usable notes
+        // A second proposal fails because there are no usable notes
         assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+            st.propose_standard_transfer::<Infallible>(
+                account,
+                fee_rule,
+                NonZeroU32::new(1).unwrap(),
                 &to,
                 NonNegativeAmount::const_from_u64(2000),
                 None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
                 None
             ),
             Err(data_api::error::Error::InsufficientFunds {
@@ -914,15 +939,15 @@ pub(crate) mod tests {
         }
         st.scan_cached_blocks(h1 + 1, 41);
 
-        // Second spend still fails
+        // Second proposal still fails
         assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+            st.propose_standard_transfer::<Infallible>(
+                account,
+                fee_rule,
+                NonZeroU32::new(1).unwrap(),
                 &to,
                 NonNegativeAmount::const_from_u64(2000),
                 None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
                 None
             ),
             Err(data_api::error::Error::InsufficientFunds {
@@ -945,16 +970,26 @@ pub(crate) mod tests {
         assert_eq!(st.get_spendable_balance(account, 1), value);
 
         // Second spend should now succeed
-        let amount_sent2 = NonNegativeAmount::from_u64(2000).unwrap();
-        let txid2 = st
-            .create_spend_to_address(
-                &usk,
+        let amount_sent2 = NonNegativeAmount::const_from_u64(2000);
+        let min_confirmations = NonZeroU32::new(1).unwrap();
+        let proposal = st
+            .propose_standard_transfer::<Infallible>(
+                account,
+                fee_rule,
+                min_confirmations,
                 &to,
                 amount_sent2,
                 None,
-                OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
                 None,
+            )
+            .unwrap();
+
+        let txid2 = st
+            .create_proposed_transaction::<Infallible, _>(
+                &usk,
+                OvkPolicy::Sender,
+                proposal,
+                min_confirmations,
             )
             .unwrap();
 
@@ -992,6 +1027,11 @@ pub(crate) mod tests {
         let addr2 = extsk2.default_address().1;
         let to = addr2.into();
 
+        // TODO: This test was originally written to use the pre-zip-313 fee rule
+        // and has not yet been updated.
+        #[allow(deprecated)]
+        let fee_rule = StandardFeeRule::PreZip313;
+
         #[allow(clippy::type_complexity)]
         let send_and_recover_with_policy = |st: &mut TestState<BlockCache>,
                                             ovk_policy|
@@ -1004,15 +1044,20 @@ pub(crate) mod tests {
                 Zip317FeeError,
             >,
         > {
-            let txid = st.create_spend_to_address(
-                &usk,
+            let min_confirmations = NonZeroU32::new(1).unwrap();
+            let proposal = st.propose_standard_transfer(
+                account,
+                fee_rule,
+                min_confirmations,
                 &to,
                 NonNegativeAmount::const_from_u64(15000),
                 None,
-                ovk_policy,
-                NonZeroU32::new(1).unwrap(),
                 None,
             )?;
+
+            // Executing the proposal should succeed
+            let txid =
+                st.create_proposed_transaction(&usk, ovk_policy, proposal, min_confirmations)?;
 
             // Fetch the transaction from the database
             let raw_tx: Vec<_> = st
@@ -1071,7 +1116,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn create_to_address_succeeds_to_t_addr_zero_change() {
+    fn spend_succeeds_to_t_addr_zero_change() {
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -1089,24 +1134,40 @@ pub(crate) mod tests {
         assert_eq!(st.get_total_balance(account), value);
         assert_eq!(st.get_spendable_balance(account, 1), value);
 
+        // TODO: This test was originally written to use the pre-zip-313 fee rule
+        // and has not yet been updated.
+        #[allow(deprecated)]
+        let fee_rule = StandardFeeRule::PreZip313;
+
         // TODO: generate_next_block_from_tx does not currently support transparent outputs.
         let to = TransparentAddress::PublicKey([7; 20]).into();
-        assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+        let min_confirmations = NonZeroU32::new(1).unwrap();
+        let proposal = st
+            .propose_standard_transfer::<Infallible>(
+                account,
+                fee_rule,
+                min_confirmations,
                 &to,
                 NonNegativeAmount::const_from_u64(50000),
                 None,
+                None,
+            )
+            .unwrap();
+
+        // Executing the proposal should succeed
+        assert_matches!(
+            st.create_proposed_transaction::<Infallible, _>(
+                &usk,
                 OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
-                None
+                proposal,
+                min_confirmations
             ),
             Ok(_)
         );
     }
 
     #[test]
-    fn create_to_address_spends_a_change_note() {
+    fn change_note_spends_succeed() {
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -1131,17 +1192,33 @@ pub(crate) mod tests {
             NonNegativeAmount::ZERO
         );
 
+        // TODO: This test was originally written to use the pre-zip-313 fee rule
+        // and has not yet been updated.
+        #[allow(deprecated)]
+        let fee_rule = StandardFeeRule::PreZip313;
+
         // TODO: generate_next_block_from_tx does not currently support transparent outputs.
         let to = TransparentAddress::PublicKey([7; 20]).into();
-        assert_matches!(
-            st.create_spend_to_address(
-                &usk,
+        let min_confirmations = NonZeroU32::new(1).unwrap();
+        let proposal = st
+            .propose_standard_transfer::<Infallible>(
+                account,
+                fee_rule,
+                min_confirmations,
                 &to,
                 NonNegativeAmount::const_from_u64(50000),
                 None,
+                None,
+            )
+            .unwrap();
+
+        // Executing the proposal should succeed
+        assert_matches!(
+            st.create_proposed_transaction::<Infallible, _>(
+                &usk,
                 OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
-                None
+                proposal,
+                min_confirmations
             ),
             Ok(_)
         );
@@ -1205,6 +1282,7 @@ pub(crate) mod tests {
         ])
         .unwrap();
 
+        #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
         let input_selector = GreedyInputSelector::new(
             fixed::SingleOutputChangeStrategy::new(fee_rule, None),
@@ -1298,10 +1376,7 @@ pub(crate) mod tests {
         assert_eq!(st.get_total_balance(account), total);
         assert_eq!(st.get_spendable_balance(account, 1), total);
 
-        let input_selector = GreedyInputSelector::new(
-            zip317::SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None),
-            DustOutputPolicy::default(),
-        );
+        let input_selector = input_selector(StandardFeeRule::Zip317, None);
 
         // This first request will fail due to insufficient non-dust funds
         let req = TransactionRequest::new(vec![Payment {

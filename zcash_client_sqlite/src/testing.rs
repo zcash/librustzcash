@@ -14,6 +14,7 @@ use tempfile::NamedTempFile;
 #[cfg(feature = "unstable")]
 use tempfile::TempDir;
 
+use zcash_client_backend::fees::{standard, DustOutputPolicy};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::RecipientAddress,
@@ -22,8 +23,10 @@ use zcash_client_backend::{
         chain::{scan_cached_blocks, BlockSource, ScanSummary},
         wallet::{
             create_proposed_transaction, create_spend_to_address,
-            input_selection::{GreedyInputSelectorError, InputSelector, Proposal},
-            propose_transfer, spend,
+            input_selection::{
+                GreedyInputSelector, GreedyInputSelectorError, InputSelector, Proposal,
+            },
+            propose_standard_transfer_to_address, propose_transfer, spend,
         },
         AccountBalance, AccountBirthday, WalletRead, WalletSummary, WalletWrite,
     },
@@ -38,7 +41,7 @@ use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
-    memo::MemoBytes,
+    memo::{Memo, MemoBytes},
     sapling::{
         note_encryption::{sapling_note_encryption, SaplingDomain},
         util::generate_random_rseed,
@@ -47,7 +50,7 @@ use zcash_primitives::{
     },
     transaction::{
         components::amount::NonNegativeAmount,
-        fees::{zip317::FeeError as Zip317FeeError, FeeRule},
+        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
     zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
@@ -524,6 +527,43 @@ impl<Cache> TestState<Cache> {
         )
     }
 
+    /// Invokes [`propose_standard_transfer`] with the given arguments.
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn propose_standard_transfer<CommitmentTreeErrT>(
+        &mut self,
+        spend_from_account: AccountId,
+        fee_rule: StandardFeeRule,
+        min_confirmations: NonZeroU32,
+        to: &RecipientAddress,
+        amount: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+        change_memo: Option<MemoBytes>,
+    ) -> Result<
+        Proposal<StandardFeeRule, ReceivedNoteId>,
+        data_api::error::Error<
+            SqliteClientError,
+            CommitmentTreeErrT,
+            GreedyInputSelectorError<Zip317FeeError, ReceivedNoteId>,
+            Zip317FeeError,
+        >,
+    > {
+        let params = self.network();
+        let result = propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
+            &mut self.db_data,
+            &params,
+            fee_rule,
+            spend_from_account,
+            min_confirmations,
+            to,
+            amount,
+            memo,
+            change_memo,
+        );
+
+        result
+    }
+
     /// Invokes [`propose_shielding`] with the given arguments.
     #[cfg(feature = "transparent-inputs")]
     #[allow(clippy::type_complexity)]
@@ -992,4 +1032,16 @@ impl TestCache for FsBlockCache {
 
         meta
     }
+}
+
+pub(crate) fn input_selector(
+    fee_rule: StandardFeeRule,
+    change_memo: Option<&str>,
+) -> GreedyInputSelector<
+    WalletDb<rusqlite::Connection, Network>,
+    standard::SingleOutputChangeStrategy,
+> {
+    let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
+    let change_strategy = standard::SingleOutputChangeStrategy::new(fee_rule, change_memo);
+    GreedyInputSelector::new(change_strategy, DustOutputPolicy::default())
 }
