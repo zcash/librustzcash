@@ -79,6 +79,7 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
 }
 
 /// The inputs to be consumed and outputs to be produced in a proposed transaction.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Proposal<FeeRuleT, NoteRef> {
     transaction_request: TransactionRequest,
     transparent_inputs: Vec<WalletTransparentOutput>,
@@ -90,6 +91,45 @@ pub struct Proposal<FeeRuleT, NoteRef> {
 }
 
 impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
+    /// Constructs a [`Proposal`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_parts(
+        transaction_request: TransactionRequest,
+        transparent_inputs: Vec<WalletTransparentOutput>,
+        sapling_inputs: Option<SaplingInputs<NoteRef>>,
+        balance: TransactionBalance,
+        fee_rule: FeeRuleT,
+        min_target_height: BlockHeight,
+        is_shielding: bool,
+    ) -> Result<Self, ()> {
+        let transparent_total = transparent_inputs
+            .iter()
+            .map(|out| out.txout().value)
+            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))?;
+        let sapling_total = sapling_inputs
+            .iter()
+            .flat_map(|s_in| s_in.notes().iter())
+            .map(|out| out.value())
+            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))?;
+        let input_total = (transparent_total + sapling_total).ok_or(())?;
+
+        let output_total = (transaction_request.total()? + balance.total()).ok_or(())?;
+
+        if input_total == output_total {
+            Ok(Self {
+                transaction_request,
+                transparent_inputs,
+                sapling_inputs,
+                balance,
+                fee_rule,
+                min_target_height,
+                is_shielding,
+            })
+        } else {
+            Err(())
+        }
+    }
+
     /// Returns the transaction request that describes the payments to be made.
     pub fn transaction_request(&self) -> &TransactionRequest {
         &self.transaction_request
@@ -147,12 +187,24 @@ impl<FeeRuleT, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
 }
 
 /// The Sapling inputs to a proposed transaction.
+#[derive(Clone, PartialEq, Eq)]
 pub struct SaplingInputs<NoteRef> {
     anchor_height: BlockHeight,
     notes: NonEmpty<ReceivedSaplingNote<NoteRef>>,
 }
 
 impl<NoteRef> SaplingInputs<NoteRef> {
+    /// Constructs a [`SaplingInputs`] from its constituent parts.
+    pub fn from_parts(
+        anchor_height: BlockHeight,
+        notes: NonEmpty<ReceivedSaplingNote<NoteRef>>,
+    ) -> Self {
+        Self {
+            anchor_height,
+            notes,
+        }
+    }
+
     /// Returns the anchor height for Sapling inputs that should be used when constructing the
     /// proposed transaction.
     pub fn anchor_height(&self) -> BlockHeight {

@@ -110,6 +110,7 @@ use self::scanning::{parse_priority_code, replace_queue_entries};
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
+    rusqlite::Row,
     std::collections::BTreeSet,
     zcash_client_backend::{address::AddressMetadata, wallet::WalletTransparentOutput},
     zcash_primitives::{
@@ -1287,6 +1288,65 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     Ok(())
 }
 
+#[cfg(feature = "transparent-inputs")]
+fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, SqliteClientError> {
+    let txid: Vec<u8> = row.get(0)?;
+    let mut txid_bytes = [0u8; 32];
+    txid_bytes.copy_from_slice(&txid);
+
+    let index: u32 = row.get(1)?;
+    let script_pubkey = Script(row.get(2)?);
+    let raw_value: i64 = row.get(3)?;
+    let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
+        SqliteClientError::CorruptedData(format!("Invalid UTXO value: {}", raw_value))
+    })?;
+    let height: u32 = row.get(4)?;
+
+    let outpoint = OutPoint::new(txid_bytes, index);
+    WalletTransparentOutput::from_parts(
+        outpoint,
+        TxOut {
+            value,
+            script_pubkey,
+        },
+        BlockHeight::from(height),
+    )
+    .ok_or_else(|| {
+        SqliteClientError::CorruptedData(
+            "Txout script_pubkey value did not correspond to a P2PKH or P2SH address".to_string(),
+        )
+    })
+}
+
+#[cfg(feature = "transparent-inputs")]
+pub(crate) fn get_unspent_transparent_output(
+    conn: &rusqlite::Connection,
+    outpoint: &OutPoint,
+) -> Result<Option<WalletTransparentOutput>, SqliteClientError> {
+    let mut stmt_select_utxo = conn.prepare_cached(
+        "SELECT u.prevout_txid, u.prevout_idx, u.script, u.value_zat, u.height
+         FROM utxos u
+         LEFT OUTER JOIN transactions tx
+         ON tx.id_tx = u.spent_in_tx
+         WHERE u.prevout_txid = :txid
+         AND u.prevout_idx = :output_index
+         AND tx.block IS NULL",
+    )?;
+
+    let result: Result<Option<WalletTransparentOutput>, SqliteClientError> = stmt_select_utxo
+        .query_and_then(
+            named_params![
+                ":txid": outpoint.hash(),
+                ":output_index": outpoint.n()
+            ],
+            to_unspent_transparent_output,
+        )?
+        .next()
+        .transpose();
+
+    result
+}
+
 /// Returns unspent transparent outputs that have been received by this wallet at the given
 /// transparent address, such that the block that included the transaction was mined at a
 /// height less than or equal to the provided `max_height`.
@@ -1303,7 +1363,7 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
         .unwrap_or(max_height)
         .saturating_sub(PRUNING_DEPTH);
 
-    let mut stmt_blocks = conn.prepare(
+    let mut stmt_utxos = conn.prepare(
         "SELECT u.prevout_txid, u.prevout_idx, u.script,
                 u.value_zat, u.height
          FROM utxos u
@@ -1317,44 +1377,17 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
     let addr_str = address.encode(params);
 
     let mut utxos = Vec::<WalletTransparentOutput>::new();
-    let mut rows = stmt_blocks.query(named_params![
+    let mut rows = stmt_utxos.query(named_params![
         ":address": addr_str,
         ":max_height": u32::from(max_height),
         ":stable_height": u32::from(stable_height),
     ])?;
     let excluded: BTreeSet<OutPoint> = exclude.iter().cloned().collect();
     while let Some(row) = rows.next()? {
-        let txid: Vec<u8> = row.get(0)?;
-        let mut txid_bytes = [0u8; 32];
-        txid_bytes.copy_from_slice(&txid);
-
-        let index: u32 = row.get(1)?;
-        let script_pubkey = Script(row.get(2)?);
-        let value_raw: i64 = row.get(3)?;
-        let value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative utxo value: {}", value_raw))
-        })?;
-        let height: u32 = row.get(4)?;
-
-        let outpoint = OutPoint::new(txid_bytes, index);
-        if excluded.contains(&outpoint) {
+        let output = to_unspent_transparent_output(row)?;
+        if excluded.contains(output.outpoint()) {
             continue;
         }
-
-        let output = WalletTransparentOutput::from_parts(
-            outpoint,
-            TxOut {
-                value,
-                script_pubkey,
-            },
-            BlockHeight::from(height),
-        )
-        .ok_or_else(|| {
-            SqliteClientError::CorruptedData(
-                "Txout script_pubkey value did not correspond to a P2PKH or P2SH address"
-                    .to_string(),
-            )
-        })?;
 
         utxos.push(output);
     }

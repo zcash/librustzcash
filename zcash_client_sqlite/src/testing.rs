@@ -14,7 +14,6 @@ use tempfile::NamedTempFile;
 #[cfg(feature = "unstable")]
 use tempfile::TempDir;
 
-use zcash_client_backend::fees::{standard, DustOutputPolicy};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::RecipientAddress,
@@ -36,6 +35,10 @@ use zcash_client_backend::{
     },
     wallet::OvkPolicy,
     zip321,
+};
+use zcash_client_backend::{
+    fees::{standard, DustOutputPolicy},
+    proto::proposal,
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -555,7 +558,7 @@ impl<Cache> TestState<Cache> {
         >,
     > {
         let params = self.network();
-        propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
+        let result = propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
             &mut self.db_data,
             &params,
             fee_rule,
@@ -565,7 +568,13 @@ impl<Cache> TestState<Cache> {
             amount,
             memo,
             change_memo,
-        )
+        );
+
+        if let Ok(proposal) = &result {
+            check_proposal_serialization_roundtrip(self.wallet(), proposal);
+        }
+
+        result
     }
 
     /// Invokes [`propose_shielding`] with the given arguments.
@@ -1060,4 +1069,16 @@ pub(crate) fn input_selector(
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
     let change_strategy = standard::SingleOutputChangeStrategy::new(fee_rule, change_memo);
     GreedyInputSelector::new(change_strategy, DustOutputPolicy::default())
+}
+
+pub(crate) fn check_proposal_serialization_roundtrip(
+    db_data: &WalletDb<rusqlite::Connection, Network>,
+    proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
+) {
+    let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);
+    assert_matches!(proposal_proto, Some(_));
+    let deserialized_proposal = proposal_proto
+        .unwrap()
+        .try_into_standard_proposal(&db_data.params, db_data);
+    assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }

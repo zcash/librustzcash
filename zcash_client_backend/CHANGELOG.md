@@ -15,6 +15,7 @@ and this library adheres to Rust's notion of
   - `ScannedBlock::sapling_tree_size`.
   - `ScannedBlock::orchard_tree_size`.
   - `wallet::propose_standard_transfer_to_address`
+  - `wallet::input_selection::Proposal::from_parts`
   - `wallet::input_selection::SaplingInputs`
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
@@ -23,6 +24,22 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::wallet`:
   - `ReceivedSaplingNote::from_parts`
   - `ReceivedSaplingNote::{txid, output_index, diversifier, rseed, note_commitment_tree_position}`
+- `zcash_client_backend::zip321::TransactionRequest::total`
+- `zcash_client_backend::proto::`
+  - `PROPOSAL_SER_V1`
+  - `ProposalError`
+  - `proposal::Proposal::{from_standard_proposal, try_into_standard_proposal}`
+  - `proposal::ProposedInput::parse_txid`
+- `impl Clone for zcash_client_backend::{
+     zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
+     wallet::{ReceivedSaplingNote, WalletTransparentOutput},
+     wallet::input_selection::{Proposal, SaplingInputs},
+   }`
+- `impl {PartialEq, Eq} for zcash_client_backend::{
+     zip321::{Zip321Error, parse::Param, parse::IndexedParam},
+     wallet::{ReceivedSaplingNote, WalletTransparentOutput},
+     wallet::input_selection::{Proposal, SaplingInputs},
+   }`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -42,11 +59,11 @@ and this library adheres to Rust's notion of
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
     - A new variant `UnsupportedPoolType` has been added.
-  - `wallet::shield_transparent_funds` no longer
-    takes a `memo` argument; instead, memos to be associated with the shielded
-    outputs should be specified in the construction of the value of the
-    `input_selector` argument, which is used to construct the proposed shielded
-    values as internal "change" outputs.
+  - `wallet::shield_transparent_funds` no longer takes a `memo` argument;
+    instead, memos to be associated with the shielded outputs should be
+    specified in the construction of the value of the `input_selector`
+    argument, which is used to construct the proposed shielded values as
+    internal "change" outputs.
   - `wallet::create_proposed_transaction` no longer takes a
     `change_memo` argument; instead, change memos are represented in the
     individual values of the `proposed_change` field of the `Proposal`'s

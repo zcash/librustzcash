@@ -17,7 +17,10 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     sapling::{self, Node, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
-        components::amount::{Amount, NonNegativeAmount},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            OutPoint,
+        },
         Transaction, TxId,
     },
     zip32::AccountId,
@@ -30,9 +33,6 @@ use crate::{
     proto::service::TreeState,
     wallet::{ReceivedSaplingNote, WalletTransparentOutput, WalletTx},
 };
-
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::components::OutPoint;
 
 use self::chain::CommitmentTreeRoot;
 use self::scanning::ScanRange;
@@ -222,6 +222,14 @@ pub trait SaplingInputSource {
     /// or a UUID.
     type NoteRef: Copy + Debug + Eq + Ord;
 
+    /// Returns a received Sapling note, or Ok(None) if the note is not known to belong to the
+    /// wallet or if the note is not spendable.
+    fn get_spendable_sapling_note(
+        &self,
+        txid: &TxId,
+        index: u32,
+    ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
+
     /// Returns a list of spendable Sapling notes sufficient to cover the specified target value,
     /// if possible.
     fn select_spendable_sapling_notes(
@@ -235,10 +243,16 @@ pub trait SaplingInputSource {
 
 /// A trait representing the capability to query a data store for unspent transparent UTXOs
 /// belonging to a wallet.
-#[cfg(feature = "transparent-inputs")]
 pub trait TransparentInputSource {
     /// The type of errors produced by a wallet backend.
     type Error;
+
+    /// Returns a received transparent UTXO, or Ok(None) if the UTXO is not known to belong to the
+    /// wallet or is not spendable.
+    fn get_unspent_transparent_output(
+        &self,
+        outpoint: &OutPoint,
+    ) -> Result<Option<WalletTransparentOutput>, Self::Error>;
 
     /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
     /// including `max_height`.
@@ -1008,6 +1022,14 @@ pub mod testing {
         type Error = ();
         type NoteRef = u32;
 
+        fn get_spendable_sapling_note(
+            &self,
+            _txid: &TxId,
+            _index: u32,
+        ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+            Ok(None)
+        }
+
         fn select_spendable_sapling_notes(
             &self,
             _account: AccountId,
@@ -1022,6 +1044,13 @@ pub mod testing {
     #[cfg(feature = "transparent-inputs")]
     impl TransparentInputSource for MockWalletDb {
         type Error = ();
+
+        fn get_unspent_transparent_output(
+            &self,
+            _outpoint: &OutPoint,
+        ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+            Ok(None)
+        }
 
         fn get_unspent_transparent_outputs(
             &self,

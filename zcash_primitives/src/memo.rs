@@ -28,7 +28,7 @@ where
 }
 
 /// Errors that may result from attempting to construct an invalid memo.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     InvalidUtf8(std::str::Utf8Error),
     TooLong(usize),

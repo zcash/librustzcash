@@ -24,7 +24,7 @@ use std::cmp::Ordering;
 use crate::address::RecipientAddress;
 
 /// Errors that may be produced in decoding of payment requests.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Zip321Error {
     /// A memo field in the ZIP 321 URI was not properly base-64 encoded
     InvalidBase64(base64::DecodeError),
@@ -63,7 +63,7 @@ pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
 }
 
 /// A single payment being requested.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
     /// The payment address to which the payment should be sent.
     pub recipient_address: RecipientAddress,
@@ -121,7 +121,7 @@ impl Payment {
 /// When constructing a transaction in response to such a request,
 /// a separate output should be added to the transaction for each
 /// payment value in the request.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionRequest {
     payments: Vec<Payment>,
 }
@@ -150,6 +150,21 @@ impl TransactionRequest {
     /// Returns the slice of payments that make up this request.
     pub fn payments(&self) -> &[Payment] {
         &self.payments[..]
+    }
+
+    /// Returns the total value of payments to be made.
+    ///
+    /// Returns `Err` in the case of overflow, if payment values are negative, or the value is
+    /// outside the valid range of Zcash values. .
+    pub fn total(&self) -> Result<NonNegativeAmount, ()> {
+        if self.payments.is_empty() {
+            Ok(NonNegativeAmount::ZERO)
+        } else {
+            self.payments
+                .iter()
+                .map(|p| p.amount)
+                .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))
+        }
     }
 
     /// A utility for use in tests to help check round-trip serialization properties.
@@ -416,7 +431,7 @@ mod parse {
 
     /// A data type that defines the possible parameter types which may occur within a
     /// ZIP 321 URI.
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Param {
         Addr(Box<RecipientAddress>),
         Amount(NonNegativeAmount),
@@ -427,7 +442,7 @@ mod parse {
     }
 
     /// A [`Param`] value with its associated index.
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct IndexedParam {
         pub param: Param,
         pub payment_index: usize,
