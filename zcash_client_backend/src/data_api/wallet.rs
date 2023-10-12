@@ -237,7 +237,7 @@ where
         prover,
         usk,
         ovk_policy,
-        proposal,
+        &proposal,
         min_confirmations,
     )
 }
@@ -338,7 +338,7 @@ where
         prover,
         usk,
         ovk_policy,
-        proposal,
+        &proposal,
         min_confirmations,
     )
 }
@@ -494,7 +494,7 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
     prover: impl SaplingProver,
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
-    proposal: Proposal<FeeRuleT, DbT::NoteRef>,
+    proposal: &Proposal<FeeRuleT, DbT::NoteRef>,
     min_confirmations: NonZeroU32,
 ) -> Result<
     TxId,
@@ -821,7 +821,7 @@ where
         prover,
         usk,
         OvkPolicy::Sender,
-        proposal,
+        &proposal,
         min_confirmations,
     )
 }

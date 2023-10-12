@@ -621,7 +621,7 @@ impl<Cache> TestState<Cache> {
             test_prover(),
             usk,
             ovk_policy,
-            proposal,
+            &proposal,
             min_confirmations,
         )
     }

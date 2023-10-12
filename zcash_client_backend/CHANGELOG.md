@@ -47,6 +47,8 @@ and this library adheres to Rust's notion of
     `TransactionBalance`.
   - `wallet::create_spend_to_address` now takes an additional
     `change_memo` argument.
+  - `wallet::create_proposed_transaction` now takes its `proposal` argument
+      by reference instead of as an owned value.
 - `zcash_client_backend::fees::ChangeValue::Sapling` is now a structured variant.
   In addition to the existing change value, it now also carries an optional memo
   to be associated with the change output.
