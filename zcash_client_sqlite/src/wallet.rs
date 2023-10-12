@@ -1947,7 +1947,6 @@ mod tests {
         },
         zcash_primitives::{
             consensus::BlockHeight,
-            memo::MemoBytes,
             transaction::{
                 components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
                 fees::fixed::FeeRule as FixedFeeRule,
@@ -2160,9 +2159,10 @@ mod tests {
 
         // Shield the output.
         let input_selector = GreedyInputSelector::new(
-            fixed::SingleOutputChangeStrategy::new(FixedFeeRule::non_standard(
-                NonNegativeAmount::ZERO,
-            )),
+            fixed::SingleOutputChangeStrategy::new(
+                FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
+                None,
+            ),
             DustOutputPolicy::default(),
         );
         let txid = st
@@ -2171,7 +2171,6 @@ mod tests {
                 value,
                 &usk,
                 &[*taddr],
-                &MemoBytes::empty(),
                 NonZeroU32::new(1).unwrap(),
             )
             .unwrap();

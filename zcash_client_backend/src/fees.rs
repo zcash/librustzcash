@@ -2,6 +2,7 @@ use std::fmt;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
+    memo::MemoBytes,
     transaction::{
         components::{
             amount::{Amount, BalanceError, NonNegativeAmount},
@@ -19,13 +20,28 @@ pub mod zip317;
 /// A proposed change amount and output pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChangeValue {
-    Sapling(NonNegativeAmount),
+    Sapling {
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    },
 }
 
 impl ChangeValue {
+    pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+        Self::Sapling { value, memo }
+    }
+
+    /// Returns the value of the change output to be created, in zatoshis.
     pub fn value(&self) -> NonNegativeAmount {
         match self {
-            ChangeValue::Sapling(value) => *value,
+            ChangeValue::Sapling { value, .. } => *value,
+        }
+    }
+
+    /// Returns the memo to be associated with the change output.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        match self {
+            ChangeValue::Sapling { memo, .. } => memo.as_ref(),
         }
     }
 }
@@ -60,7 +76,7 @@ impl TransactionBalance {
         })
     }
 
-    /// The change values proposed by the [`ChangeStrategy`] that computed this balance.  
+    /// The change values proposed by the [`ChangeStrategy`] that computed this balance.
     pub fn proposed_change(&self) -> &[ChangeValue] {
         &self.proposed_change
     }

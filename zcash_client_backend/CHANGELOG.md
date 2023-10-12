@@ -26,6 +26,23 @@ and this library adheres to Rust's notion of
     an `Amount`.
   - All uses of `Amount` in `data_api::wallet::input_selection` have been replaced
     with `NonNegativeAmount`.
+  - `wallet::shield_transparent_funds` no longer
+    takes a `memo` argument; instead, memos to be associated with the shielded
+    outputs should be specified in the construction of the value of the
+    `input_selector` argument, which is used to construct the proposed shielded
+    values as internal "change" outputs.
+  - `wallet::create_proposed_transaction` no longer takes a
+    `change_memo` argument; instead, change memos are represented in the
+    individual values of the `proposed_change` field of the `Proposal`'s
+    `TransactionBalance`.
+  - `wallet::create_spend_to_address` now takes an additional
+    `change_memo` argument.
+- `zcash_client_backend::fees::ChangeValue::Sapling` is now a structured variant.
+  In addition to the existing change value, it now also carries an optional memo
+  to be associated with the change output.
+- `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy::new` and
+  `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy::new` each now
+  accept an additional `change_memo` argument.
 - All uses of `Amount` in `zcash_client_backend::fees` have been replaced
   with `NonNegativeAmount`.
 

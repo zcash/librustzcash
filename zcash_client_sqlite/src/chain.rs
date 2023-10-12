@@ -532,7 +532,7 @@ mod tests {
         }])
         .unwrap();
         let input_selector = GreedyInputSelector::new(
-            SingleOutputChangeStrategy::new(FeeRule::standard()),
+            SingleOutputChangeStrategy::new(FeeRule::standard(), None),
             DustOutputPolicy::default(),
         );
         assert_matches!(

@@ -427,6 +427,7 @@ impl<Cache> TestState<Cache> {
     /// Invokes [`create_spend_to_address`] with the given arguments.
     #[allow(deprecated)]
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn create_spend_to_address(
         &mut self,
         usk: &UnifiedSpendingKey,
@@ -435,6 +436,7 @@ impl<Cache> TestState<Cache> {
         memo: Option<MemoBytes>,
         ovk_policy: OvkPolicy,
         min_confirmations: NonZeroU32,
+        change_memo: Option<MemoBytes>,
     ) -> Result<
         TxId,
         data_api::error::Error<
@@ -455,6 +457,7 @@ impl<Cache> TestState<Cache> {
             memo,
             ovk_policy,
             min_confirmations,
+            change_memo,
         )
     }
 
@@ -563,7 +566,6 @@ impl<Cache> TestState<Cache> {
         ovk_policy: OvkPolicy,
         proposal: Proposal<FeeRuleT, ReceivedNoteId>,
         min_confirmations: NonZeroU32,
-        change_memo: Option<MemoBytes>,
     ) -> Result<
         TxId,
         data_api::error::Error<
@@ -585,7 +587,6 @@ impl<Cache> TestState<Cache> {
             ovk_policy,
             proposal,
             min_confirmations,
-            change_memo,
         )
     }
 
@@ -598,7 +599,6 @@ impl<Cache> TestState<Cache> {
         shielding_threshold: NonNegativeAmount,
         usk: &UnifiedSpendingKey,
         from_addrs: &[TransparentAddress],
-        memo: &MemoBytes,
         min_confirmations: NonZeroU32,
     ) -> Result<
         TxId,
@@ -621,7 +621,6 @@ impl<Cache> TestState<Cache> {
             shielding_threshold,
             usk,
             from_addrs,
-            memo,
             min_confirmations,
         )
     }

@@ -118,6 +118,7 @@ where
 ///   received note must have in the blockchain in order to be considered for being
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
+/// * `change_memo`: A memo to be included in the change output
 ///
 /// # Examples
 ///
@@ -174,7 +175,8 @@ where
 ///     Amount::from_u64(1).unwrap(),
 ///     None,
 ///     OvkPolicy::Sender,
-///     10
+///     10,
+///     None
 /// )
 ///
 /// # }
@@ -196,6 +198,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     memo: Option<MemoBytes>,
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
+    change_memo: Option<MemoBytes>,
 ) -> Result<
     TxId,
     Error<
@@ -224,7 +227,7 @@ where
 
     #[allow(deprecated)]
     let fee_rule = fixed::FeeRule::standard();
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fee_rule);
+    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fee_rule, change_memo);
     spend(
         wallet_db,
         params,
@@ -335,7 +338,6 @@ where
         ovk_policy,
         proposal,
         min_confirmations,
-        None,
     )
 }
 
@@ -418,7 +420,6 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
     ovk_policy: OvkPolicy,
     proposal: Proposal<FeeRuleT, DbT::NoteRef>,
     min_confirmations: NonZeroU32,
-    change_memo: Option<MemoBytes>,
 ) -> Result<
     TxId,
     Error<
@@ -566,14 +567,12 @@ where
 
     for change_value in proposal.balance().proposed_change() {
         match change_value {
-            ChangeValue::Sapling(amount) => {
-                let memo = change_memo
-                    .as_ref()
-                    .map_or_else(MemoBytes::empty, |m| m.clone());
+            ChangeValue::Sapling { value, memo } => {
+                let memo = memo.as_ref().map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     internal_ovk(),
                     dfvk.change_address().1,
-                    amount.into(),
+                    value.into(),
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
@@ -581,7 +580,7 @@ where
                         account,
                         PoolType::Shielded(ShieldedProtocol::Sapling),
                     ),
-                    amount.into(),
+                    value.into(),
                     Some(memo),
                 ))
             }
@@ -682,10 +681,6 @@ where
 /// * `from_addrs`: The list of transparent addresses that will be used to filter transaparent
 ///   UTXOs received by the wallet. Only UTXOs received at one of the provided addresses will
 ///   be selected to be shielded.
-/// * `memo`: A memo to be included in the output to the (internal) recipient.
-///   This can be used to take notes about auto-shielding operations internal
-///   to the wallet that the wallet can use to improve how it represents those
-///   shielding transactions to the user.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
@@ -703,7 +698,6 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
     shielding_threshold: NonNegativeAmount,
     usk: &UnifiedSpendingKey,
     from_addrs: &[TransparentAddress],
-    memo: &MemoBytes,
     min_confirmations: NonZeroU32,
 ) -> Result<
     TxId,
@@ -737,7 +731,6 @@ where
         OvkPolicy::Sender,
         proposal,
         min_confirmations,
-        Some(memo.clone()),
     )
 }
 

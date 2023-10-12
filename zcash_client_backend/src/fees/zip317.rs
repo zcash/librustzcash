@@ -7,6 +7,7 @@ use core::cmp::Ordering;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
+    memo::MemoBytes,
     transaction::{
         components::{
             amount::{Amount, BalanceError, NonNegativeAmount},
@@ -28,13 +29,17 @@ use super::{
 /// shielded pool and delegates fee calculation to the provided fee rule.
 pub struct SingleOutputChangeStrategy {
     fee_rule: Zip317FeeRule,
+    change_memo: Option<MemoBytes>,
 }
 
 impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
-    /// fee parameters.
-    pub fn new(fee_rule: Zip317FeeRule) -> Self {
-        Self { fee_rule }
+    /// fee parameters and change memo.
+    pub fn new(fee_rule: Zip317FeeRule, change_memo: Option<MemoBytes>) -> Self {
+        Self {
+            fee_rule,
+            change_memo,
+        }
     }
 }
 
@@ -204,7 +209,10 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                             })
                         }
                         DustAction::AllowDustChange => TransactionBalance::new(
-                            vec![ChangeValue::Sapling(proposed_change)],
+                            vec![ChangeValue::sapling(
+                                proposed_change,
+                                self.change_memo.clone(),
+                            )],
                             fee_amount,
                         )
                         .map_err(|_| overflow()),
@@ -215,8 +223,14 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                         .map_err(|_| overflow()),
                     }
                 } else {
-                    TransactionBalance::new(vec![ChangeValue::Sapling(proposed_change)], fee_amount)
-                        .map_err(|_| overflow())
+                    TransactionBalance::new(
+                        vec![ChangeValue::sapling(
+                            proposed_change,
+                            self.change_memo.clone(),
+                        )],
+                        fee_amount,
+                    )
+                    .map_err(|_| overflow())
                 }
             }
         }
@@ -249,7 +263,7 @@ mod tests {
 
     #[test]
     fn change_without_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard());
+        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -269,14 +283,15 @@ mod tests {
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(NonNegativeAmount::const_from_u64(5000))]
-                && balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(5000), None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
     }
 
     #[test]
     fn change_with_transparent_payments() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard());
+        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -306,7 +321,7 @@ mod tests {
 
     #[test]
     fn change_with_allowable_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard());
+        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -339,7 +354,7 @@ mod tests {
 
     #[test]
     fn change_with_disallowed_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard());
+        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
