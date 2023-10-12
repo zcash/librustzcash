@@ -177,11 +177,58 @@ impl<N> WalletSaplingOutput<N> {
 /// with sufficient information for use in note selection.
 #[derive(Debug)]
 pub struct ReceivedSaplingNote<NoteRef> {
-    pub note_id: NoteRef,
-    pub diversifier: sapling::Diversifier,
-    pub note_value: Amount,
-    pub rseed: sapling::Rseed,
-    pub note_commitment_tree_position: Position,
+    note_id: NoteRef,
+    txid: TxId,
+    output_index: u16,
+    diversifier: sapling::Diversifier,
+    note_value: Amount,
+    rseed: sapling::Rseed,
+    note_commitment_tree_position: Position,
+}
+
+impl<NoteRef> ReceivedSaplingNote<NoteRef> {
+    pub fn from_parts(
+        note_id: NoteRef,
+        txid: TxId,
+        output_index: u16,
+        diversifier: sapling::Diversifier,
+        note_value: Amount,
+        rseed: sapling::Rseed,
+        note_commitment_tree_position: Position,
+    ) -> Self {
+        ReceivedSaplingNote {
+            note_id,
+            txid,
+            output_index,
+            diversifier,
+            note_value,
+            rseed,
+            note_commitment_tree_position,
+        }
+    }
+
+    pub fn internal_note_id(&self) -> &NoteRef {
+        &self.note_id
+    }
+
+    pub fn txid(&self) -> &TxId {
+        &self.txid
+    }
+    pub fn output_index(&self) -> u16 {
+        self.output_index
+    }
+    pub fn diversifier(&self) -> sapling::Diversifier {
+        self.diversifier
+    }
+    pub fn value(&self) -> Amount {
+        self.note_value
+    }
+    pub fn rseed(&self) -> sapling::Rseed {
+        self.rseed
+    }
+    pub fn note_commitment_tree_position(&self) -> Position {
+        self.note_commitment_tree_position
+    }
 }
 
 impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedSaplingNote<NoteRef> {

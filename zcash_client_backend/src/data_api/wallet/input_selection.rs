@@ -419,7 +419,7 @@ where
 
             let new_available = sapling_inputs
                 .iter()
-                .map(|n| n.note_value)
+                .map(|n| n.value())
                 .sum::<Option<Amount>>()
                 .ok_or(BalanceError::Overflow)?;
 
@@ -493,7 +493,7 @@ where
             }
         };
 
-        if balance.total() >= shielding_threshold.into() {
+        if balance.total() >= shielding_threshold {
             Ok(Proposal {
                 transaction_request: TransactionRequest::empty(),
                 transparent_inputs,
@@ -506,7 +506,7 @@ where
             })
         } else {
             Err(InputSelectorError::InsufficientFunds {
-                available: balance.total(),
+                available: balance.total().into(),
                 required: shielding_threshold.into(),
             })
         }

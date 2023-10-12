@@ -45,6 +45,8 @@ use crate::{
     },
 };
 
+use super::components::amount::NonNegativeAmount;
+
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
@@ -345,7 +347,11 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             &mut self.rng,
             ovk,
             to,
-            NoteValue::from_raw(value.into()),
+            NoteValue::from_raw(
+                value
+                    .try_into()
+                    .expect("Cannot create Sapling outputs with negative note values."),
+            ),
             memo,
         )
     }
@@ -407,28 +413,26 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ///
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
-    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<Amount, Error<FR::Error>> {
-        fee_rule
-            .fee_required(
-                &self.params,
-                self.target_height,
-                self.transparent_builder.inputs(),
-                self.transparent_builder.outputs(),
-                self.sapling_builder.inputs().len(),
-                self.sapling_builder.bundle_output_count(),
-                match std::cmp::max(
-                    self.orchard_builder
-                        .as_ref()
-                        .map_or(0, |builder| builder.outputs().len()),
-                    self.orchard_builder
-                        .as_ref()
-                        .map_or(0, |builder| builder.spends().len()),
-                ) {
-                    1 => 2,
-                    n => n,
-                },
-            )
-            .map_err(Error::Fee)
+    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<NonNegativeAmount, FR::Error> {
+        fee_rule.fee_required(
+            &self.params,
+            self.target_height,
+            self.transparent_builder.inputs(),
+            self.transparent_builder.outputs(),
+            self.sapling_builder.inputs().len(),
+            self.sapling_builder.bundle_output_count(),
+            match std::cmp::max(
+                self.orchard_builder
+                    .as_ref()
+                    .map_or(0, |builder| builder.outputs().len()),
+                self.orchard_builder
+                    .as_ref()
+                    .map_or(0, |builder| builder.spends().len()),
+            ) {
+                1 => 2,
+                n => n,
+            },
+        )
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -440,8 +444,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         prover: &impl TxProver,
         fee_rule: &FR,
     ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
-        let fee = self.get_fee(fee_rule)?;
-        self.build_internal(prover, fee)
+        let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
+        self.build_internal(prover, fee.into())
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -467,7 +471,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             )
             .map_err(Error::Fee)?;
 
-        self.build_internal(prover, fee)
+        self.build_internal(prover, fee.into())
     }
 
     fn build_internal<FE>(
@@ -714,7 +718,7 @@ mod tests {
         memo::MemoBytes,
         sapling::{Node, Rseed},
         transaction::components::{
-            amount::Amount,
+            amount::{Amount, NonNegativeAmount},
             sapling::builder::{self as sapling_builder},
             transparent::builder::{self as transparent_builder},
         },
@@ -893,7 +897,7 @@ mod tests {
             let builder = Builder::new(TEST_NETWORK, tx_height, None);
             assert_matches!(
                 builder.mock_build(),
-                Err(Error::InsufficientFunds(MINIMUM_FEE))
+                Err(Error::InsufficientFunds(expected)) if expected == MINIMUM_FEE.into()
             );
         }
 
@@ -916,7 +920,7 @@ mod tests {
             assert_matches!(
                 builder.mock_build(),
                 Err(Error::InsufficientFunds(expected)) if
-                    expected == (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
+                    expected == (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -933,7 +937,7 @@ mod tests {
             assert_matches!(
                 builder.mock_build(),
                 Err(Error::InsufficientFunds(expected)) if expected ==
-                    (Amount::from_i64(50000).unwrap() + MINIMUM_FEE).unwrap()
+                    (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
         }
 
@@ -971,7 +975,7 @@ mod tests {
                 .unwrap();
             assert_matches!(
                 builder.mock_build(),
-                Err(Error::InsufficientFunds(expected)) if expected == Amount::from_i64(1).unwrap()
+                Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
             );
         }
 

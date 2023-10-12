@@ -1135,7 +1135,9 @@ mod tests {
     use {
         crate::testing::AddressType,
         zcash_client_backend::keys::sapling,
-        zcash_primitives::{consensus::Parameters, transaction::components::Amount},
+        zcash_primitives::{
+            consensus::Parameters, transaction::components::amount::NonNegativeAmount,
+        },
     };
 
     #[test]
@@ -1194,12 +1196,12 @@ mod tests {
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(5).unwrap(),
+            NonNegativeAmount::const_from_u64(5),
         );
         let (h2, meta2, _) = st.generate_next_block(
             &dfvk,
             AddressType::DefaultExternal,
-            Amount::from_u64(10).unwrap(),
+            NonNegativeAmount::const_from_u64(10),
         );
 
         // The BlockMeta DB is not updated until we do so explicitly.

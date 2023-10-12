@@ -2100,7 +2100,7 @@ mod tests {
 
         // Initialize the wallet with chain data that has no shielded notes for us.
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
-        let not_our_value = Amount::const_from_i64(10000);
+        let not_our_value = NonNegativeAmount::const_from_u64(10000);
         let (start_height, _, _) =
             st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
         for _ in 1..10 {
@@ -2166,7 +2166,9 @@ mod tests {
 
         // Shield the output.
         let input_selector = GreedyInputSelector::new(
-            fixed::SingleOutputChangeStrategy::new(FixedFeeRule::non_standard(Amount::zero())),
+            fixed::SingleOutputChangeStrategy::new(FixedFeeRule::non_standard(
+                NonNegativeAmount::ZERO,
+            )),
             DustOutputPolicy::default(),
         );
         let txid = st

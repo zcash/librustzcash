@@ -4,7 +4,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     transaction::{
         components::{
-            amount::{Amount, BalanceError},
+            amount::{Amount, BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
             transparent::fees as transparent,
             OutPoint,
@@ -19,11 +19,11 @@ pub mod zip317;
 /// A proposed change amount and output pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChangeValue {
-    Sapling(Amount),
+    Sapling(NonNegativeAmount),
 }
 
 impl ChangeValue {
-    pub fn value(&self) -> Amount {
+    pub fn value(&self) -> NonNegativeAmount {
         match self {
             ChangeValue::Sapling(value) => *value,
         }
@@ -36,23 +36,28 @@ impl ChangeValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionBalance {
     proposed_change: Vec<ChangeValue>,
-    fee_required: Amount,
-    total: Amount,
+    fee_required: NonNegativeAmount,
+    total: NonNegativeAmount,
 }
 
 impl TransactionBalance {
     /// Constructs a new balance from its constituent parts.
-    pub fn new(proposed_change: Vec<ChangeValue>, fee_required: Amount) -> Option<Self> {
-        proposed_change
+    pub fn new(
+        proposed_change: Vec<ChangeValue>,
+        fee_required: NonNegativeAmount,
+    ) -> Result<Self, ()> {
+        let total = proposed_change
             .iter()
-            .map(|v| v.value())
-            .chain(Some(fee_required))
-            .sum::<Option<Amount>>()
-            .map(|total| TransactionBalance {
-                proposed_change,
-                fee_required,
-                total,
-            })
+            .map(|c| c.value())
+            .chain(Some(fee_required).into_iter())
+            .sum::<Option<NonNegativeAmount>>()
+            .ok_or(())?;
+
+        Ok(Self {
+            proposed_change,
+            fee_required,
+            total,
+        })
     }
 
     /// The change values proposed by the [`ChangeStrategy`] that computed this balance.  
@@ -62,12 +67,12 @@ impl TransactionBalance {
 
     /// Returns the fee computed for the transaction, assuming that the suggested
     /// change outputs are added to the transaction.
-    pub fn fee_required(&self) -> Amount {
+    pub fn fee_required(&self) -> NonNegativeAmount {
         self.fee_required
     }
 
     /// Returns the sum of the proposed change outputs and the required fee.
-    pub fn total(&self) -> Amount {
+    pub fn total(&self) -> NonNegativeAmount {
         self.total
     }
 }
@@ -147,7 +152,7 @@ pub enum DustAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DustOutputPolicy {
     action: DustAction,
-    dust_threshold: Option<Amount>,
+    dust_threshold: Option<NonNegativeAmount>,
 }
 
 impl DustOutputPolicy {
@@ -157,7 +162,7 @@ impl DustOutputPolicy {
     /// of the dust threshold to the change strategy that is evaluating the strategy; this
     /// recommended, but an explicit value (including zero) may be provided to explicitly
     /// override the determination of the change strategy.
-    pub fn new(action: DustAction, dust_threshold: Option<Amount>) -> Self {
+    pub fn new(action: DustAction, dust_threshold: Option<NonNegativeAmount>) -> Self {
         Self {
             action,
             dust_threshold,
@@ -170,7 +175,7 @@ impl DustOutputPolicy {
     }
     /// Returns a value that will be used to override the dust determination logic of the
     /// change policy, if any.
-    pub fn dust_threshold(&self) -> Option<Amount> {
+    pub fn dust_threshold(&self) -> Option<NonNegativeAmount> {
         self.dust_threshold
     }
 }

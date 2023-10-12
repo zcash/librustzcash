@@ -48,10 +48,7 @@ use zcash_primitives::{
         Note, Nullifier, PaymentAddress,
     },
     transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            Amount,
-        },
+        components::amount::{BalanceError, NonNegativeAmount},
         fees::FeeRule,
         Transaction, TxId,
     },
@@ -181,7 +178,7 @@ where
         &mut self,
         dfvk: &DiversifiableFullViewingKey,
         req: AddressType,
-        value: Amount,
+        value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult, Nullifier) {
         let (height, prev_hash, initial_sapling_tree_size) = self
             .latest_cached_block
@@ -211,7 +208,7 @@ where
         prev_hash: BlockHash,
         dfvk: &DiversifiableFullViewingKey,
         req: AddressType,
-        value: Amount,
+        value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
     ) -> (Cache::InsertResult, Nullifier) {
         let (cb, nf) = fake_compact_block(
@@ -240,9 +237,9 @@ where
     pub(crate) fn generate_next_block_spending(
         &mut self,
         dfvk: &DiversifiableFullViewingKey,
-        note: (Nullifier, Amount),
+        note: (Nullifier, NonNegativeAmount),
         to: PaymentAddress,
-        value: Amount,
+        value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult) {
         let (height, prev_hash, initial_sapling_tree_size) = self
             .latest_cached_block
@@ -434,7 +431,7 @@ impl<Cache> TestState<Cache> {
         &mut self,
         usk: &UnifiedSpendingKey,
         to: &RecipientAddress,
-        amount: Amount,
+        amount: NonNegativeAmount,
         memo: Option<MemoBytes>,
         ovk_policy: OvkPolicy,
         min_confirmations: NonZeroU32,
@@ -445,7 +442,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
             Infallible,
-            ReceivedNoteId,
         >,
     > {
         let params = self.network();
@@ -478,7 +474,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -512,7 +507,6 @@ impl<Cache> TestState<Cache> {
             Infallible,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -546,7 +540,6 @@ impl<Cache> TestState<Cache> {
             Infallible,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -578,7 +571,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             Infallible,
             FeeRuleT::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -615,7 +607,6 @@ impl<Cache> TestState<Cache> {
             commitment_tree::Error,
             InputsT::Error,
             <InputsT::FeeRule as FeeRule>::Error,
-            ReceivedNoteId,
         >,
     >
     where
@@ -706,7 +697,7 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
     prev_hash: BlockHash,
     dfvk: &DiversifiableFullViewingKey,
     req: AddressType,
-    value: Amount,
+    value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> (CompactBlock, Nullifier) {
     let to = match req {
@@ -718,7 +709,7 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
     // Create a fake Note for the account
     let mut rng = OsRng;
     let rseed = generate_random_rseed(params, height, &mut rng);
-    let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
+    let note = Note::from_parts(to, NoteValue::from(value), rseed);
     let encryptor = sapling_note_encryption::<_, Network>(
         Some(dfvk.fvk().ovk),
         note.clone(),
@@ -807,10 +798,10 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    (nf, in_value): (Nullifier, Amount),
+    (nf, in_value): (Nullifier, NonNegativeAmount),
     dfvk: &DiversifiableFullViewingKey,
     to: PaymentAddress,
-    value: Amount,
+    value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
     let mut rng = OsRng;
@@ -826,7 +817,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
 
     // Create a fake Note for the payment
     ctx.outputs.push({
-        let note = Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
+        let note = Note::from_parts(to, NoteValue::from(value), rseed);
         let encryptor = sapling_note_encryption::<_, Network>(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -852,7 +843,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         let rseed = generate_random_rseed(params, height, &mut rng);
         let note = Note::from_parts(
             change_addr,
-            NoteValue::from_raw((in_value - value).unwrap().into()),
+            NoteValue::from((in_value - value).unwrap()),
             rseed,
         );
         let encryptor = sapling_note_encryption::<_, Network>(

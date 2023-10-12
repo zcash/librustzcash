@@ -5,7 +5,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     transaction::{
         components::{
-            amount::{Amount, BalanceError},
+            amount::{Amount, BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
             transparent::fees as transparent,
         },
@@ -83,7 +83,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             )
             .unwrap(); // fixed::FeeRule::fee_required is infallible.
 
-        let total_in = (t_in + sapling_in).ok_or(BalanceError::Overflow)?;
+        let total_in = (t_in + sapling_in)
+            .and_then(|v| NonNegativeAmount::try_from(v).ok())
+            .ok_or(BalanceError::Overflow)?;
 
         if (!transparent_inputs.is_empty() || !sapling_inputs.is_empty()) && fee_amount > total_in {
             // For the fixed-fee selection rule, the only time we consider inputs dust is when the fee
@@ -101,20 +103,22 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                     .collect(),
             })
         } else {
-            let total_out = [t_out, sapling_out, fee_amount]
+            let total_out = [t_out, sapling_out, fee_amount.into()]
                 .iter()
                 .sum::<Option<Amount>>()
                 .ok_or(BalanceError::Overflow)?;
 
-            let proposed_change = (total_in - total_out).ok_or(BalanceError::Underflow)?;
+            let overflow = |_| ChangeError::StrategyError(BalanceError::Overflow);
+            let proposed_change =
+                (Amount::from(total_in) - total_out).ok_or(BalanceError::Underflow)?;
             match proposed_change.cmp(&Amount::zero()) {
                 Ordering::Less => Err(ChangeError::InsufficientFunds {
-                    available: total_in,
+                    available: total_in.into(),
                     required: total_out,
                 }),
-                Ordering::Equal => TransactionBalance::new(vec![], fee_amount)
-                    .ok_or_else(|| BalanceError::Overflow.into()),
+                Ordering::Equal => TransactionBalance::new(vec![], fee_amount).map_err(overflow),
                 Ordering::Greater => {
+                    let proposed_change = NonNegativeAmount::try_from(proposed_change).unwrap();
                     let dust_threshold = dust_output_policy
                         .dust_threshold()
                         .unwrap_or_else(|| self.fee_rule.fixed_fee());
@@ -125,28 +129,29 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                                 let shortfall = (dust_threshold - proposed_change)
                                     .ok_or(BalanceError::Underflow)?;
                                 Err(ChangeError::InsufficientFunds {
-                                    available: total_in,
+                                    available: total_in.into(),
                                     required: (total_in + shortfall)
-                                        .ok_or(BalanceError::Overflow)?,
+                                        .ok_or(BalanceError::Overflow)?
+                                        .into(),
                                 })
                             }
                             DustAction::AllowDustChange => TransactionBalance::new(
                                 vec![ChangeValue::Sapling(proposed_change)],
                                 fee_amount,
                             )
-                            .ok_or_else(|| BalanceError::Overflow.into()),
+                            .map_err(overflow),
                             DustAction::AddDustToFee => TransactionBalance::new(
                                 vec![],
-                                (fee_amount + proposed_change).unwrap(),
+                                (fee_amount + proposed_change).ok_or(BalanceError::Overflow)?,
                             )
-                            .ok_or_else(|| BalanceError::Overflow.into()),
+                            .map_err(overflow),
                         }
                     } else {
                         TransactionBalance::new(
                             vec![ChangeValue::Sapling(proposed_change)],
                             fee_amount,
                         )
-                        .ok_or_else(|| BalanceError::Overflow.into())
+                        .map_err(overflow)
                     }
                 }
             }
@@ -159,7 +164,10 @@ mod tests {
     use zcash_primitives::{
         consensus::{Network, NetworkUpgrade, Parameters},
         transaction::{
-            components::{amount::Amount, transparent::TxOut},
+            components::{
+                amount::{Amount, NonNegativeAmount},
+                transparent::TxOut,
+            },
             fees::fixed::FeeRule as FixedFeeRule,
         },
     };
@@ -197,8 +205,8 @@ mod tests {
 
         assert_matches!(
             result,
-            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(Amount::from_u64(10000).unwrap())]
-                && balance.fee_required() == Amount::from_u64(10000).unwrap()
+            Ok(balance) if balance.proposed_change() == [ChangeValue::Sapling(NonNegativeAmount::const_from_u64(10000))]
+                && balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
         );
     }
 

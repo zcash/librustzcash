@@ -13,7 +13,7 @@ use zcash_primitives::{
     },
     transaction::{
         builder::Builder,
-        components::amount::{Amount, BalanceError},
+        components::amount::{Amount, BalanceError, NonNegativeAmount},
         fees::{fixed, FeeRule},
         Transaction,
     },
@@ -37,15 +37,12 @@ use crate::{
 pub mod input_selection;
 use input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector};
 
-use super::ShieldedProtocol;
+use super::{NoteId, ShieldedProtocol};
 
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::wallet::WalletTransparentOutput,
-    zcash_primitives::{
-        legacy::TransparentAddress, sapling::keys::OutgoingViewingKey,
-        transaction::components::amount::NonNegativeAmount,
-    },
+    zcash_primitives::{legacy::TransparentAddress, sapling::keys::OutgoingViewingKey},
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -195,7 +192,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     prover: impl SaplingProver,
     usk: &UnifiedSpendingKey,
     to: &RecipientAddress,
-    amount: Amount,
+    amount: NonNegativeAmount,
     memo: Option<MemoBytes>,
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
@@ -206,7 +203,6 @@ pub fn create_spend_to_address<DbT, ParamsT>(
         <DbT as WalletCommitmentTrees>::Error,
         GreedyInputSelectorError<BalanceError, DbT::NoteRef>,
         Infallible,
-        DbT::NoteRef,
     >,
 >
 where
@@ -216,7 +212,7 @@ where
 {
     let req = zip321::TransactionRequest::new(vec![Payment {
         recipient_address: to.clone(),
-        amount,
+        amount: amount.into(),
         memo,
         label: None,
         message: None,
@@ -309,7 +305,6 @@ pub fn spend<DbT, ParamsT, InputsT>(
         <DbT as WalletCommitmentTrees>::Error,
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
     >,
 >
 where
@@ -358,13 +353,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     min_confirmations: NonZeroU32,
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
-    Error<
-        DbT::Error,
-        CommitmentTreeErrT,
-        InputsT::Error,
-        <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
-    >,
+    Error<DbT::Error, CommitmentTreeErrT, InputsT::Error, <InputsT::FeeRule as FeeRule>::Error>,
 >
 where
     DbT: WalletWrite,
@@ -395,13 +384,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     min_confirmations: NonZeroU32,
 ) -> Result<
     Proposal<InputsT::FeeRule, DbT::NoteRef>,
-    Error<
-        DbT::Error,
-        CommitmentTreeErrT,
-        InputsT::Error,
-        <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
-    >,
+    Error<DbT::Error, CommitmentTreeErrT, InputsT::Error, <InputsT::FeeRule as FeeRule>::Error>,
 >
 where
     ParamsT: consensus::Parameters,
@@ -446,7 +429,6 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
         <DbT as WalletCommitmentTrees>::Error,
         InputsErrT,
         FeeRuleT::Error,
-        DbT::NoteRef,
     >,
 >
 where
@@ -491,8 +473,7 @@ where
     let mut builder = Builder::new(params.clone(), proposal.min_target_height(), None);
 
     let checkpoint_depth = wallet_db.get_checkpoint_depth(min_confirmations)?;
-
-    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _, _>>(|sapling_tree| {
+    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
         for selected in proposal.sapling_inputs() {
             let (note, key, merkle_path) = select_key_for_note(
                 sapling_tree,
@@ -501,9 +482,15 @@ where
                 &dfvk,
                 checkpoint_depth,
             )?
-            .ok_or(Error::NoteMismatch(selected.note_id))?;
+            .ok_or_else(|| {
+                Error::NoteMismatch(NoteId {
+                    txid: *selected.txid(),
+                    protocol: ShieldedProtocol::Sapling,
+                    output_index: selected.output_index(),
+                })
+            })?;
 
-            builder.add_sapling_spend(key, selected.diversifier, note, merkle_path)?;
+            builder.add_sapling_spend(key, selected.diversifier(), note, merkle_path)?;
         }
         Ok(())
     })?;
@@ -605,7 +592,7 @@ where
                 builder.add_sapling_output(
                     internal_ovk(),
                     dfvk.change_address().1,
-                    *amount,
+                    amount.into(),
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
@@ -613,7 +600,7 @@ where
                         account,
                         PoolType::Shielded(ShieldedProtocol::Sapling),
                     ),
-                    *amount,
+                    amount.into(),
                     Some(memo),
                 ))
             }
@@ -682,7 +669,7 @@ where
             created: time::OffsetDateTime::now_utc(),
             account,
             outputs: sapling_outputs.chain(transparent_outputs).collect(),
-            fee_amount: proposal.balance().fee_required(),
+            fee_amount: Amount::from(proposal.balance().fee_required()),
             #[cfg(feature = "transparent-inputs")]
             utxos_spent: utxos.iter().map(|utxo| utxo.outpoint().clone()).collect(),
         })
@@ -744,7 +731,6 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
         <DbT as WalletCommitmentTrees>::Error,
         InputsT::Error,
         <InputsT::FeeRule as FeeRule>::Error,
-        DbT::NoteRef,
     >,
 >
 where
@@ -793,15 +779,15 @@ fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
     // corresponding to the unified spending key, checking against the witness we are using
     // to spend the note that we've used the correct key.
     let external_note = dfvk
-        .diversified_address(selected.diversifier)
-        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .diversified_address(selected.diversifier())
+        .map(|addr| addr.create_note(selected.value().try_into().unwrap(), selected.rseed()));
     let internal_note = dfvk
-        .diversified_change_address(selected.diversifier)
-        .map(|addr| addr.create_note(selected.note_value.into(), selected.rseed));
+        .diversified_change_address(selected.diversifier())
+        .map(|addr| addr.create_note(selected.value().try_into().unwrap(), selected.rseed()));
 
     let expected_root = commitment_tree.root_at_checkpoint(checkpoint_depth)?;
     let merkle_path = commitment_tree
-        .witness_caching(selected.note_commitment_tree_position, checkpoint_depth)?;
+        .witness_caching(selected.note_commitment_tree_position(), checkpoint_depth)?;
 
     Ok(external_note
         .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))

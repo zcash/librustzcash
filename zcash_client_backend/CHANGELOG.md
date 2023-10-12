@@ -8,15 +8,31 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+
 - `zcash_client_backend::data_api::ShieldedProtocol` has a new variant for `Orchard`,
   allowing for better reporting to callers trying to perform actions using `Orchard`
   before it is fully supported.
 - `zcash_client_backend::data_api::error::Error` has new error variant:
   - `Error::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
+- Added methods to `zcash_client_backend::wallet::ReceivedSaplingNote`:
+  `{from_parts, txid, output_index, diversifier, rseed, note_commitment_tree_position}`.
 
 ### Changed
 - `zcash_client_backend::data_api::chain::scan_cached_blocks` now returns
   a `ScanSummary` containing metadata about the scanned blocks on success.
+- The fields of `zcash_client_backend::wallet::ReceivedSaplingNote` are now
+  private. Use `ReceivedSaplingNote::from_parts` for construction instead.
+  Accessor methods are provided for each previously-public field.
+- `zcash_client_backend::data_api` changes:
+  - The `NoteMismatch` variant of `data_api::error::Error` now wraps a
+    `data_api::NoteId` instead of a backend-specific note identifier. The
+    related `NoteRef` type parameter has been removed from `data_api::error::Error`.
+  - `wallet::create_spend_to_address` now takes a `NonNegativeAmount` rather than
+    an `Amount`.
+  - All uses of `Amount` in `data_api::wallet::input_selection` have been replaced
+    with `NonNegativeAmount`.
+- All uses of `Amount` in `zcash_client_backend::fees` have been replaced
+  with `NonNegativeAmount`.
 
 ## [0.10.0] - 2023-09-25
 

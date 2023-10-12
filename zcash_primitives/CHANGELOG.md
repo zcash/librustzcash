@@ -21,14 +21,41 @@ and this library adheres to Rust's notion of
     set of closures.
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
+- Constants in `zcash_primitives::transaction::fees::zip317`:
+  - `MARGINAL_FEE`
+  - `GRACE_ACTIONS`
+  - `P2PKH_STANDARD_INPUT_SIZE`
+  - `P2PKH_STANDARD_OUTPUT_SIZE`
+- `zcash_primitives::transaction::builder::get_fee`
+- Additions related to `zcash_primitive::components::transaction::Amount`
+  and `zcash_primitive::components::transaction::NonNegativeAmount`
+  - `impl TryFrom<Amount> for u64`
+  - `Amount::const_from_u64`
+  - `NonNegativeAmount::const_from_u64`
+  - `NonNegativeAmount::from_nonnegative_i64_le_bytes`
+  - `NonNegativeAmount::to_i64_le_bytes`
+  - `impl From<&NonNegativeAmount> for Amount`
+  - `impl From<NonNegativeAmount> for u64`
+  - `impl From<NonNegativeAmount> for zcash_primitives::sapling::value::NoteValue`
+  - `impl Sum<NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `impl<'a> Sum<&'a NonNegativeAmount> for Option<NonNegativeAmount>`
 
 ### Changed
+- `zcash_primitives::transaction::fees`:
+  - `FeeRule::fee_required` now returns the required fee as a `NonNegativeAmount` instead
+    of as an `Amount`.
+  - When using the `zfuture` feature flag, `FutureFeeRule::fee_required_zfuture` now returns
+    the required fee as a `NonNegativeAmount` instead of as an `Amount`.
+  - `fees::fixed::FeeRule::fixed_fee` now wraps a `NonNegativeAmount` instead of an `Amount`
+  - `fees::zip317::FeeRule::marginal_fee` is now represented and exposed as a
+    `NonNegativeAmount` instead of an `Amount`
 - `zcash_primitives::transaction::components::sapling`:
   - `MapAuth` trait methods now take `&mut self` instead of `&self`.
 
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
+- `impl From<zcash_primitive::components::transaction::Amount> for u64`
 
 ## [0.13.0] - 2023-09-25
 ### Added
@@ -53,7 +80,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - Migrated to `incrementalmerkletree 0.5`, `orchard 0.6`.
 - `zcash_primitives::transaction`:
-  - `builder::Builder::{new, new_with_rng}` now take an optional `orchard_anchor` 
+  - `builder::Builder::{new, new_with_rng}` now take an optional `orchard_anchor`
     argument which must be provided in order to enable Orchard spends and recipients.
   - All `builder::Builder` methods now require the bound `R: CryptoRng` on
     `Builder<'a, P, R>`. A non-`CryptoRng` randomness source is still accepted
@@ -62,11 +89,11 @@ and this library adheres to Rust's notion of
   - `builder::Error` has several additional variants for Orchard-related errors.
   - `fees::FeeRule::fee_required` now takes an additional argument,
     `orchard_action_count`
-  - `Unauthorized`'s associated type `OrchardAuth` is now 
+  - `Unauthorized`'s associated type `OrchardAuth` is now
     `orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>`
     instead of `zcash_primitives::transaction::components::orchard::Unauthorized`
 - `zcash_primitives::consensus::NetworkUpgrade` now implements `PartialEq`, `Eq`
-- `zcash_primitives::legacy::Script` now has a custom `Debug` implementation that 
+- `zcash_primitives::legacy::Script` now has a custom `Debug` implementation that
   renders script details in a much more legible fashion.
 - `zcash_primitives::sapling::redjubjub::Signature` now has a custom `Debug`
   implementation that renders details in a much more legible fashion.
@@ -74,7 +101,7 @@ and this library adheres to Rust's notion of
   implementation that renders details in a much more legible fashion.
 
 ### Removed
-- `impl {PartialEq, Eq} for transaction::builder::Error` 
+- `impl {PartialEq, Eq} for transaction::builder::Error`
   (use `assert_matches!` where error comparisons are required)
 - `zcash_primitives::transaction::components::orchard::Unauthorized`
 - `zcash_primitives::transaction::components::amount::DEFAULT_FEE` was
