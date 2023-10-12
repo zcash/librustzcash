@@ -456,11 +456,12 @@ pub(crate) mod tests {
             PaymentAddress,
         },
         transaction::{
-            components::{
-                amount::{BalanceError, NonNegativeAmount},
-                Amount,
+            components::{amount::NonNegativeAmount, Amount},
+            fees::{
+                fixed::FeeRule as FixedFeeRule,
+                zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
+                StandardFeeRule,
             },
-            fees::{fixed::FeeRule as FixedFeeRule, zip317::FeeRule as Zip317FeeRule},
             Transaction,
         },
         zip32::{sapling::ExtendedSpendingKey, Scope},
@@ -477,7 +478,7 @@ pub(crate) mod tests {
             WalletWrite,
         },
         decrypt_transaction,
-        fees::{fixed, zip317, DustOutputPolicy},
+        fees::{fixed, standard, zip317, DustOutputPolicy},
         keys::UnifiedSpendingKey,
         wallet::OvkPolicy,
         zip321::{self, Payment, TransactionRequest},
@@ -547,10 +548,10 @@ pub(crate) mod tests {
         }])
         .unwrap();
 
-        let fee_rule = FixedFeeRule::standard();
+        let fee_rule = StandardFeeRule::PreZip313;
         let change_memo = "Test change memo".parse::<Memo>().unwrap();
         let change_strategy =
-            fixed::SingleOutputChangeStrategy::new(fee_rule, Some(change_memo.clone().into()));
+            standard::SingleOutputChangeStrategy::new(fee_rule, Some(change_memo.clone().into()));
         let input_selector =
             &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
         let proposal_result = st.propose_transfer(
@@ -561,7 +562,7 @@ pub(crate) mod tests {
         );
         assert_matches!(proposal_result, Ok(_));
 
-        let create_proposed_result = st.create_proposed_transaction(
+        let create_proposed_result = st.create_proposed_transaction::<Infallible, _>(
             &usk,
             OvkPolicy::Sender,
             proposal_result.unwrap(),
@@ -655,6 +656,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn create_to_address_fails_on_incorrect_usk() {
         let mut st = TestBuilder::new()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -998,8 +1000,8 @@ pub(crate) mod tests {
             Error<
                 SqliteClientError,
                 commitment_tree::Error,
-                GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
-                Infallible,
+                GreedyInputSelectorError<Zip317FeeError, ReceivedNoteId>,
+                Zip317FeeError,
             >,
         > {
             let txid = st.create_spend_to_address(

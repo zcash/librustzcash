@@ -1,7 +1,6 @@
-use std::{convert::Infallible, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_primitives::transaction::TxId;
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
@@ -13,9 +12,9 @@ use zcash_primitives::{
     },
     transaction::{
         builder::Builder,
-        components::amount::{Amount, BalanceError, NonNegativeAmount},
-        fees::{fixed, FeeRule},
-        Transaction,
+        components::amount::{Amount, NonNegativeAmount},
+        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
+        Transaction, TxId,
     },
     zip32::{sapling::DiversifiableFullViewingKey, sapling::ExtendedSpendingKey, AccountId, Scope},
 };
@@ -204,8 +203,8 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     Error<
         <DbT as WalletRead>::Error,
         <DbT as WalletCommitmentTrees>::Error,
-        GreedyInputSelectorError<BalanceError, DbT::NoteRef>,
-        Infallible,
+        GreedyInputSelectorError<Zip317FeeError, DbT::NoteRef>,
+        Zip317FeeError,
     >,
 >
 where
@@ -226,8 +225,8 @@ where
     );
 
     #[allow(deprecated)]
-    let fee_rule = fixed::FeeRule::standard();
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fee_rule, change_memo);
+    let fee_rule = StandardFeeRule::PreZip313;
+    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(fee_rule, change_memo);
     spend(
         wallet_db,
         params,

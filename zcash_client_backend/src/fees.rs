@@ -15,6 +15,7 @@ use zcash_primitives::{
 };
 
 pub mod fixed;
+pub mod standard;
 pub mod zip317;
 
 /// A proposed change amount and output pool.
@@ -116,6 +117,28 @@ pub enum ChangeError<E, NoteRefT> {
     },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
+}
+
+impl<E, NoteRefT> ChangeError<E, NoteRefT> {
+    pub fn map<E0, F: FnOnce(E) -> E0>(self, f: F) -> ChangeError<E0, NoteRefT> {
+        match self {
+            ChangeError::InsufficientFunds {
+                available,
+                required,
+            } => ChangeError::InsufficientFunds {
+                available,
+                required,
+            },
+            ChangeError::DustInputs {
+                transparent,
+                sapling,
+            } => ChangeError::DustInputs {
+                transparent,
+                sapling,
+            },
+            ChangeError::StrategyError(e) => ChangeError::StrategyError(f(e)),
+        }
+    }
 }
 
 impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {

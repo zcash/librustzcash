@@ -14,6 +14,7 @@ and this library adheres to Rust's notion of
   before it is fully supported.
 - `zcash_client_backend::data_api::error::Error` has new error variant:
   - `Error::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
+- Added module `zcash_client_backend::fees::standard`
 - Added methods to `zcash_client_backend::wallet::ReceivedSaplingNote`:
   `{from_parts, txid, output_index, diversifier, rseed, note_commitment_tree_position}`.
 

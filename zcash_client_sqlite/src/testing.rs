@@ -14,20 +14,18 @@ use tempfile::NamedTempFile;
 #[cfg(feature = "unstable")]
 use tempfile::TempDir;
 
-use zcash_client_backend::data_api::chain::ScanSummary;
-use zcash_client_backend::data_api::{AccountBalance, WalletRead};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::RecipientAddress,
     data_api::{
         self,
-        chain::{scan_cached_blocks, BlockSource},
+        chain::{scan_cached_blocks, BlockSource, ScanSummary},
         wallet::{
             create_proposed_transaction, create_spend_to_address,
             input_selection::{GreedyInputSelectorError, InputSelector, Proposal},
             propose_transfer, spend,
         },
-        AccountBirthday, WalletSummary, WalletWrite,
+        AccountBalance, AccountBirthday, WalletRead, WalletSummary, WalletWrite,
     },
     keys::UnifiedSpendingKey,
     proto::compact_formats::{
@@ -48,8 +46,8 @@ use zcash_primitives::{
         Note, Nullifier, PaymentAddress,
     },
     transaction::{
-        components::amount::{BalanceError, NonNegativeAmount},
-        fees::FeeRule,
+        components::amount::NonNegativeAmount,
+        fees::{zip317::FeeError as Zip317FeeError, FeeRule},
         Transaction, TxId,
     },
     zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
@@ -442,8 +440,8 @@ impl<Cache> TestState<Cache> {
         data_api::error::Error<
             SqliteClientError,
             commitment_tree::Error,
-            GreedyInputSelectorError<BalanceError, ReceivedNoteId>,
-            Infallible,
+            GreedyInputSelectorError<Zip317FeeError, ReceivedNoteId>,
+            Zip317FeeError,
         >,
     > {
         let params = self.network();
@@ -560,7 +558,7 @@ impl<Cache> TestState<Cache> {
     }
 
     /// Invokes [`create_proposed_transaction`] with the given arguments.
-    pub(crate) fn create_proposed_transaction<FeeRuleT>(
+    pub(crate) fn create_proposed_transaction<InputsErrT, FeeRuleT>(
         &mut self,
         usk: &UnifiedSpendingKey,
         ovk_policy: OvkPolicy,
@@ -571,7 +569,7 @@ impl<Cache> TestState<Cache> {
         data_api::error::Error<
             SqliteClientError,
             commitment_tree::Error,
-            Infallible,
+            InputsErrT,
             FeeRuleT::Error,
         >,
     >
@@ -579,7 +577,7 @@ impl<Cache> TestState<Cache> {
         FeeRuleT: FeeRule,
     {
         let params = self.network();
-        create_proposed_transaction::<_, _, Infallible, _>(
+        create_proposed_transaction(
             &mut self.db_data,
             &params,
             test_prover(),
