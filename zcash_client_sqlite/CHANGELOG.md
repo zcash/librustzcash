@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_sqlite::error::SqliteClientError` has new error variant:
+  - `SqliteClientError::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
+
 ## [0.8.0] - 2023-09-25
 
 ### Notable Changes

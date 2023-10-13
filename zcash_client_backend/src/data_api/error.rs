@@ -16,6 +16,7 @@ use zcash_primitives::{
 };
 
 use crate::data_api::wallet::input_selection::InputSelectorError;
+use crate::data_api::PoolType;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};
@@ -55,6 +56,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
 
     /// It is forbidden to provide a memo when constructing a transparent output.
     MemoForbidden,
+
+    /// Attempted to create a spend to an unsupported pool type (currently, Orchard).
+    UnsupportedPoolType(PoolType),
 
     /// A note being spent does not correspond to either the internal or external
     /// full viewing key for an account.
@@ -112,6 +116,7 @@ where
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
+            Error::UnsupportedPoolType(t) => write!(f, "Attempted to create spend to an unsupported pool type: {}", t),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
             #[cfg(feature = "transparent-inputs")]

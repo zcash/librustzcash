@@ -410,6 +410,9 @@ where
 ///
 /// Returns the database identifier for the newly constructed transaction, or an error if
 /// an error occurs in transaction construction, proving, or signing.
+///
+/// Note: If the payment includes a recipient with an Orchard-only UA, this will attempt
+/// to fall back to the transparent receiver until full Orchard support is implemented.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
@@ -534,17 +537,33 @@ where
                     .memo
                     .as_ref()
                     .map_or_else(MemoBytes::empty, |m| m.clone());
-                builder.add_sapling_output(
-                    external_ovk,
-                    *ua.sapling().expect("TODO: Add Orchard support to builder"),
-                    payment.amount,
-                    memo.clone(),
-                )?;
-                sapling_output_meta.push((
-                    Recipient::Unified(ua.clone(), PoolType::Shielded(ShieldedProtocol::Sapling)),
-                    payment.amount,
-                    Some(memo),
-                ));
+
+                if let Some(sapling_receiver) = ua.sapling() {
+                    builder.add_sapling_output(
+                        external_ovk,
+                        *sapling_receiver,
+                        payment.amount,
+                        memo.clone(),
+                    )?;
+                    sapling_output_meta.push((
+                        Recipient::Unified(
+                            ua.clone(),
+                            PoolType::Shielded(ShieldedProtocol::Sapling),
+                        ),
+                        payment.amount,
+                        Some(memo),
+                    ));
+                } else if let Some(taddr) = ua.transparent() {
+                    if payment.memo.is_some() {
+                        return Err(Error::MemoForbidden);
+                    } else {
+                        builder.add_transparent_output(taddr, payment.amount)?;
+                    }
+                } else {
+                    return Err(Error::UnsupportedPoolType(PoolType::Shielded(
+                        ShieldedProtocol::Orchard,
+                    )));
+                }
             }
             RecipientAddress::Shielded(addr) => {
                 let memo = payment
