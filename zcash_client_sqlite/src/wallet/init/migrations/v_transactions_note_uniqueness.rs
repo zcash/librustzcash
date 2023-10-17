@@ -158,3 +158,93 @@ impl RusqliteMigration for Migration {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use rusqlite::{self, params};
+    use tempfile::NamedTempFile;
+
+    use zcash_client_backend::keys::UnifiedSpendingKey;
+    use zcash_primitives::{consensus::Network, zip32::AccountId};
+
+    use crate::{
+        wallet::init::{init_wallet_db_internal, migrations::v_transactions_net},
+        WalletDb,
+    };
+
+    #[test]
+    fn v_transactions_note_uniqueness_migration() {
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[v_transactions_net::MIGRATION_ID]).unwrap();
+
+        // Create an account in the wallet
+        let usk0 =
+            UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::from(0))
+                .unwrap();
+        let ufvk0 = usk0.to_unified_full_viewing_key();
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (account, ufvk) VALUES (0, ?)",
+                params![ufvk0.encode(&db_data.params)],
+            )
+            .unwrap();
+
+        // Tx 0 contains two received notes, both of 2 zatoshis, that are controlled by account 0.
+        db_data.conn.execute_batch(
+            "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'00');
+            INSERT INTO transactions (block, id_tx, txid) VALUES (0, 0, 'tx0');
+
+            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+            VALUES (0, 0, 0, '', 2, '', 'nf_a', false);
+            INSERT INTO received_notes (tx, output_index, account, diversifier, value, rcm, nf, is_change)
+            VALUES (0, 3, 0, '', 2, '', 'nf_b', false);").unwrap();
+
+        let check_balance_delta = |db_data: &mut WalletDb<rusqlite::Connection, Network>,
+                                   expected_notes: i64| {
+            let mut q = db_data
+                .conn
+                .prepare(
+                    "SELECT account_id, account_balance_delta, has_change, memo_count, sent_note_count, received_note_count
+                    FROM v_transactions",
+                )
+                .unwrap();
+            let mut rows = q.query([]).unwrap();
+            let mut row_count = 0;
+            while let Some(row) = rows.next().unwrap() {
+                row_count += 1;
+                let account: i64 = row.get(0).unwrap();
+                let account_balance_delta: i64 = row.get(1).unwrap();
+                let has_change: bool = row.get(2).unwrap();
+                let memo_count: i64 = row.get(3).unwrap();
+                let sent_note_count: i64 = row.get(4).unwrap();
+                let received_note_count: i64 = row.get(5).unwrap();
+                match account {
+                    0 => {
+                        assert_eq!(account_balance_delta, 2 * expected_notes);
+                        assert!(!has_change);
+                        assert_eq!(memo_count, 0);
+                        assert_eq!(sent_note_count, 0);
+                        assert_eq!(received_note_count, expected_notes);
+                    }
+                    other => {
+                        panic!(
+                            "Account {:?} is not expected to exist in the wallet.",
+                            other
+                        );
+                    }
+                }
+            }
+            assert_eq!(row_count, 1);
+        };
+
+        // Check for the bug (#1020).
+        check_balance_delta(&mut db_data, 1);
+
+        // Apply the current migration.
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+
+        // Now it should be correct.
+        check_balance_delta(&mut db_data, 2);
+    }
+}
