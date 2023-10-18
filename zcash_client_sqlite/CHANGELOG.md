@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.8.1] - 2023-10-18
+
+### Fixed
+- Fixed a bug in `v_transactions` that was omitting value from identically-valued notes
+
 ## [0.8.0] - 2023-09-25
 
 ### Notable Changes
