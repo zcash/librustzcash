@@ -12,6 +12,7 @@ mod ufvk_support;
 mod utxos_table;
 mod v_sapling_shard_unscanned_ranges;
 mod v_transactions_net;
+mod v_transactions_note_uniqueness;
 mod v_transactions_shielding_balance;
 mod v_transactions_transparent_history;
 mod v_tx_outputs_use_legacy_false;
@@ -48,6 +49,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     // v_sapling_shard_unscanned_ranges               v_tx_outputs_use_legacy_false
     //                |                                             |
     //        wallet_summaries                       v_transactions_shielding_balance
+    //                                                              |
+    //                                               v_transactions_note_uniqueness
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -82,5 +85,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(v_transactions_transparent_history::Migration),
         Box::new(v_tx_outputs_use_legacy_false::Migration),
         Box::new(v_transactions_shielding_balance::Migration),
+        Box::new(v_transactions_note_uniqueness::Migration),
     ]
 }

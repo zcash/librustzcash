@@ -435,7 +435,8 @@ mod tests {
             "CREATE VIEW v_transactions AS
             WITH
             notes AS (
-                SELECT sapling_received_notes.account        AS account_id,
+                SELECT sapling_received_notes.id_note        AS id,
+                       sapling_received_notes.account        AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
                        2                                     AS pool,
@@ -457,7 +458,8 @@ mod tests {
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.tx
                 UNION
-                SELECT utxos.received_by_account     AS account_id,
+                SELECT utxos.id_utxo                 AS id,
+                       utxos.received_by_account     AS account_id,
                        utxos.height                  AS block,
                        utxos.prevout_txid            AS txid,
                        0                             AS pool,
@@ -467,7 +469,8 @@ mod tests {
                        0                             AS memo_present
                 FROM utxos
                 UNION
-                SELECT sapling_received_notes.account        AS account_id,
+                SELECT sapling_received_notes.id_note        AS id,
+                       sapling_received_notes.account        AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
                        2                                     AS pool,
@@ -479,7 +482,8 @@ mod tests {
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.spent
                 UNION
-                SELECT utxos.received_by_account     AS account_id,
+                SELECT utxos.id_utxo                 AS id,
+                       utxos.received_by_account     AS account_id,
                        transactions.block            AS block,
                        transactions.txid             AS txid,
                        0                             AS pool,
