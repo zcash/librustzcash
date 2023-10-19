@@ -11,6 +11,10 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::error::SqliteClientError` has new error variant:
   - `SqliteClientError::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
 
+## [0.8.1] - 2023-10-18
+
+- Fixed a bug in `v_transactions` that was omitting value from identically-valued notes
+
 ## [0.8.0] - 2023-09-25
 
 ### Notable Changes
