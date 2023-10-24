@@ -12,7 +12,7 @@ use crate::{
     keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
-    sapling::{self, prover::TxProver, value::NoteValue, Diversifier, Note, PaymentAddress},
+    sapling::{self, prover::TxProver, Diversifier, Note, PaymentAddress},
     transaction::{
         components::{
             amount::{Amount, BalanceError},
@@ -344,7 +344,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             &mut self.rng,
             ovk,
             to,
-            NoteValue::from_raw(value.into()),
+            sapling::value::NoteValue::from_raw(value.into()),
             memo,
         )
     }
@@ -709,7 +709,7 @@ mod tests {
         consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
         legacy::TransparentAddress,
         memo::MemoBytes,
-        sapling::{Node, Rseed},
+        sapling::{self, Node, Rseed},
         transaction::components::{
             amount::{Amount, NonNegativeAmount},
             sapling::builder::{self as sapling_builder},
@@ -802,7 +802,10 @@ mod tests {
 
         let mut rng = OsRng;
 
-        let note1 = to.create_note(50000, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note1 = to.create_note(
+            sapling::value::NoteValue::from_raw(50000),
+            Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
+        );
         let cmu1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
@@ -895,7 +898,10 @@ mod tests {
             );
         }
 
-        let note1 = to.create_note(59999, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note1 = to.create_note(
+            sapling::value::NoteValue::from_raw(59999),
+            Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
+        );
         let cmu1 = Node::from_cmu(&note1.cmu());
         let mut tree = CommitmentTree::<Node, 32>::empty();
         tree.append(cmu1).unwrap();
@@ -933,7 +939,10 @@ mod tests {
             );
         }
 
-        let note2 = to.create_note(1, Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)));
+        let note2 = to.create_note(
+            sapling::value::NoteValue::from_raw(1),
+            Rseed::BeforeZip212(jubjub::Fr::random(&mut rng)),
+        );
         let cmu2 = Node::from_cmu(&note2.cmu());
         tree.append(cmu2).unwrap();
         witness1.append(cmu2).unwrap();

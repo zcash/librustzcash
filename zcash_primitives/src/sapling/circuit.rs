@@ -6,7 +6,7 @@ use group::{ff::PrimeField, Curve};
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 
-use super::{PaymentAddress, ProofGenerationKey};
+use super::{value::NoteValue, PaymentAddress, ProofGenerationKey};
 
 use bellman::gadgets::blake2s;
 use bellman::gadgets::boolean;
@@ -23,9 +23,6 @@ use self::constants::{
 #[cfg(test)]
 use group::ff::PrimeFieldBits;
 
-#[cfg(test)]
-use super::value::NoteValue;
-
 mod constants;
 mod ecc;
 mod pedersen_hash;
@@ -33,7 +30,7 @@ mod pedersen_hash;
 /// The opening (value and randomness) of a Sapling value commitment.
 #[derive(Clone)]
 pub struct ValueCommitmentOpening {
-    pub value: u64,
+    pub value: NoteValue,
     pub randomness: jubjub::Scalar,
 }
 
@@ -41,7 +38,7 @@ pub struct ValueCommitmentOpening {
 impl ValueCommitmentOpening {
     fn commitment(&self) -> jubjub::ExtendedPoint {
         let cv = (super::constants::VALUE_COMMITMENT_VALUE_GENERATOR
-            * jubjub::Fr::from(self.value))
+            * jubjub::Fr::from(self.value.inner()))
             + (super::constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR * self.randomness);
         cv.into()
     }
@@ -116,7 +113,7 @@ where
     // Booleanize the value into little-endian bit order
     let value_bits = boolean::u64_into_boolean_vec_le(
         cs.namespace(|| "value"),
-        value_commitment_opening.as_ref().map(|c| c.value),
+        value_commitment_opening.as_ref().map(|c| c.value.inner()),
     )?;
 
     // Compute the note value in the exponent
@@ -571,7 +568,7 @@ fn test_input_circuit_with_bls12_381() {
 
     for _ in 0..10 {
         let value_commitment = ValueCommitmentOpening {
-            value: rng.next_u64(),
+            value: NoteValue::from_raw(rng.next_u64()),
             randomness: jubjub::Fr::random(&mut rng),
         };
 
@@ -607,7 +604,7 @@ fn test_input_circuit_with_bls12_381() {
             let expected_value_commitment = value_commitment.commitment().to_affine();
             let note = Note::from_parts(
                 payment_address,
-                NoteValue::from_raw(value_commitment.value),
+                value_commitment.value,
                 Rseed::BeforeZip212(commitment_randomness),
             );
 
@@ -743,7 +740,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
     for i in 0..10 {
         let value_commitment = ValueCommitmentOpening {
-            value: i,
+            value: NoteValue::from_raw(i),
             randomness: jubjub::Fr::from(1000 * (i + 1)),
         };
 
@@ -787,7 +784,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
             );
             let note = Note::from_parts(
                 payment_address,
-                NoteValue::from_raw(value_commitment.value),
+                value_commitment.value,
                 Rseed::BeforeZip212(commitment_randomness),
             );
 
@@ -895,7 +892,7 @@ fn test_output_circuit_with_bls12_381() {
 
     for _ in 0..100 {
         let value_commitment = ValueCommitmentOpening {
-            value: rng.next_u64(),
+            value: NoteValue::from_raw(rng.next_u64()),
             randomness: jubjub::Fr::random(&mut rng),
         };
 

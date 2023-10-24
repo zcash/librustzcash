@@ -93,8 +93,8 @@ impl PaymentAddress {
         self.diversifier.g_d().expect("checked at construction")
     }
 
-    pub fn create_note(&self, value: u64, rseed: Rseed) -> Note {
-        Note::from_parts(*self, NoteValue::from_raw(value), rseed)
+    pub fn create_note(&self, value: NoteValue, rseed: Rseed) -> Note {
+        Note::from_parts(*self, value, rseed)
     }
 }
 
