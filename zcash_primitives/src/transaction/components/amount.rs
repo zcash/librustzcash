@@ -282,7 +282,8 @@ impl NonNegativeAmount {
         Self::from_u64(amount)
     }
 
-    /// Reads a NonNegativeAmount from a signed 64-bit little-endian integer.
+    /// Reads a NonNegativeAmount from a signed integer represented as a two's
+    /// complement 64-bit little-endian value.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
@@ -290,7 +291,8 @@ impl NonNegativeAmount {
         Self::from_nonnegative_i64(amount)
     }
 
-    /// Returns this NonNegativeAmount encoded as a signed 64-bit little-endian integer.
+    /// Returns this NonNegativeAmount encoded as a signed two's complement 64-bit
+    /// little-endian value.
     pub fn to_i64_le_bytes(self) -> [u8; 8] {
         self.0.to_i64_le_bytes()
     }
