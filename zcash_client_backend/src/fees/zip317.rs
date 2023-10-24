@@ -3,14 +3,13 @@
 //! Change selection in ZIP 317 requires careful handling of low-valued inputs
 //! to ensure that inputs added to a transaction do not cause fees to rise by
 //! an amount greater than their value.
-use core::cmp::Ordering;
 
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
         components::{
-            amount::{Amount, BalanceError, NonNegativeAmount},
+            amount::{BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
             transparent::fees as transparent,
         },
@@ -66,7 +65,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             .filter_map(|i| {
                 // for now, we're just assuming p2pkh inputs, so we don't check the size of the input
                 // script
-                if i.coin().value < self.fee_rule.marginal_fee().into() {
+                if i.coin().value < self.fee_rule.marginal_fee() {
                     Some(i.outpoint().clone())
                 } else {
                     None
@@ -77,7 +76,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         let mut sapling_dust: Vec<_> = sapling_inputs
             .iter()
             .filter_map(|i| {
-                if i.value() < self.fee_rule.marginal_fee().into() {
+                if i.value() < self.fee_rule.marginal_fee() {
                     Some(i.note_id().clone())
                 } else {
                     None
@@ -179,59 +178,56 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
 
         let total_in = (t_in + sapling_in).ok_or_else(overflow)?;
 
-        let total_out = [t_out, sapling_out, fee_amount.into()]
+        let total_out = [t_out, sapling_out, fee_amount]
             .iter()
-            .sum::<Option<Amount>>()
+            .sum::<Option<NonNegativeAmount>>()
             .ok_or_else(overflow)?;
 
-        let proposed_change = (total_in - total_out).ok_or_else(underflow)?;
-        match proposed_change.cmp(&Amount::zero()) {
-            Ordering::Less => Err(ChangeError::InsufficientFunds {
-                available: total_in,
-                required: total_out,
-            }),
-            Ordering::Equal => TransactionBalance::new(vec![], fee_amount).map_err(|_| overflow()),
-            Ordering::Greater => {
-                let proposed_change = NonNegativeAmount::try_from(proposed_change).unwrap();
-                let dust_threshold = dust_output_policy
-                    .dust_threshold()
-                    .unwrap_or_else(|| self.fee_rule.marginal_fee());
+        let proposed_change = (total_in - total_out).ok_or(ChangeError::InsufficientFunds {
+            available: total_in,
+            required: total_out,
+        })?;
 
-                if dust_threshold > proposed_change {
-                    match dust_output_policy.action() {
-                        DustAction::Reject => {
-                            let shortfall =
-                                (dust_threshold - proposed_change).ok_or_else(underflow)?;
+        if proposed_change == NonNegativeAmount::ZERO {
+            TransactionBalance::new(vec![], fee_amount).map_err(|_| overflow())
+        } else {
+            let dust_threshold = dust_output_policy
+                .dust_threshold()
+                .unwrap_or_else(|| self.fee_rule.marginal_fee());
 
-                            Err(ChangeError::InsufficientFunds {
-                                available: total_in,
-                                required: (total_in + shortfall.into()).ok_or_else(overflow)?,
-                            })
-                        }
-                        DustAction::AllowDustChange => TransactionBalance::new(
-                            vec![ChangeValue::sapling(
-                                proposed_change,
-                                self.change_memo.clone(),
-                            )],
-                            fee_amount,
-                        )
-                        .map_err(|_| overflow()),
-                        DustAction::AddDustToFee => TransactionBalance::new(
-                            vec![],
-                            (fee_amount + proposed_change).ok_or_else(overflow)?,
-                        )
-                        .map_err(|_| overflow()),
+            if dust_threshold > proposed_change {
+                match dust_output_policy.action() {
+                    DustAction::Reject => {
+                        let shortfall = (dust_threshold - proposed_change).ok_or_else(underflow)?;
+
+                        Err(ChangeError::InsufficientFunds {
+                            available: total_in,
+                            required: (total_in + shortfall).ok_or_else(overflow)?,
+                        })
                     }
-                } else {
-                    TransactionBalance::new(
+                    DustAction::AllowDustChange => TransactionBalance::new(
                         vec![ChangeValue::sapling(
                             proposed_change,
                             self.change_memo.clone(),
                         )],
                         fee_amount,
                     )
-                    .map_err(|_| overflow())
+                    .map_err(|_| overflow()),
+                    DustAction::AddDustToFee => TransactionBalance::new(
+                        vec![],
+                        (fee_amount + proposed_change).ok_or_else(overflow)?,
+                    )
+                    .map_err(|_| overflow()),
                 }
+            } else {
+                TransactionBalance::new(
+                    vec![ChangeValue::sapling(
+                        proposed_change,
+                        self.change_memo.clone(),
+                    )],
+                    fee_amount,
+                )
+                .map_err(|_| overflow())
             }
         }
     }
@@ -244,10 +240,7 @@ mod tests {
         consensus::{Network, NetworkUpgrade, Parameters},
         legacy::Script,
         transaction::{
-            components::{
-                amount::{Amount, NonNegativeAmount},
-                transparent::TxOut,
-            },
+            components::{amount::NonNegativeAmount, transparent::TxOut},
             fees::zip317::FeeRule as Zip317FeeRule,
         },
     };
@@ -275,9 +268,11 @@ mod tests {
             &Vec::<TxOut>::new(),
             &[TestSaplingInput {
                 note_id: 0,
-                value: Amount::from_u64(55000).unwrap(),
+                value: NonNegativeAmount::const_from_u64(55000),
             }],
-            &[SaplingPayment::new(Amount::from_u64(40000).unwrap())],
+            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                40000,
+            ))],
             &DustOutputPolicy::default(),
         );
 
@@ -301,12 +296,12 @@ mod tests {
                 .unwrap(),
             &Vec::<TestTransparentInput>::new(),
             &[TxOut {
-                value: Amount::from_u64(40000).unwrap(),
+                value: NonNegativeAmount::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
             }],
             &[TestSaplingInput {
                 note_id: 0,
-                value: Amount::from_u64(55000).unwrap(),
+                value: NonNegativeAmount::const_from_u64(55000),
             }],
             &Vec::<SaplingPayment>::new(),
             &DustOutputPolicy::default(),
@@ -334,14 +329,16 @@ mod tests {
             &[
                 TestSaplingInput {
                     note_id: 0,
-                    value: Amount::from_u64(49000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(49000),
                 },
                 TestSaplingInput {
                     note_id: 1,
-                    value: Amount::from_u64(1000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(1000),
                 },
             ],
-            &[SaplingPayment::new(Amount::from_u64(40000).unwrap())],
+            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                40000,
+            ))],
             &DustOutputPolicy::default(),
         );
 
@@ -367,18 +364,20 @@ mod tests {
             &[
                 TestSaplingInput {
                     note_id: 0,
-                    value: Amount::from_u64(29000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(29000),
                 },
                 TestSaplingInput {
                     note_id: 1,
-                    value: Amount::from_u64(20000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(20000),
                 },
                 TestSaplingInput {
                     note_id: 2,
-                    value: Amount::from_u64(1000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(1000),
                 },
             ],
-            &[SaplingPayment::new(Amount::from_u64(40000).unwrap())],
+            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                40000,
+            ))],
             &DustOutputPolicy::default(),
         );
 

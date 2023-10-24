@@ -10,7 +10,7 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     transaction::{
         components::{
-            amount::{Amount, BalanceError, NonNegativeAmount},
+            amount::{BalanceError, NonNegativeAmount},
             sapling::fees as sapling,
             OutPoint, TxOut,
         },
@@ -35,7 +35,10 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     Selection(SelectorErrT),
     /// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
-    InsufficientFunds { available: Amount, required: Amount },
+    InsufficientFunds {
+        available: NonNegativeAmount,
+        required: NonNegativeAmount,
+    },
     /// The data source does not have enough information to choose an expiry height
     /// for the transaction.
     SyncRequired,
@@ -60,8 +63,8 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
             } => write!(
                 f,
                 "Insufficient balance (have {}, need {} including fee)",
-                i64::from(*available),
-                i64::from(*required)
+                u64::from(*available),
+                u64::from(*required)
             ),
             InputSelectorError::SyncRequired => {
                 write!(f, "Insufficient chain data is available, sync required.")
@@ -270,17 +273,17 @@ impl<DbErrT, ChangeStrategyErrT, NoteRefT> From<BalanceError>
     }
 }
 
-pub(crate) struct SaplingPayment(Amount);
+pub(crate) struct SaplingPayment(NonNegativeAmount);
 
 #[cfg(test)]
 impl SaplingPayment {
-    pub(crate) fn new(amount: Amount) -> Self {
+    pub(crate) fn new(amount: NonNegativeAmount) -> Self {
         SaplingPayment(amount)
     }
 }
 
 impl sapling::OutputView for SaplingPayment {
-    fn value(&self) -> Amount {
+    fn value(&self) -> NonNegativeAmount {
         self.0
     }
 }
@@ -338,10 +341,7 @@ where
 
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
-        let mut output_total = Amount::zero();
         for payment in transaction_request.payments() {
-            output_total = (output_total + payment.amount).ok_or(BalanceError::Overflow)?;
-
             let mut push_transparent = |taddr: TransparentAddress| {
                 transparent_outputs.push(TxOut {
                     value: payment.amount,
@@ -374,8 +374,8 @@ where
         }
 
         let mut sapling_inputs: Vec<ReceivedSaplingNote<DbT::NoteRef>> = vec![];
-        let mut prior_available = Amount::zero();
-        let mut amount_required = Amount::zero();
+        let mut prior_available = NonNegativeAmount::ZERO;
+        let mut amount_required = NonNegativeAmount::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
         // This loop is guaranteed to terminate because on each iteration we check that the amount
         // of funds selected is strictly increasing. The loop will either return a successful
@@ -414,13 +414,18 @@ where
             }
 
             sapling_inputs = wallet_db
-                .select_spendable_sapling_notes(account, amount_required, anchor_height, &exclude)
+                .select_spendable_sapling_notes(
+                    account,
+                    amount_required.into(),
+                    anchor_height,
+                    &exclude,
+                )
                 .map_err(InputSelectorError::DataSource)?;
 
             let new_available = sapling_inputs
                 .iter()
                 .map(|n| n.value())
-                .sum::<Option<Amount>>()
+                .sum::<Option<NonNegativeAmount>>()
                 .ok_or(BalanceError::Overflow)?;
 
             if new_available <= prior_available {
@@ -506,8 +511,8 @@ where
             })
         } else {
             Err(InputSelectorError::InsufficientFunds {
-                available: balance.total().into(),
-                required: shielding_threshold.into(),
+                available: balance.total(),
+                required: shielding_threshold,
             })
         }
     }

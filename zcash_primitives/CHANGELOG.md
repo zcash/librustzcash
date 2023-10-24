@@ -49,8 +49,25 @@ and this library adheres to Rust's notion of
   - `fees::fixed::FeeRule::fixed_fee` now wraps a `NonNegativeAmount` instead of an `Amount`
   - `fees::zip317::FeeRule::marginal_fee` is now represented and exposed as a
     `NonNegativeAmount` instead of an `Amount`
+- `zcash_primitives::transaction::sighash::TransparentAuthorizingContext::input_amounts` now
+  returns the input values as `NonNegativeAmount` instead of as `Amount`
 - `zcash_primitives::transaction::components::sapling`:
   - `MapAuth` trait methods now take `&mut self` instead of `&self`.
+  - `sapling::fees::InputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
+  - `sapling::fees::OutputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
+- `zcash_primitives::transaction::components::transparent`:
+  - `transparent::TxOut::value` now has type `NonNegativeAmount` instead of `Amount`
+  - `transparent::builder::TransparentBuilder::add_output` now takes its `value`
+    parameter as a `NonNegativeAmount` instead of as an `Amount`.
+  - `transparent::fees::InputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
+  - `transparent::fees::OutputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
+- The following `zcash_primitives::transaction::builder::Builder` methods
+  have changed to take a `NonNegativeAmount` for their `value` arguments,
+  instead of an `Amount`.
+  - `Builder::add_sapling_output`
+  - `Builder::add_transparent_output`
+- `zcash_primitives::transaction::components::amount::testing::arb_nonnegative_amount`
+  now returns a `NonNegativeAmount` instead of an `Amount`
 
 ### Removed
 - `zcash_primitives::constants`:

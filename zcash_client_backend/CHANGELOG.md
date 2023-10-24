@@ -27,8 +27,12 @@ and this library adheres to Rust's notion of
   - The `NoteMismatch` variant of `data_api::error::Error` now wraps a
     `data_api::NoteId` instead of a backend-specific note identifier. The
     related `NoteRef` type parameter has been removed from `data_api::error::Error`.
-  - `wallet::create_spend_to_address` now takes a `NonNegativeAmount` rather than
-    an `Amount`.
+  - `SentTransactionOutput::value` is now represented as `NonNegativeAmount` instead of
+    `Amount`, and constructors and accessors have been updated accordingly.
+  - The `available` and `required` fields of `data_api::error::Error::InsufficientFunds`
+    are now represented as `NonNegativeAmount` instead of `Amount`.
+  - `data_api::wallet::create_spend_to_address` now takes its `amount` argument as
+    as `NonNegativeAmount` instead of `Amount`.
   - All uses of `Amount` in `data_api::wallet::input_selection` have been replaced
     with `NonNegativeAmount`.
   - `wallet::shield_transparent_funds` no longer
@@ -49,6 +53,14 @@ and this library adheres to Rust's notion of
   `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy::new` each now
   accept an additional `change_memo` argument.
 - All uses of `Amount` in `zcash_client_backend::fees` have been replaced
+  with `NonNegativeAmount`.
+- `zcash_client_backend::wallet::WalletTransparentOutput::value` is now represented
+  as `NonNegativeAmount` instead of `Amount`, and constructors and accessors have been
+  updated accordingly.
+- `zcash_client_backend::wallet::ReceivedSaplingNote::value` is now represented
+  as `NonNegativeAmount` instead of `Amount`, and constructors and accessors have been
+  updated accordingly.
+- Almost all uses of `Amount` in `zcash_client_backend::zip321` have been replaced
   with `NonNegativeAmount`.
 
 ## [0.10.0] - 2023-09-25

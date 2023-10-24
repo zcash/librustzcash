@@ -10,9 +10,9 @@ use zcash_primitives::{
     sapling,
     transaction::{
         components::{
+            amount::NonNegativeAmount,
             sapling::fees as sapling_fees,
             transparent::{self, OutPoint, TxOut},
-            Amount,
         },
         TxId,
     },
@@ -69,7 +69,7 @@ impl WalletTransparentOutput {
         &self.recipient_address
     }
 
-    pub fn value(&self) -> Amount {
+    pub fn value(&self) -> NonNegativeAmount {
         self.txout.value
     }
 }
@@ -181,7 +181,7 @@ pub struct ReceivedSaplingNote<NoteRef> {
     txid: TxId,
     output_index: u16,
     diversifier: sapling::Diversifier,
-    note_value: Amount,
+    note_value: NonNegativeAmount,
     rseed: sapling::Rseed,
     note_commitment_tree_position: Position,
 }
@@ -192,7 +192,7 @@ impl<NoteRef> ReceivedSaplingNote<NoteRef> {
         txid: TxId,
         output_index: u16,
         diversifier: sapling::Diversifier,
-        note_value: Amount,
+        note_value: NonNegativeAmount,
         rseed: sapling::Rseed,
         note_commitment_tree_position: Position,
     ) -> Self {
@@ -220,7 +220,7 @@ impl<NoteRef> ReceivedSaplingNote<NoteRef> {
     pub fn diversifier(&self) -> sapling::Diversifier {
         self.diversifier
     }
-    pub fn value(&self) -> Amount {
+    pub fn value(&self) -> NonNegativeAmount {
         self.note_value
     }
     pub fn rseed(&self) -> sapling::Rseed {
@@ -236,7 +236,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedSaplingNote<NoteRef> 
         &self.note_id
     }
 
-    fn value(&self) -> Amount {
+    fn value(&self) -> NonNegativeAmount {
         self.note_value
     }
 }

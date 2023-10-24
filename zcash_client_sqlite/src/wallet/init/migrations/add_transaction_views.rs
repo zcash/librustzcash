@@ -396,6 +396,8 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
+        use zcash_primitives::transaction::components::amount::NonNegativeAmount;
+
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
@@ -419,7 +421,7 @@ mod tests {
                     sequence: 0,
                 }],
                 vout: vec![TxOut {
-                    value: Amount::from_i64(1100000000).unwrap(),
+                    value: NonNegativeAmount::const_from_u64(1100000000),
                     script_pubkey: Script(vec![]),
                 }],
                 authorization: Authorized,

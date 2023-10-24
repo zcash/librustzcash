@@ -3,10 +3,11 @@ use std::ops::Deref;
 
 use proptest::prelude::*;
 
-use crate::{consensus::BranchId, legacy::Script};
+use crate::{
+    consensus::BranchId, legacy::Script, transaction::components::amount::NonNegativeAmount,
+};
 
 use super::{
-    components::Amount,
     sapling,
     sighash::{
         SignableInput, TransparentAuthorizingContext, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
@@ -134,7 +135,7 @@ fn zip_0143() {
                 index: n as usize,
                 script_code: &tv.script_code,
                 script_pubkey: &tv.script_code,
-                value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
+                value: NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
             },
             _ => SignableInput::Shielded,
         };
@@ -156,7 +157,7 @@ fn zip_0243() {
                 index: n as usize,
                 script_code: &tv.script_code,
                 script_pubkey: &tv.script_code,
-                value: Amount::from_nonnegative_i64(tv.amount).unwrap(),
+                value: NonNegativeAmount::from_nonnegative_i64(tv.amount).unwrap(),
             },
             _ => SignableInput::Shielded,
         };
@@ -170,7 +171,7 @@ fn zip_0243() {
 
 #[derive(Debug)]
 struct TestTransparentAuth {
-    input_amounts: Vec<Amount>,
+    input_amounts: Vec<NonNegativeAmount>,
     input_scriptpubkeys: Vec<Script>,
 }
 
@@ -179,7 +180,7 @@ impl transparent::Authorization for TestTransparentAuth {
 }
 
 impl TransparentAuthorizingContext for TestTransparentAuth {
-    fn input_amounts(&self) -> Vec<Amount> {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
         self.input_amounts.clone()
     }
 
@@ -214,7 +215,7 @@ fn zip_0244() {
         let input_amounts = tv
             .amounts
             .iter()
-            .map(|amount| Amount::from_nonnegative_i64(*amount).unwrap())
+            .map(|amount| NonNegativeAmount::from_nonnegative_i64(*amount).unwrap())
             .collect();
         let input_scriptpubkeys = tv
             .script_pubkeys

@@ -630,7 +630,7 @@ pub enum Recipient {
 pub struct SentTransactionOutput {
     output_index: usize,
     recipient: Recipient,
-    value: Amount,
+    value: NonNegativeAmount,
     memo: Option<MemoBytes>,
     sapling_change_to: Option<(AccountId, sapling::Note)>,
 }
@@ -639,7 +639,7 @@ impl SentTransactionOutput {
     pub fn from_parts(
         output_index: usize,
         recipient: Recipient,
-        value: Amount,
+        value: NonNegativeAmount,
         memo: Option<MemoBytes>,
         sapling_change_to: Option<(AccountId, sapling::Note)>,
     ) -> Self {
@@ -667,7 +667,7 @@ impl SentTransactionOutput {
         &self.recipient
     }
     /// Returns the value of the newly created output.
-    pub fn value(&self) -> Amount {
+    pub fn value(&self) -> NonNegativeAmount {
         self.value
     }
     /// Returns the memo that was attached to the output, if any. This will only be `None`

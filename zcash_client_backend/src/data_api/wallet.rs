@@ -215,7 +215,7 @@ where
 {
     let req = zip321::TransactionRequest::new(vec![Payment {
         recipient_address: to.clone(),
-        amount: amount.into(),
+        amount,
         memo,
         label: None,
         message: None,
@@ -591,7 +591,7 @@ where
                 builder.add_sapling_output(
                     internal_ovk(),
                     dfvk.change_address().1,
-                    value.into(),
+                    *value,
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
@@ -599,7 +599,7 @@ where
                         account,
                         PoolType::Shielded(ShieldedProtocol::Sapling),
                     ),
-                    value.into(),
+                    *value,
                     Some(memo),
                 ))
             }

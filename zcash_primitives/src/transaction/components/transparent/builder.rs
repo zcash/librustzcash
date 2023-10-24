@@ -6,7 +6,7 @@ use crate::{
     legacy::{Script, TransparentAddress},
     transaction::{
         components::{
-            amount::{Amount, BalanceError},
+            amount::{Amount, BalanceError, NonNegativeAmount},
             transparent::{self, fees, Authorization, Authorized, Bundle, TxIn, TxOut},
         },
         sighash::TransparentAuthorizingContext,
@@ -134,10 +134,6 @@ impl TransparentBuilder {
         utxo: OutPoint,
         coin: TxOut,
     ) -> Result<(), Error> {
-        if coin.value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
         // Ensure that the RIPEMD-160 digest of the public key associated with the
         // provided secret key matches that of the address to which the provided
         // output may be spent.
@@ -164,11 +160,11 @@ impl TransparentBuilder {
         Ok(())
     }
 
-    pub fn add_output(&mut self, to: &TransparentAddress, value: Amount) -> Result<(), Error> {
-        if value.is_negative() {
-            return Err(Error::InvalidAmount);
-        }
-
+    pub fn add_output(
+        &mut self,
+        to: &TransparentAddress,
+        value: NonNegativeAmount,
+    ) -> Result<(), Error> {
         self.vout.push(TxOut {
             value,
             script_pubkey: to.script(),
@@ -183,20 +179,20 @@ impl TransparentBuilder {
             .inputs
             .iter()
             .map(|input| input.coin.value)
-            .sum::<Option<Amount>>()
+            .sum::<Option<NonNegativeAmount>>()
             .ok_or(BalanceError::Overflow)?;
 
         #[cfg(not(feature = "transparent-inputs"))]
-        let input_sum = Amount::zero();
+        let input_sum = NonNegativeAmount::ZERO;
 
         let output_sum = self
             .vout
             .iter()
             .map(|vo| vo.value)
-            .sum::<Option<Amount>>()
+            .sum::<Option<NonNegativeAmount>>()
             .ok_or(BalanceError::Overflow)?;
 
-        (input_sum - output_sum).ok_or(BalanceError::Underflow)
+        (Amount::from(input_sum) - Amount::from(output_sum)).ok_or(BalanceError::Underflow)
     }
 
     pub fn build(self) -> Option<transparent::Bundle<Unauthorized>> {
@@ -241,7 +237,7 @@ impl TxIn<Unauthorized> {
 
 #[cfg(not(feature = "transparent-inputs"))]
 impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<Amount> {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
         vec![]
     }
 
@@ -252,7 +248,7 @@ impl TransparentAuthorizingContext for Unauthorized {
 
 #[cfg(feature = "transparent-inputs")]
 impl TransparentAuthorizingContext for Unauthorized {
-    fn input_amounts(&self) -> Vec<Amount> {
+    fn input_amounts(&self) -> Vec<NonNegativeAmount> {
         return self.inputs.iter().map(|txin| txin.coin.value).collect();
     }
 

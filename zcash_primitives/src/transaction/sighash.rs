@@ -3,6 +3,7 @@ use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
     components::{
+        amount::NonNegativeAmount,
         sapling::{self, GrothProofBytes},
         transparent, Amount,
     },
@@ -27,7 +28,7 @@ pub enum SignableInput<'a> {
         index: usize,
         script_code: &'a Script,
         script_pubkey: &'a Script,
-        value: Amount,
+        value: NonNegativeAmount,
     },
     #[cfg(feature = "zfuture")]
     Tze {
@@ -63,7 +64,7 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions
     /// providing these inputs.
-    fn input_amounts(&self) -> Vec<Amount>;
+    fn input_amounts(&self) -> Vec<NonNegativeAmount>;
     /// Returns the list of all transparent input scriptPubKeys, provided
     /// so that wallets can commit to the transparent input breakdown
     /// without requiring the full data of the previous transactions

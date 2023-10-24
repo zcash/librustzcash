@@ -281,6 +281,21 @@ impl NonNegativeAmount {
         let amount = u64::from_le_bytes(bytes);
         Self::from_u64(amount)
     }
+
+    /// Reads a NonNegativeAmount from a signed integer represented as a two's
+    /// complement 64-bit little-endian value.
+    ///
+    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
+        let amount = i64::from_le_bytes(bytes);
+        Self::from_nonnegative_i64(amount)
+    }
+
+    /// Returns this NonNegativeAmount encoded as a signed two's complement 64-bit
+    /// little-endian value.
+    pub fn to_i64_le_bytes(self) -> [u8; 8] {
+        self.0.to_i64_le_bytes()
+    }
 }
 
 impl From<NonNegativeAmount> for Amount {
@@ -400,7 +415,7 @@ impl std::fmt::Display for BalanceError {
 pub mod testing {
     use proptest::prelude::prop_compose;
 
-    use super::{Amount, MAX_MONEY};
+    use super::{Amount, NonNegativeAmount, MAX_MONEY};
 
     prop_compose! {
         pub fn arb_amount()(amt in -MAX_MONEY..MAX_MONEY) -> Amount {
@@ -409,8 +424,8 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_nonnegative_amount()(amt in 0i64..MAX_MONEY) -> Amount {
-            Amount::from_i64(amt).unwrap()
+        pub fn arb_nonnegative_amount()(amt in 0i64..MAX_MONEY) -> NonNegativeAmount {
+            NonNegativeAmount::from_u64(amt as u64).unwrap()
         }
     }
 

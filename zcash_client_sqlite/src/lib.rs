@@ -55,7 +55,10 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     sapling,
     transaction::{
-        components::{amount::Amount, OutPoint},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            OutPoint,
+        },
         Transaction, TxId,
     },
     zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
@@ -596,7 +599,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             tx_ref,
                             output.index,
                             &recipient,
-                            Amount::from_u64(output.note.value().inner()).map_err(|_| {
+                            NonNegativeAmount::from_u64(output.note.value().inner()).map_err(|_| {
                                 SqliteClientError::CorruptedData(
                                     "Note value is not a valid Zcash amount.".to_string(),
                                 )

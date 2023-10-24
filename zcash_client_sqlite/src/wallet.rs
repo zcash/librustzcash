@@ -1345,7 +1345,10 @@ pub(crate) fn get_unspent_transparent_outputs<P: consensus::Parameters>(
 
         let index: u32 = row.get(1)?;
         let script_pubkey = Script(row.get(2)?);
-        let value = Amount::from_i64(row.get(3)?).unwrap();
+        let value_raw: i64 = row.get(3)?;
+        let value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|_| {
+            SqliteClientError::CorruptedData(format!("Negative utxo value: {}", value_raw))
+        })?;
         let height: u32 = row.get(4)?;
 
         let outpoint = OutPoint::new(txid_bytes, index);
@@ -1642,7 +1645,7 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
         ":received_by_account": &u32::from(received_by_account),
         ":address": &output.recipient_address().encode(params),
         ":script": &output.txout().script_pubkey.0,
-        ":value_zat": &i64::from(output.txout().value),
+        ":value_zat": &i64::from(Amount::from(output.txout().value)),
         ":height": &u32::from(output.height()),
     ];
 
@@ -1708,7 +1711,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
         ":from_account": &u32::from(from_account),
         ":to_address": &to_address,
         ":to_account": &to_account,
-        ":value": &i64::from(output.value()),
+        ":value": &i64::from(Amount::from(output.value())),
         ":memo": memo_repr(output.memo())
     ];
 
@@ -1736,7 +1739,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     tx_ref: i64,
     output_index: usize,
     recipient: &Recipient,
-    value: Amount,
+    value: NonNegativeAmount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_sent_output = conn.prepare_cached(
@@ -1762,7 +1765,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
         ":from_account": &u32::from(from_account),
         ":to_address": &to_address,
         ":to_account": &to_account,
-        ":value": &i64::from(value),
+        ":value": &i64::from(Amount::from(value)),
         ":memo": memo_repr(memo)
     ];
 
@@ -2016,7 +2019,7 @@ mod tests {
         assert!(bal_absent.is_empty());
 
         // Create a fake transparent output.
-        let value = Amount::from_u64(100000).unwrap();
+        let value = NonNegativeAmount::const_from_u64(100000);
         let outpoint = OutPoint::new([1u8; 32], 1);
         let txout = TxOut {
             value,
@@ -2064,7 +2067,7 @@ mod tests {
 
         assert_matches!(
             st.wallet().get_transparent_balances(account_id, height_2),
-            Ok(h) if h.get(taddr) == Some(&value)
+            Ok(h) if h.get(taddr) == Some(&value.into())
         );
 
         // Artificially delete the address from the addresses table so that
@@ -2134,8 +2137,8 @@ mod tests {
                     .unwrap()
                     .into_iter()
                     .map(|utxo| utxo.value())
-                    .sum::<Option<Amount>>(),
-                Some(Amount::from(expected)),
+                    .sum::<Option<NonNegativeAmount>>(),
+                Some(expected),
             );
         };
 
@@ -2147,7 +2150,7 @@ mod tests {
         let value = NonNegativeAmount::from_u64(100000).unwrap();
         let outpoint = OutPoint::new([1u8; 32], 1);
         let txout = TxOut {
-            value: value.into(),
+            value,
             script_pubkey: taddr.script(),
         };
 

@@ -9,7 +9,10 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::MemoBytes,
     sapling::{self, Diversifier, Note, Nullifier, Rseed},
-    transaction::{components::Amount, TxId},
+    transaction::{
+        components::{amount::NonNegativeAmount, Amount},
+        TxId,
+    },
     zip32::AccountId,
 };
 
@@ -97,7 +100,9 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
         Diversifier(tmp)
     };
 
-    let note_value = Amount::from_i64(row.get(4)?).unwrap();
+    let note_value = NonNegativeAmount::from_nonnegative_i64(row.get(4)?).map_err(|_e| {
+        SqliteClientError::CorruptedData("Note values must be nonnegative".to_string())
+    })?;
 
     let rseed = {
         let rcm_bytes: Vec<_> = row.get(5)?;
@@ -534,7 +539,7 @@ pub(crate) mod tests {
         let to: RecipientAddress = to_extsk.default_address().1.into();
         let request = zip321::TransactionRequest::new(vec![Payment {
             recipient_address: to,
-            amount: Amount::const_from_i64(10000),
+            amount: NonNegativeAmount::const_from_u64(10000),
             memo: None, // this should result in the creation of an empty memo
             label: None,
             message: None,
@@ -771,8 +776,8 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::const_from_i64(50000)
-                && required == Amount::const_from_i64(80000)
+            if available == NonNegativeAmount::const_from_u64(50000)
+                && required == NonNegativeAmount::const_from_u64(80000)
         );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 2 to 9 until just before the second
@@ -800,8 +805,8 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::const_from_i64(50000)
-                && required == Amount::const_from_i64(80000)
+            if available == NonNegativeAmount::const_from_u64(50000)
+                && required == NonNegativeAmount::const_from_u64(80000)
         );
 
         // Mine block 11 so that the second note becomes verified
@@ -893,7 +898,7 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::zero() && required == Amount::const_from_i64(12000)
+            if available == NonNegativeAmount::ZERO && required == NonNegativeAmount::const_from_u64(12000)
         );
 
         // Mine blocks SAPLING_ACTIVATION_HEIGHT + 1 to 41 (that don't send us funds)
@@ -922,7 +927,7 @@ pub(crate) mod tests {
                 available,
                 required
             })
-            if available == Amount::zero() && required == Amount::const_from_i64(12000)
+            if available == NonNegativeAmount::ZERO && required == NonNegativeAmount::const_from_u64(12000)
         );
 
         // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
@@ -1180,7 +1185,7 @@ pub(crate) mod tests {
             // payment to an external recipient
             Payment {
                 recipient_address: RecipientAddress::Shielded(addr2),
-                amount: amount_sent.into(),
+                amount: amount_sent,
                 memo: None,
                 label: None,
                 message: None,
@@ -1189,7 +1194,7 @@ pub(crate) mod tests {
             // payment back to the originating wallet, simulating legacy change
             Payment {
                 recipient_address: RecipientAddress::Shielded(addr),
-                amount: amount_legacy_change.into(),
+                amount: amount_legacy_change,
                 memo: None,
                 label: None,
                 message: None,
@@ -1299,7 +1304,7 @@ pub(crate) mod tests {
         // This first request will fail due to insufficient non-dust funds
         let req = TransactionRequest::new(vec![Payment {
             recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
-            amount: Amount::const_from_i64(50000),
+            amount: NonNegativeAmount::const_from_u64(50000),
             memo: None,
             label: None,
             message: None,
@@ -1316,15 +1321,15 @@ pub(crate) mod tests {
                 NonZeroU32::new(1).unwrap(),
             ),
             Err(Error::InsufficientFunds { available, required })
-                if available == Amount::const_from_i64(51000)
-                && required == Amount::const_from_i64(60000)
+                if available == NonNegativeAmount::const_from_u64(51000)
+                && required == NonNegativeAmount::const_from_u64(60000)
         );
 
         // This request will succeed, spending a single dust input to pay the 10000
         // ZAT fee in addition to the 41000 ZAT output to the recipient
         let req = TransactionRequest::new(vec![Payment {
             recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
-            amount: Amount::const_from_i64(41000),
+            amount: NonNegativeAmount::const_from_u64(41000),
             memo: None,
             label: None,
             message: None,
@@ -1350,7 +1355,7 @@ pub(crate) mod tests {
         // in the total balance.
         assert_eq!(
             st.get_total_balance(account),
-            (total - NonNegativeAmount::from_u64(10000).unwrap()).unwrap()
+            (total - NonNegativeAmount::const_from_u64(10000)).unwrap()
         );
     }
 
@@ -1383,7 +1388,7 @@ pub(crate) mod tests {
         let utxo = WalletTransparentOutput::from_parts(
             OutPoint::new([1u8; 32], 1),
             TxOut {
-                value: Amount::const_from_i64(10000),
+                value: NonNegativeAmount::const_from_u64(10000),
                 script_pubkey: taddr.script(),
             },
             h,
