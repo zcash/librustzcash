@@ -466,7 +466,7 @@ pub(crate) mod tests {
         assert_eq!(st.get_spendable_balance(account, 1), value);
 
         assert_eq!(
-            block_max_scanned(&st.wallet().conn)
+            block_max_scanned(&st.wallet().conn, &st.wallet().params)
                 .unwrap()
                 .unwrap()
                 .block_height(),

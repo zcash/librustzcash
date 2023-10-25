@@ -553,8 +553,9 @@ impl ScanProgress for SubtreeScanProgress {
 ///
 /// `min_confirmations` can be 0, but that case is currently treated identically to
 /// `min_confirmations == 1` for shielded notes. This behaviour may change in the future.
-pub(crate) fn get_wallet_summary(
+pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     min_confirmations: u32,
     progress: &impl ScanProgress,
 ) -> Result<Option<WalletSummary>, SqliteClientError> {
@@ -569,7 +570,7 @@ pub(crate) fn get_wallet_summary(
         wallet_birthday(conn)?.expect("If a scan range exists, we know the wallet birthday.");
 
     let fully_scanned_height =
-        block_fully_scanned(conn)?.map_or(birthday_height - 1, |m| m.block_height());
+        block_fully_scanned(conn, params)?.map_or(birthday_height - 1, |m| m.block_height());
     let summary_height = (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
 
     let sapling_scan_progress = progress.sapling_scan_progress(
@@ -946,10 +947,11 @@ pub(crate) fn get_target_and_anchor_heights(
     }
 }
 
-fn parse_block_metadata(
-    row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>),
+fn parse_block_metadata<P: consensus::Parameters>(
+    params: &P,
+    row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>, Option<u32>),
 ) -> Result<BlockMetadata, SqliteClientError> {
-    let (block_height, hash_data, sapling_tree_size_opt, sapling_tree) = row;
+    let (block_height, hash_data, sapling_tree_size_opt, sapling_tree, orchard_tree_size_opt) = row;
     let sapling_tree_size = sapling_tree_size_opt.map_or_else(|| {
         if sapling_tree == BLOCK_SAPLING_FRONTIER_ABSENT {
             Err(SqliteClientError::CorruptedData("One of either the Sapling tree size or the legacy Sapling commitment tree must be present.".to_owned()))
@@ -975,16 +977,26 @@ fn parse_block_metadata(
     Ok(BlockMetadata::from_parts(
         block_height,
         block_hash,
-        sapling_tree_size,
+        Some(sapling_tree_size),
+        if params
+            .activation_height(NetworkUpgrade::Nu5)
+            .iter()
+            .any(|nu5_activation| &block_height >= nu5_activation)
+        {
+            orchard_tree_size_opt
+        } else {
+            Some(0)
+        },
     ))
 }
 
-pub(crate) fn block_metadata(
+pub(crate) fn block_metadata<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     block_height: BlockHeight,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
-        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
+        "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
         FROM blocks
         WHERE height = :block_height",
         named_params![":block_height": u32::from(block_height)],
@@ -993,21 +1005,24 @@ pub(crate) fn block_metadata(
             let block_hash: Vec<u8> = row.get(1)?;
             let sapling_tree_size: Option<u32> = row.get(2)?;
             let sapling_tree: Vec<u8> = row.get(3)?;
+            let orchard_tree_size: Option<u32> = row.get(4)?;
             Ok((
                 BlockHeight::from(height),
                 block_hash,
                 sapling_tree_size,
                 sapling_tree,
+                orchard_tree_size,
             ))
         },
     )
     .optional()
     .map_err(SqliteClientError::from)
-    .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
+    .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
 }
 
-pub(crate) fn block_fully_scanned(
+pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     if let Some(birthday_height) = wallet_birthday(conn)? {
         // We assume that the only way we get a contiguous range of block heights in the `blocks` table
@@ -1020,7 +1035,7 @@ pub(crate) fn block_fully_scanned(
         // block rows, which is a combined case of the "gaps and islands" and "greatest N per group"
         // SQL query problems.
         conn.query_row(
-            "SELECT height, hash, sapling_commitment_tree_size, sapling_tree
+            "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
             FROM blocks
             INNER JOIN (
                 WITH contiguous AS (
@@ -1039,27 +1054,30 @@ pub(crate) fn block_fully_scanned(
                 let block_hash: Vec<u8> = row.get(1)?;
                 let sapling_tree_size: Option<u32> = row.get(2)?;
                 let sapling_tree: Vec<u8> = row.get(3)?;
+                let orchard_tree_size: Option<u32> = row.get(4)?;
                 Ok((
                     BlockHeight::from(height),
                     block_hash,
                     sapling_tree_size,
                     sapling_tree,
+                    orchard_tree_size
                 ))
             },
         )
         .optional()
         .map_err(SqliteClientError::from)
-        .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
+        .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
     } else {
         Ok(None)
     }
 }
 
-pub(crate) fn block_max_scanned(
+pub(crate) fn block_max_scanned<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
 ) -> Result<Option<BlockMetadata>, SqliteClientError> {
     conn.query_row(
-        "SELECT blocks.height, hash, sapling_commitment_tree_size, sapling_tree
+        "SELECT blocks.height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
          FROM blocks
          JOIN (SELECT MAX(height) AS height FROM blocks) blocks_max
          ON blocks.height = blocks_max.height",
@@ -1069,17 +1087,19 @@ pub(crate) fn block_max_scanned(
             let block_hash: Vec<u8> = row.get(1)?;
             let sapling_tree_size: Option<u32> = row.get(2)?;
             let sapling_tree: Vec<u8> = row.get(3)?;
+            let orchard_tree_size: Option<u32> = row.get(4)?;
             Ok((
                 BlockHeight::from(height),
                 block_hash,
                 sapling_tree_size,
                 sapling_tree,
+                orchard_tree_size
             ))
         },
     )
     .optional()
     .map_err(SqliteClientError::from)
-    .and_then(|meta_row| meta_row.map(parse_block_metadata).transpose())
+    .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
 }
 
 /// Returns the block height at which the specified transaction was mined,

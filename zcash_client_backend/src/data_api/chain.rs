@@ -345,23 +345,37 @@ where
                 continuity_check_metadata = Some(BlockMetadata::from_parts(
                     BlockHeight::from(0),
                     BlockHash([0; 32]),
-                    0,
+                    Some(0),
+                    Some(0),
                 ));
             }
-            continuity_check_metadata = continuity_check_metadata.as_ref().map(|m| {
+            continuity_check_metadata = continuity_check_metadata.as_ref().map(|bm| {
                 BlockMetadata::from_parts(
                     block.height(),
                     block.hash(),
                     block
                         .chain_metadata
                         .as_ref()
-                        .map(|m| m.sapling_commitment_tree_size)
-                        .unwrap_or_else(|| {
-                            m.sapling_tree_size()
-                                + u32::try_from(
+                        .map(|bcm| bcm.sapling_commitment_tree_size)
+                        .or_else(|| {
+                            bm.sapling_tree_size().map(|s| {
+                                s + u32::try_from(
                                     block.vtx.iter().map(|tx| tx.outputs.len()).sum::<usize>(),
                                 )
                                 .unwrap()
+                            })
+                        }),
+                    block
+                        .chain_metadata
+                        .as_ref()
+                        .map(|bcm| bcm.orchard_commitment_tree_size)
+                        .or_else(|| {
+                            bm.orchard_tree_size().map(|s| {
+                                s + u32::try_from(
+                                    block.vtx.iter().map(|tx| tx.actions.len()).sum::<usize>(),
+                                )
+                                .unwrap()
+                            })
                         }),
                 )
             });
@@ -415,7 +429,7 @@ where
                     .map(|out| (out.account(), *out.nf()))
             }));
 
-            prior_block_metadata = Some(*scanned_block.metadata());
+            prior_block_metadata = Some(scanned_block.to_block_metadata());
             scanned_blocks.push(scanned_block);
 
             Ok(())

@@ -9,8 +9,11 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `BlockMetadata::orchard_tree_size`.
   - `TransparentInputSource`
   - `SaplingInputSource`
+  - `ScannedBlock::sapling_tree_size`.
+  - `ScannedBlock::orchard_tree_size`.
   - `wallet::propose_standard_transfer_to_address`
   - `wallet::input_selection::SaplingInputs`
   - `wallet::input_selection::ShieldingSelector` has been
@@ -23,6 +26,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_client_backend::data_api`:
+  - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
+    a `u32` for consistency with Orchard.
   - `ShieldedProtocol` has a new variant for `Orchard`, allowing for better
     reporting to callers trying to perform actions using `Orchard` before it is
     fully supported.
@@ -33,6 +38,8 @@ and this library adheres to Rust's notion of
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
     - A new variant `UnsupportedPoolType` has been added.
+  - `ScannedBlock::metadata` has been renamed to `to_block_metadata` and now
+    returns an owned value rather than a reference.
   - `wallet::shield_transparent_funds` no longer
     takes a `memo` argument; instead, memos to be associated with the shielded
     outputs should be specified in the construction of the value of the
@@ -69,7 +76,7 @@ and this library adheres to Rust's notion of
       `min_confirmations` argument as `u32` instead of `NonZeroU32`.
   - The `wallet::input_selection::InputSelector::DataSource`
     associated type has been renamed to `InputSource`.
-  - The signature of `wallet:input_selection::InputSelector::propose_transaction` 
+  - The signature of `wallet:input_selection::InputSelector::propose_transaction`
     has been altered such that it longer takes `min_confirmations` as an
     argument, instead taking explicit `target_height` and `anchor_height`
     arguments. This helps to minimize the set of capabilities that the

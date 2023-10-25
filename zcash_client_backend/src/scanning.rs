@@ -7,7 +7,7 @@ use std::fmt::{self, Debug};
 use incrementalmerkletree::{Position, Retention};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
-use zcash_primitives::consensus::BlockHeight;
+use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade};
 use zcash_primitives::{
     consensus,
     sapling::{
@@ -310,17 +310,39 @@ pub(crate) fn check_continuity(
             });
         }
 
-        if let Some(given) = block
+        let given_sapling_tree_size = block
             .chain_metadata
             .as_ref()
-            .map(|m| m.sapling_commitment_tree_size)
-        {
-            let computed = prev.sapling_tree_size()
-                + u32::try_from(block.vtx.iter().map(|tx| tx.outputs.len()).sum::<usize>())
-                    .unwrap();
+            .map(|m| m.sapling_commitment_tree_size);
+
+        let computed_sapling_tree_size = prev.sapling_tree_size().map(|s| {
+            s + u32::try_from(block.vtx.iter().map(|tx| tx.outputs.len()).sum::<usize>()).unwrap()
+        });
+
+        if let Some((given, computed)) = given_sapling_tree_size.zip(computed_sapling_tree_size) {
             if given != computed {
                 return Some(ScanError::TreeSizeMismatch {
                     protocol: ShieldedProtocol::Sapling,
+                    at_height: block.height(),
+                    given,
+                    computed,
+                });
+            }
+        }
+
+        let given_orchard_tree_size = block
+            .chain_metadata
+            .as_ref()
+            .map(|m| m.orchard_commitment_tree_size);
+
+        let computed_orchard_tree_size = prev.orchard_tree_size().map(|s| {
+            s + u32::try_from(block.vtx.iter().map(|tx| tx.actions.len()).sum::<usize>()).unwrap()
+        });
+
+        if let Some((given, computed)) = given_orchard_tree_size.zip(computed_orchard_tree_size) {
+            if given != computed {
+                return Some(ScanError::TreeSizeMismatch {
+                    protocol: ShieldedProtocol::Orchard,
                     at_height: block.height(),
                     given,
                     computed,
@@ -358,26 +380,69 @@ pub(crate) fn scan_block_with_runner<
     // to use it. `block.sapling_commitment_tree_size` is expected to be correct as of the end of
     // the block, and we can't have a note of ours in a block with no outputs so treating the zero
     // default value from the protobuf as `None` is always correct.
-    let mut sapling_commitment_tree_size = block
-        .chain_metadata
-        .as_ref()
-        .and_then(|m| {
-            if m.sapling_commitment_tree_size == 0 {
-                None
-            } else {
-                let block_note_count: u32 = block
-                    .vtx
-                    .iter()
-                    .map(|tx| {
-                        u32::try_from(tx.outputs.len()).expect("output count cannot exceed a u32")
-                    })
-                    .sum();
-                Some(m.sapling_commitment_tree_size - block_note_count)
-            }
+    let initial_sapling_tree_size = prior_block_metadata.and_then(|m| m.sapling_tree_size());
+    let mut sapling_commitment_tree_size = initial_sapling_tree_size
+        .or_else(|| {
+            block
+                .chain_metadata
+                .as_ref()
+                .and_then(|m| {
+                    if m.sapling_commitment_tree_size == 0 {
+                        None
+                    } else {
+                        let block_output_count: u32 = block
+                            .vtx
+                            .iter()
+                            .map(|tx| tx.outputs.len())
+                            .sum::<usize>()
+                            .try_into()
+                            .expect("Sapling output count cannot exceed a u32");
+                        Some(m.sapling_commitment_tree_size - block_output_count)
+                    }
+                })
+                .or_else(|| {
+                    // If we're below Sapling activation, or Sapling activation is not set, the
+                    // tree size is zero
+                    params
+                        .activation_height(NetworkUpgrade::Sapling)
+                        .map_or(Some(0), |h| if h > cur_height { Some(0) } else { None })
+                })
         })
-        .or_else(|| prior_block_metadata.map(|m| m.sapling_tree_size()))
         .ok_or(ScanError::TreeSizeUnknown {
             protocol: ShieldedProtocol::Sapling,
+            at_height: cur_height,
+        })?;
+
+    let initial_orchard_tree_size = prior_block_metadata.and_then(|m| m.orchard_tree_size());
+    let mut orchard_commitment_tree_size = initial_orchard_tree_size
+        .or_else(|| {
+            block
+                .chain_metadata
+                .as_ref()
+                .and_then(|m| {
+                    if m.orchard_commitment_tree_size == 0 {
+                        None
+                    } else {
+                        let block_action_count: u32 = block
+                            .vtx
+                            .iter()
+                            .map(|tx| tx.actions.len())
+                            .sum::<usize>()
+                            .try_into()
+                            .expect("Orchard action count cannot exceed a u32");
+                        Some(m.orchard_commitment_tree_size - block_action_count)
+                    }
+                })
+                .or_else(|| {
+                    // If we're below Nu5 activation, or Nu5 activation is not set, the tree size
+                    // is zero
+                    params
+                        .activation_height(NetworkUpgrade::Nu5)
+                        .map_or(Some(0), |h| if h > cur_height { Some(0) } else { None })
+                })
+        })
+        .ok_or(ScanError::TreeSizeUnknown {
+            protocol: ShieldedProtocol::Orchard,
             at_height: cur_height,
         })?;
 
@@ -428,9 +493,15 @@ pub(crate) fn scan_block_with_runner<
             .map(|spend| spend.account())
             .collect();
 
+        // We keep track of the number of outputs and actions here because tx.outputs
+        // and tx.actions end up being moved.
+        let tx_outputs_len =
+            u32::try_from(tx.outputs.len()).expect("Sapling output count cannot exceed a u32");
+        let tx_actions_len =
+            u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
+
         // Check for incoming notes while incrementing tree and witnesses
         let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf>> = vec![];
-        let tx_outputs_len = u32::try_from(tx.outputs.len()).unwrap();
         {
             let decoded = &tx
                 .outputs
@@ -548,11 +619,15 @@ pub(crate) fn scan_block_with_runner<
         }
 
         sapling_commitment_tree_size += tx_outputs_len;
+        orchard_commitment_tree_size += tx_actions_len;
     }
 
     Ok(ScannedBlock::from_parts(
-        BlockMetadata::from_parts(cur_height, cur_hash, sapling_commitment_tree_size),
+        cur_height,
+        cur_hash,
         block.time,
+        sapling_commitment_tree_size,
+        orchard_commitment_tree_size,
         wtxs,
         sapling_nullifier_map,
         sapling_note_commitments,
@@ -630,7 +705,7 @@ mod tests {
     /// single spend of the given nullifier and a single output paying the given address.
     /// Returns the CompactBlock.
     ///
-    /// Set `initial_sapling_tree_size` to `None` to simulate a `CompactBlock` retrieved
+    /// Set `initial_tree_sizes` to `None` to simulate a `CompactBlock` retrieved
     /// from a `lightwalletd` that is not currently tracking note commitment tree sizes.
     fn fake_compact_block(
         height: BlockHeight,
@@ -639,7 +714,7 @@ mod tests {
         dfvk: &DiversifiableFullViewingKey,
         value: NonNegativeAmount,
         tx_after: bool,
-        initial_sapling_tree_size: Option<u32>,
+        initial_tree_sizes: Option<(u32, u32)>,
     ) -> CompactBlock {
         let to = dfvk.default_address().1;
 
@@ -700,14 +775,15 @@ mod tests {
             cb.vtx.push(tx);
         }
 
-        cb.chain_metadata = initial_sapling_tree_size.map(|s| compact::ChainMetadata {
-            sapling_commitment_tree_size: s + cb
-                .vtx
-                .iter()
-                .map(|tx| tx.outputs.len() as u32)
-                .sum::<u32>(),
-            ..Default::default()
-        });
+        cb.chain_metadata =
+            initial_tree_sizes.map(|(initial_sapling_tree_size, initial_orchard_tree_size)| {
+                compact::ChainMetadata {
+                    sapling_commitment_tree_size: initial_sapling_tree_size
+                        + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+                    orchard_commitment_tree_size: initial_orchard_tree_size
+                        + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
+                }
+            });
 
         cb
     }
@@ -755,7 +831,8 @@ mod tests {
                 Some(&BlockMetadata::from_parts(
                     BlockHeight::from(0),
                     BlockHash([0u8; 32]),
-                    0,
+                    Some(0),
+                    Some(0),
                 )),
                 batch_runner.as_mut(),
             )
@@ -775,7 +852,7 @@ mod tests {
                 Position::from(1)
             );
 
-            assert_eq!(scanned_block.metadata().sapling_tree_size(), 2);
+            assert_eq!(scanned_block.sapling_tree_size(), 2);
             assert_eq!(
                 scanned_block
                     .sapling_commitments()
@@ -810,7 +887,7 @@ mod tests {
                 &dfvk,
                 NonNegativeAmount::const_from_u64(5),
                 true,
-                Some(0),
+                Some((0, 0)),
             );
             assert_eq!(cb.vtx.len(), 3);
 
@@ -886,7 +963,7 @@ mod tests {
             &dfvk,
             NonNegativeAmount::const_from_u64(5),
             false,
-            Some(0),
+            Some((0, 0)),
         );
         assert_eq!(cb.vtx.len(), 2);
         let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];

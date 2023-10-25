@@ -222,15 +222,15 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     }
 
     fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
-        wallet::block_metadata(self.conn.borrow(), height)
+        wallet::block_metadata(self.conn.borrow(), &self.params, height)
     }
 
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
-        wallet::block_fully_scanned(self.conn.borrow())
+        wallet::block_fully_scanned(self.conn.borrow(), &self.params)
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
-        wallet::block_max_scanned(self.conn.borrow())
+        wallet::block_max_scanned(self.conn.borrow(), &self.params)
     }
 
     fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
@@ -295,7 +295,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         min_confirmations: u32,
     ) -> Result<Option<WalletSummary>, Self::Error> {
-        wallet::get_wallet_summary(self.conn.borrow(), min_confirmations, &SubtreeScanProgress)
+        wallet::get_wallet_summary(
+            self.conn.borrow(),
+            &self.params,
+            min_confirmations,
+            &SubtreeScanProgress,
+        )
     }
 
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
@@ -429,7 +434,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 (
                     block.height(),
                     Position::from(
-                        u64::from(block.metadata().sapling_tree_size())
+                        u64::from(block.sapling_tree_size())
                             - u64::try_from(block.sapling_commitments().len()).unwrap(),
                     ),
                 )
@@ -451,7 +456,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     block.height(),
                     block.block_hash(),
                     block.block_time(),
-                    block.metadata().sapling_tree_size(),
+                    block.sapling_tree_size(),
                     block.sapling_commitments().len().try_into().unwrap(),
                 )?;
 
