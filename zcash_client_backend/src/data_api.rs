@@ -95,6 +95,9 @@ pub struct AccountBalance {
     /// The value of unspent Sapling outputs belonging to the account.
     pub sapling_balance: Balance,
 
+    /// The value of unspent Orchard outputs belonging to the account.
+    pub orchard_balance: Balance,
+
     /// The value of all unspent transparent outputs belonging to the account, irrespective of
     /// confirmation depth.
     ///
@@ -109,13 +112,42 @@ impl AccountBalance {
     /// The [`Balance`] value having zero values for all its fields.
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
+        orchard_balance: Balance::ZERO,
         unshielded: NonNegativeAmount::ZERO,
     };
 
     /// Returns the total value of funds belonging to the account.
     pub fn total(&self) -> NonNegativeAmount {
-        (self.sapling_balance.total() + self.unshielded)
+        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
             .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
+    /// spent.
+    pub fn spendable_value(&self) -> NonNegativeAmount {
+        (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of change and/or shielding transaction outputs that are awaiting
+    /// sufficient confirmations for spendability.
+    pub fn change_pending_confirmation(&self) -> NonNegativeAmount {
+        (self.sapling_balance.change_pending_confirmation
+            + self.orchard_balance.change_pending_confirmation)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the value of shielded funds that are not yet spendable because additional scanning
+    /// is required before it will be possible to derive witnesses for the associated notes.
+    pub fn value_pending_spendability(&self) -> NonNegativeAmount {
+        (self.sapling_balance.value_pending_spendability
+            + self.orchard_balance.value_pending_spendability)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
+    pub fn unshielded(&self) -> NonNegativeAmount {
+        self.unshielded
     }
 }
 
