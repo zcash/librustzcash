@@ -80,6 +80,7 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `transaction::fees::StandardFeeRule`
+
 ## [0.13.0] - 2023-09-25
 ### Added
 - `zcash_primitives::consensus::BlockHeight::saturating_sub`

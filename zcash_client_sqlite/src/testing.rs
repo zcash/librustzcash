@@ -549,7 +549,7 @@ impl<Cache> TestState<Cache> {
         >,
     > {
         let params = self.network();
-        let result = propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
+        propose_standard_transfer_to_address::<_, _, CommitmentTreeErrT>(
             &mut self.db_data,
             &params,
             fee_rule,
@@ -559,9 +559,7 @@ impl<Cache> TestState<Cache> {
             amount,
             memo,
             change_memo,
-        );
-
-        result
+        )
     }
 
     /// Invokes [`propose_shielding`] with the given arguments.

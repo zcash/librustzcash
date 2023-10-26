@@ -17,7 +17,7 @@ use zcash_primitives::{
 
 use super::{fixed, zip317, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance};
 
-/// A change strategy that and proposes change as a single output to the most current supported
+/// A change strategy that proposes change as a single output to the most current supported
 /// shielded pool and delegates fee calculation to the provided fee rule.
 pub struct SingleOutputChangeStrategy {
     fee_rule: StandardFeeRule,

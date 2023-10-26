@@ -381,8 +381,8 @@ where
 /// Returns the proposal, which may then be executed using [`create_proposed_transaction`]
 ///
 /// Parameters:
-/// * `wallet_db`: A read/write reference to the wallet database
-/// * `params`: Consensus parameters
+/// * `wallet_db`: A read/write reference to the wallet database.
+/// * `params`: Consensus parameters.
 /// * `fee_rule`: The fee rule to use in creating the transaction.
 /// * `spend_from_account`: The unified account that controls the funds that will be spent
 ///   in the resulting transaction. This procedure will return an error if the

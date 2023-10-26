@@ -60,9 +60,13 @@ pub trait FutureFeeRule: FeeRule {
 /// An enumeration of the standard fee rules supported by the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StandardFeeRule {
-    #[deprecated(note = "It is recommended to use `StandardFeeRule::Zip317` instead.")]
+    #[deprecated(
+        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
+    )]
     PreZip313,
-    #[deprecated(note = "It is recommended to use `StandardFeeRule::Zip317` instead.")]
+    #[deprecated(
+        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
+    )]
     Zip313,
     Zip317,
 }
