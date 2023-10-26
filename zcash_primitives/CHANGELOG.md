@@ -78,6 +78,9 @@ and this library adheres to Rust's notion of
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
 
+### Added
+- `transaction::fees::StandardFeeRule`
+
 ## [0.13.0] - 2023-09-25
 ### Added
 - `zcash_primitives::consensus::BlockHeight::saturating_sub`

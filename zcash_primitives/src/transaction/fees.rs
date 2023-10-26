@@ -56,3 +56,47 @@ pub trait FutureFeeRule: FeeRule {
         tze_outputs: &[impl tze::OutputView],
     ) -> Result<NonNegativeAmount, Self::Error>;
 }
+
+/// An enumeration of the standard fee rules supported by the wallet.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StandardFeeRule {
+    #[deprecated(
+        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
+    )]
+    PreZip313,
+    #[deprecated(
+        note = "Using this fee rule violates ZIP 317, and might cause transactions built with it to fail. Use `StandardFeeRule::Zip317` instead."
+    )]
+    Zip313,
+    Zip317,
+}
+
+impl FeeRule for StandardFeeRule {
+    type Error = zip317::FeeError;
+
+    fn fee_required<P: consensus::Parameters>(
+        &self,
+        params: &P,
+        target_height: BlockHeight,
+        transparent_inputs: &[impl transparent::InputView],
+        transparent_outputs: &[impl transparent::OutputView],
+        sapling_input_count: usize,
+        sapling_output_count: usize,
+        orchard_action_count: usize,
+    ) -> Result<NonNegativeAmount, Self::Error> {
+        #[allow(deprecated)]
+        match self {
+            Self::PreZip313 => Ok(zip317::MINIMUM_FEE),
+            Self::Zip313 => Ok(NonNegativeAmount::const_from_u64(1000)),
+            Self::Zip317 => zip317::FeeRule::standard().fee_required(
+                params,
+                target_height,
+                transparent_inputs,
+                transparent_outputs,
+                sapling_input_count,
+                sapling_output_count,
+                orchard_action_count,
+            ),
+        }
+    }
+}

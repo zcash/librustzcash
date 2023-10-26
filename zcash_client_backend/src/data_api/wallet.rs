@@ -1,7 +1,7 @@
-use std::{convert::Infallible, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_primitives::transaction::TxId;
+
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
@@ -13,9 +13,9 @@ use zcash_primitives::{
     },
     transaction::{
         builder::Builder,
-        components::amount::{Amount, BalanceError, NonNegativeAmount},
-        fees::{fixed, FeeRule},
-        Transaction,
+        components::amount::{Amount, NonNegativeAmount},
+        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
+        Transaction, TxId,
     },
     zip32::{sapling::DiversifiableFullViewingKey, sapling::ExtendedSpendingKey, AccountId, Scope},
 };
@@ -204,8 +204,8 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     Error<
         <DbT as WalletRead>::Error,
         <DbT as WalletCommitmentTrees>::Error,
-        GreedyInputSelectorError<BalanceError, DbT::NoteRef>,
-        Infallible,
+        GreedyInputSelectorError<Zip317FeeError, DbT::NoteRef>,
+        Zip317FeeError,
     >,
 >
 where
@@ -213,29 +213,31 @@ where
     DbT: WalletWrite + WalletCommitmentTrees,
     DbT::NoteRef: Copy + Eq + Ord,
 {
-    let req = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to.clone(),
-        amount,
-        memo,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
-    .expect(
-        "It should not be possible for this to violate ZIP 321 request construction invariants.",
-    );
+    let account = wallet_db
+        .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
+        .map_err(Error::DataSource)?
+        .ok_or(Error::KeyNotRecognized)?;
 
     #[allow(deprecated)]
-    let fee_rule = fixed::FeeRule::standard();
-    let change_strategy = fees::fixed::SingleOutputChangeStrategy::new(fee_rule, change_memo);
-    spend(
+    let proposal = propose_standard_transfer_to_address(
+        wallet_db,
+        params,
+        StandardFeeRule::PreZip313,
+        account,
+        min_confirmations,
+        to,
+        amount,
+        memo,
+        change_memo,
+    )?;
+
+    create_proposed_transaction(
         wallet_db,
         params,
         prover,
-        &GreedyInputSelector::<DbT, _>::new(change_strategy, DustOutputPolicy::default()),
         usk,
-        req,
         ovk_policy,
+        proposal,
         min_confirmations,
     )
 }
@@ -372,6 +374,77 @@ where
             min_confirmations,
         )
         .map_err(Error::from)
+}
+
+/// Proposes a transaction paying the specified address from the given account.
+///
+/// Returns the proposal, which may then be executed using [`create_proposed_transaction`]
+///
+/// Parameters:
+/// * `wallet_db`: A read/write reference to the wallet database.
+/// * `params`: Consensus parameters.
+/// * `fee_rule`: The fee rule to use in creating the transaction.
+/// * `spend_from_account`: The unified account that controls the funds that will be spent
+///   in the resulting transaction. This procedure will return an error if the
+///   account ID does not correspond to an account known to the wallet.
+/// * `min_confirmations`: The minimum number of confirmations that a previously
+///   received note must have in the blockchain in order to be considered for being
+///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
+///   not supported.
+/// * `to`: The address to which `amount` will be paid.
+/// * `amount`: The amount to send.
+/// * `memo`: A memo to be included in the output to the recipient.
+/// * `change_memo`: A memo to be included in any change output that is created.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
+    wallet_db: &mut DbT,
+    params: &ParamsT,
+    fee_rule: StandardFeeRule,
+    spend_from_account: AccountId,
+    min_confirmations: NonZeroU32,
+    to: &RecipientAddress,
+    amount: NonNegativeAmount,
+    memo: Option<MemoBytes>,
+    change_memo: Option<MemoBytes>,
+) -> Result<
+    Proposal<StandardFeeRule, DbT::NoteRef>,
+    Error<
+        DbT::Error,
+        CommitmentTreeErrT,
+        GreedyInputSelectorError<Zip317FeeError, DbT::NoteRef>,
+        Zip317FeeError,
+    >,
+>
+where
+    ParamsT: consensus::Parameters + Clone,
+    DbT: WalletWrite,
+    DbT::NoteRef: Copy + Eq + Ord,
+{
+    let request = zip321::TransactionRequest::new(vec![Payment {
+        recipient_address: to.clone(),
+        amount,
+        memo,
+        label: None,
+        message: None,
+        other_params: vec![],
+    }])
+    .expect(
+        "It should not be possible for this to violate ZIP 321 request construction invariants.",
+    );
+
+    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(fee_rule, change_memo);
+    let input_selector =
+        GreedyInputSelector::<DbT, _>::new(change_strategy, DustOutputPolicy::default());
+
+    propose_transfer(
+        wallet_db,
+        params,
+        spend_from_account,
+        &input_selector,
+        request,
+        min_confirmations,
+    )
 }
 
 #[cfg(feature = "transparent-inputs")]
