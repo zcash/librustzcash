@@ -61,7 +61,7 @@ use zcash_primitives::{
         },
         Transaction, TxId,
     },
-    zip32::{AccountId, DiversifierIndex, ExtendedFullViewingKey},
+    zip32::{AccountId, DiversifierIndex},
 };
 
 use zcash_client_backend::{
@@ -245,14 +245,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<AccountId>, Self::Error> {
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
-    }
-
-    fn is_valid_account_extfvk(
-        &self,
-        account: AccountId,
-        extfvk: &ExtendedFullViewingKey,
-    ) -> Result<bool, Self::Error> {
-        wallet::is_valid_account_extfvk(self.conn.borrow(), &self.params, account, extfvk)
     }
 
     fn get_wallet_summary(

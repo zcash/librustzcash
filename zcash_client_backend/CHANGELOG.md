@@ -64,6 +64,11 @@ and this library adheres to Rust's notion of
 - Almost all uses of `Amount` in `zcash_client_backend::zip321` have been replaced
   with `NonNegativeAmount`.
 
+### Removed
+- `zcash_client_backend::data_api::WalletRead::is_valid_account_extfvk` has been
+  removed; it was unused in the ECC mobile wallet SDKs and has been superseded by 
+  `get_account_for_ufvk`.
+
 ## [0.10.0] - 2023-09-25
 
 ### Notable Changes

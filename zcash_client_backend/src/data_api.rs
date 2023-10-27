@@ -23,7 +23,7 @@ use zcash_primitives::{
         },
         Transaction, TxId,
     },
-    zip32::{AccountId, ExtendedFullViewingKey},
+    zip32::AccountId,
 };
 
 use crate::{
@@ -325,13 +325,6 @@ pub trait WalletRead {
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<AccountId>, Self::Error>;
-
-    /// Checks whether the specified extended full viewing key is associated with the account.
-    fn is_valid_account_extfvk(
-        &self,
-        account: AccountId,
-        extfvk: &ExtendedFullViewingKey,
-    ) -> Result<bool, Self::Error>;
 
     /// Returns the wallet balances and sync status for an account given the specified minimum
     /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
@@ -950,7 +943,7 @@ pub mod testing {
             components::{Amount, OutPoint},
             Transaction, TxId,
         },
-        zip32::{AccountId, ExtendedFullViewingKey},
+        zip32::AccountId,
     };
 
     use crate::{
@@ -1062,14 +1055,6 @@ pub mod testing {
             _ufvk: &UnifiedFullViewingKey,
         ) -> Result<Option<AccountId>, Self::Error> {
             Ok(None)
-        }
-
-        fn is_valid_account_extfvk(
-            &self,
-            _account: AccountId,
-            _extfvk: &ExtendedFullViewingKey,
-        ) -> Result<bool, Self::Error> {
-            Ok(false)
         }
 
         fn get_wallet_summary(

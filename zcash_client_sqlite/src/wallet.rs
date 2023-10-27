@@ -65,7 +65,7 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use incrementalmerkletree::Retention;
-use rusqlite::{self, named_params, OptionalExtension, ToSql};
+use rusqlite::{self, named_params, OptionalExtension};
 use shardtree::ShardTree;
 use std::cmp;
 use std::collections::{BTreeMap, HashMap};
@@ -89,10 +89,7 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     merkle_tree::read_commitment_tree,
     transaction::{components::Amount, Transaction, TxId},
-    zip32::{
-        sapling::{DiversifiableFullViewingKey, ExtendedFullViewingKey},
-        AccountId, DiversifierIndex,
-    },
+    zip32::{AccountId, DiversifierIndex},
 };
 
 use zcash_client_backend::{
@@ -459,37 +456,6 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     )
     .optional()
     .map_err(SqliteClientError::from)
-}
-
-/// Checks whether the specified [`ExtendedFullViewingKey`] is valid and corresponds to the
-/// specified account.
-///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
-pub(crate) fn is_valid_account_extfvk<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
-    params: &P,
-    account: AccountId,
-    extfvk: &ExtendedFullViewingKey,
-) -> Result<bool, SqliteClientError> {
-    conn.prepare("SELECT ufvk FROM accounts WHERE account = ?")?
-        .query_row([u32::from(account).to_sql()?], |row| {
-            row.get(0).map(|ufvk_str: String| {
-                UnifiedFullViewingKey::decode(params, &ufvk_str)
-                    .map_err(SqliteClientError::CorruptedData)
-            })
-        })
-        .optional()
-        .map_err(SqliteClientError::from)
-        .and_then(|row| {
-            if let Some(ufvk) = row {
-                ufvk.map(|ufvk| {
-                    ufvk.sapling().map(|dfvk| dfvk.to_bytes())
-                        == Some(DiversifiableFullViewingKey::from(extfvk.clone()).to_bytes())
-                })
-            } else {
-                Ok(false)
-            }
-        })
 }
 
 pub(crate) trait ScanProgress {
