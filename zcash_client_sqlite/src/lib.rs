@@ -511,7 +511,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }));
 
                 last_scanned_height = Some(block.height());
-                sapling_commitments.extend(block.into_sapling_commitments().into_iter().map(Some));
+                let (block_sapling_commitments, _) = block.into_commitments();
+                sapling_commitments.extend(block_sapling_commitments.into_iter().map(Some));
             }
 
             // Prune the nullifier map of entries we no longer need.

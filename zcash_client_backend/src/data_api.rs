@@ -516,6 +516,8 @@ pub struct ScannedBlock<Nf> {
     transactions: Vec<WalletTx<Nf>>,
     sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
     sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+    orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
+    orchard_commitments: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
 }
 
 impl<Nf> ScannedBlock<Nf> {
@@ -530,6 +532,8 @@ impl<Nf> ScannedBlock<Nf> {
         transactions: Vec<WalletTx<Nf>>,
         sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
         sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+        orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
+        orchard_commitments: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
     ) -> Self {
         Self {
             block_height,
@@ -540,6 +544,8 @@ impl<Nf> ScannedBlock<Nf> {
             transactions,
             sapling_nullifier_map,
             sapling_commitments,
+            orchard_nullifier_map,
+            orchard_commitments,
         }
     }
 
@@ -589,10 +595,34 @@ impl<Nf> ScannedBlock<Nf> {
         &self.sapling_commitments
     }
 
-    /// Consumes `self` and returns the list of Sapling note commitments associated with the
-    /// scanned block as an owned value.
-    pub fn into_sapling_commitments(self) -> Vec<(sapling::Node, Retention<BlockHeight>)> {
-        self.sapling_commitments
+    /// Returns the vector of Orchard nullifiers for each transaction in the block.
+    ///
+    /// The returned tuple is keyed by both transaction ID and the index of the transaction within
+    /// the block, so that either the txid or the combination of the block hash available from
+    /// [`Self::block_hash`] and returned transaction index may be used to uniquely identify the
+    /// transaction, depending upon the needs of the caller.
+    pub fn orchard_nullifier_map(&self) -> &[(TxId, u16, Vec<orchard::note::Nullifier>)] {
+        &self.orchard_nullifier_map
+    }
+
+    /// Returns the ordered list of Orchard note commitments to be added to the note commitment
+    /// tree.
+    pub fn orchard_commitments(
+        &self,
+    ) -> &[(orchard::note::NoteCommitment, Retention<BlockHeight>)] {
+        &self.orchard_commitments
+    }
+
+    /// Consumes `self` and returns the lists of Sapling and Orchard note commitments associated
+    /// with the scanned block as an owned value.
+    #[allow(clippy::type_complexity)]
+    pub fn into_commitments(
+        self,
+    ) -> (
+        Vec<(sapling::Node, Retention<BlockHeight>)>,
+        Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
+    ) {
+        (self.sapling_commitments, self.orchard_commitments)
     }
 
     /// Returns the [`BlockMetadata`] corresponding to the scanned block.
