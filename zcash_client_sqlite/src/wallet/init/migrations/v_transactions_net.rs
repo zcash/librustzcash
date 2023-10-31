@@ -6,7 +6,7 @@ use rusqlite::{self, named_params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::data_api::{PoolType, ShieldedProtocol};
+use zcash_client_backend::{PoolType, ShieldedProtocol};
 
 use super::add_transaction_views;
 use crate::wallet::{init::WalletMigrationError, pool_code};

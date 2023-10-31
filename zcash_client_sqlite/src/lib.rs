@@ -64,14 +64,14 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, DecryptedTransaction, NoteId, NullifierQuery, PoolType,
-        Recipient, SaplingInputSource, ScannedBlock, SentTransaction, ShieldedProtocol,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, BlockMetadata, DecryptedTransaction, NullifierQuery, SaplingInputSource,
+        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::{ReceivedSaplingNote, WalletTransparentOutput},
-    DecryptedOutput, TransferType,
+    wallet::{NoteId, ReceivedSaplingNote, Recipient, WalletTransparentOutput},
+    DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
 };
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};

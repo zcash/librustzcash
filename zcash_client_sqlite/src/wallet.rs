@@ -77,27 +77,25 @@ use zcash_client_backend::data_api::{AccountBalance, Ratio, WalletSummary};
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 use zcash_primitives::zip32::Scope;
 
-use zcash_client_backend::data_api::{
-    scanning::{ScanPriority, ScanRange},
-    AccountBirthday, NoteId, ShieldedProtocol, SAPLING_SHARD_HEIGHT,
-};
-use zcash_primitives::transaction::TransactionData;
-
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     merkle_tree::read_commitment_tree,
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{components::Amount, Transaction, TransactionData, TxId},
     zip32::{AccountId, DiversifierIndex},
 };
 
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
-    data_api::{BlockMetadata, PoolType, Recipient, SentTransactionOutput},
+    data_api::{
+        scanning::{ScanPriority, ScanRange},
+        AccountBirthday, BlockMetadata, SentTransactionOutput, SAPLING_SHARD_HEIGHT,
+    },
     encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
-    wallet::WalletTx,
+    wallet::{NoteId, Recipient, WalletTx},
+    PoolType, ShieldedProtocol,
 };
 
 use crate::wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore};

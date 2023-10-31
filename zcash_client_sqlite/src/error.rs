@@ -4,10 +4,13 @@ use std::error;
 use std::fmt;
 
 use shardtree::error::ShardTreeError;
-use zcash_client_backend::data_api::PoolType;
-use zcash_client_backend::encoding::{Bech32DecodeError, TransparentCodecError};
-use zcash_primitives::transaction::components::amount::BalanceError;
-use zcash_primitives::{consensus::BlockHeight, zip32::AccountId};
+use zcash_client_backend::{
+    encoding::{Bech32DecodeError, TransparentCodecError},
+    PoolType,
+};
+use zcash_primitives::{
+    consensus::BlockHeight, transaction::components::amount::BalanceError, zip32::AccountId,
+};
 
 use crate::wallet::commitment_tree;
 use crate::PRUNING_DEPTH;

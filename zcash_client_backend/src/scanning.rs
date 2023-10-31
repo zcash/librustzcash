@@ -19,11 +19,12 @@ use zcash_primitives::{
     zip32::{AccountId, Scope},
 };
 
-use crate::data_api::{BlockMetadata, ScannedBlock, ShieldedProtocol};
+use crate::data_api::{BlockMetadata, ScannedBlock};
 use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, Tasks},
     wallet::{WalletSaplingOutput, WalletSaplingSpend, WalletTx},
+    ShieldedProtocol,
 };
 
 /// A key that can be used to perform trial decryption and nullifier

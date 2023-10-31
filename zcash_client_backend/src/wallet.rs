@@ -18,6 +18,55 @@ use zcash_primitives::{
     zip32::AccountId,
 };
 
+use crate::{address::UnifiedAddress, PoolType, ShieldedProtocol};
+
+/// A unique identifier for a shielded transaction output
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NoteId {
+    txid: TxId,
+    protocol: ShieldedProtocol,
+    output_index: u16,
+}
+
+impl NoteId {
+    /// Constructs a new `NoteId` from its parts.
+    pub fn new(txid: TxId, protocol: ShieldedProtocol, output_index: u16) -> Self {
+        Self {
+            txid,
+            protocol,
+            output_index,
+        }
+    }
+
+    /// Returns the ID of the transaction containing this note.
+    pub fn txid(&self) -> &TxId {
+        &self.txid
+    }
+
+    /// Returns the shielded protocol used by this note.
+    pub fn protocol(&self) -> ShieldedProtocol {
+        self.protocol
+    }
+
+    /// Returns the index of this note within its transaction's corresponding list of
+    /// shielded outputs.
+    pub fn output_index(&self) -> u16 {
+        self.output_index
+    }
+}
+
+/// A type that represents the recipient of a transaction output; a recipient address (and, for
+/// unified addresses, the pool to which the payment is sent) in the case of outgoing output, or an
+/// internal account ID and the pool to which funds were sent in the case of a wallet-internal
+/// output.
+#[derive(Debug, Clone)]
+pub enum Recipient {
+    Transparent(TransparentAddress),
+    Sapling(sapling::PaymentAddress),
+    Unified(UnifiedAddress, PoolType),
+    InternalAccount(AccountId, PoolType),
+}
+
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction

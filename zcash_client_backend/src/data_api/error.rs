@@ -15,12 +15,12 @@ use zcash_primitives::{
 };
 
 use crate::data_api::wallet::input_selection::InputSelectorError;
-use crate::data_api::PoolType;
+use crate::PoolType;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};
 
-use super::NoteId;
+use crate::wallet::NoteId;
 
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]

@@ -24,15 +24,16 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     data_api::{
-        error::Error, wallet::input_selection::Proposal, DecryptedTransaction, PoolType, Recipient,
-        SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
+        error::Error, wallet::input_selection::Proposal, DecryptedTransaction, SentTransaction,
+        SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
         SAPLING_SHARD_HEIGHT,
     },
     decrypt_transaction,
     fees::{self, ChangeValue, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    wallet::{OvkPolicy, ReceivedSaplingNote},
+    wallet::{NoteId, OvkPolicy, ReceivedSaplingNote, Recipient},
     zip321::{self, Payment},
+    PoolType, ShieldedProtocol,
 };
 
 pub mod input_selection;
@@ -40,7 +41,7 @@ use input_selection::{
     GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
 };
 
-use super::{NoteId, SaplingInputSource, ShieldedProtocol};
+use super::SaplingInputSource;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -597,11 +598,11 @@ where
                     sapling_inputs.anchor_height(),
                 )?
                 .ok_or_else(|| {
-                    Error::NoteMismatch(NoteId {
-                        txid: *selected.txid(),
-                        protocol: ShieldedProtocol::Sapling,
-                        output_index: selected.output_index(),
-                    })
+                    Error::NoteMismatch(NoteId::new(
+                        *selected.txid(),
+                        ShieldedProtocol::Sapling,
+                        selected.output_index(),
+                    ))
                 })?;
 
                 let key = match scope {

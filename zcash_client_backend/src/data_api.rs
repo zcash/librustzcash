@@ -2,7 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt::{self, Debug},
+    fmt::Debug,
     io,
     num::{NonZeroU32, TryFromIntError},
 };
@@ -31,7 +31,7 @@ use crate::{
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
-    wallet::{ReceivedSaplingNote, WalletTransparentOutput, WalletTx},
+    wallet::{NoteId, ReceivedSaplingNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
 use self::chain::CommitmentTreeRoot;
@@ -756,81 +756,6 @@ pub struct SentTransaction<'a> {
     pub utxos_spent: Vec<OutPoint>,
 }
 
-/// A shielded transfer protocol supported by the wallet.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ShieldedProtocol {
-    /// The Sapling protocol
-    Sapling,
-    /// The Orchard protocol
-    Orchard,
-}
-
-/// A unique identifier for a shielded transaction output
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NoteId {
-    txid: TxId,
-    protocol: ShieldedProtocol,
-    output_index: u16,
-}
-
-impl NoteId {
-    /// Constructs a new `NoteId` from its parts.
-    pub fn new(txid: TxId, protocol: ShieldedProtocol, output_index: u16) -> Self {
-        Self {
-            txid,
-            protocol,
-            output_index,
-        }
-    }
-
-    /// Returns the ID of the transaction containing this note.
-    pub fn txid(&self) -> &TxId {
-        &self.txid
-    }
-
-    /// Returns the shielded protocol used by this note.
-    pub fn protocol(&self) -> ShieldedProtocol {
-        self.protocol
-    }
-
-    /// Returns the index of this note within its transaction's corresponding list of
-    /// shielded outputs.
-    pub fn output_index(&self) -> u16 {
-        self.output_index
-    }
-}
-
-/// A value pool to which the wallet supports sending transaction outputs.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PoolType {
-    /// The transparent value pool
-    Transparent,
-    /// A shielded value pool.
-    Shielded(ShieldedProtocol),
-}
-
-impl fmt::Display for PoolType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PoolType::Transparent => f.write_str("Transparent"),
-            PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
-            PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
-        }
-    }
-}
-
-/// A type that represents the recipient of a transaction output; a recipient address (and, for
-/// unified addresses, the pool to which the payment is sent) in the case of outgoing output, or an
-/// internal account ID and the pool to which funds were sent in the case of a wallet-internal
-/// output.
-#[derive(Debug, Clone)]
-pub enum Recipient {
-    Transparent(TransparentAddress),
-    Sapling(sapling::PaymentAddress),
-    Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, PoolType),
-}
-
 /// A type that represents an output (either Sapling or transparent) that was sent by the wallet.
 pub struct SentTransactionOutput {
     output_index: usize,
@@ -1149,14 +1074,13 @@ pub mod testing {
     use crate::{
         address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-        wallet::{ReceivedSaplingNote, WalletTransparentOutput},
+        wallet::{NoteId, ReceivedSaplingNote, WalletTransparentOutput},
     };
 
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, NoteId, NullifierQuery, SaplingInputSource, ScannedBlock,
-        SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        DecryptedTransaction, NullifierQuery, SaplingInputSource, ScannedBlock, SentTransaction,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {

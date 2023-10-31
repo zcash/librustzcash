@@ -483,14 +483,14 @@ pub(crate) mod tests {
             chain::CommitmentTreeRoot,
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-            AccountBirthday, Ratio, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
-            WalletWrite,
+            AccountBirthday, Ratio, WalletCommitmentTrees, WalletRead, WalletWrite,
         },
         decrypt_transaction,
         fees::{fixed, standard, DustOutputPolicy},
         keys::UnifiedSpendingKey,
         wallet::OvkPolicy,
         zip321::{self, Payment, TransactionRequest},
+        ShieldedProtocol,
     };
 
     use crate::{

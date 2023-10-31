@@ -49,6 +49,12 @@ and this library adheres to Rust's notion of
      wallet::input_selection::{Proposal, SaplingInputs},
    }`
 
+### Moved
+- `zcash_client_backend::data_api::{PoolType, ShieldedProtocol}` have
+  been moved into the `zcash_client_backend` root module.
+- `zcash_client_backend::data_api::{NoteId, Recipient}` have
+  been moved into the `zcash_client_backend::wallet` module.
+
 ### Changed
 - `zcash_client_backend::data_api`:
   - Arguments to `BlockMetadata::from_parts` have changed to include Orchard.
