@@ -13,18 +13,18 @@ use zcash_primitives::{
         components::{amount::NonNegativeAmount, Amount},
         TxId,
     },
-    zip32::AccountId,
+    zip32::{AccountId, Scope},
 };
 
 use zcash_client_backend::{
     keys::UnifiedFullViewingKey,
-    wallet::{ReceivedSaplingNote, WalletSaplingOutput},
+    wallet::{ReceivedNote, WalletNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
 
 use crate::{error::SqliteClientError, ReceivedNoteId};
 
-use super::{memo_repr, wallet_birthday};
+use super::{memo_repr, parse_scope, scope_code, wallet_birthday};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
@@ -35,9 +35,10 @@ pub(crate) trait ReceivedSaplingOutput {
     fn is_change(&self) -> bool;
     fn nullifier(&self) -> Option<&sapling::Nullifier>;
     fn note_commitment_tree_position(&self) -> Option<Position>;
+    fn recipient_key_scope(&self) -> Scope;
 }
 
-impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier> {
+impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope> {
     fn index(&self) -> usize {
         self.index()
     }
@@ -58,6 +59,10 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier> {
     }
     fn note_commitment_tree_position(&self) -> Option<Position> {
         Some(WalletSaplingOutput::note_commitment_tree_position(self))
+    }
+
+    fn recipient_key_scope(&self) -> Scope {
+        *self.recipient_key_scope()
     }
 }
 
@@ -83,12 +88,19 @@ impl ReceivedSaplingOutput for DecryptedOutput<Note> {
     fn note_commitment_tree_position(&self) -> Option<Position> {
         None
     }
+    fn recipient_key_scope(&self) -> Scope {
+        if self.transfer_type == TransferType::WalletInternal {
+            Scope::Internal
+        } else {
+            Scope::External
+        }
+    }
 }
 
 fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
-) -> Result<ReceivedSaplingNote<ReceivedNoteId>, SqliteClientError> {
+) -> Result<ReceivedNote<ReceivedNoteId>, SqliteClientError> {
     let note_id = ReceivedNoteId(row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
@@ -132,32 +144,31 @@ fn to_spendable_note<P: consensus::Parameters>(
     let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
         .map_err(SqliteClientError::CorruptedData)?;
 
-    let is_change: bool = row.get(8)?;
+    let scope_code: i64 = row.get(8)?;
+    let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
+        SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
+    })?;
 
-    // FIXME: We attempt to recover the recipient address for the received note based upon the
-    // change flag; however, this is inaccurate for change notes received prior to the switch to
-    // internal receivers. However, for now it's okay, because we don't use the recipient directly
-    // in spends; instead, we use just the diversifier component. A future migration will update
-    // the persistent received note information so that the note can be definitively linked to
-    // either the internal or external key component.
-    let external_address = ufvk
-        .sapling()
-        .and_then(|dfvk| dfvk.diversified_address(diversifier));
-    let internal_address = ufvk
-        .sapling()
-        .and_then(|dfvk| dfvk.diversified_change_address(diversifier));
-    let recipient = if is_change {
-        internal_address.or(external_address)
-    } else {
-        external_address
+    let recipient = match spending_key_scope {
+        Scope::Internal => ufvk
+            .sapling()
+            .and_then(|dfvk| dfvk.diversified_change_address(diversifier)),
+        Scope::External => ufvk
+            .sapling()
+            .and_then(|dfvk| dfvk.diversified_address(diversifier)),
     }
     .ok_or_else(|| SqliteClientError::CorruptedData("Diversifier invalid.".to_owned()))?;
 
-    Ok(ReceivedSaplingNote::from_parts(
+    Ok(ReceivedNote::from_parts(
         note_id,
         txid,
         output_index,
-        sapling::Note::from_parts(recipient, note_value.into(), rseed),
+        WalletNote::Sapling(sapling::Note::from_parts(
+            recipient,
+            note_value.into(),
+            rseed,
+        )),
+        spending_key_scope,
         note_commitment_tree_position,
     ))
 }
@@ -171,10 +182,10 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     params: &P,
     txid: &TxId,
     index: u32,
-) -> Result<Option<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId>>, SqliteClientError> {
     let mut stmt_select_note = conn.prepare_cached(
         "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
-                accounts.ufvk, is_change
+                accounts.ufvk, recipient_key_scope
          FROM sapling_received_notes
          INNER JOIN accounts on accounts.account = sapling_received_notes.account
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
@@ -228,7 +239,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_value: Amount,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
-) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+) -> Result<Vec<ReceivedNote<ReceivedNoteId>>, SqliteClientError> {
     let birthday_height = match wallet_birthday(conn)? {
         Some(birthday) => birthday,
         None => {
@@ -264,7 +275,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
                  id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
                     OVER (PARTITION BY sapling_received_notes.account, spent ORDER BY id_note) AS so_far,
-                 accounts.ufvk as ufvk, is_change
+                 accounts.ufvk as ufvk, recipient_key_scope
              FROM sapling_received_notes
              INNER JOIN accounts on accounts.account = sapling_received_notes.account
              INNER JOIN transactions
@@ -285,10 +296,10 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
                 AND unscanned.block_range_end > :wallet_birthday
              )
          )
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, is_change
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
          FROM eligible WHERE so_far < :target_value
          UNION
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, is_change
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
@@ -396,7 +407,9 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
-        (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change, spent, commitment_tree_position)
+        (tx, output_index, account, diversifier, value, rcm, memo, nf,
+         is_change, spent, commitment_tree_position,
+         recipient_key_scope)
         VALUES (
             :tx,
             :output_index,
@@ -408,7 +421,8 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             :nf,
             :is_change,
             :spent,
-            :commitment_tree_position
+            :commitment_tree_position,
+            :recipient_key_scope
         )
         ON CONFLICT (tx, output_index) DO UPDATE
         SET account = :account,
@@ -419,7 +433,8 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             memo = IFNULL(:memo, memo),
             is_change = IFNULL(:is_change, is_change),
             spent = IFNULL(:spent, spent),
-            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position)",
+            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
+            recipient_key_scope = :recipient_key_scope",
     )?;
 
     let rcm = output.note().rcm().to_repr();
@@ -438,6 +453,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":is_change": output.is_change(),
         ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
+        ":recipient_key_scope": scope_code(output.recipient_key_scope()),
     ];
 
     stmt_upsert_received_note
@@ -452,6 +468,7 @@ pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
     use incrementalmerkletree::Hashable;
+    use rusqlite::params;
     use secrecy::Secret;
     use zcash_proofs::prover::LocalTxProver;
 
@@ -497,8 +514,8 @@ pub(crate) mod tests {
         error::SqliteClientError,
         testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
         wallet::{
-            block_max_scanned, commitment_tree, sapling::select_spendable_sapling_notes,
-            scanning::tests::test_with_canopy_birthday,
+            block_max_scanned, commitment_tree, parse_scope,
+            sapling::select_spendable_sapling_notes, scanning::tests::test_with_canopy_birthday,
         },
         AccountId, NoteId, ReceivedNoteId,
     };
@@ -1184,6 +1201,15 @@ pub(crate) mod tests {
             st.get_spendable_balance(account, 10),
             NonNegativeAmount::ZERO
         );
+
+        let change_note_scope = st.wallet().conn.query_row(
+            "SELECT recipient_key_scope
+             FROM sapling_received_notes
+             WHERE value = ?",
+            params![u64::from(value)],
+            |row| Ok(parse_scope(row.get(0)?)),
+        );
+        assert_matches!(change_note_scope, Ok(Some(Scope::Internal)));
 
         // TODO: This test was originally written to use the pre-zip-313 fee rule
         // and has not yet been updated.

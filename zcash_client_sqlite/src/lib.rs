@@ -55,7 +55,7 @@ use zcash_primitives::{
         components::amount::{Amount, NonNegativeAmount},
         Transaction, TxId,
     },
-    zip32::{AccountId, DiversifierIndex},
+    zip32::{AccountId, DiversifierIndex, Scope},
 };
 
 use zcash_client_backend::{
@@ -70,7 +70,7 @@ use zcash_client_backend::{
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::{NoteId, ReceivedSaplingNote, Recipient, WalletTransparentOutput},
+    wallet::{NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
 };
 
@@ -177,7 +177,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSour
         &self,
         txid: &TxId,
         index: u32,
-    ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+    ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error> {
         wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), &self.params, txid, index)
     }
 
@@ -187,7 +187,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSour
         target_value: Amount,
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error> {
         wallet::sapling::select_spendable_sapling_notes(
             self.conn.borrow(),
             &self.params,
@@ -443,7 +443,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier>>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let start_positions = blocks.first().map(|block| {
@@ -487,7 +487,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     for output in &tx.sapling_outputs {
                         // Check whether this note was spent in a later block range that
                         // we previously scanned.
-                        let spent_in = wallet::query_nullifier_map(
+                        let spent_in = wallet::query_nullifier_map::<_, Scope>(
                             wdb.conn.0,
                             ShieldedProtocol::Sapling,
                             output.nf(),

@@ -23,7 +23,7 @@ use zcash_primitives::{
         },
         Transaction, TxId,
     },
-    zip32::AccountId,
+    zip32::{AccountId, Scope},
 };
 
 use crate::{
@@ -31,7 +31,7 @@ use crate::{
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
-    wallet::{NoteId, ReceivedSaplingNote, Recipient, WalletTransparentOutput, WalletTx},
+    wallet::{NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
 use self::chain::CommitmentTreeRoot;
@@ -358,7 +358,7 @@ pub trait SaplingInputSource {
         &self,
         txid: &TxId,
         index: u32,
-    ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error>;
 
     /// Returns a list of spendable Sapling notes sufficient to cover the specified target value,
     /// if possible.
@@ -368,7 +368,7 @@ pub trait SaplingInputSource {
         target_value: Amount,
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error>;
 }
 
 /// A trait representing the capability to query a data store for unspent transparent UTXOs
@@ -602,20 +602,20 @@ impl BlockMetadata {
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct ScannedBlock<Nf> {
+pub struct ScannedBlock<Nf, S> {
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
     sapling_tree_size: u32,
     orchard_tree_size: u32,
-    transactions: Vec<WalletTx<Nf>>,
+    transactions: Vec<WalletTx<Nf, S>>,
     sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
     sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
     orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
     orchard_commitments: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
 }
 
-impl<Nf> ScannedBlock<Nf> {
+impl<Nf, S> ScannedBlock<Nf, S> {
     /// Constructs a new `ScannedBlock`
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -624,7 +624,7 @@ impl<Nf> ScannedBlock<Nf> {
         block_time: u32,
         sapling_tree_size: u32,
         orchard_tree_size: u32,
-        transactions: Vec<WalletTx<Nf>>,
+        transactions: Vec<WalletTx<Nf, S>>,
         sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
         sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
         orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
@@ -670,7 +670,7 @@ impl<Nf> ScannedBlock<Nf> {
     }
 
     /// Returns the list of transactions from the block that are relevant to the wallet.
-    pub fn transactions(&self) -> &[WalletTx<Nf>] {
+    pub fn transactions(&self) -> &[WalletTx<Nf, S>] {
         &self.transactions
     }
 
@@ -981,7 +981,7 @@ pub trait WalletWrite: WalletRead {
     /// `blocks` must be sequential, in order of increasing block height
     fn put_blocks(
         &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier>>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
     ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
@@ -1068,13 +1068,13 @@ pub mod testing {
         memo::Memo,
         sapling,
         transaction::{components::Amount, Transaction, TxId},
-        zip32::AccountId,
+        zip32::{AccountId, Scope},
     };
 
     use crate::{
         address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-        wallet::{NoteId, ReceivedSaplingNote, WalletTransparentOutput},
+        wallet::{NoteId, ReceivedNote, WalletTransparentOutput},
     };
 
     use super::{
@@ -1112,7 +1112,7 @@ pub mod testing {
             &self,
             _txid: &TxId,
             _index: u32,
-        ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error> {
             Ok(None)
         }
 
@@ -1122,7 +1122,7 @@ pub mod testing {
             _target_value: Amount,
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
     }
@@ -1290,7 +1290,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
-            _blocks: Vec<ScannedBlock<sapling::Nullifier>>,
+            _blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }

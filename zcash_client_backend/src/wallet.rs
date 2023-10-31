@@ -15,7 +15,7 @@ use zcash_primitives::{
         },
         TxId,
     },
-    zip32::AccountId,
+    zip32::{AccountId, Scope},
 };
 
 use crate::{address::UnifiedAddress, PoolType, ShieldedProtocol};
@@ -70,11 +70,11 @@ pub enum Recipient {
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
-pub struct WalletTx<N> {
+pub struct WalletTx<N, S> {
     pub txid: TxId,
     pub index: usize,
     pub sapling_spends: Vec<WalletSaplingSpend>,
-    pub sapling_outputs: Vec<WalletSaplingOutput<N>>,
+    pub sapling_outputs: Vec<WalletSaplingOutput<N, S>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,7 +159,7 @@ impl WalletSaplingSpend {
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.
 ///
 /// [`OutputDescription`]: zcash_primitives::transaction::components::OutputDescription
-pub struct WalletSaplingOutput<N> {
+pub struct WalletSaplingOutput<N, S> {
     index: usize,
     cmu: sapling::note::ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
@@ -168,9 +168,10 @@ pub struct WalletSaplingOutput<N> {
     is_change: bool,
     note_commitment_tree_position: Position,
     nf: N,
+    recipient_key_scope: S,
 }
 
-impl<N> WalletSaplingOutput<N> {
+impl<N, S> WalletSaplingOutput<N, S> {
     /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -182,6 +183,7 @@ impl<N> WalletSaplingOutput<N> {
         is_change: bool,
         note_commitment_tree_position: Position,
         nf: N,
+        recipient_key_scope: S,
     ) -> Self {
         Self {
             index,
@@ -192,6 +194,7 @@ impl<N> WalletSaplingOutput<N> {
             is_change,
             note_commitment_tree_position,
             nf,
+            recipient_key_scope,
         }
     }
 
@@ -219,35 +222,58 @@ impl<N> WalletSaplingOutput<N> {
     pub fn nf(&self) -> &N {
         &self.nf
     }
+    pub fn recipient_key_scope(&self) -> &S {
+        &self.recipient_key_scope
+    }
+}
+
+/// An enumeration of supported shielded note types for use in [`ReceivedNote`]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WalletNote {
+    Sapling(sapling::Note),
+    Orchard(orchard::Note),
+}
+
+impl WalletNote {
+    pub fn value(&self) -> NonNegativeAmount {
+        match self {
+            WalletNote::Sapling(n) => n.value().try_into().expect(
+                "Sapling notes must have values in the range of valid non-negative ZEC values.",
+            ),
+            WalletNote::Orchard(n) => NonNegativeAmount::from_u64(n.value().inner()).expect(
+                "Orchard notes must have values in the range of valid non-negative ZEC values.",
+            ),
+        }
+    }
 }
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReceivedSaplingNote<NoteRef> {
+pub struct ReceivedNote<NoteRef> {
     note_id: NoteRef,
     txid: TxId,
     output_index: u16,
-    // FIXME: We do not yet expose the note directly, because while we know its diversifier to be
-    // correct, the recipient address may have been reconstructed from persisted data using the
-    // incorrect IVK.
-    note: sapling::Note,
+    note: WalletNote,
+    spending_key_scope: Scope,
     note_commitment_tree_position: Position,
 }
 
-impl<NoteRef> ReceivedSaplingNote<NoteRef> {
+impl<NoteRef> ReceivedNote<NoteRef> {
     pub fn from_parts(
         note_id: NoteRef,
         txid: TxId,
         output_index: u16,
-        note: sapling::Note,
+        note: WalletNote,
+        spending_key_scope: Scope,
         note_commitment_tree_position: Position,
     ) -> Self {
-        ReceivedSaplingNote {
+        ReceivedNote {
             note_id,
             txid,
             output_index,
             note,
+            spending_key_scope,
             note_commitment_tree_position,
         }
     }
@@ -261,33 +287,27 @@ impl<NoteRef> ReceivedSaplingNote<NoteRef> {
     pub fn output_index(&self) -> u16 {
         self.output_index
     }
-    pub fn diversifier(&self) -> sapling::Diversifier {
-        *self.note.recipient().diversifier()
+    pub fn note(&self) -> &WalletNote {
+        &self.note
     }
     pub fn value(&self) -> NonNegativeAmount {
-        self.note
-            .value()
-            .try_into()
-            .expect("Sapling notes must have values in the range of valid non-negative ZEC values.")
+        self.note.value()
     }
-    pub fn rseed(&self) -> sapling::Rseed {
-        *self.note.rseed()
+    pub fn spending_key_scope(&self) -> Scope {
+        self.spending_key_scope
     }
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
     }
 }
 
-impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedSaplingNote<NoteRef> {
+impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef> {
     fn note_id(&self) -> &NoteRef {
         &self.note_id
     }
 
     fn value(&self) -> NonNegativeAmount {
-        self.note
-            .value()
-            .try_into()
-            .expect("Sapling notes must have values in the range of valid non-negative ZEC values.")
+        self.note.value()
     }
 }
 

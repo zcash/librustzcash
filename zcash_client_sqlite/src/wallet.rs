@@ -143,6 +143,14 @@ pub(crate) fn scope_code(scope: Scope) -> i64 {
     }
 }
 
+pub(crate) fn parse_scope(code: i64) -> Option<Scope> {
+    match code {
+        0i64 => Some(Scope::External),
+        1i64 => Some(Scope::Internal),
+        _ => None,
+    }
+}
+
 pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
     memo.map(|m| {
         if m == &MemoBytes::empty() {
@@ -1509,9 +1517,9 @@ pub(crate) fn put_block(
 
 /// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
-pub(crate) fn put_tx_meta<N>(
+pub(crate) fn put_tx_meta<N, S>(
     conn: &rusqlite::Connection,
-    tx: &WalletTx<N>,
+    tx: &WalletTx<N, S>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
@@ -1890,7 +1898,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
 
 /// Returns the row of the `transactions` table corresponding to the transaction in which
 /// this nullifier is revealed, if any.
-pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
+pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
     conn: &rusqlite::Transaction<'_>,
     spend_pool: ShieldedProtocol,
     nf: &N,
@@ -1928,7 +1936,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     // change or explicit in-wallet recipient.
     put_tx_meta(
         conn,
-        &WalletTx::<N> {
+        &WalletTx::<N, S> {
             txid,
             index,
             sapling_spends: vec![],
