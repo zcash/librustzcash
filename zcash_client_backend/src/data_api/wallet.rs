@@ -231,15 +231,7 @@ where
         change_memo,
     )?;
 
-    create_proposed_transaction(
-        wallet_db,
-        params,
-        prover,
-        usk,
-        ovk_policy,
-        proposal,
-        min_confirmations,
-    )
+    create_proposed_transaction(wallet_db, params, prover, usk, ovk_policy, &proposal)
 }
 
 /// Constructs a transaction that sends funds as specified by the `request` argument
@@ -332,15 +324,7 @@ where
         min_confirmations,
     )?;
 
-    create_proposed_transaction(
-        wallet_db,
-        params,
-        prover,
-        usk,
-        ovk_policy,
-        proposal,
-        min_confirmations,
-    )
+    create_proposed_transaction(wallet_db, params, prover, usk, ovk_policy, &proposal)
 }
 
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction
@@ -494,8 +478,7 @@ pub fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT>(
     prover: impl SaplingProver,
     usk: &UnifiedSpendingKey,
     ovk_policy: OvkPolicy,
-    proposal: Proposal<FeeRuleT, DbT::NoteRef>,
-    min_confirmations: NonZeroU32,
+    proposal: &Proposal<FeeRuleT, DbT::NoteRef>,
 ) -> Result<
     TxId,
     Error<
@@ -546,7 +529,7 @@ where
     // are no possible transparent inputs, so we ignore those
     let mut builder = Builder::new(params.clone(), proposal.min_target_height(), None);
 
-    let checkpoint_depth = wallet_db.get_checkpoint_depth(min_confirmations)?;
+    let checkpoint_depth = wallet_db.get_checkpoint_depth(proposal.min_confirmations())?;
     wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
         for selected in proposal.sapling_inputs() {
             let (note, key, merkle_path) = select_key_for_note(
@@ -815,15 +798,7 @@ where
         min_confirmations,
     )?;
 
-    create_proposed_transaction(
-        wallet_db,
-        params,
-        prover,
-        usk,
-        OvkPolicy::Sender,
-        proposal,
-        min_confirmations,
-    )
+    create_proposed_transaction(wallet_db, params, prover, usk, OvkPolicy::Sender, &proposal)
 }
 
 #[allow(clippy::type_complexity)]

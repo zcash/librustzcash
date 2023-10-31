@@ -438,7 +438,6 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
@@ -546,26 +545,28 @@ pub(crate) mod tests {
         }])
         .unwrap();
 
+        // TODO: This test was originally written to use the pre-zip-313 fee rule
+        // and has not yet been updated.
+        #[allow(deprecated)]
         let fee_rule = StandardFeeRule::PreZip313;
+
         let change_memo = "Test change memo".parse::<Memo>().unwrap();
         let change_strategy =
             standard::SingleOutputChangeStrategy::new(fee_rule, Some(change_memo.clone().into()));
         let input_selector =
             &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
-        let proposal_result = st.propose_transfer(
-            account,
-            input_selector,
-            request,
-            NonZeroU32::new(1).unwrap(),
-        );
-        assert_matches!(proposal_result, Ok(_));
 
-        let create_proposed_result = st.create_proposed_transaction::<Infallible, _>(
-            &usk,
-            OvkPolicy::Sender,
-            proposal_result.unwrap(),
-            NonZeroU32::new(1).unwrap(),
-        );
+        let proposal = st
+            .propose_transfer(
+                account,
+                input_selector,
+                request,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
+
+        let create_proposed_result =
+            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal);
         assert_matches!(create_proposed_result, Ok(_));
 
         let sent_tx_id = create_proposed_result.unwrap();
@@ -682,7 +683,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn create_to_address_fails_with_no_blocks() {
+    #[allow(deprecated)]
+    fn proposal_fails_with_no_blocks() {
         let mut st = TestBuilder::new()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
@@ -839,12 +841,7 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         let txid = st
-            .create_proposed_transaction::<Infallible, _>(
-                &usk,
-                OvkPolicy::Sender,
-                proposal,
-                min_confirmations,
-            )
+            .create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
             .unwrap();
 
         let (h, _) = st.generate_next_block_including(txid);
@@ -901,12 +898,7 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(
-                &usk,
-                OvkPolicy::Sender,
-                proposal,
-                min_confirmations
-            ),
+            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal,),
             Ok(_)
         );
 
@@ -985,12 +977,7 @@ pub(crate) mod tests {
             .unwrap();
 
         let txid2 = st
-            .create_proposed_transaction::<Infallible, _>(
-                &usk,
-                OvkPolicy::Sender,
-                proposal,
-                min_confirmations,
-            )
+            .create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
             .unwrap();
 
         let (h, _) = st.generate_next_block_including(txid2);
@@ -1056,8 +1043,7 @@ pub(crate) mod tests {
             )?;
 
             // Executing the proposal should succeed
-            let txid =
-                st.create_proposed_transaction(&usk, ovk_policy, proposal, min_confirmations)?;
+            let txid = st.create_proposed_transaction(&usk, ovk_policy, &proposal)?;
 
             // Fetch the transaction from the database
             let raw_tx: Vec<_> = st
@@ -1156,12 +1142,7 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(
-                &usk,
-                OvkPolicy::Sender,
-                proposal,
-                min_confirmations
-            ),
+            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
             Ok(_)
         );
     }
@@ -1214,12 +1195,7 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(
-                &usk,
-                OvkPolicy::Sender,
-                proposal,
-                min_confirmations
-            ),
+            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
             Ok(_)
         );
     }
@@ -1475,8 +1451,13 @@ pub(crate) mod tests {
         let res0 = st.wallet_mut().put_received_transparent_utxo(&utxo);
         assert!(matches!(res0, Ok(_)));
 
+        // TODO: This test was originally written to use the pre-zip-313 fee rule
+        // and has not yet been updated.
+        #[allow(deprecated)]
+        let fee_rule = StandardFeeRule::PreZip313;
+
         let input_selector = GreedyInputSelector::new(
-            fixed::SingleOutputChangeStrategy::new(FixedFeeRule::standard(), None),
+            standard::SingleOutputChangeStrategy::new(fee_rule, None),
             DustOutputPolicy::default(),
         );
 

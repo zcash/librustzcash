@@ -600,8 +600,7 @@ impl<Cache> TestState<Cache> {
         &mut self,
         usk: &UnifiedSpendingKey,
         ovk_policy: OvkPolicy,
-        proposal: Proposal<FeeRuleT, ReceivedNoteId>,
-        min_confirmations: NonZeroU32,
+        proposal: &Proposal<FeeRuleT, ReceivedNoteId>,
     ) -> Result<
         TxId,
         data_api::error::Error<
@@ -622,7 +621,6 @@ impl<Cache> TestState<Cache> {
             usk,
             ovk_policy,
             proposal,
-            min_confirmations,
         )
     }
 
