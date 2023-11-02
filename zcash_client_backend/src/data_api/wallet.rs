@@ -105,7 +105,10 @@ where
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
-/// * `prover`: The [`sapling::TxProver`] to use in constructing the shielded transaction.
+/// * `spend_prover`: The [`sapling::SpendProver`] to use in constructing the shielded
+///   transaction.
+/// * `output_prover`: The [`sapling::OutputProver`] to use in constructing the shielded
+///   transaction.
 /// * `usk`: The unified spending key that controls the funds that will be spent
 ///   in the resulting transaction. This procedure will return an error if the
 ///   USK does not correspond to an account known to the wallet.
@@ -182,7 +185,9 @@ where
 /// # }
 /// # }
 /// ```
-/// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
+///
+/// [`sapling::SpendProver`]: zcash_primitives::sapling::prover::SpendProver
+/// [`sapling::OutputProver`]: zcash_primitives::sapling::prover::OutputProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[deprecated(
@@ -276,7 +281,10 @@ where
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
-/// * `prover`: The [`sapling::TxProver`] to use in constructing the shielded transaction.
+/// * `spend_prover`: The [`sapling::SpendProver`] to use in constructing the shielded
+///   transaction.
+/// * `output_prover`: The [`sapling::OutputProver`] to use in constructing the shielded
+///   transaction.
 /// * `input_selector`: The [`InputSelector`] that will be used to select available
 ///   inputs from the wallet database, choose change amounts and compute required
 ///   transaction fees.
@@ -292,7 +300,8 @@ where
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
 ///
-/// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
+/// [`sapling::SpendProver`]: zcash_primitives::sapling::prover::SpendProver
+/// [`sapling::OutputProver`]: zcash_primitives::sapling::prover::OutputProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn spend<DbT, ParamsT, InputsT>(
@@ -764,7 +773,10 @@ where
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database
 /// * `params`: Consensus parameters
-/// * `prover`: The [`sapling::TxProver`] to use in constructing the shielded transaction.
+/// * `spend_prover`: The [`sapling::SpendProver`] to use in constructing the shielded
+///   transaction.
+/// * `output_prover`: The [`sapling::OutputProver`] to use in constructing the shielded
+///   transaction.
 /// * `input_selector`: The [`InputSelector`] to for note selection and change and fee
 ///   determination
 /// * `usk`: The unified spending key that will be used to detect and spend transparent UTXOs,
@@ -781,7 +793,8 @@ where
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
 ///
-/// [`sapling::TxProver`]: zcash_primitives::sapling::prover::TxProver
+/// [`sapling::SpendProver`]: zcash_primitives::sapling::prover::SpendProver
+/// [`sapling::OutputProver`]: zcash_primitives::sapling::prover::OutputProver
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]

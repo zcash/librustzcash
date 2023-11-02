@@ -42,7 +42,7 @@ and this library adheres to Rust's notion of
     - `P2PKH_STANDARD_INPUT_SIZE`
     - `P2PKH_STANDARD_OUTPUT_SIZE`
 - Test helpers, behind the `test-dependencies` feature flag:
-  - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
+  - `zcash_primitives::sapling::prover::mock::{MockSpendProver, MockOutputProver}`
 - Additions related to `zcash_primitive::components::amount::Amount`
   and `zcash_primitive::components::amount::NonNegativeAmount`:
   - `impl TryFrom<Amount> for u64`
