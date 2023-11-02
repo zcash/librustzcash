@@ -123,6 +123,14 @@ impl Sub<&ValueCommitTrapdoor> for ValueCommitTrapdoor {
     }
 }
 
+impl Sub<TrapdoorSum> for TrapdoorSum {
+    type Output = TrapdoorSum;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        TrapdoorSum(self.0 - rhs.0)
+    }
+}
+
 impl SubAssign<&ValueCommitTrapdoor> for TrapdoorSum {
     fn sub_assign(&mut self, rhs: &ValueCommitTrapdoor) {
         self.0 -= rhs.0;
@@ -204,6 +212,14 @@ impl Sub<&ValueCommitment> for ValueCommitment {
 impl SubAssign<&ValueCommitment> for CommitmentSum {
     fn sub_assign(&mut self, rhs: &ValueCommitment) {
         self.0 -= rhs.0;
+    }
+}
+
+impl Sub<CommitmentSum> for CommitmentSum {
+    type Output = CommitmentSum;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        CommitmentSum(self.0 - rhs.0)
     }
 }
 

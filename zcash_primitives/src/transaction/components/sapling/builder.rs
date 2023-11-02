@@ -1,32 +1,37 @@
 //! Types and functions for building Sapling transaction components.
 
 use core::fmt;
-use std::sync::mpsc::Sender;
+use std::{marker::PhantomData, sync::mpsc::Sender};
 
 use ff::Field;
 use rand::{seq::SliceRandom, RngCore};
+use rand_core::CryptoRng;
 
 use crate::{
     consensus::{self, BlockHeight},
     keys::OutgoingViewingKey,
     memo::MemoBytes,
     sapling::{
-        keys::SaplingIvk,
+        self,
+        constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         note_encryption::sapling_note_encryption,
-        prover::TxProver,
-        redjubjub::{PrivateKey, Signature},
+        prover::{OutputProver, SpendProver},
+        redjubjub::{PrivateKey, PublicKey, Signature},
         spend_sig_internal,
         util::generate_random_rseed_internal,
-        value::{NoteValue, ValueSum},
-        Diversifier, MerklePath, Node, Note, PaymentAddress,
+        value::{
+            CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment, ValueSum,
+        },
+        verify_spend_sig, Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey,
+        SaplingIvk,
     },
     transaction::{
         builder::Progress,
         components::{
             amount::{Amount, NonNegativeAmount},
             sapling::{
-                fees, Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
-                SpendDescription,
+                fees, Authorization, Authorized, Bundle, GrothProofBytes, MapAuth,
+                OutputDescription, SpendDescription,
             },
         },
     },
@@ -41,8 +46,15 @@ const MIN_SHIELDED_OUTPUTS: usize = 2;
 pub enum Error {
     AnchorMismatch,
     BindingSig,
+    /// A signature is valid for more than one input. This should never happen if `alpha`
+    /// is sampled correctly, and indicates a critical failure in randomness generation.
+    DuplicateSignature,
     InvalidAddress,
     InvalidAmount,
+    /// External signature is not valid.
+    InvalidExternalSignature,
+    /// A bundle could not be built because required signatures were missing.
+    MissingSignatures,
     SpendProof,
 }
 
@@ -53,8 +65,11 @@ impl fmt::Display for Error {
                 write!(f, "Anchor mismatch (anchors for all spends must be equal)")
             }
             Error::BindingSig => write!(f, "Failed to create bindingSig"),
+            Error::DuplicateSignature => write!(f, "Signature valid for more than one input"),
             Error::InvalidAddress => write!(f, "Invalid address"),
             Error::InvalidAmount => write!(f, "Invalid amount"),
+            Error::InvalidExternalSignature => write!(f, "External signature was invalid"),
+            Error::MissingSignatures => write!(f, "Required signatures were missing during build"),
             Error::SpendProof => write!(f, "Failed to create Sapling spend proof"),
         }
     }
@@ -62,11 +77,12 @@ impl fmt::Display for Error {
 
 #[derive(Debug, Clone)]
 pub struct SpendDescriptionInfo {
-    extsk: ExtendedSpendingKey,
+    proof_generation_key: ProofGenerationKey,
     diversifier: Diversifier,
     note: Note,
     alpha: jubjub::Fr,
     merkle_path: MerklePath,
+    rcv: ValueCommitTrapdoor,
 }
 
 impl fees::InputView<()> for SpendDescriptionInfo {
@@ -81,6 +97,70 @@ impl fees::InputView<()> for SpendDescriptionInfo {
     }
 }
 
+impl SpendDescriptionInfo {
+    fn new_internal<R: RngCore>(
+        mut rng: &mut R,
+        extsk: &ExtendedSpendingKey,
+        diversifier: Diversifier,
+        note: Note,
+        merkle_path: MerklePath,
+    ) -> Self {
+        SpendDescriptionInfo {
+            proof_generation_key: extsk.expsk.proof_generation_key(),
+            diversifier,
+            note,
+            alpha: jubjub::Fr::random(&mut rng),
+            merkle_path,
+            rcv: ValueCommitTrapdoor::random(rng),
+        }
+    }
+
+    fn build<Pr: SpendProver>(
+        self,
+        anchor: Option<bls12_381::Scalar>,
+    ) -> Result<SpendDescription<InProgress<Unproven, Unsigned>>, Error> {
+        let anchor = anchor.expect("Sapling anchor must be set if Sapling spends are present.");
+
+        // Construct the value commitment.
+        let cv = ValueCommitment::derive(self.note.value(), self.rcv.clone());
+
+        let ak = PublicKey(self.proof_generation_key.ak.into());
+
+        // This is the result of the re-randomization, we compute it for the caller
+        let rk = ak.randomize(self.alpha, SPENDING_KEY_GENERATOR);
+
+        let nullifier = self.note.nf(
+            &self.proof_generation_key.to_viewing_key().nk,
+            u64::try_from(self.merkle_path.position())
+                .expect("Sapling note commitment tree position must fit into a u64"),
+        );
+
+        let zkproof = Pr::prepare_circuit(
+            self.proof_generation_key,
+            self.diversifier,
+            *self.note.rseed(),
+            self.note.value(),
+            self.alpha,
+            self.rcv,
+            anchor,
+            self.merkle_path.clone(),
+        )
+        .ok_or(Error::SpendProof)?;
+
+        Ok(SpendDescription {
+            cv,
+            anchor,
+            nullifier,
+            rk,
+            zkproof,
+            spend_auth_sig: SigningParts {
+                ak,
+                alpha: self.alpha,
+            },
+        })
+    }
+}
+
 /// A struct containing the information required in order to construct a
 /// Sapling output to a transaction.
 #[derive(Clone)]
@@ -89,9 +169,38 @@ struct SaplingOutputInfo {
     ovk: Option<OutgoingViewingKey>,
     note: Note,
     memo: MemoBytes,
+    rcv: ValueCommitTrapdoor,
 }
 
 impl SaplingOutputInfo {
+    fn dummy<P: consensus::Parameters, R: RngCore>(
+        params: &P,
+        mut rng: &mut R,
+        target_height: BlockHeight,
+    ) -> Self {
+        // This is a dummy output
+        let dummy_to = {
+            let mut diversifier = Diversifier([0; 11]);
+            loop {
+                rng.fill_bytes(&mut diversifier.0);
+                let dummy_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
+                if let Some(addr) = dummy_ivk.to_payment_address(diversifier) {
+                    break addr;
+                }
+            }
+        };
+
+        Self::new_internal(
+            params,
+            rng,
+            target_height,
+            None,
+            dummy_to,
+            NoteValue::from_raw(0),
+            MemoBytes::empty(),
+        )
+    }
+
     fn new_internal<P: consensus::Parameters, R: RngCore>(
         params: &P,
         rng: &mut R,
@@ -105,24 +214,31 @@ impl SaplingOutputInfo {
 
         let note = Note::from_parts(to, value, rseed);
 
-        SaplingOutputInfo { ovk, note, memo }
+        SaplingOutputInfo {
+            ovk,
+            note,
+            memo,
+            rcv: ValueCommitTrapdoor::random(rng),
+        }
     }
 
-    fn build<P: consensus::Parameters, Pr: TxProver, R: RngCore>(
+    fn build<P: consensus::Parameters, Pr: OutputProver, R: RngCore>(
         self,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
         rng: &mut R,
-    ) -> OutputDescription<GrothProofBytes> {
+    ) -> OutputDescription<sapling::circuit::Output> {
         let encryptor =
             sapling_note_encryption::<R, P>(self.ovk, self.note.clone(), self.memo, rng);
 
-        let (zkproof, cv) = prover.output_proof(
-            ctx,
+        // Construct the value commitment.
+        let cv = ValueCommitment::derive(self.note.value(), self.rcv.clone());
+
+        // Prepare the circuit that will be used to construct the proof.
+        let zkproof = Pr::prepare_circuit(
             encryptor.esk().0,
             self.note.recipient(),
             self.note.rcm(),
-            self.note.value().inner(),
+            self.note.value(),
+            self.rcv,
         );
 
         let cmu = self.note.cmu();
@@ -197,23 +313,6 @@ pub struct SaplingBuilder<P> {
     outputs: Vec<SaplingOutputInfo>,
 }
 
-#[derive(Clone)]
-pub struct Unauthorized {
-    tx_metadata: SaplingMetadata,
-}
-
-impl std::fmt::Debug for Unauthorized {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "Unauthorized")
-    }
-}
-
-impl Authorization for Unauthorized {
-    type SpendProof = GrothProofBytes;
-    type OutputProof = GrothProofBytes;
-    type AuthSig = SpendDescriptionInfo;
-}
-
 impl<P> SaplingBuilder<P> {
     pub fn new(params: P, target_height: BlockHeight) -> Self {
         SaplingBuilder {
@@ -276,7 +375,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
     pub fn add_spend<R: RngCore>(
         &mut self,
         mut rng: R,
-        extsk: ExtendedSpendingKey,
+        extsk: &ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note,
         merkle_path: MerklePath,
@@ -292,18 +391,13 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             self.anchor = Some(merkle_path.root(node).into())
         }
 
-        let alpha = jubjub::Fr::random(&mut rng);
-
         self.value_balance = (self.value_balance + note.value()).ok_or(Error::InvalidAmount)?;
         self.try_value_balance()?;
 
-        self.spends.push(SpendDescriptionInfo {
-            extsk,
-            diversifier,
-            note,
-            alpha,
-            merkle_path,
-        });
+        let spend =
+            SpendDescriptionInfo::new_internal(&mut rng, extsk, diversifier, note, merkle_path);
+
+        self.spends.push(spend);
 
         Ok(())
     }
@@ -336,22 +430,18 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         Ok(())
     }
 
-    pub fn build<Pr: TxProver, R: RngCore>(
+    pub fn build<SP: SpendProver, OP: OutputProver, R: RngCore>(
         self,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
         mut rng: R,
         target_height: BlockHeight,
-        progress_notifier: Option<&Sender<Progress>>,
-    ) -> Result<Option<Bundle<Unauthorized>>, Error> {
+    ) -> Result<Option<(UnauthorizedBundle, SaplingMetadata)>, Error> {
         let value_balance = self.try_value_balance()?;
 
         // Record initial positions of spends and outputs
-        let params = self.params;
         let mut indexed_spends: Vec<_> = self.spends.into_iter().enumerate().collect();
         let mut indexed_outputs: Vec<_> = self
             .outputs
-            .iter()
+            .into_iter()
             .enumerate()
             .map(|(i, o)| Some((i, o)))
             .collect();
@@ -373,204 +463,403 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         indexed_spends.shuffle(&mut rng);
         indexed_outputs.shuffle(&mut rng);
 
-        // Keep track of the total number of steps computed
-        let total_progress = indexed_spends.len() as u32 + indexed_outputs.len() as u32;
-        let mut progress = 0u32;
+        // Record the transaction metadata and create dummy outputs.
+        let spend_infos = indexed_spends
+            .into_iter()
+            .enumerate()
+            .map(|(i, (pos, spend))| {
+                // Record the post-randomized spend location
+                tx_metadata.spend_indices[pos] = i;
 
-        // Create Sapling SpendDescriptions
-        let shielded_spends: Vec<SpendDescription<Unauthorized>> = if !indexed_spends.is_empty() {
-            let anchor = self
-                .anchor
-                .expect("Sapling anchor must be set if Sapling spends are present.");
-
-            indexed_spends
-                .into_iter()
-                .enumerate()
-                .map(|(i, (pos, spend))| {
-                    let proof_generation_key = spend.extsk.expsk.proof_generation_key();
-
-                    let nullifier = spend.note.nf(
-                        &proof_generation_key.to_viewing_key().nk,
-                        u64::try_from(spend.merkle_path.position())
-                            .expect("Sapling note commitment tree position must fit into a u64"),
-                    );
-
-                    let (zkproof, cv, rk) = prover
-                        .spend_proof(
-                            ctx,
-                            proof_generation_key,
-                            spend.diversifier,
-                            *spend.note.rseed(),
-                            spend.alpha,
-                            spend.note.value().inner(),
-                            anchor,
-                            spend.merkle_path.clone(),
-                        )
-                        .map_err(|_| Error::SpendProof)?;
-
-                    // Record the post-randomized spend location
-                    tx_metadata.spend_indices[pos] = i;
-
-                    // Update progress and send a notification on the channel
-                    progress += 1;
-                    if let Some(sender) = progress_notifier {
-                        // If the send fails, we should ignore the error, not crash.
-                        sender
-                            .send(Progress::new(progress, Some(total_progress)))
-                            .unwrap_or(());
-                    }
-
-                    Ok(SpendDescription {
-                        cv,
-                        anchor,
-                        nullifier,
-                        rk,
-                        zkproof,
-                        spend_auth_sig: spend,
-                    })
-                })
-                .collect::<Result<Vec<_>, Error>>()?
-        } else {
-            vec![]
-        };
-
-        // Create Sapling OutputDescriptions
-        let shielded_outputs: Vec<OutputDescription<GrothProofBytes>> = indexed_outputs
+                spend
+            })
+            .collect::<Vec<_>>();
+        let output_infos = indexed_outputs
             .into_iter()
             .enumerate()
             .map(|(i, output)| {
-                let result = if let Some((pos, output)) = output {
+                if let Some((pos, output)) = output {
                     // Record the post-randomized output location
                     tx_metadata.output_indices[pos] = i;
 
-                    output.clone().build::<P, _, _>(prover, ctx, &mut rng)
+                    output
                 } else {
                     // This is a dummy output
-                    let dummy_note = {
-                        let payment_address = {
-                            let mut diversifier = Diversifier([0; 11]);
-                            loop {
-                                rng.fill_bytes(&mut diversifier.0);
-                                let dummy_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
-                                if let Some(addr) = dummy_ivk.to_payment_address(diversifier) {
-                                    break addr;
-                                }
-                            }
-                        };
-
-                        let rseed =
-                            generate_random_rseed_internal(&params, target_height, &mut rng);
-
-                        Note::from_parts(payment_address, NoteValue::from_raw(0), rseed)
-                    };
-
-                    let esk = dummy_note.generate_or_derive_esk_internal(&mut rng);
-                    let epk = esk.derive_public(
-                        dummy_note
-                            .recipient()
-                            .diversifier()
-                            .g_d()
-                            .expect("checked at construction")
-                            .into(),
-                    );
-
-                    let (zkproof, cv) = prover.output_proof(
-                        ctx,
-                        esk.0,
-                        dummy_note.recipient(),
-                        dummy_note.rcm(),
-                        dummy_note.value().inner(),
-                    );
-
-                    let cmu = dummy_note.cmu();
-
-                    let mut enc_ciphertext = [0u8; 580];
-                    let mut out_ciphertext = [0u8; 80];
-                    rng.fill_bytes(&mut enc_ciphertext[..]);
-                    rng.fill_bytes(&mut out_ciphertext[..]);
-
-                    OutputDescription {
-                        cv,
-                        cmu,
-                        ephemeral_key: epk.to_bytes(),
-                        enc_ciphertext,
-                        out_ciphertext,
-                        zkproof,
-                    }
-                };
-
-                // Update progress and send a notification on the channel
-                progress += 1;
-                if let Some(sender) = progress_notifier {
-                    // If the send fails, we should ignore the error, not crash.
-                    sender
-                        .send(Progress::new(progress, Some(total_progress)))
-                        .unwrap_or(());
+                    SaplingOutputInfo::dummy(&self.params, &mut rng, target_height)
                 }
-
-                result
             })
-            .collect();
+            .collect::<Vec<_>>();
+
+        // Compute the transaction binding signing key.
+        let bsk = {
+            let spends: TrapdoorSum = spend_infos.iter().map(|spend| &spend.rcv).sum();
+            let outputs: TrapdoorSum = output_infos.iter().map(|output| &output.rcv).sum();
+            (spends - outputs).into_bsk()
+        };
+
+        // Create the unauthorized Spend and Output descriptions.
+        let shielded_spends = spend_infos
+            .into_iter()
+            .map(|a| a.build::<SP>(self.anchor))
+            .collect::<Result<Vec<_>, _>>()?;
+        let shielded_outputs = output_infos
+            .into_iter()
+            .map(|a| a.build::<P, OP, _>(&mut rng))
+            .collect::<Vec<_>>();
+
+        // Verify that bsk and bvk are consistent.
+        let bvk = {
+            let spends = shielded_spends
+                .iter()
+                .map(|spend| spend.cv())
+                .sum::<CommitmentSum>();
+            let outputs = shielded_outputs
+                .iter()
+                .map(|output| output.cv())
+                .sum::<CommitmentSum>();
+            (spends - outputs)
+                .into_bvk(i64::try_from(self.value_balance).map_err(|_| Error::InvalidAmount)?)
+        };
+        assert_eq!(
+            PublicKey::from_private(&bsk, VALUE_COMMITMENT_RANDOMNESS_GENERATOR).0,
+            bvk.0,
+        );
 
         let bundle = if shielded_spends.is_empty() && shielded_outputs.is_empty() {
             None
         } else {
-            Some(Bundle {
-                shielded_spends,
-                shielded_outputs,
-                value_balance,
-                authorization: Unauthorized { tx_metadata },
-            })
+            Some((
+                Bundle {
+                    shielded_spends,
+                    shielded_outputs,
+                    value_balance,
+                    authorization: InProgress {
+                        sigs: Unsigned { bsk },
+                        _proof_state: PhantomData::default(),
+                    },
+                },
+                tx_metadata,
+            ))
         };
 
         Ok(bundle)
     }
 }
 
-impl SpendDescription<Unauthorized> {
-    pub fn apply_signature(&self, spend_auth_sig: Signature) -> SpendDescription<Authorized> {
-        SpendDescription {
-            cv: self.cv.clone(),
-            anchor: self.anchor,
-            nullifier: self.nullifier,
-            rk: self.rk.clone(),
-            zkproof: self.zkproof,
-            spend_auth_sig,
+/// Type alias for an in-progress bundle that has no proofs or signatures.
+///
+/// This is returned by [`SaplingBuilder::build`].
+pub type UnauthorizedBundle = Bundle<InProgress<Unproven, Unsigned>>;
+
+/// Marker trait representing bundle proofs in the process of being created.
+pub trait InProgressProofs: fmt::Debug {
+    /// The proof type of a Sapling spend in the process of being proven.
+    type SpendProof: Clone + fmt::Debug;
+    /// The proof type of a Sapling output in the process of being proven.
+    type OutputProof: Clone + fmt::Debug;
+}
+
+/// Marker trait representing bundle signatures in the process of being created.
+pub trait InProgressSignatures: fmt::Debug {
+    /// The authorization type of a Sapling spend or output in the process of being
+    /// authorized.
+    type AuthSig: Clone + fmt::Debug;
+}
+
+/// Marker for a bundle in the process of being built.
+#[derive(Clone, Debug)]
+pub struct InProgress<P: InProgressProofs, S: InProgressSignatures> {
+    sigs: S,
+    _proof_state: PhantomData<P>,
+}
+
+impl<P: InProgressProofs, S: InProgressSignatures> Authorization for InProgress<P, S> {
+    type SpendProof = P::SpendProof;
+    type OutputProof = P::OutputProof;
+    type AuthSig = S::AuthSig;
+}
+
+/// Marker for a [`Bundle`] without proofs.
+///
+/// The [`SpendDescription`]s and [`OutputDescription`]s within the bundle contain the
+/// private data needed to create proofs.
+#[derive(Debug)]
+pub struct Unproven;
+
+impl InProgressProofs for Unproven {
+    type SpendProof = sapling::circuit::Spend;
+    type OutputProof = sapling::circuit::Output;
+}
+
+/// Marker for a [`Bundle`] with proofs.
+#[derive(Debug)]
+pub struct Proven;
+
+impl InProgressProofs for Proven {
+    type SpendProof = GrothProofBytes;
+    type OutputProof = GrothProofBytes;
+}
+
+struct CreateProofs<'a, SP: SpendProver, OP: OutputProver, R: RngCore> {
+    spend_prover: &'a SP,
+    output_prover: &'a OP,
+    rng: R,
+    progress_notifier: Option<&'a Sender<Progress>>,
+    total_progress: u32,
+    progress: u32,
+}
+
+impl<'a, SP: SpendProver, OP: OutputProver, R: RngCore> CreateProofs<'a, SP, OP, R> {
+    fn new(
+        spend_prover: &'a SP,
+        output_prover: &'a OP,
+        rng: R,
+        progress_notifier: Option<&'a Sender<Progress>>,
+        total_progress: u32,
+    ) -> Self {
+        // Keep track of the total number of steps computed
+        Self {
+            spend_prover,
+            output_prover,
+            rng,
+            progress_notifier,
+            total_progress,
+            progress: 0u32,
+        }
+    }
+
+    fn update_progress(&mut self) {
+        // Update progress and send a notification on the channel
+        self.progress += 1;
+        if let Some(sender) = self.progress_notifier {
+            // If the send fails, we should ignore the error, not crash.
+            sender
+                .send(Progress::new(self.progress, Some(self.total_progress)))
+                .unwrap_or(());
         }
     }
 }
 
-impl Bundle<Unauthorized> {
-    pub fn apply_signatures<Pr: TxProver, R: RngCore>(
-        self,
-        prover: &Pr,
-        ctx: &mut Pr::SaplingProvingContext,
-        rng: &mut R,
-        sighash_bytes: &[u8; 32],
-    ) -> Result<(Bundle<Authorized>, SaplingMetadata), Error> {
-        let binding_sig = prover
-            .binding_sig(ctx, self.value_balance, sighash_bytes)
-            .map_err(|_| Error::BindingSig)?;
+impl<'a, S: InProgressSignatures, SP: SpendProver, OP: OutputProver, R: RngCore>
+    MapAuth<InProgress<Unproven, S>, InProgress<Proven, S>> for CreateProofs<'a, SP, OP, R>
+{
+    fn map_spend_proof(&mut self, spend: sapling::circuit::Spend) -> GrothProofBytes {
+        let proof = self.spend_prover.create_proof(spend, &mut self.rng);
+        self.update_progress();
+        SP::encode_proof(proof)
+    }
 
-        Ok((
-            Bundle {
-                shielded_spends: self
-                    .shielded_spends
-                    .iter()
-                    .map(|spend| {
-                        spend.apply_signature(spend_sig_internal(
-                            PrivateKey(spend.spend_auth_sig.extsk.expsk.ask),
-                            spend.spend_auth_sig.alpha,
-                            sighash_bytes,
-                            rng,
-                        ))
-                    })
-                    .collect(),
-                shielded_outputs: self.shielded_outputs,
-                value_balance: self.value_balance,
-                authorization: Authorized { binding_sig },
+    fn map_output_proof(&mut self, output: sapling::circuit::Output) -> GrothProofBytes {
+        let proof = self.output_prover.create_proof(output, &mut self.rng);
+        self.update_progress();
+        OP::encode_proof(proof)
+    }
+
+    fn map_auth_sig(&mut self, s: S::AuthSig) -> S::AuthSig {
+        s
+    }
+
+    fn map_authorization(&mut self, a: InProgress<Unproven, S>) -> InProgress<Proven, S> {
+        InProgress {
+            sigs: a.sigs,
+            _proof_state: PhantomData::default(),
+        }
+    }
+}
+
+impl<S: InProgressSignatures> Bundle<InProgress<Unproven, S>> {
+    /// Creates the proofs for this bundle.
+    pub fn create_proofs<SP: SpendProver, OP: OutputProver>(
+        self,
+        spend_prover: &SP,
+        output_prover: &OP,
+        rng: impl RngCore,
+        progress_notifier: Option<&Sender<Progress>>,
+    ) -> Bundle<InProgress<Proven, S>> {
+        let total_progress = self.shielded_spends.len() as u32 + self.shielded_outputs.len() as u32;
+        self.map_authorization(CreateProofs::new(
+            spend_prover,
+            output_prover,
+            rng,
+            progress_notifier,
+            total_progress,
+        ))
+    }
+}
+
+/// Marker for an unauthorized bundle with no signatures.
+pub struct Unsigned {
+    bsk: PrivateKey,
+}
+
+impl fmt::Debug for Unsigned {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Unsigned").finish_non_exhaustive()
+    }
+}
+
+impl InProgressSignatures for Unsigned {
+    type AuthSig = SigningParts;
+}
+
+/// The parts needed to sign a [`SpendDescription`].
+#[derive(Clone, Debug)]
+pub struct SigningParts {
+    /// The spend validating key for this spend description. Used to match spend
+    /// authorizing keys to spend descriptions they can create signatures for.
+    ak: PublicKey,
+    /// The randomization needed to derive the actual signing key for this note.
+    alpha: jubjub::Scalar,
+}
+
+/// Marker for a partially-authorized bundle, in the process of being signed.
+#[derive(Debug)]
+pub struct PartiallyAuthorized {
+    binding_signature: Signature,
+    sighash: [u8; 32],
+}
+
+impl InProgressSignatures for PartiallyAuthorized {
+    type AuthSig = MaybeSigned;
+}
+
+/// A heisen[`Signature`] for a particular [`SpendDescription`].
+#[derive(Clone, Debug)]
+pub enum MaybeSigned {
+    /// The information needed to sign this [`SpendDescription`].
+    SigningMetadata(SigningParts),
+    /// The signature for this [`SpendDescription`].
+    Signature(Signature),
+}
+
+impl MaybeSigned {
+    fn finalize(self) -> Result<Signature, Error> {
+        match self {
+            Self::Signature(sig) => Ok(sig),
+            _ => Err(Error::MissingSignatures),
+        }
+    }
+}
+
+impl<P: InProgressProofs> Bundle<InProgress<P, Unsigned>> {
+    /// Loads the sighash into this bundle, preparing it for signing.
+    ///
+    /// This API ensures that all signatures are created over the same sighash.
+    pub fn prepare<R: RngCore + CryptoRng>(
+        self,
+        mut rng: R,
+        sighash: [u8; 32],
+    ) -> Bundle<InProgress<P, PartiallyAuthorized>> {
+        self.map_authorization((
+            |proof| proof,
+            |proof| proof,
+            MaybeSigned::SigningMetadata,
+            |auth: InProgress<P, Unsigned>| InProgress {
+                sigs: PartiallyAuthorized {
+                    binding_signature: auth.sigs.bsk.sign(
+                        &sighash,
+                        &mut rng,
+                        VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+                    ),
+                    sighash,
+                },
+                _proof_state: PhantomData::default(),
             },
-            self.authorization.tx_metadata,
+        ))
+    }
+}
+
+impl Bundle<InProgress<Proven, Unsigned>> {
+    /// Applies signatures to this bundle, in order to authorize it.
+    ///
+    /// This is a helper method that wraps [`Bundle::prepare`], [`Bundle::sign`], and
+    /// [`Bundle::finalize`].
+    pub fn apply_signatures<R: RngCore + CryptoRng>(
+        self,
+        mut rng: R,
+        sighash: [u8; 32],
+        signing_keys: &[PrivateKey],
+    ) -> Result<Bundle<Authorized>, Error> {
+        signing_keys
+            .iter()
+            .fold(self.prepare(&mut rng, sighash), |partial, ask| {
+                partial.sign(&mut rng, ask)
+            })
+            .finalize()
+    }
+}
+
+impl<P: InProgressProofs> Bundle<InProgress<P, PartiallyAuthorized>> {
+    /// Signs this bundle with the given [`PrivateKey`].
+    ///
+    /// This will apply signatures for all notes controlled by this spending key.
+    pub fn sign<R: RngCore + CryptoRng>(self, mut rng: R, ask: &PrivateKey) -> Self {
+        let expected_ak = PublicKey::from_private(ask, SPENDING_KEY_GENERATOR);
+        let sighash = self.authorization.sigs.sighash;
+        self.map_authorization((
+            |proof| proof,
+            |proof| proof,
+            |maybe| match maybe {
+                MaybeSigned::SigningMetadata(parts) if parts.ak.0 == expected_ak.0 => {
+                    MaybeSigned::Signature(spend_sig_internal(ask, parts.alpha, &sighash, &mut rng))
+                }
+                s => s,
+            },
+            |partial| partial,
+        ))
+    }
+
+    /// Appends externally computed [`Signature`]s.
+    ///
+    /// Each signature will be applied to the one input for which it is valid. An error
+    /// will be returned if the signature is not valid for any inputs, or if it is valid
+    /// for more than one input.
+    pub fn append_signatures(self, signatures: &[Signature]) -> Result<Self, Error> {
+        signatures.iter().try_fold(self, Self::append_signature)
+    }
+
+    fn append_signature(self, signature: &Signature) -> Result<Self, Error> {
+        let sighash = self.authorization.sigs.sighash;
+        let mut signature_valid_for = 0usize;
+        let bundle = self.map_authorization((
+            |proof| proof,
+            |proof| proof,
+            |maybe| match maybe {
+                MaybeSigned::SigningMetadata(parts) => {
+                    if verify_spend_sig(&parts.ak, parts.alpha, &sighash, signature) {
+                        signature_valid_for += 1;
+                        MaybeSigned::Signature(*signature)
+                    } else {
+                        // Signature isn't for this input.
+                        MaybeSigned::SigningMetadata(parts)
+                    }
+                }
+                s => s,
+            },
+            |partial| partial,
+        ));
+        match signature_valid_for {
+            0 => Err(Error::InvalidExternalSignature),
+            1 => Ok(bundle),
+            _ => Err(Error::DuplicateSignature),
+        }
+    }
+}
+
+impl Bundle<InProgress<Proven, PartiallyAuthorized>> {
+    /// Finalizes this bundle, enabling it to be included in a transaction.
+    ///
+    /// Returns an error if any signatures are missing.
+    pub fn finalize(self) -> Result<Bundle<Authorized>, Error> {
+        self.try_map_authorization((
+            Ok,
+            Ok,
+            |maybe: MaybeSigned| maybe.finalize(),
+            |partial: InProgress<Proven, PartiallyAuthorized>| {
+                Ok(Authorized {
+                    binding_sig: partial.sigs.binding_signature,
+                })
+            },
         ))
     }
 }
@@ -587,7 +876,8 @@ pub mod testing {
             TEST_NETWORK,
         },
         sapling::{
-            prover::mock::MockTxProver,
+            prover::mock::{MockOutputProver, MockSpendProver},
+            redjubjub::PrivateKey,
             testing::{arb_node, arb_note},
             value::testing::arb_positive_note_value,
             Diversifier,
@@ -628,31 +918,30 @@ pub mod testing {
             for ((note, path), diversifier) in spendable_notes.into_iter().zip(commitment_trees.into_iter()).zip(diversifiers.into_iter()) {
                 builder.add_spend(
                     &mut rng,
-                    extsk.clone(),
+                    &extsk,
                     diversifier,
                     note,
                     path
                 ).unwrap();
             }
 
-            let prover = MockTxProver;
-
-            let bundle = builder.build(
-                &prover,
-                &mut (),
+            let (bundle, _) = builder.build::<MockSpendProver, MockOutputProver, _>(
                 &mut rng,
                 target_height.unwrap(),
-                None
             ).unwrap().unwrap();
 
-            let (bundle, _) = bundle.apply_signatures(
-                &prover,
-                &mut (),
+            let bundle = bundle.create_proofs(
+                &MockSpendProver,
+                &MockOutputProver,
                 &mut rng,
-                &fake_sighash_bytes,
-            ).unwrap();
+                None,
+            );
 
-            bundle
+            bundle.apply_signatures(
+                &mut rng,
+                fake_sighash_bytes,
+                &[PrivateKey(extsk.expsk.ask)],
+            ).unwrap()
         }
     }
 }

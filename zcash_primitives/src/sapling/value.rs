@@ -38,7 +38,7 @@
 //! [Rust documentation]: https://doc.rust-lang.org/stable/std/primitive.i64.html
 
 use bitvec::{array::BitArray, order::Lsb0};
-use ff::Field;
+use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use rand::RngCore;
 use subtle::CtOption;
@@ -84,6 +84,21 @@ impl ValueCommitTrapdoor {
     /// This is public for access by `zcash_proofs`.
     pub fn random(rng: impl RngCore) -> Self {
         ValueCommitTrapdoor(jubjub::Scalar::random(rng))
+    }
+
+    /// Constructs `ValueCommitTrapdoor` from the byte representation of a scalar.
+    ///
+    /// Returns a `None` [`CtOption`] if `bytes` is not a canonical representation of a
+    /// Jubjub scalar.
+    ///
+    /// This is a low-level API, requiring a detailed understanding of the
+    /// [use of value commitment trapdoors][saplingbalance] in the Zcash protocol
+    /// to use correctly and securely. It is intended to be used in combination
+    /// with [`ValueCommitment::derive`].
+    ///
+    /// [saplingbalance]: https://zips.z.cash/protocol/protocol.pdf#saplingbalance
+    pub fn from_bytes(bytes: [u8; 32]) -> CtOption<Self> {
+        jubjub::Scalar::from_repr(bytes).map(ValueCommitTrapdoor)
     }
 
     /// Returns the inner Jubjub scalar representing this trapdoor.

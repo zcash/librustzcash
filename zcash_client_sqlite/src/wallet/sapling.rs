@@ -451,8 +451,9 @@ pub(crate) mod tests {
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
         sapling::{
-            note_encryption::try_sapling_output_recovery, prover::TxProver, Node, Note,
-            PaymentAddress,
+            note_encryption::try_sapling_output_recovery,
+            prover::{OutputProver, SpendProver},
+            Node, Note, PaymentAddress,
         },
         transaction::{
             components::{amount::NonNegativeAmount, Amount},
@@ -497,7 +498,7 @@ pub(crate) mod tests {
         zcash_primitives::transaction::components::{OutPoint, TxOut},
     };
 
-    pub(crate) fn test_prover() -> impl TxProver {
+    pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
         match LocalTxProver::with_default_location() {
             Some(tx_prover) => tx_prover,
             None => {
