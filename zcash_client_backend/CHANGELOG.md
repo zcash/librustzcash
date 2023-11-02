@@ -8,35 +8,24 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-
-- `zcash_client_backend::data_api::ShieldedProtocol` has a new variant for `Orchard`,
-  allowing for better reporting to callers trying to perform actions using `Orchard`
-  before it is fully supported.
-- `zcash_client_backend::data_api::error::Error` has new error variant:
-  - `Error::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
-- Added module `zcash_client_backend::fees::standard`
-- Added `zcash_client_backend::wallet::input_selection::Proposal::min_confirmations`
-- Added methods to `zcash_client_backend::wallet::ReceivedSaplingNote`:
-  `{from_parts, txid, output_index, diversifier, rseed, note_commitment_tree_position}`.
+- `zcash_client_backend::fees::standard`
+- `zcash_client_backend::wallet`:
+  - `input_selection::Proposal::min_confirmations`
+  - `ReceivedSaplingNote::from_parts`
+  - `ReceivedSaplingNote::{txid, output_index, diversifier, rseed, note_commitment_tree_position}`
 
 ### Changed
-- `zcash_client_backend::data_api::chain::scan_cached_blocks` now returns
-  a `ScanSummary` containing metadata about the scanned blocks on success.
-- The fields of `zcash_client_backend::wallet::ReceivedSaplingNote` are now
-  private. Use `ReceivedSaplingNote::from_parts` for construction instead.
-  Accessor methods are provided for each previously-public field.
-- `zcash_client_backend::data_api` changes:
-  - The `NoteMismatch` variant of `data_api::error::Error` now wraps a
-    `data_api::NoteId` instead of a backend-specific note identifier. The
-    related `NoteRef` type parameter has been removed from `data_api::error::Error`.
-  - `SentTransactionOutput::value` is now represented as `NonNegativeAmount` instead of
-    `Amount`, and constructors and accessors have been updated accordingly.
-  - The `available` and `required` fields of `data_api::error::Error::InsufficientFunds`
-    are now represented as `NonNegativeAmount` instead of `Amount`.
-  - `data_api::wallet::create_spend_to_address` now takes its `amount` argument as
-    as `NonNegativeAmount` instead of `Amount`.
-  - All uses of `Amount` in `data_api::wallet::input_selection` have been replaced
-    with `NonNegativeAmount`.
+- `zcash_client_backend::data_api`:
+  - `ShieldedProtocol` has a new variant for `Orchard`, allowing for better
+    reporting to callers trying to perform actions using `Orchard` before it is
+    fully supported.
+  - `chain::scan_cached_blocks` now returns a `ScanSummary` containing metadata
+    about the scanned blocks on success.
+  - `error::Error` enum changes:
+    - The `NoteMismatch` variant now wraps a `NoteId` instead of a
+      backend-specific note identifier. The related `NoteRef` type parameter has
+      been removed from `error::Error`.
+    - A new variant `UnsupportedPoolType` has been added.
   - `wallet::shield_transparent_funds` no longer
     takes a `memo` argument; instead, memos to be associated with the shielded
     outputs should be specified in the construction of the value of the
@@ -52,22 +41,44 @@ and this library adheres to Rust's notion of
     argument. Instead, `min_confirmations` is stored in the `Proposal`
   - `wallet::create_spend_to_address` now takes an additional
     `change_memo` argument.
-- `zcash_client_backend::fees::ChangeValue::Sapling` is now a structured variant.
-  In addition to the existing change value, it now also carries an optional memo
-  to be associated with the change output.
-- `zcash_client_backend::fees::fixed::SingleOutputChangeStrategy::new` and
-  `zcash_client_backend::fees::zip317::SingleOutputChangeStrategy::new` each now
-  accept an additional `change_memo` argument.
-- All uses of `Amount` in `zcash_client_backend::fees` have been replaced
-  with `NonNegativeAmount`.
-- `zcash_client_backend::wallet::WalletTransparentOutput::value` is now represented
-  as `NonNegativeAmount` instead of `Amount`, and constructors and accessors have been
-  updated accordingly.
-- `zcash_client_backend::wallet::ReceivedSaplingNote::value` is now represented
-  as `NonNegativeAmount` instead of `Amount`, and constructors and accessors have been
-  updated accordingly.
-- Almost all uses of `Amount` in `zcash_client_backend::zip321` have been replaced
-  with `NonNegativeAmount`.
+- `zcash_client_backend::fees`:
+  - `ChangeValue::Sapling` is now a structured variant. In addition to the
+    existing change value, it now also carries an optional memo to be associated
+    with the change output.
+  - `fixed::SingleOutputChangeStrategy::new` and
+    `zip317::SingleOutputChangeStrategy::new` each now accept an additional
+    `change_memo` argument.
+- `zcash_client_backend::wallet`:
+  - The fields of `ReceivedSaplingNote` are now private. Use
+    `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
+    are provided for each previously public field.
+- The following fields now have type `NonNegativeAmount` instead of `Amount`:
+  - `zcash_client_backend::data_api`:
+    - `error::Error::InsufficientFunds.{available, required}`
+    - `wallet::input_selection::InputSelectorError::InsufficientFunds.{available, required}`
+  - `zcash_client_backend::fees`:
+    - `ChangeValue::Sapling.value`
+    - `ChangeError::InsufficientFunds.{available, required}`
+  - `zcash_client_backend::zip321::Payment.amount`
+- The following methods now take `NonNegativeAmount` instead of `Amount`:
+  - `zcash_client_backend::data_api`:
+    - `SentTransactionOutput::from_parts`
+    - `wallet::create_spend_to_address`
+    - `wallet::input_selection::InputSelector::propose_shielding`
+  - `zcash_client_backend::fees`:
+    - `ChangeValue::sapling`
+    - `DustOutputPolicy::new`
+    - `TransactionBalance::new`
+  - `zcash_client_backend::wallet::ReceivedSaplingNote::from_parts`
+- The following methods now return `NonNegativeAmount` instead of `Amount`:
+  - `zcash_client_backend::data_api::SentTransactionOutput::value`
+  - `zcash_client_backend::fees`:
+    - `ChangeValue::value`
+    - `DustOutputPolicy::dust_threshold`
+    - `TransactionBalance::{fee_required, total}`
+  - `zcash_client_backend::wallet`:
+    - `ReceivedSaplingNote::value`
+    - `WalletTransparentOutput::value`
 
 ### Removed
 - `zcash_client_backend::data_api::WalletRead::is_valid_account_extfvk` has been
