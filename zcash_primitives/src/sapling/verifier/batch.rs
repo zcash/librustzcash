@@ -2,9 +2,9 @@ use bellman::groth16;
 use bls12_381::Bls12;
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
-use zcash_primitives::transaction::components::sapling::{Authorized, Bundle};
 
 use super::SaplingVerificationContextInner;
+use crate::transaction::components::sapling::{Authorized, Bundle};
 
 /// Batch validation context for Sapling.
 ///

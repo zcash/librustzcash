@@ -9,6 +9,8 @@ and this library adheres to Rust's notion of
 ### Added
 - Dependency on `bellman 0.14`.
 - `zcash_primitives::sapling`:
+  - `BatchValidator` (moved from `zcash_proofs::sapling`).
+  - `SaplingVerificationContext` (moved from `zcash_proofs::sapling`).
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`

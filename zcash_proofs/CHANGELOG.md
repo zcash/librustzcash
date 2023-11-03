@@ -19,7 +19,10 @@ and this library adheres to Rust's notion of
 - `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).
 - `zcash_proofs::circuit::{ecc, pedersen_hash}`
 - `zcash_proofs::constants`
-- `zcash_proofs::sapling::SaplingProvingContext`
+- `zcash_proofs::sapling`:
+  - `BatchValidator` (moved to `zcash_primitives::sapling`).
+  - `SaplingProvingContext`
+  - `SaplingVerificationContext` (moved to `zcash_primitives::sapling`).
 
 ## [0.13.0] - 2023-09-25
 ### Changed

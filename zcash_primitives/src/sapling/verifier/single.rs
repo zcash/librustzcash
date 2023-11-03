@@ -1,6 +1,8 @@
 use bellman::groth16::{verify_proof, PreparedVerifyingKey, Proof};
 use bls12_381::Bls12;
-use zcash_primitives::{
+
+use super::SaplingVerificationContextInner;
+use crate::{
     sapling::{
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         note::ExtractedNoteCommitment,
@@ -9,8 +11,6 @@ use zcash_primitives::{
     },
     transaction::components::Amount,
 };
-
-use super::SaplingVerificationContextInner;
 
 /// A context object for verifying the Sapling components of a single Zcash transaction.
 pub struct SaplingVerificationContext {

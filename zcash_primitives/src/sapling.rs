@@ -14,6 +14,7 @@ mod spec;
 mod tree;
 pub mod util;
 pub mod value;
+mod verifier;
 
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
@@ -28,6 +29,7 @@ pub use note::{nullifier::Nullifier, Note, Rseed};
 pub use tree::{
     merkle_hash, CommitmentTree, IncrementalWitness, MerklePath, Node, NOTE_COMMITMENT_TREE_DEPTH,
 };
+pub use verifier::{BatchValidator, SaplingVerificationContext};
 
 /// Create the spendAuthSig for a Sapling SpendDescription.
 pub fn spend_sig<R: RngCore + CryptoRng>(
