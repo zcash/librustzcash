@@ -6,18 +6,14 @@ use std::path::Path;
 use zcash_primitives::{
     sapling::{
         self,
-        prover::{OutputProver, SpendProver, TxProver},
-        redjubjub::{PublicKey, Signature},
-        value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+        prover::{OutputProver, SpendProver},
+        value::{NoteValue, ValueCommitTrapdoor},
         Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
     },
-    transaction::components::{sapling::GrothProofBytes, Amount, GROTH_PROOF_SIZE},
+    transaction::components::{sapling::GrothProofBytes, GROTH_PROOF_SIZE},
 };
 
-use crate::{
-    load_parameters, parse_parameters, sapling::SaplingProvingContext, OutputParameters,
-    SpendParameters,
-};
+use crate::{load_parameters, parse_parameters, OutputParameters, SpendParameters};
 
 #[cfg(feature = "local-prover")]
 use crate::{default_params_folder, SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME};
@@ -213,70 +209,5 @@ impl OutputProver for LocalTxProver {
             .write(&mut zkproof[..])
             .expect("should be able to serialize a proof");
         zkproof
-    }
-}
-
-impl TxProver for LocalTxProver {
-    type SaplingProvingContext = SaplingProvingContext;
-
-    fn new_sapling_proving_context(&self) -> Self::SaplingProvingContext {
-        SaplingProvingContext::new()
-    }
-
-    fn spend_proof(
-        &self,
-        ctx: &mut Self::SaplingProvingContext,
-        proof_generation_key: ProofGenerationKey,
-        diversifier: Diversifier,
-        rseed: Rseed,
-        ar: jubjub::Fr,
-        value: u64,
-        anchor: bls12_381::Scalar,
-        merkle_path: MerklePath,
-    ) -> Result<([u8; GROTH_PROOF_SIZE], ValueCommitment, PublicKey), ()> {
-        let (proof, cv, rk) = ctx.spend_proof(
-            proof_generation_key,
-            diversifier,
-            rseed,
-            ar,
-            value,
-            anchor,
-            merkle_path,
-            &self.spend_params,
-        )?;
-
-        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
-        proof
-            .write(&mut zkproof[..])
-            .expect("should be able to serialize a proof");
-
-        Ok((zkproof, cv, rk))
-    }
-
-    fn output_proof(
-        &self,
-        ctx: &mut Self::SaplingProvingContext,
-        esk: jubjub::Fr,
-        payment_address: PaymentAddress,
-        rcm: jubjub::Fr,
-        value: u64,
-    ) -> ([u8; GROTH_PROOF_SIZE], ValueCommitment) {
-        let (proof, cv) = ctx.output_proof(esk, payment_address, rcm, value, &self.output_params);
-
-        let mut zkproof = [0u8; GROTH_PROOF_SIZE];
-        proof
-            .write(&mut zkproof[..])
-            .expect("should be able to serialize a proof");
-
-        (zkproof, cv)
-    }
-
-    fn binding_sig(
-        &self,
-        ctx: &mut Self::SaplingProvingContext,
-        value_balance: Amount,
-        sighash: &[u8; 32],
-    ) -> Result<Signature, ()> {
-        ctx.binding_sig(value_balance, sighash)
     }
 }
