@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api::wallet::propose_standard_transfer_to_address`
 - `zcash_client_backend::fees::standard`
 - `zcash_client_backend::wallet`:
   - `input_selection::Proposal::min_confirmations`
@@ -41,6 +42,15 @@ and this library adheres to Rust's notion of
     argument. Instead, `min_confirmations` is stored in the `Proposal`
   - `wallet::create_spend_to_address` now takes an additional
     `change_memo` argument.
+  - The error type of `wallet::create_spend_to_address` has been changed to use
+    `zcash_primitives::transaction::fees::zip317::FeeError` instead of
+    `zcash_primitives::transaction::components::amount::BalanceError`.
+  - The following methods now take `&impl SpendProver, &impl OutputProver`
+    instead of `impl TxProver`:
+    - `wallet::create_proposed_transaction`
+    - `wallet::create_spend_to_address`
+    - `wallet::shield_transparent_funds`
+    - `wallet::spend`
 - `zcash_client_backend::fees`:
   - `ChangeValue::Sapling` is now a structured variant. In addition to the
     existing change value, it now also carries an optional memo to be associated

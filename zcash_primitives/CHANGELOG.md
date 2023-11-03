@@ -12,10 +12,24 @@ and this library adheres to Rust's notion of
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`
+  - `value`:
+    - `ValueCommitTrapdoor::from_bytes`
+    - `impl Sub<TrapdoorSum> for TrapdoorSum`
+    - `impl Sub<CommitmentSum> for CommitmentSum`
   - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
 - `zcash_primitives::transaction`:
   - `builder::get_fee`
   - `components::sapling`:
+    - `builder::UnauthorizedBundle`
+    - `builder::InProgress`
+    - `builder::{InProgressProofs, Unproven, Proven}`
+    - `builder::{InProgressSignatures, Unsigned, PartiallyAuthorized}`
+    - `builder::{MaybeSigned, SigningParts}`
+    - `Bundle::<InProgress<Unproven, _>>::create_proofs`
+    - `Bundle::<InProgress<_, Unsigned>>::prepare`
+    - `Bundle::<InProgress<_, PartiallyAuthorized>>::{sign, append_signatures}`
+    - `Bundle::<InProgress<Proven, PartiallyAuthorized>>::finalize`
+    - `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures`
     - `Bundle::try_map_authorization`
     - `TryMapAuth`
     - `impl {MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)` helpers to
@@ -49,10 +63,23 @@ and this library adheres to Rust's notion of
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
     instead of as a bare `u64`.
 - `zcash_primitives::transaction`:
-  - `components::sapling::MapAuth` trait methods now take `&mut self` instead of
-    `&self`.
+  - `builder::Builder::{build, build_zfuture}` now take
+    `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
+  - `components::sapling`:
+    - `MapAuth` trait methods now take `&mut self` instead of `&self`.
+    - `builder::SaplingBuilder::add_spend` now takes `extsk` by reference.
+    - `builder::SaplingBuilder::build` no longer takes a prover, proving context,
+      or progress notifier. Instead, it has `SpendProver, OutputProver` generic
+      parameters and returns `(UnauthorizedBundle, SaplingMetadata)`. The caller
+      can then use `Bundle::<InProgress<Unproven, _>>::create_proofs` to create
+      spend and output proofs for the bundle.
+    - `builder::Error` has new error variants:
+      - `Error::DuplicateSignature`
+      - `Error::InvalidExternalSignature`
+      - `Error::MissingSignatures`
   - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
     instead of `Amount`.
+  - `Unauthorized::SaplingAuth` now has type `InProgress<Proven, Unsigned>`.
   - The following methods now take `NonNegativeAmount` instead of `Amount`:
     - `builder::Builder::{add_sapling_output, add_transparent_output}`
     - `components::transparent::builder::TransparentBuilder::add_output`
@@ -74,6 +101,12 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
+- `zcash_primitives::transaction::components::sapling`:
+  - `Unproven`
+  - `builder::Unauthorized` (use `builder::InProgress` instead).
+  - `SpendDescription::<Unauthorized>::apply_signature`
+  - `Bundle::<Unauthorized>::apply_signatures` (use
+    `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
 
 ## [0.13.0] - 2023-09-25
