@@ -11,7 +11,9 @@
 
 use bellman::groth16::{prepare_verifying_key, PreparedVerifyingKey, VerifyingKey};
 use bls12_381::Bls12;
-use zcash_primitives::sapling::circuit::{OutputParameters, SpendParameters};
+use zcash_primitives::sapling::circuit::{
+    OutputParameters, PreparedOutputVerifyingKey, PreparedSpendVerifyingKey, SpendParameters,
+};
 
 use std::fs::File;
 use std::io::{self, BufReader};
@@ -287,9 +289,9 @@ fn stream_params_downloads_to_disk(
 /// Zcash Sprout and Sapling groth16 circuit parameters.
 pub struct ZcashParameters {
     pub spend_params: SpendParameters,
-    pub spend_vk: PreparedVerifyingKey<Bls12>,
+    pub spend_vk: PreparedSpendVerifyingKey,
     pub output_params: OutputParameters,
-    pub output_vk: PreparedVerifyingKey<Bls12>,
+    pub output_vk: PreparedOutputVerifyingKey,
     pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
 }
 
@@ -427,8 +429,8 @@ pub fn parse_parameters<R: io::Read>(
     }
 
     // Prepare verifying keys
-    let spend_vk = prepare_verifying_key(spend_params.verifying_key());
-    let output_vk = prepare_verifying_key(output_params.verifying_key());
+    let spend_vk = spend_params.prepared_verifying_key();
+    let output_vk = output_params.prepared_verifying_key();
     let sprout_vk = sprout_vk.map(|vk| prepare_verifying_key(&vk));
 
     ZcashParameters {

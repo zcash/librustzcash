@@ -4,7 +4,10 @@ use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
 
 use super::SaplingVerificationContextInner;
-use crate::transaction::components::sapling::{Authorized, Bundle};
+use crate::{
+    sapling::circuit::{OutputVerifyingKey, SpendVerifyingKey},
+    transaction::components::sapling::{Authorized, Bundle},
+};
 
 /// Batch validation context for Sapling.
 ///
@@ -145,8 +148,8 @@ impl BatchValidator {
     /// is desired, construct separate [`BatchValidator`]s for sub-batches of the bundles.
     pub fn validate<R: RngCore + CryptoRng>(
         self,
-        spend_vk: &groth16::VerifyingKey<Bls12>,
-        output_vk: &groth16::VerifyingKey<Bls12>,
+        spend_vk: &SpendVerifyingKey,
+        output_vk: &OutputVerifyingKey,
         mut rng: R,
     ) -> bool {
         if !self.bundles_added {
@@ -166,12 +169,12 @@ impl BatchValidator {
         let mut verify_proofs =
             |batch: groth16::batch::Verifier<Bls12>, vk| batch.verify(&mut rng, vk);
 
-        if verify_proofs(self.spend_proofs, spend_vk).is_err() {
+        if verify_proofs(self.spend_proofs, &spend_vk.0).is_err() {
             tracing::debug!("Spend proof batch validation failed");
             return false;
         }
 
-        if verify_proofs(self.output_proofs, output_vk).is_err() {
+        if verify_proofs(self.output_proofs, &output_vk.0).is_err() {
             tracing::debug!("Output proof batch validation failed");
             return false;
         }

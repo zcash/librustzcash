@@ -11,9 +11,8 @@ and this library adheres to Rust's notion of
   `zcash_proofs::prover::LocalTxProver`
 
 ### Changed
-- The `zcash_proofs::ZcashParameters::{spend_params, output_params}` fields
-  now have types `zcash_primitives::sapling::circuit::SpendParameters` and
-  `zcash_primitives::sapling::circuit::OutputParameters` respectively.
+- The `zcash_proofs::ZcashParameters` Sapling fields now use the parameter and
+  viewing key newtypes defined in `zcash_primitives::sapling::circuit`.
 
 ### Removed
 - `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).
