@@ -12,21 +12,14 @@ and this library adheres to Rust's notion of
   `zcash_proofs::prover::LocalTxProver`
 
 ### Changed
-- The new `SpendParameters` and `OutputParameters` types are used in the
-  following places:
-  - `zcash_proofs::ZcashParameters::{spend_params, output_params}` fields.
-  - `zcash_proofs::sapling::prover`:
-    - `SaplingProvingContext::{spend_proof, output_proof}` (the `proving_key`
-      arguments).
-- `zcash_proofs::sapling::prover`:
-  - The `verifying_key` argument `SaplingProvingContext::spend_proof` has been
-    removed. Callers should instead use `SaplingVerifyingContext` to verify
-    proofs after they have been created.
+- The `zcash_proofs::ZcashParameters::{spend_params, output_params}` fields
+  now have types `SpendParameters` and `OutputParameters` respectively.
 
 ### Removed
 - `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).
 - `zcash_proofs::circuit::{ecc, pedersen_hash}`
 - `zcash_proofs::constants`
+- `zcash_proofs::sapling::SaplingProvingContext`
 
 ## [0.13.0] - 2023-09-25
 ### Changed
