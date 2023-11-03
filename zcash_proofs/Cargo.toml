@@ -53,17 +53,5 @@ multicore = ["bellman/multicore", "zcash_primitives/multicore"]
 [lib]
 bench = false
 
-[[example]]
-name = "get-params-path"
-required-features = ["directories"]
-
-[[example]]
-name = "download-params"
-required-features = ["download-params"]
-
-[[example]]
-name = "download-sprout-and-sapling-params"
-required-features = ["download-params"]
-
 [badges]
 maintenance = { status = "actively-developed" }
