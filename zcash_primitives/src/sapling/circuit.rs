@@ -1,10 +1,12 @@
 //! The Sapling circuits.
 
 use core::fmt;
+use std::io;
 
 use group::{ff::PrimeField, Curve};
 
-use bellman::{Circuit, ConstraintSystem, SynthesisError};
+use bellman::{groth16, Circuit, ConstraintSystem, SynthesisError};
+use bls12_381::Bls12;
 
 use super::{value::NoteValue, PaymentAddress, ProofGenerationKey};
 
@@ -548,6 +550,42 @@ impl Circuit<bls12_381::Scalar> for Output {
         cm.get_u().inputize(cs.namespace(|| "commitment"))?;
 
         Ok(())
+    }
+}
+
+/// The parameters for the Sapling Spend circuit.
+pub struct SpendParameters(pub(crate) groth16::Parameters<Bls12>);
+
+impl SpendParameters {
+    /// Reads the parameters from their encoding.
+    ///
+    /// Only set `verify_point_encodings` to false if you are verifying the parameters in
+    /// another way (such as checking the hash of the parameters file on disk).
+    pub fn read<R: io::Read>(reader: R, verify_point_encodings: bool) -> io::Result<Self> {
+        groth16::Parameters::<Bls12>::read(reader, verify_point_encodings).map(Self)
+    }
+
+    /// Returns the verifying key for the Sapling Spend circuit.
+    pub fn verifying_key(&self) -> &groth16::VerifyingKey<Bls12> {
+        &self.0.vk
+    }
+}
+
+/// The parameters for the Sapling Output circuit.
+pub struct OutputParameters(pub(crate) groth16::Parameters<Bls12>);
+
+impl OutputParameters {
+    /// Reads the parameters from their encoding.
+    ///
+    /// Only set `verify_point_encodings` to false if you are verifying the parameters in
+    /// another way (such as checking the hash of the parameters file on disk).
+    pub fn read<R: io::Read>(reader: R, verify_point_encodings: bool) -> io::Result<Self> {
+        groth16::Parameters::<Bls12>::read(reader, verify_point_encodings).map(Self)
+    }
+
+    /// Returns the verifying key for the Sapling Output circuit.
+    pub fn verifying_key(&self) -> &groth16::VerifyingKey<Bls12> {
+        &self.0.vk
     }
 }
 

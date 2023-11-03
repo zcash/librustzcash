@@ -7,13 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
-- `zcash_proofs::{SpendParameters, OutputParameters}`
 - `impl zcash_primitives::sapling::prover::{SpendProver, OutputProver}` for
   `zcash_proofs::prover::LocalTxProver`
 
 ### Changed
 - The `zcash_proofs::ZcashParameters::{spend_params, output_params}` fields
-  now have types `SpendParameters` and `OutputParameters` respectively.
+  now have types `zcash_primitives::sapling::circuit::SpendParameters` and
+  `zcash_primitives::sapling::circuit::OutputParameters` respectively.
 
 ### Removed
 - `zcash_proofs::circuit::sapling` (moved to `zcash_primitives::sapling::circuit`).

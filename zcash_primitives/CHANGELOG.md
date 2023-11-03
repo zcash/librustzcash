@@ -12,6 +12,7 @@ and this library adheres to Rust's notion of
   - `BatchValidator` (moved from `zcash_proofs::sapling`).
   - `SaplingVerificationContext` (moved from `zcash_proofs::sapling`).
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
+  - `circuit::{SpendParameters, OutputParameters}`
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`
   - `value`:
