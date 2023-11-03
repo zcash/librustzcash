@@ -18,8 +18,8 @@ use crate::{load_parameters, parse_parameters, OutputParameters, SpendParameters
 #[cfg(feature = "local-prover")]
 use crate::{default_params_folder, SAPLING_OUTPUT_NAME, SAPLING_SPEND_NAME};
 
-/// An implementation of [`TxProver`] using Sapling Spend and Output parameters from
-/// locally-accessible paths.
+/// An implementation of [`SpendProver`] and [`OutputProver`] using Sapling Spend and
+/// Output parameters from locally-accessible paths.
 pub struct LocalTxProver {
     spend_params: SpendParameters,
     output_params: OutputParameters,
