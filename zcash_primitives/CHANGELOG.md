@@ -12,23 +12,39 @@ and this library adheres to Rust's notion of
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`
+  - `value`:
+    - `ValueCommitTrapdoor::from_bytes`
+    - `impl Sub<TrapdoorSum> for TrapdoorSum`
+    - `impl Sub<CommitmentSum> for CommitmentSum`
   - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
-- `zcash_primitives::transaction::components::sapling`:
-  - `Bundle::try_map_authorization`
-  - `TryMapAuth`
-  - `impl {MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)` helpers to
-    enable calling `Bundle::{map_authorization, try_map_authorization}` with a
-    set of closures.
+- `zcash_primitives::transaction`:
+  - `builder::get_fee`
+  - `components::sapling`:
+    - `builder::UnauthorizedBundle`
+    - `builder::InProgress`
+    - `builder::{InProgressProofs, Unproven, Proven}`
+    - `builder::{InProgressSignatures, Unsigned, PartiallyAuthorized}`
+    - `builder::{MaybeSigned, SigningParts}`
+    - `Bundle::<InProgress<Unproven, _>>::create_proofs`
+    - `Bundle::<InProgress<_, Unsigned>>::prepare`
+    - `Bundle::<InProgress<_, PartiallyAuthorized>>::{sign, append_signatures}`
+    - `Bundle::<InProgress<Proven, PartiallyAuthorized>>::finalize`
+    - `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures`
+    - `Bundle::try_map_authorization`
+    - `TryMapAuth`
+    - `impl {MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)` helpers to
+      enable calling `Bundle::{map_authorization, try_map_authorization}` with a
+      set of closures.
+  - `fees::StandardFeeRule`
+  - Constants in `fees::zip317`:
+    - `MARGINAL_FEE`
+    - `GRACE_ACTIONS`
+    - `P2PKH_STANDARD_INPUT_SIZE`
+    - `P2PKH_STANDARD_OUTPUT_SIZE`
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::prover::mock::{MockSpendProver, MockOutputProver}`
-- Constants in `zcash_primitives::transaction::fees::zip317`:
-  - `MARGINAL_FEE`
-  - `GRACE_ACTIONS`
-  - `P2PKH_STANDARD_INPUT_SIZE`
-  - `P2PKH_STANDARD_OUTPUT_SIZE`
-- `zcash_primitives::transaction::builder::get_fee`
-- Additions related to `zcash_primitive::components::transaction::Amount`
-  and `zcash_primitive::components::transaction::NonNegativeAmount`
+- Additions related to `zcash_primitive::components::amount::Amount`
+  and `zcash_primitive::components::amount::NonNegativeAmount`:
   - `impl TryFrom<Amount> for u64`
   - `Amount::const_from_u64`
   - `NonNegativeAmount::const_from_u64`
@@ -39,47 +55,59 @@ and this library adheres to Rust's notion of
   - `impl From<NonNegativeAmount> for zcash_primitives::sapling::value::NoteValue`
   - `impl Sum<NonNegativeAmount> for Option<NonNegativeAmount>`
   - `impl<'a> Sum<&'a NonNegativeAmount> for Option<NonNegativeAmount>`
-- `zcash_primitives::sapling::circuit::ValueCommitmentOpening::value` is
-  now represented as a `NoteValue` instead of as a bare `u64`.
-- `zcash_primitives::sapling::address::PaymentAddress::create_note` now
-  takes its `value` argument as a `NoteValue` instead of as a bare `u64`.
 
 ### Changed
-- `zcash_primitives::transaction::fees`:
-  - `FeeRule::fee_required` now returns the required fee as a `NonNegativeAmount` instead
-    of as an `Amount`.
-  - When using the `zfuture` feature flag, `FutureFeeRule::fee_required_zfuture` now returns
-    the required fee as a `NonNegativeAmount` instead of as an `Amount`.
-  - `fees::fixed::FeeRule::fixed_fee` now wraps a `NonNegativeAmount` instead of an `Amount`
-  - `fees::zip317::FeeRule::marginal_fee` is now represented and exposed as a
-    `NonNegativeAmount` instead of an `Amount`
-- `zcash_primitives::transaction::sighash::TransparentAuthorizingContext::input_amounts` now
-  returns the input values as `NonNegativeAmount` instead of as `Amount`
-- `zcash_primitives::transaction::components::sapling`:
-  - `MapAuth` trait methods now take `&mut self` instead of `&self`.
-  - `sapling::fees::InputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
-  - `sapling::fees::OutputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
-- `zcash_primitives::transaction::components::transparent`:
-  - `transparent::TxOut::value` now has type `NonNegativeAmount` instead of `Amount`
-  - `transparent::builder::TransparentBuilder::add_output` now takes its `value`
-    parameter as a `NonNegativeAmount` instead of as an `Amount`.
-  - `transparent::fees::InputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
-  - `transparent::fees::OutputView::value` now returns a `NonNegativeAmount` instead of an `Amount`
-- The following `zcash_primitives::transaction::builder::Builder` methods
-  have changed to take a `NonNegativeAmount` for their `value` arguments,
-  instead of an `Amount`.
-  - `Builder::add_sapling_output`
-  - `Builder::add_transparent_output`
-- `zcash_primitives::transaction::components::amount::testing::arb_nonnegative_amount`
-  now returns a `NonNegativeAmount` instead of an `Amount`
+- `zcash_primitives::sapling`:
+  - `address::PaymentAddress::create_note` now takes its `value` argument as a
+    `NoteValue` instead of as a bare `u64`.
+  - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
+    instead of as a bare `u64`.
+- `zcash_primitives::transaction`:
+  - `builder::Builder::{build, build_zfuture}` now take
+    `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
+  - `components::sapling`:
+    - `MapAuth` trait methods now take `&mut self` instead of `&self`.
+    - `builder::SaplingBuilder::add_spend` now takes `extsk` by reference.
+    - `builder::SaplingBuilder::build` no longer takes a prover, proving context,
+      or progress notifier. Instead, it has `SpendProver, OutputProver` generic
+      parameters and returns `(UnauthorizedBundle, SaplingMetadata)`. The caller
+      can then use `Bundle::<InProgress<Unproven, _>>::create_proofs` to create
+      spend and output proofs for the bundle.
+    - `builder::Error` has new error variants:
+      - `Error::DuplicateSignature`
+      - `Error::InvalidExternalSignature`
+      - `Error::MissingSignatures`
+  - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
+    instead of `Amount`.
+  - `Unauthorized::SaplingAuth` now has type `InProgress<Proven, Unsigned>`.
+  - The following methods now take `NonNegativeAmount` instead of `Amount`:
+    - `builder::Builder::{add_sapling_output, add_transparent_output}`
+    - `components::transparent::builder::TransparentBuilder::add_output`
+    - `fees::fixed::FeeRule::non_standard`
+    - `fees::zip317::FeeRule::non_standard`
+  - The following methods now return `NonNegativeAmount` instead of `Amount`:
+    - `components::amount::testing::arb_nonnegative_amount`
+    - `components::sapling`:
+      - `fees::InputView::value`
+      - `fees::OutputView::value`
+    - `components::transparent`:
+      - `fees::InputView::value`
+      - `fees::OutputView::value`
+    - `fees::FeeRule::{fee_required, fee_required_zfuture}`
+    - `fees::fixed::FeeRule::fixed_fee`
+    - `fees::zip317::FeeRule::marginal_fee`
+    - `sighash::TransparentAuthorizingContext::input_amounts`
 
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
+- `zcash_primitives::transaction::components::sapling`:
+  - `Unproven`
+  - `builder::Unauthorized` (use `builder::InProgress` instead).
+  - `SpendDescription::<Unauthorized>::apply_signature`
+  - `Bundle::<Unauthorized>::apply_signatures` (use
+    `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
-
-### Added
-- `transaction::fees::StandardFeeRule`
 
 ## [0.13.0] - 2023-09-25
 ### Added

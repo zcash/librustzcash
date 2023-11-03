@@ -120,7 +120,7 @@ pub enum ChangeError<E, NoteRefT> {
 }
 
 impl<E, NoteRefT> ChangeError<E, NoteRefT> {
-    pub fn map<E0, F: FnOnce(E) -> E0>(self, f: F) -> ChangeError<E0, NoteRefT> {
+    pub(crate) fn map<E0, F: FnOnce(E) -> E0>(self, f: F) -> ChangeError<E0, NoteRefT> {
         match self {
             ChangeError::InsufficientFunds {
                 available,

@@ -5,19 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- `zcash_client_sqlite::error::SqliteClientError` has new error variant:
+  - `SqliteClientError::UnsupportedPoolType`
+
 ## [0.8.1] - 2023-10-18
 
 ### Fixed
-- Fixed a bug in `v_transactions` that was omitting value from identically-valued notes
-
-## [Unreleased]
-
-### Added
-- `zcash_client_sqlite::error::SqliteClientError` has new error variant:
-  - `SqliteClientError::UnsupportedPoolType(zcash_client_backend::data_api::PoolType)`
-
-## [0.8.1] - 2023-10-18
-
 - Fixed a bug in `v_transactions` that was omitting value from identically-valued notes
 
 ## [0.8.0] - 2023-09-25
