@@ -583,7 +583,7 @@ impl<P: InProgressProofs, S: InProgressSignatures> Authorization for InProgress<
 ///
 /// The [`SpendDescription`]s and [`OutputDescription`]s within the bundle contain the
 /// private data needed to create proofs.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Unproven;
 
 impl InProgressProofs for Unproven {
@@ -592,7 +592,7 @@ impl InProgressProofs for Unproven {
 }
 
 /// Marker for a [`Bundle`] with proofs.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Proven;
 
 impl InProgressProofs for Proven {
@@ -692,6 +692,14 @@ pub struct Unsigned {
     bsk: PrivateKey,
 }
 
+impl Clone for Unsigned {
+    fn clone(&self) -> Self {
+        Self {
+            bsk: PrivateKey(self.bsk.0),
+        }
+    }
+}
+
 impl fmt::Debug for Unsigned {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Unsigned").finish_non_exhaustive()
@@ -713,7 +721,7 @@ pub struct SigningParts {
 }
 
 /// Marker for a partially-authorized bundle, in the process of being signed.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PartiallyAuthorized {
     binding_signature: Signature,
     sighash: [u8; 32],
