@@ -61,7 +61,7 @@ rand_core.workspace = true
 regex = "1.4"
 tempfile = "3.5.0"
 zcash_note_encryption.workspace = true
-zcash_proofs = { workspace = true, features = ["local-prover"] }
+zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zcash_primitives = { workspace = true, features = ["test-dependencies"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }

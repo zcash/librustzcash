@@ -796,11 +796,7 @@ mod tests {
             .activation_height(NetworkUpgrade::ZFuture)
             .unwrap();
 
-        // Only run the test if we have the prover parameters.
-        let prover = match LocalTxProver::with_default_location() {
-            Some(prover) => prover,
-            None => return,
-        };
+        let prover = LocalTxProver::bundled();
 
         //
         // Opening transaction
