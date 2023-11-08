@@ -9,8 +9,12 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
-use bellman::groth16::{prepare_verifying_key, Parameters, PreparedVerifyingKey, VerifyingKey};
+use bellman::groth16::{prepare_verifying_key, PreparedVerifyingKey, VerifyingKey};
 use bls12_381::Bls12;
+use zcash_primitives::sapling::circuit::{
+    OutputParameters, PreparedOutputVerifyingKey, PreparedSpendVerifyingKey, SpendParameters,
+};
+
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
@@ -20,7 +24,6 @@ use std::path::PathBuf;
 
 pub mod circuit;
 mod hashreader;
-pub mod sapling;
 pub mod sprout;
 
 #[cfg(any(feature = "local-prover", feature = "bundled-prover"))]
@@ -283,18 +286,12 @@ fn stream_params_downloads_to_disk(
     Ok(())
 }
 
-/// The parameters for the Sapling Spend circuit.
-pub struct SpendParameters(Parameters<Bls12>);
-
-/// The parameters for the Sapling Output circuit.
-pub struct OutputParameters(Parameters<Bls12>);
-
 /// Zcash Sprout and Sapling groth16 circuit parameters.
 pub struct ZcashParameters {
     pub spend_params: SpendParameters,
-    pub spend_vk: PreparedVerifyingKey<Bls12>,
+    pub spend_vk: PreparedSpendVerifyingKey,
     pub output_params: OutputParameters,
-    pub output_vk: PreparedVerifyingKey<Bls12>,
+    pub output_vk: PreparedOutputVerifyingKey,
     pub sprout_vk: Option<PreparedVerifyingKey<Bls12>>,
 }
 
@@ -355,9 +352,11 @@ pub fn load_parameters(
     )
 }
 
-/// Parse Bls12 keys from bytes as serialized by [`Parameters::write`].
+/// Parse Bls12 keys from bytes as serialized by [`groth16::Parameters::write`].
 ///
 /// This function will panic if it encounters unparsable data.
+///
+/// [`groth16::Parameters::write`]: bellman::groth16::Parameters::write
 pub fn parse_parameters<R: io::Read>(
     spend_fs: R,
     output_fs: R,
@@ -368,10 +367,10 @@ pub fn parse_parameters<R: io::Read>(
     let mut sprout_fs = sprout_fs.map(hashreader::HashReader::new);
 
     // Deserialize params
-    let spend_params = Parameters::<Bls12>::read(&mut spend_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
-    let output_params = Parameters::<Bls12>::read(&mut output_fs, false)
-        .expect("couldn't deserialize Sapling spend parameters file");
+    let spend_params = SpendParameters::read(&mut spend_fs, false)
+        .expect("couldn't deserialize Sapling spend parameters");
+    let output_params = OutputParameters::read(&mut output_fs, false)
+        .expect("couldn't deserialize Sapling spend parameters");
 
     // We only deserialize the verifying key for the Sprout parameters, which
     // appears at the beginning of the parameter file. The rest is loaded
@@ -430,14 +429,14 @@ pub fn parse_parameters<R: io::Read>(
     }
 
     // Prepare verifying keys
-    let spend_vk = prepare_verifying_key(&spend_params.vk);
-    let output_vk = prepare_verifying_key(&output_params.vk);
+    let spend_vk = spend_params.prepared_verifying_key();
+    let output_vk = output_params.prepared_verifying_key();
     let sprout_vk = sprout_vk.map(|vk| prepare_verifying_key(&vk));
 
     ZcashParameters {
-        spend_params: SpendParameters(spend_params),
+        spend_params,
         spend_vk,
-        output_params: OutputParameters(output_params),
+        output_params,
         output_vk,
         sprout_vk,
     }

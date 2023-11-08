@@ -9,7 +9,12 @@ and this library adheres to Rust's notion of
 ### Added
 - Dependency on `bellman 0.14`.
 - `zcash_primitives::sapling`:
+  - `BatchValidator` (moved from `zcash_proofs::sapling`).
+  - `SaplingVerificationContext` (moved from `zcash_proofs::sapling`).
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
+  - `circuit::{SpendParameters, OutputParameters}`
+  - `circuit::{SpendVerifyingKey, PreparedSpendVerifyingKey}`
+  - `circuit::{OutputVerifyingKey, PreparedOutputVerifyingKey}`
   - `constants` module.
   - `prover::{SpendProver, OutputProver}`
   - `value`:
@@ -58,6 +63,11 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_primitives::sapling`:
+  - `BatchValidator::validate` now takes the `SpendVerifyingKey` and
+    `OutputVerifyingKey` newtypes.
+  - `SaplingVerificationContext::{check_spend, check_output}` now take
+    the `PreparedSpendVerifyingKey` and `PreparedOutputVerifyingKey`
+    newtypes.
   - `address::PaymentAddress::create_note` now takes its `value` argument as a
     `NoteValue` instead of as a bare `u64`.
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`

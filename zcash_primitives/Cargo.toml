@@ -32,8 +32,9 @@ rand_core.workspace = true
 blake2b_simd.workspace = true
 sha2.workspace = true
 
-# - Metrics
+# - Logging and metrics
 memuse.workspace = true
+tracing.workspace = true
 
 # - Secret management
 subtle.workspace = true
@@ -74,6 +75,7 @@ hex.workspace = true
 # - Shielded protocols
 bitvec.workspace = true
 blake2s_simd.workspace = true
+redjubjub = "0.7"
 
 # - Transparent inputs
 ripemd = { workspace = true, optional = true }

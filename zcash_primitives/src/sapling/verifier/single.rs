@@ -1,7 +1,10 @@
-use bellman::groth16::{verify_proof, PreparedVerifyingKey, Proof};
+use bellman::groth16::{verify_proof, Proof};
 use bls12_381::Bls12;
-use zcash_primitives::{
+
+use super::SaplingVerificationContextInner;
+use crate::{
     sapling::{
+        circuit::{PreparedOutputVerifyingKey, PreparedSpendVerifyingKey},
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         note::ExtractedNoteCommitment,
         redjubjub::{PublicKey, Signature},
@@ -9,8 +12,6 @@ use zcash_primitives::{
     },
     transaction::components::Amount,
 };
-
-use super::SaplingVerificationContextInner;
 
 /// A context object for verifying the Sapling components of a single Zcash transaction.
 pub struct SaplingVerificationContext {
@@ -39,7 +40,7 @@ impl SaplingVerificationContext {
         sighash_value: &[u8; 32],
         spend_auth_sig: Signature,
         zkproof: Proof<Bls12>,
-        verifying_key: &PreparedVerifyingKey<Bls12>,
+        verifying_key: &PreparedSpendVerifyingKey,
     ) -> bool {
         let zip216_enabled = self.zip216_enabled;
         self.inner.check_spend(
@@ -55,7 +56,7 @@ impl SaplingVerificationContext {
                 rk.verify_with_zip216(&msg, spend_auth_sig, SPENDING_KEY_GENERATOR, zip216_enabled)
             },
             |_, proof, public_inputs| {
-                verify_proof(verifying_key, &proof, &public_inputs[..]).is_ok()
+                verify_proof(&verifying_key.0, &proof, &public_inputs[..]).is_ok()
             },
         )
     }
@@ -68,11 +69,11 @@ impl SaplingVerificationContext {
         cmu: ExtractedNoteCommitment,
         epk: jubjub::ExtendedPoint,
         zkproof: Proof<Bls12>,
-        verifying_key: &PreparedVerifyingKey<Bls12>,
+        verifying_key: &PreparedOutputVerifyingKey,
     ) -> bool {
         self.inner
             .check_output(cv, cmu, epk, zkproof, |proof, public_inputs| {
-                verify_proof(verifying_key, &proof, &public_inputs[..]).is_ok()
+                verify_proof(&verifying_key.0, &proof, &public_inputs[..]).is_ok()
             })
     }
 
