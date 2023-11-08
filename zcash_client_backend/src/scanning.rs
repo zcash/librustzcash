@@ -167,6 +167,14 @@ pub enum ScanError {
         protocol: ShieldedProtocol,
         at_height: BlockHeight,
     },
+
+    /// We were provided chain metadata for a block containing note commitment tree metadata
+    /// that is invalidated by the data in the block itself. This may be caused by the presence
+    /// of default values in the chain metadata.
+    TreeSizeInvalid {
+        protocol: ShieldedProtocol,
+        at_height: BlockHeight,
+    },
 }
 
 impl ScanError {
@@ -178,6 +186,7 @@ impl ScanError {
             BlockHeightDiscontinuity { .. } => true,
             TreeSizeMismatch { .. } => true,
             TreeSizeUnknown { .. } => false,
+            TreeSizeInvalid { .. } => false,
         }
     }
 
@@ -189,6 +198,7 @@ impl ScanError {
             BlockHeightDiscontinuity { new_height, .. } => *new_height,
             TreeSizeMismatch { at_height, .. } => *at_height,
             TreeSizeUnknown { at_height, .. } => *at_height,
+            TreeSizeInvalid { at_height, .. } => *at_height,
         }
     }
 }
@@ -210,6 +220,9 @@ impl fmt::Display for ScanError {
             }
             TreeSizeUnknown { protocol, at_height } => {
                 write!(f, "Unable to determine {:?} note commitment tree size at height {}", protocol, at_height)
+            }
+            TreeSizeInvalid { protocol, at_height } => {
+                write!(f, "Received invalid (potentially default) {:?} note commitment tree size metadata at height {}", protocol, at_height)
             }
         }
     }
@@ -335,70 +348,98 @@ pub(crate) fn scan_block_with_runner<
     let cur_hash = block.hash();
 
     let initial_sapling_tree_size = prior_block_metadata.and_then(|m| m.sapling_tree_size());
-    let mut sapling_commitment_tree_size = initial_sapling_tree_size
-        .or_else(|| {
-            block
-                .chain_metadata
-                .as_ref()
-                .and_then(|m| {
-                    if m.sapling_commitment_tree_size == 0 {
-                        None
-                    } else {
-                        let block_output_count: u32 = block
-                            .vtx
-                            .iter()
-                            .map(|tx| tx.outputs.len())
-                            .sum::<usize>()
-                            .try_into()
-                            .expect("Sapling output count cannot exceed a u32");
-                        Some(m.sapling_commitment_tree_size - block_output_count)
-                    }
-                })
-                .or_else(|| {
-                    // If we're below Sapling activation, or Sapling activation is not set, the
-                    // tree size is zero
+    let mut sapling_commitment_tree_size = initial_sapling_tree_size.map_or_else(
+        || {
+            block.chain_metadata.as_ref().map_or_else(
+                || {
+                    // If we're below Sapling activation, or Sapling activation is not set, the tree size is zero
                     params
                         .activation_height(NetworkUpgrade::Sapling)
-                        .map_or(Some(0), |h| if h > cur_height { Some(0) } else { None })
-                })
-        })
-        .ok_or(ScanError::TreeSizeUnknown {
-            protocol: ShieldedProtocol::Sapling,
-            at_height: cur_height,
-        })?;
+                        .map_or_else(
+                            || Ok(0),
+                            |sapling_activation| {
+                                if cur_height < sapling_activation {
+                                    Ok(0)
+                                } else {
+                                    Err(ScanError::TreeSizeUnknown {
+                                        protocol: ShieldedProtocol::Sapling,
+                                        at_height: cur_height,
+                                    })
+                                }
+                            },
+                        )
+                },
+                |m| {
+                    let sapling_output_count: u32 = block
+                        .vtx
+                        .iter()
+                        .map(|tx| tx.outputs.len())
+                        .sum::<usize>()
+                        .try_into()
+                        .expect("Sapling output count cannot exceed a u32");
+
+                    if m.sapling_commitment_tree_size >= sapling_output_count {
+                        Ok(m.sapling_commitment_tree_size - sapling_output_count)
+                    } else {
+                        // The default for m.sapling_commitment_tree_size is zero, so we need to check
+                        // that the subtraction will not underflow; if it would do so, we given invalid
+                        // chain metadata for a block with Sapling outputs.
+                        Err(ScanError::TreeSizeInvalid {
+                            protocol: ShieldedProtocol::Sapling,
+                            at_height: cur_height,
+                        })
+                    }
+                },
+            )
+        },
+        Ok,
+    )?;
 
     let initial_orchard_tree_size = prior_block_metadata.and_then(|m| m.orchard_tree_size());
-    let mut orchard_commitment_tree_size = initial_orchard_tree_size
-        .or_else(|| {
-            block
-                .chain_metadata
-                .as_ref()
-                .and_then(|m| {
-                    if m.orchard_commitment_tree_size == 0 {
-                        None
+    let mut orchard_commitment_tree_size = initial_orchard_tree_size.map_or_else(
+        || {
+            block.chain_metadata.as_ref().map_or_else(
+                || {
+                    // If we're below Orchard activation, or Orchard activation is not set, the tree size is zero
+                    params.activation_height(NetworkUpgrade::Nu5).map_or_else(
+                        || Ok(0),
+                        |orchard_activation| {
+                            if cur_height < orchard_activation {
+                                Ok(0)
+                            } else {
+                                Err(ScanError::TreeSizeUnknown {
+                                    protocol: ShieldedProtocol::Orchard,
+                                    at_height: cur_height,
+                                })
+                            }
+                        },
+                    )
+                },
+                |m| {
+                    let orchard_action_count: u32 = block
+                        .vtx
+                        .iter()
+                        .map(|tx| tx.actions.len())
+                        .sum::<usize>()
+                        .try_into()
+                        .expect("Orchard action count cannot exceed a u32");
+
+                    // The default for m.orchard_commitment_tree_size is zero, so we need to check
+                    // that the subtraction will not underflow; if it would do so, we given invalid
+                    // chain metadata for a block with Orchard actions.
+                    if m.orchard_commitment_tree_size >= orchard_action_count {
+                        Ok(m.orchard_commitment_tree_size - orchard_action_count)
                     } else {
-                        let block_action_count: u32 = block
-                            .vtx
-                            .iter()
-                            .map(|tx| tx.actions.len())
-                            .sum::<usize>()
-                            .try_into()
-                            .expect("Orchard action count cannot exceed a u32");
-                        Some(m.orchard_commitment_tree_size - block_action_count)
+                        Err(ScanError::TreeSizeInvalid {
+                            protocol: ShieldedProtocol::Orchard,
+                            at_height: cur_height,
+                        })
                     }
-                })
-                .or_else(|| {
-                    // If we're below Nu5 activation, or Nu5 activation is not set, the tree size
-                    // is zero
-                    params
-                        .activation_height(NetworkUpgrade::Nu5)
-                        .map_or(Some(0), |h| if h > cur_height { Some(0) } else { None })
-                })
-        })
-        .ok_or(ScanError::TreeSizeUnknown {
-            protocol: ShieldedProtocol::Orchard,
-            at_height: cur_height,
-        })?;
+                },
+            )
+        },
+        Ok,
+    )?;
 
     let compact_block_tx_count = block.vtx.len();
     let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];

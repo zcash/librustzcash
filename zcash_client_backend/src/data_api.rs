@@ -440,13 +440,13 @@ impl BlockMetadata {
     }
 
     /// Returns the size of the Sapling note commitment tree for the final treestate of the block
-    /// that this [`BlockMetadata`] describes.
+    /// that this [`BlockMetadata`] describes, if available.
     pub fn sapling_tree_size(&self) -> Option<u32> {
         self.sapling_tree_size
     }
 
     /// Returns the size of the Orchard note commitment tree for the final treestate of the block
-    /// that this [`BlockMetadata`] describes.
+    /// that this [`BlockMetadata`] describes, if available.
     pub fn orchard_tree_size(&self) -> Option<u32> {
         self.orchard_tree_size
     }

@@ -26,8 +26,12 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_client_backend::data_api`:
+  - Arguments to `BlockMetadata::from_parts` have changed to include Orchard.
   - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
     a `u32` for consistency with Orchard.
+  - Arguments to `ScannedBlock::from_parts` have changed.
+  - `ScannedBlock::metadata` has been renamed to `to_block_metadata` and now
+    returns an owned value rather than a reference.
   - `ShieldedProtocol` has a new variant for `Orchard`, allowing for better
     reporting to callers trying to perform actions using `Orchard` before it is
     fully supported.
@@ -38,8 +42,6 @@ and this library adheres to Rust's notion of
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
     - A new variant `UnsupportedPoolType` has been added.
-  - `ScannedBlock::metadata` has been renamed to `to_block_metadata` and now
-    returns an owned value rather than a reference.
   - `wallet::shield_transparent_funds` no longer
     takes a `memo` argument; instead, memos to be associated with the shielded
     outputs should be specified in the construction of the value of the
@@ -108,6 +110,7 @@ and this library adheres to Rust's notion of
   - The fields of `ReceivedSaplingNote` are now private. Use
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
     are provided for each previously public field.
+- `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
 - The following fields now have type `NonNegativeAmount` instead of `Amount`:
   - `zcash_client_backend::data_api`:
     - `error::Error::InsufficientFunds.{available, required}`
