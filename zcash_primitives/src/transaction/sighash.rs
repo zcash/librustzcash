@@ -5,7 +5,7 @@ use super::{
     components::{
         amount::NonNegativeAmount,
         sapling::{self, GrothProofBytes},
-        transparent, Amount,
+        transparent,
     },
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
@@ -13,7 +13,7 @@ use super::{
 };
 
 #[cfg(feature = "zfuture")]
-use crate::extensions::transparent::Precondition;
+use {super::components::Amount, crate::extensions::transparent::Precondition};
 
 pub const SIGHASH_ALL: u8 = 0x01;
 pub const SIGHASH_NONE: u8 = 0x02;

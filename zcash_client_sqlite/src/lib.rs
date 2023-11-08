@@ -44,10 +44,7 @@ use std::{
 };
 
 use incrementalmerkletree::Position;
-use shardtree::{
-    error::{QueryError, ShardTreeError},
-    ShardTree,
-};
+use shardtree::{error::ShardTreeError, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -55,10 +52,7 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     sapling,
     transaction::{
-        components::{
-            amount::{Amount, NonNegativeAmount},
-            OutPoint,
-        },
+        components::amount::{Amount, NonNegativeAmount},
         Transaction, TxId,
     },
     zip32::{AccountId, DiversifierIndex},
@@ -71,8 +65,8 @@ use zcash_client_backend::{
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, DecryptedTransaction, NoteId, NullifierQuery, PoolType,
-        Recipient, ScannedBlock, SentTransaction, ShieldedProtocol, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        Recipient, SaplingInputSource, ScannedBlock, SentTransaction, ShieldedProtocol,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -81,6 +75,12 @@ use zcash_client_backend::{
 };
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
+
+#[cfg(feature = "transparent-inputs")]
+use {
+    zcash_client_backend::data_api::TransparentInputSource,
+    zcash_primitives::transaction::components::OutPoint,
+};
 
 #[cfg(feature = "unstable")]
 use {
@@ -94,7 +94,7 @@ pub mod error;
 
 pub mod wallet;
 use wallet::{
-    commitment_tree::{self, get_checkpoint_depth, put_shard_roots},
+    commitment_tree::{self, put_shard_roots},
     SubtreeScanProgress,
 };
 
@@ -167,9 +167,53 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSource
+    for WalletDb<C, P>
+{
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
+
+    fn select_spendable_sapling_notes(
+        &self,
+        account: AccountId,
+        target_value: Amount,
+        anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        wallet::sapling::select_spendable_sapling_notes(
+            self.conn.borrow(),
+            account,
+            target_value,
+            anchor_height,
+            exclude,
+        )
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> TransparentInputSource
+    for WalletDb<C, P>
+{
+    type Error = SqliteClientError;
+
+    fn get_unspent_transparent_outputs(
+        &self,
+        address: &TransparentAddress,
+        max_height: BlockHeight,
+        exclude: &[OutPoint],
+    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+        wallet::get_unspent_transparent_outputs(
+            self.conn.borrow(),
+            &self.params,
+            address,
+            max_height,
+            exclude,
+        )
+    }
+}
+
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
+    type Error = SqliteClientError;
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
@@ -277,63 +321,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
-    fn get_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::sapling::get_spendable_sapling_notes(
-            self.conn.borrow(),
-            account,
-            anchor_height,
-            exclude,
-        )
-    }
-
-    fn select_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        target_value: Amount,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::sapling::select_spendable_sapling_notes(
-            self.conn.borrow(),
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )
-    }
-
     fn get_transparent_receivers(
         &self,
         _account: AccountId,
     ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return wallet::get_transparent_receivers(self.conn.borrow(), &self.params, _account);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
-    }
-
-    fn get_unspent_transparent_outputs(
-        &self,
-        _address: &TransparentAddress,
-        _max_height: BlockHeight,
-        _exclude: &[OutPoint],
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::get_unspent_transparent_outputs(
-            self.conn.borrow(),
-            &self.params,
-            _address,
-            _max_height,
-            _exclude,
-        );
 
         #[cfg(not(feature = "transparent-inputs"))]
         panic!(
@@ -534,7 +527,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                 // Update the Sapling note commitment tree with all newly read note commitments
                 let mut subtrees = subtrees.into_iter();
-                wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
+                wdb.with_sapling_tree_mut::<_, _, Self::Error>(move |sapling_tree| {
                     for (tree, checkpoints) in &mut subtrees {
                         sapling_tree.insert_tree(tree, checkpoints)?;
                     }
@@ -792,18 +785,6 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         Ok(())
     }
-
-    fn get_checkpoint_depth(
-        &self,
-        min_confirmations: NonZeroU32,
-    ) -> Result<usize, ShardTreeError<Self::Error>> {
-        get_checkpoint_depth(&self.conn, SAPLING_TABLES_PREFIX, min_confirmations)
-            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?
-            // `CheckpointPruned` is perhaps a little misleading; in this case it's that
-            // the chain tip is unknown, but if that were the case we should never have been
-            // calling this anyway.
-            .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
-    }
 }
 
 impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
@@ -843,18 +824,6 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
             start_index,
             roots,
         )
-    }
-
-    fn get_checkpoint_depth(
-        &self,
-        min_confirmations: NonZeroU32,
-    ) -> Result<usize, ShardTreeError<Self::Error>> {
-        get_checkpoint_depth(self.conn.0, SAPLING_TABLES_PREFIX, min_confirmations)
-            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?
-            // `CheckpointPruned` is perhaps a little misleading; in this case it's that
-            // the chain tip is unknown, but if that were the case we should never have been
-            // calling this anyway.
-            .ok_or(ShardTreeError::Query(QueryError::CheckpointPruned))
     }
 }
 

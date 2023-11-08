@@ -112,7 +112,7 @@ pub enum ChangeError<E, NoteRefT> {
     DustInputs {
         /// The outpoints corresponding to transparent inputs having no current economic value.
         transparent: Vec<OutPoint>,
-        /// The identifiers for Sapling inputs having not current economic value
+        /// The identifiers for Sapling inputs having no current economic value
         sapling: Vec<NoteRefT>,
     },
     /// An error occurred that was specific to the change selection strategy in use.

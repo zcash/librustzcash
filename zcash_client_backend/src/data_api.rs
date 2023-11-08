@@ -17,10 +17,7 @@ use zcash_primitives::{
     memo::{Memo, MemoBytes},
     sapling::{self, Node, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
-        components::{
-            amount::{Amount, NonNegativeAmount},
-            OutPoint,
-        },
+        components::amount::{Amount, NonNegativeAmount},
         Transaction, TxId,
     },
     zip32::AccountId,
@@ -33,6 +30,9 @@ use crate::{
     proto::service::TreeState,
     wallet::{ReceivedSaplingNote, WalletTransparentOutput, WalletTx},
 };
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::transaction::components::OutPoint;
 
 use self::chain::CommitmentTreeRoot;
 use self::scanning::ScanRange;
@@ -210,12 +210,9 @@ impl WalletSummary {
     }
 }
 
-/// Read-only operations required for light wallet functions.
-///
-/// This trait defines the read-only portion of the storage interface atop which
-/// higher-level wallet operations are implemented. It serves to allow wallet functions to
-/// be abstracted away from any particular data storage substrate.
-pub trait WalletRead {
+/// A trait representing the capability to query a data store for unspent Sapling notes belonging
+/// to a wallet.
+pub trait SaplingInputSource {
     /// The type of errors produced by a wallet backend.
     type Error;
 
@@ -224,6 +221,43 @@ pub trait WalletRead {
     /// For example, this might be a database identifier type
     /// or a UUID.
     type NoteRef: Copy + Debug + Eq + Ord;
+
+    /// Returns a list of spendable Sapling notes sufficient to cover the specified target value,
+    /// if possible.
+    fn select_spendable_sapling_notes(
+        &self,
+        account: AccountId,
+        target_value: Amount,
+        anchor_height: BlockHeight,
+        exclude: &[Self::NoteRef],
+    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
+}
+
+/// A trait representing the capability to query a data store for unspent transparent UTXOs
+/// belonging to a wallet.
+#[cfg(feature = "transparent-inputs")]
+pub trait TransparentInputSource {
+    /// The type of errors produced by a wallet backend.
+    type Error;
+
+    /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
+    /// including `max_height`.
+    fn get_unspent_transparent_outputs(
+        &self,
+        address: &TransparentAddress,
+        max_height: BlockHeight,
+        exclude: &[OutPoint],
+    ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
+}
+
+/// Read-only operations required for light wallet functions.
+///
+/// This trait defines the read-only portion of the storage interface atop which
+/// higher-level wallet operations are implemented. It serves to allow wallet functions to
+/// be abstracted away from any particular data storage substrate.
+pub trait WalletRead {
+    /// The type of errors that may be generated when querying a wallet data store.
+    type Error;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
@@ -351,24 +385,6 @@ pub trait WalletRead {
         query: NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error>;
 
-    /// Return all unspent Sapling notes, excluding the specified note IDs.
-    fn get_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
-
-    /// Returns a list of spendable Sapling notes sufficient to cover the specified target value,
-    /// if possible.
-    fn select_spendable_sapling_notes(
-        &self,
-        account: AccountId,
-        target_value: Amount,
-        anchor_height: BlockHeight,
-        exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
-
     /// Returns the set of all transparent receivers associated with the given account.
     ///
     /// The set contains all transparent receivers that are known to have been derived
@@ -378,15 +394,6 @@ pub trait WalletRead {
         &self,
         account: AccountId,
     ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error>;
-
-    /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
-    /// including `max_height`.
-    fn get_unspent_transparent_outputs(
-        &self,
-        address: &TransparentAddress,
-        max_height: BlockHeight,
-        exclude: &[OutPoint],
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
     /// for each address associated with a nonzero balance.
@@ -897,16 +904,7 @@ pub trait WalletCommitmentTrees {
         Error = Self::Error,
     >;
 
-    /// Returns the depth of the checkpoint in the tree that can be used to create a witness at the
-    /// anchor having the given number of confirmations.
     ///
-    /// This assumes that at any time a note is added to the tree, a checkpoint is created for the
-    /// end of the block in which that note was discovered.
-    fn get_checkpoint_depth(
-        &self,
-        min_confirmations: NonZeroU32,
-    ) -> Result<usize, ShardTreeError<Self::Error>>;
-
     fn with_sapling_tree_mut<F, A, E>(&mut self, callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
@@ -939,10 +937,7 @@ pub mod testing {
         legacy::TransparentAddress,
         memo::Memo,
         sapling,
-        transaction::{
-            components::{Amount, OutPoint},
-            Transaction, TxId,
-        },
+        transaction::{components::Amount, Transaction, TxId},
         zip32::AccountId,
     };
 
@@ -954,8 +949,9 @@ pub mod testing {
 
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, NoteId, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        DecryptedTransaction, NoteId, NullifierQuery, SaplingInputSource, ScannedBlock,
+        SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -967,6 +963,9 @@ pub mod testing {
         >,
     }
 
+    #[cfg(feature = "transparent-inputs")]
+    use {super::TransparentInputSource, zcash_primitives::transaction::components::OutPoint};
+
     impl MockWalletDb {
         pub fn new(network: Network) -> Self {
             Self {
@@ -976,9 +975,37 @@ pub mod testing {
         }
     }
 
-    impl WalletRead for MockWalletDb {
+    impl SaplingInputSource for MockWalletDb {
         type Error = ();
         type NoteRef = u32;
+
+        fn select_spendable_sapling_notes(
+            &self,
+            _account: AccountId,
+            _target_value: Amount,
+            _anchor_height: BlockHeight,
+            _exclude: &[Self::NoteRef],
+        ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    impl TransparentInputSource for MockWalletDb {
+        type Error = ();
+
+        fn get_unspent_transparent_outputs(
+            &self,
+            _address: &TransparentAddress,
+            _anchor_height: BlockHeight,
+            _exclude: &[OutPoint],
+        ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl WalletRead for MockWalletDb {
+        type Error = ();
 
         fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)
@@ -1079,39 +1106,11 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_spendable_sapling_notes(
-            &self,
-            _account: AccountId,
-            _anchor_height: BlockHeight,
-            _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-            Ok(Vec::new())
-        }
-
-        fn select_spendable_sapling_notes(
-            &self,
-            _account: AccountId,
-            _target_value: Amount,
-            _anchor_height: BlockHeight,
-            _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-            Ok(Vec::new())
-        }
-
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
         ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
             Ok(HashMap::new())
-        }
-
-        fn get_unspent_transparent_outputs(
-            &self,
-            _address: &TransparentAddress,
-            _anchor_height: BlockHeight,
-            _exclude: &[OutPoint],
-        ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
-            Ok(Vec::new())
         }
 
         fn get_transparent_balances(
@@ -1213,13 +1212,6 @@ pub mod testing {
             })?;
 
             Ok(())
-        }
-
-        fn get_checkpoint_depth(
-            &self,
-            min_confirmations: NonZeroU32,
-        ) -> Result<usize, ShardTreeError<Self::Error>> {
-            Ok(usize::try_from(u32::from(min_confirmations)).unwrap())
         }
     }
 }

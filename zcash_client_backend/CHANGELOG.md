@@ -8,10 +8,16 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `zcash_client_backend::data_api::wallet::propose_standard_transfer_to_address`
+- `zcash_client_backend::data_api`:
+  - `TransparentInputSource`
+  - `SaplingInputSource`
+  - `wallet::propose_standard_transfer_to_address`
+  - `wallet::input_selection::SaplingInputs`
+  - `wallet::input_selection::ShieldingSelector` has been
+    factored out from the `InputSelector` trait to separate out transparent
+    functionality and move it behind the `transparent-inputs` feature flag.
 - `zcash_client_backend::fees::standard`
 - `zcash_client_backend::wallet`:
-  - `input_selection::Proposal::min_confirmations`
   - `ReceivedSaplingNote::from_parts`
   - `ReceivedSaplingNote::{txid, output_index, diversifier, rseed, note_commitment_tree_position}`
 
@@ -39,7 +45,7 @@ and this library adheres to Rust's notion of
   - `wallet::create_proposed_transaction` now takes its `proposal` argument
     by reference instead of as an owned value.
   - `wallet::create_proposed_transaction` no longer takes a `min_confirmations`
-    argument. Instead, `min_confirmations` is stored in the `Proposal`
+    argument. Instead, it uses the anchor height from its `proposal` argument.
   - `wallet::create_spend_to_address` now takes an additional
     `change_memo` argument.
   - The error type of `wallet::create_spend_to_address` has been changed to use
@@ -51,6 +57,39 @@ and this library adheres to Rust's notion of
     - `wallet::create_spend_to_address`
     - `wallet::shield_transparent_funds`
     - `wallet::spend`
+  - In order to support better reusability for input selection code, two new
+    traits have been factored out from `WalletRead`:
+    - `zcash_client_backend::data_api::TransparentInputSource`
+    - `zcash_client_backend::data_api::SaplingInputSource`
+  - `wallet::input_selection::InputSelector::propose_shielding`,
+    has been moved out to the newly-created `ShieldingSelector` trait.
+    - `ShieldingSelector::propose_shielding` has been altered such that it takes
+      an explicit `target_height` in order to minimize the capabilities that the
+      `data_api::TransparentInputSource` trait must expose. Also, it now takes its
+      `min_confirmations` argument as `u32` instead of `NonZeroU32`.
+  - The `wallet::input_selection::InputSelector::DataSource`
+    associated type has been renamed to `InputSource`.
+  - The signature of `wallet:input_selection::InputSelector::propose_transaction` 
+    has been altered such that it longer takes `min_confirmations` as an
+    argument, instead taking explicit `target_height` and `anchor_height`
+    arguments. This helps to minimize the set of capabilities that the
+    `data_api::SaplingInputSource` must expose.
+  - `WalletRead::get_checkpoint_depth` has been removed without replacement. This
+    is no longer needed given the change to use the stored anchor height for transaction
+    proposal execution.
+  - `wallet::{propose_shielding, shield_transparent_funds}` now takes their
+    `min_confirmations` arguments as `u32` rather than a `NonZeroU32` to permit
+    implmentations to enable zero-conf shielding.
+  - `wallet::create_proposed_transaction` now forces implementations to ignore
+    the database identifiers for its contained notes by universally quantifying
+    the `NoteRef` type parameter.
+  - `wallet::input_selection::Proposal::sapling_inputs` now returns type
+    `Option<&SaplingInputs>`.
+  - `wallet::input_selection::Proposal::min_anchor_height` has been removed in
+    favor of storing this value in `SaplingInputs`.
+  - `wallet::input_selection::GreedyInputSelector` now has relaxed requirements
+    for its `InputSource` associated type.
+
 - `zcash_client_backend::fees`:
   - `ChangeValue::Sapling` is now a structured variant. In addition to the
     existing change value, it now also carries an optional memo to be associated
@@ -92,8 +131,12 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_client_backend::data_api::WalletRead::is_valid_account_extfvk` has been
-  removed; it was unused in the ECC mobile wallet SDKs and has been superseded by 
+  removed; it was unused in the ECC mobile wallet SDKs and has been superseded by
   `get_account_for_ufvk`.
+- `zcash_client_backend::data_api::WalletRead::get_spendable_sapling_notes` has been
+  removed without replacement as it was unused, and its functionality will be
+  fully reproduced by `SaplingInputSource::select_spendable_sapling_notes` in a future
+  change.
 
 ## [0.10.0] - 2023-09-25
 
