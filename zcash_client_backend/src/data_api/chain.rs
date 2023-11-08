@@ -362,7 +362,7 @@ where
                                 s + u32::try_from(
                                     block.vtx.iter().map(|tx| tx.outputs.len()).sum::<usize>(),
                                 )
-                                .unwrap()
+                                .expect("count of Sapling outputs in a block cannot exceed a u32")
                             })
                         }),
                     block
@@ -374,7 +374,7 @@ where
                                 s + u32::try_from(
                                     block.vtx.iter().map(|tx| tx.actions.len()).sum::<usize>(),
                                 )
-                                .unwrap()
+                                .expect("count of Orchard actions in a block cannot exceed a u32")
                             })
                         }),
                 )
