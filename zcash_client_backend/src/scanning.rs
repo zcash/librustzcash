@@ -292,7 +292,7 @@ pub(crate) fn add_block_to_runner<P, S, T>(
     }
 }
 
-pub(crate) fn check_continuity(
+fn check_hash_continuity(
     block: &CompactBlock,
     prior_block_metadata: Option<&BlockMetadata>,
 ) -> Option<ScanError> {
@@ -308,46 +308,6 @@ pub(crate) fn check_continuity(
             return Some(ScanError::PrevHashMismatch {
                 at_height: block.height(),
             });
-        }
-
-        let given_sapling_tree_size = block
-            .chain_metadata
-            .as_ref()
-            .map(|m| m.sapling_commitment_tree_size);
-
-        let computed_sapling_tree_size = prev.sapling_tree_size().map(|s| {
-            s + u32::try_from(block.vtx.iter().map(|tx| tx.outputs.len()).sum::<usize>()).unwrap()
-        });
-
-        if let Some((given, computed)) = given_sapling_tree_size.zip(computed_sapling_tree_size) {
-            if given != computed {
-                return Some(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Sapling,
-                    at_height: block.height(),
-                    given,
-                    computed,
-                });
-            }
-        }
-
-        let given_orchard_tree_size = block
-            .chain_metadata
-            .as_ref()
-            .map(|m| m.orchard_commitment_tree_size);
-
-        let computed_orchard_tree_size = prev.orchard_tree_size().map(|s| {
-            s + u32::try_from(block.vtx.iter().map(|tx| tx.actions.len()).sum::<usize>()).unwrap()
-        });
-
-        if let Some((given, computed)) = given_orchard_tree_size.zip(computed_orchard_tree_size) {
-            if given != computed {
-                return Some(ScanError::TreeSizeMismatch {
-                    protocol: ShieldedProtocol::Orchard,
-                    at_height: block.height(),
-                    given,
-                    computed,
-                });
-            }
         }
     }
 
@@ -367,19 +327,13 @@ pub(crate) fn scan_block_with_runner<
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
-    if let Some(scan_error) = check_continuity(&block, prior_block_metadata) {
+    if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
     }
 
     let cur_height = block.height();
     let cur_hash = block.hash();
 
-    // It's possible to make progress without a Sapling tree position if we don't have any Sapling
-    // notes in the block, since we only use the position for constructing nullifiers for our own
-    // received notes. Thus, we allow it to be optional here, and only produce an error if we try
-    // to use it. `block.sapling_commitment_tree_size` is expected to be correct as of the end of
-    // the block, and we can't have a note of ours in a block with no outputs so treating the zero
-    // default value from the protobuf as `None` is always correct.
     let initial_sapling_tree_size = prior_block_metadata.and_then(|m| m.sapling_tree_size());
     let mut sapling_commitment_tree_size = initial_sapling_tree_size
         .or_else(|| {
@@ -620,6 +574,26 @@ pub(crate) fn scan_block_with_runner<
 
         sapling_commitment_tree_size += tx_outputs_len;
         orchard_commitment_tree_size += tx_actions_len;
+    }
+
+    if let Some(chain_meta) = block.chain_metadata {
+        if chain_meta.sapling_commitment_tree_size != sapling_commitment_tree_size {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedProtocol::Sapling,
+                at_height: cur_height,
+                given: chain_meta.sapling_commitment_tree_size,
+                computed: sapling_commitment_tree_size,
+            });
+        }
+
+        if chain_meta.orchard_commitment_tree_size != orchard_commitment_tree_size {
+            return Err(ScanError::TreeSizeMismatch {
+                protocol: ShieldedProtocol::Orchard,
+                at_height: cur_height,
+                given: chain_meta.orchard_commitment_tree_size,
+                computed: orchard_commitment_tree_size,
+            });
+        }
     }
 
     Ok(ScannedBlock::from_parts(
