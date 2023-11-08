@@ -24,7 +24,7 @@ use zcash_encoding::{Array, CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
-    sapling::redjubjub,
+    sapling::{builder as sapling_builder, redjubjub},
 };
 
 use self::{
@@ -276,7 +276,7 @@ pub struct Unauthorized;
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
     type SaplingAuth =
-        sapling::builder::InProgress<sapling::builder::Proven, sapling::builder::Unsigned>;
+        sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
         orchard::builder::InProgress<orchard::builder::Unproven, orchard::builder::Unauthorized>;
 

@@ -1,6 +1,7 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
 mod address;
+pub mod builder;
 pub mod circuit;
 pub mod constants;
 pub mod group_hash;

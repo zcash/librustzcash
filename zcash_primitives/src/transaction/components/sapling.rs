@@ -24,7 +24,6 @@ use super::{amount::Amount, GROTH_PROOF_SIZE};
 
 pub type GrothProofBytes = [u8; GROTH_PROOF_SIZE];
 
-pub mod builder;
 pub mod fees;
 
 /// Defines the authorization type of a Sapling bundle.
@@ -342,6 +341,17 @@ impl<A: Authorization> SpendDescription<A> {
         zkproof: A::SpendProof,
         spend_auth_sig: A::AuthSig,
     ) -> Self {
+        Self::from_parts(cv, anchor, nullifier, rk, zkproof, spend_auth_sig)
+    }
+
+    pub(crate) fn from_parts(
+        cv: ValueCommitment,
+        anchor: bls12_381::Scalar,
+        nullifier: Nullifier,
+        rk: PublicKey,
+        zkproof: A::SpendProof,
+        spend_auth_sig: A::AuthSig,
+    ) -> Self {
         Self {
             cv,
             anchor,
@@ -595,7 +605,6 @@ impl<Proof> OutputDescription<Proof> {
         )
     }
 
-    #[cfg(any(test, feature = "temporary-zcashd"))]
     pub(crate) fn from_parts(
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,

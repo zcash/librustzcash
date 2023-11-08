@@ -6,9 +6,10 @@ use std::fmt::{self, Debug, Display};
 use shardtree::error::ShardTreeError;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 use zcash_primitives::{
+    sapling,
     transaction::{
         builder,
-        components::{amount::BalanceError, sapling, transparent},
+        components::{amount::BalanceError, transparent},
     },
     zip32::AccountId,
 };
