@@ -9,8 +9,11 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_client_backend::data_api`:
+  - `BlockMetadata::orchard_tree_size`.
   - `TransparentInputSource`
   - `SaplingInputSource`
+  - `ScannedBlock::sapling_tree_size`.
+  - `ScannedBlock::orchard_tree_size`.
   - `wallet::propose_standard_transfer_to_address`
   - `wallet::input_selection::SaplingInputs`
   - `wallet::input_selection::ShieldingSelector` has been
@@ -23,6 +26,12 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_client_backend::data_api`:
+  - Arguments to `BlockMetadata::from_parts` have changed to include Orchard.
+  - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
+    a `u32` for consistency with Orchard.
+  - Arguments to `ScannedBlock::from_parts` have changed.
+  - `ScannedBlock::metadata` has been renamed to `to_block_metadata` and now
+    returns an owned value rather than a reference.
   - `ShieldedProtocol` has a new variant for `Orchard`, allowing for better
     reporting to callers trying to perform actions using `Orchard` before it is
     fully supported.
@@ -69,7 +78,7 @@ and this library adheres to Rust's notion of
       `min_confirmations` argument as `u32` instead of `NonZeroU32`.
   - The `wallet::input_selection::InputSelector::DataSource`
     associated type has been renamed to `InputSource`.
-  - The signature of `wallet:input_selection::InputSelector::propose_transaction` 
+  - The signature of `wallet:input_selection::InputSelector::propose_transaction`
     has been altered such that it longer takes `min_confirmations` as an
     argument, instead taking explicit `target_height` and `anchor_height`
     arguments. This helps to minimize the set of capabilities that the
@@ -101,6 +110,7 @@ and this library adheres to Rust's notion of
   - The fields of `ReceivedSaplingNote` are now private. Use
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
     are provided for each previously public field.
+- `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
 - The following fields now have type `NonNegativeAmount` instead of `Amount`:
   - `zcash_client_backend::data_api`:
     - `error::Error::InsufficientFunds.{available, required}`

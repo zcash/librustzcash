@@ -409,8 +409,8 @@ pub trait WalletRead {
 pub struct BlockMetadata {
     block_height: BlockHeight,
     block_hash: BlockHash,
-    sapling_tree_size: u32,
-    //TODO: orchard_tree_size: u32
+    sapling_tree_size: Option<u32>,
+    orchard_tree_size: Option<u32>,
 }
 
 impl BlockMetadata {
@@ -418,12 +418,14 @@ impl BlockMetadata {
     pub fn from_parts(
         block_height: BlockHeight,
         block_hash: BlockHash,
-        sapling_tree_size: u32,
+        sapling_tree_size: Option<u32>,
+        orchard_tree_size: Option<u32>,
     ) -> Self {
         Self {
             block_height,
             block_hash,
             sapling_tree_size,
+            orchard_tree_size,
         }
     }
 
@@ -437,10 +439,16 @@ impl BlockMetadata {
         self.block_hash
     }
 
-    /// Returns the size of the Sapling note commitment tree as of the block that this
-    /// [`BlockMetadata`] describes.
-    pub fn sapling_tree_size(&self) -> u32 {
+    /// Returns the size of the Sapling note commitment tree for the final treestate of the block
+    /// that this [`BlockMetadata`] describes, if available.
+    pub fn sapling_tree_size(&self) -> Option<u32> {
         self.sapling_tree_size
+    }
+
+    /// Returns the size of the Orchard note commitment tree for the final treestate of the block
+    /// that this [`BlockMetadata`] describes, if available.
+    pub fn orchard_tree_size(&self) -> Option<u32> {
+        self.orchard_tree_size
     }
 }
 
@@ -449,8 +457,11 @@ impl BlockMetadata {
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 pub struct ScannedBlock<Nf> {
-    metadata: BlockMetadata,
+    block_height: BlockHeight,
+    block_hash: BlockHash,
     block_time: u32,
+    sapling_tree_size: u32,
+    orchard_tree_size: u32,
     transactions: Vec<WalletTx<Nf>>,
     sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
     sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
@@ -458,16 +469,23 @@ pub struct ScannedBlock<Nf> {
 
 impl<Nf> ScannedBlock<Nf> {
     /// Constructs a new `ScannedBlock`
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
-        metadata: BlockMetadata,
+        block_height: BlockHeight,
+        block_hash: BlockHash,
         block_time: u32,
+        sapling_tree_size: u32,
+        orchard_tree_size: u32,
         transactions: Vec<WalletTx<Nf>>,
         sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
         sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
     ) -> Self {
         Self {
-            metadata,
+            block_height,
+            block_hash,
             block_time,
+            sapling_tree_size,
+            orchard_tree_size,
             transactions,
             sapling_nullifier_map,
             sapling_commitments,
@@ -476,12 +494,12 @@ impl<Nf> ScannedBlock<Nf> {
 
     /// Returns the height of the block that was scanned.
     pub fn height(&self) -> BlockHeight {
-        self.metadata.block_height
+        self.block_height
     }
 
     /// Returns the block hash of the block that was scanned.
     pub fn block_hash(&self) -> BlockHash {
-        self.metadata.block_hash
+        self.block_hash
     }
 
     /// Returns the block time of the block that was scanned, as a Unix timestamp in seconds.
@@ -489,13 +507,14 @@ impl<Nf> ScannedBlock<Nf> {
         self.block_time
     }
 
-    /// Returns the metadata describing the state of the note commitment trees as of the end of the
-    /// scanned block.
-    ///
-    /// The metadata returned from this method is guaranteed to be consistent with what is returned
-    /// by [`Self::height`] and [`Self::block_hash`].
-    pub fn metadata(&self) -> &BlockMetadata {
-        &self.metadata
+    /// Returns the size of the Sapling note commitment tree as of the end of the scanned block.
+    pub fn sapling_tree_size(&self) -> u32 {
+        self.sapling_tree_size
+    }
+
+    /// Returns the size of the Orchard note commitment tree as of the end of the scanned block.
+    pub fn orchard_tree_size(&self) -> u32 {
+        self.orchard_tree_size
     }
 
     /// Returns the list of transactions from the block that are relevant to the wallet.
@@ -523,6 +542,16 @@ impl<Nf> ScannedBlock<Nf> {
     /// scanned block as an owned value.
     pub fn into_sapling_commitments(self) -> Vec<(sapling::Node, Retention<BlockHeight>)> {
         self.sapling_commitments
+    }
+
+    /// Returns the [`BlockMetadata`] corresponding to the scanned block.
+    pub fn to_block_metadata(&self) -> BlockMetadata {
+        BlockMetadata {
+            block_height: self.block_height,
+            block_hash: self.block_hash,
+            sapling_tree_size: Some(self.sapling_tree_size),
+            orchard_tree_size: Some(self.orchard_tree_size),
+        }
     }
 }
 
