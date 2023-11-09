@@ -4,9 +4,9 @@ use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
 
 use super::SaplingVerificationContextInner;
-use crate::{
-    sapling::circuit::{OutputVerifyingKey, SpendVerifyingKey},
-    transaction::components::sapling::{Authorized, Bundle},
+use crate::sapling::{
+    bundle::{Authorized, Bundle},
+    circuit::{OutputVerifyingKey, SpendVerifyingKey},
 };
 
 /// Batch validation context for Sapling.

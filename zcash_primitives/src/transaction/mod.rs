@@ -24,16 +24,17 @@ use zcash_encoding::{Array, CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
-    sapling::{builder as sapling_builder, redjubjub},
+    sapling::{
+        self, builder as sapling_builder,
+        bundle::{OutputDescription, OutputDescriptionV5, SpendDescription, SpendDescriptionV5},
+        redjubjub,
+    },
 };
 
 use self::{
     components::{
         amount::{Amount, BalanceError},
-        orchard as orchard_serialization,
-        sapling::{
-            self, OutputDescription, OutputDescriptionV5, SpendDescription, SpendDescriptionV5,
-        },
+        orchard as orchard_serialization, sapling as sapling_serialization,
         sprout::{self, JsDescription},
         transparent::{self, TxIn, TxOut},
         OutPoint,
@@ -252,7 +253,7 @@ impl TxVersion {
 /// Authorization state for a bundle of transaction data.
 pub trait Authorization {
     type TransparentAuth: transparent::Authorization;
-    type SaplingAuth: sapling::Authorization;
+    type SaplingAuth: sapling::bundle::Authorization;
     type OrchardAuth: orchard::bundle::Authorization;
 
     #[cfg(feature = "zfuture")]
@@ -264,7 +265,7 @@ pub struct Authorized;
 
 impl Authorization for Authorized {
     type TransparentAuth = transparent::Authorized;
-    type SaplingAuth = sapling::Authorized;
+    type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
     #[cfg(feature = "zfuture")]
@@ -490,7 +491,7 @@ impl<A: Authorization> TransactionData<A> {
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
-        f_sapling: impl sapling::MapAuth<A::SaplingAuth, B::SaplingAuth>,
+        f_sapling: impl sapling::bundle::MapAuth<A::SaplingAuth, B::SaplingAuth>,
         mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
         #[cfg(feature = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
     ) -> TransactionData<B> {
@@ -604,10 +605,10 @@ impl Transaction {
         let (value_balance, shielded_spends, shielded_outputs) = if version.has_sapling() {
             let vb = Self::read_amount(&mut reader)?;
             #[allow(clippy::redundant_closure)]
-            let ss: Vec<SpendDescription<sapling::Authorized>> =
+            let ss: Vec<SpendDescription<sapling::bundle::Authorized>> =
                 Vector::read(&mut reader, |r| SpendDescription::read(r))?;
             #[allow(clippy::redundant_closure)]
-            let so: Vec<OutputDescription<sapling::GrothProofBytes>> =
+            let so: Vec<OutputDescription<sapling::bundle::GrothProofBytes>> =
                 Vector::read(&mut reader, |r| OutputDescription::read(r))?;
             (vb, ss, so)
         } else {
@@ -661,7 +662,7 @@ impl Transaction {
                         shielded_spends,
                         shielded_outputs,
                         value_balance,
-                        sapling::Authorized { binding_sig },
+                        sapling::bundle::Authorized { binding_sig },
                     )
                 }),
                 orchard_bundle: None,
@@ -741,14 +742,14 @@ impl Transaction {
     #[cfg(feature = "temporary-zcashd")]
     pub fn temporary_zcashd_read_v5_sapling<R: Read>(
         reader: R,
-    ) -> io::Result<Option<sapling::Bundle<sapling::Authorized>>> {
+    ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized>>> {
         Self::read_v5_sapling(reader)
     }
 
     #[allow(clippy::redundant_closure)]
     fn read_v5_sapling<R: Read>(
         mut reader: R,
-    ) -> io::Result<Option<sapling::Bundle<sapling::Authorized>>> {
+    ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized>>> {
         let sd_v5s = Vector::read(&mut reader, SpendDescriptionV5::read)?;
         let od_v5s = Vector::read(&mut reader, OutputDescriptionV5::read)?;
         let n_spends = sd_v5s.len();
@@ -760,16 +761,20 @@ impl Transaction {
         };
 
         let anchor = if n_spends > 0 {
-            Some(sapling::read_base(&mut reader, "anchor")?)
+            Some(sapling_serialization::read_base(&mut reader, "anchor")?)
         } else {
             None
         };
 
-        let v_spend_proofs = Array::read(&mut reader, n_spends, |r| sapling::read_zkproof(r))?;
+        let v_spend_proofs = Array::read(&mut reader, n_spends, |r| {
+            sapling_serialization::read_zkproof(r)
+        })?;
         let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| {
             SpendDescription::read_spend_auth_sig(r)
         })?;
-        let v_output_proofs = Array::read(&mut reader, n_outputs, |r| sapling::read_zkproof(r))?;
+        let v_output_proofs = Array::read(&mut reader, n_outputs, |r| {
+            sapling_serialization::read_zkproof(r)
+        })?;
 
         let binding_sig = if n_spends > 0 || n_outputs > 0 {
             Some(redjubjub::Signature::read(&mut reader)?)
@@ -801,7 +806,7 @@ impl Transaction {
                 shielded_spends,
                 shielded_outputs,
                 value_balance,
-                sapling::Authorized { binding_sig },
+                sapling::bundle::Authorized { binding_sig },
             )
         }))
     }
@@ -934,7 +939,7 @@ impl Transaction {
 
     #[cfg(feature = "temporary-zcashd")]
     pub fn temporary_zcashd_write_v5_sapling<W: Write>(
-        sapling_bundle: Option<&sapling::Bundle<sapling::Authorized>>,
+        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized>>,
         writer: W,
     ) -> io::Result<()> {
         Self::write_v5_sapling_inner(sapling_bundle, writer)
@@ -945,7 +950,7 @@ impl Transaction {
     }
 
     fn write_v5_sapling_inner<W: Write>(
-        sapling_bundle: Option<&sapling::Bundle<sapling::Authorized>>,
+        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized>>,
         mut writer: W,
     ) -> io::Result<()> {
         if let Some(bundle) = sapling_bundle {

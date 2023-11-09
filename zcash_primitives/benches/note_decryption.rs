@@ -11,13 +11,12 @@ use zcash_primitives::{
         builder::SaplingBuilder,
         note_encryption::{
             try_sapling_compact_note_decryption, try_sapling_note_decryption,
-            PreparedIncomingViewingKey, SaplingDomain,
+            CompactOutputDescription, PreparedIncomingViewingKey, SaplingDomain,
         },
         prover::mock::{MockOutputProver, MockSpendProver},
         value::NoteValue,
         Diversifier, SaplingIvk,
     },
-    transaction::components::sapling::CompactOutputDescription,
 };
 
 #[cfg(unix)]

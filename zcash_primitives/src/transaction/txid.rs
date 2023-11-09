@@ -7,12 +7,17 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
 use orchard::bundle::{self as orchard};
 
-use crate::consensus::{BlockHeight, BranchId};
+use crate::{
+    consensus::{BlockHeight, BranchId},
+    sapling::{
+        self,
+        bundle::{OutputDescription, SpendDescription},
+    },
+};
 
 use super::{
     components::{
         amount::Amount,
-        sapling::{self, OutputDescription, SpendDescription},
         transparent::{self, TxIn, TxOut},
     },
     Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
@@ -136,7 +141,7 @@ pub(crate) fn hash_tze_outputs(tze_outputs: &[TzeOut]) -> Blake2bHash {
 /// * \[(cv, anchor, rk, zkproof)*\] - personalized with ZCASH_SAPLING_SPENDS_NONCOMPACT_HASH_PERSONALIZATION
 ///
 /// Then, hash these together personalized by ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION
-pub(crate) fn hash_sapling_spends<A: sapling::Authorization>(
+pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
     shielded_spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_SPENDS_HASH_PERSONALIZATION);
@@ -250,7 +255,9 @@ pub(crate) fn hash_transparent_txid_data(
 }
 
 /// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
-fn hash_sapling_txid_data<A: sapling::Authorization>(bundle: &sapling::Bundle<A>) -> Blake2bHash {
+fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
+    bundle: &sapling::Bundle<A>,
+) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
     if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
         h.write_all(hash_sapling_spends(bundle.shielded_spends()).as_bytes())
@@ -460,7 +467,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<sapling::Authorized>>,
+        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized>>,
     ) -> Blake2bHash {
         let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
         if let Some(bundle) = sapling_bundle {

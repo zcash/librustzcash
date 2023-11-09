@@ -13,6 +13,10 @@ use crate::{
     memo::MemoBytes,
     sapling::{
         self,
+        bundle::{
+            Authorization, Authorized, Bundle, GrothProofBytes, MapAuth, OutputDescription,
+            SpendDescription,
+        },
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         note_encryption::sapling_note_encryption,
         prover::{OutputProver, SpendProver},
@@ -29,10 +33,7 @@ use crate::{
         builder::Progress,
         components::{
             amount::{Amount, NonNegativeAmount},
-            sapling::{
-                fees, Authorization, Authorized, Bundle, GrothProofBytes, MapAuth,
-                OutputDescription, SpendDescription,
-            },
+            sapling::fees,
         },
     },
     zip32::ExtendedSpendingKey,
@@ -885,16 +886,14 @@ pub mod testing {
             TEST_NETWORK,
         },
         sapling::{
+            bundle::{Authorized, Bundle},
             prover::mock::{MockOutputProver, MockSpendProver},
             redjubjub::PrivateKey,
             testing::{arb_node, arb_note},
             value::testing::arb_positive_note_value,
             Diversifier,
         },
-        transaction::components::{
-            amount::MAX_MONEY,
-            sapling::{Authorized, Bundle},
-        },
+        transaction::components::amount::MAX_MONEY,
         zip32::sapling::testing::arb_extended_spending_key,
     };
     use incrementalmerkletree::{

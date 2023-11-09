@@ -193,7 +193,7 @@ struct TestUnauthorized;
 
 impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
-    type SaplingAuth = sapling::Authorized;
+    type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
     #[cfg(feature = "zfuture")]

@@ -1,11 +1,16 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
 
-use crate::consensus::BranchId;
+use crate::{
+    consensus::BranchId,
+    sapling::{
+        self,
+        bundle::{GrothProofBytes, OutputDescription, SpendDescription},
+    },
+};
 
 use super::{
     components::{
-        sapling::{self, GrothProofBytes, OutputDescription, SpendDescription},
         sprout::JsDescription,
         transparent::{self, TxIn, TxOut},
     },
@@ -97,7 +102,7 @@ fn joinsplits_hash(
 }
 
 fn shielded_spends_hash<
-    A: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    A: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
 >(
     shielded_spends: &[SpendDescription<A>],
 ) -> Blake2bHash {
@@ -127,7 +132,7 @@ fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]
 }
 
 pub fn v4_signature_hash<
-    SA: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA>,
 >(
     tx: &TransactionData<A>,

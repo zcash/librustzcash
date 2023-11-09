@@ -18,11 +18,34 @@ and this library adheres to Rust's notion of
   - `builder::{InProgressProofs, Unproven, Proven}`
   - `builder::{InProgressSignatures, Unsigned, PartiallyAuthorized}`
   - `builder::{MaybeSigned, SigningParts}`
+  - `bundle` module, containing the following types moved from
+    `zcash_primitives::transaction::components::sapling`:
+    - `Bundle`
+    - `SpendDescription, SpendDescriptionV5`
+    - `OutputDescription, OutputDescriptionV5`
+    - `Authorization, Authorized, MapAuth`
+    - `GrothProofBytes`
+  - `bundle::Bundle::<InProgress<Unproven, _>>::create_proofs`
+  - `bundle::Bundle::<InProgress<_, Unsigned>>::prepare`
+  - `bundle::Bundle::<InProgress<_, PartiallyAuthorized>>::{sign, append_signatures}`
+  - `bundle::Bundle::<InProgress<Proven, PartiallyAuthorized>>::finalize`
+  - `bundle::Bundle::<InProgress<Proven, Unsigned>>::apply_signatures`
+  - `bundle::Bundle::try_map_authorization`
+  - `bundle::TryMapAuth`
+  - `impl bundle::{MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)`
+    helpers to enable calling `Bundle::{map_authorization, try_map_authorization}`
+    with a set of closures.
+  - `bundle::testing` module, containing the following functions moved from
+    `zcash_primitives::transaction::components::sapling::testing`:
+    - `arb_output_description`
+    - `arb_bundle`
   - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
   - `circuit::{SpendParameters, OutputParameters}`
   - `circuit::{SpendVerifyingKey, PreparedSpendVerifyingKey}`
   - `circuit::{OutputVerifyingKey, PreparedOutputVerifyingKey}`
   - `constants` module.
+  - `note_encryption::CompactOutputDescription` (moved from
+    `zcash_primitives::transaction::components::sapling`).
   - `prover::{SpendProver, OutputProver}`
   - `value`:
     - `ValueCommitTrapdoor::from_bytes`
@@ -31,17 +54,6 @@ and this library adheres to Rust's notion of
   - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
 - `zcash_primitives::transaction`:
   - `builder::get_fee`
-  - `components::sapling`:
-    - `Bundle::<InProgress<Unproven, _>>::create_proofs`
-    - `Bundle::<InProgress<_, Unsigned>>::prepare`
-    - `Bundle::<InProgress<_, PartiallyAuthorized>>::{sign, append_signatures}`
-    - `Bundle::<InProgress<Proven, PartiallyAuthorized>>::finalize`
-    - `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures`
-    - `Bundle::try_map_authorization`
-    - `TryMapAuth`
-    - `impl {MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)` helpers to
-      enable calling `Bundle::{map_authorization, try_map_authorization}` with a
-      set of closures.
   - `fees::StandardFeeRule`
   - Constants in `fees::zip317`:
     - `MARGINAL_FEE`
@@ -82,13 +94,12 @@ and this library adheres to Rust's notion of
     - `Error::DuplicateSignature`
     - `Error::InvalidExternalSignature`
     - `Error::MissingSignatures`
+  - `bundle::MapAuth` trait methods now take `&mut self` instead of `&self`.
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
     instead of as a bare `u64`.
 - `zcash_primitives::transaction`:
   - `builder::Builder::{build, build_zfuture}` now take
     `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
-  - `components::sapling`:
-    - `MapAuth` trait methods now take `&mut self` instead of `&self`.
   - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
     instead of `Amount`.
   - `Unauthorized::SaplingAuth` now has type `InProgress<Proven, Unsigned>`.
@@ -114,9 +125,20 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
 - `zcash_primitives::transaction::components::sapling`:
+  - The following types were removed from this module (moved into
+    `zcash_primitives::sapling::bundle`):
+    - `Bundle`
+    - `SpendDescription, SpendDescriptionV5`
+    - `OutputDescription, OutputDescriptionV5`
+    - `Authorization, Authorized, MapAuth`
+    - `GrothProofBytes`
+  - `CompactOutputDescription` (moved to
+    `zcash_primitives::sapling::note_encryption`).
   - `Unproven`
   - `builder` (moved to `zcash_primitives::sapling::builder`).
   - `builder::Unauthorized` (use `builder::InProgress` instead).
+  - `testing::{arb_bundle, arb_output_description}` (moved into
+    `zcash_primitives::sapling::bundle::testing`).
   - `SpendDescription::<Unauthorized>::apply_signature`
   - `Bundle::<Unauthorized>::apply_signatures` (use
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).

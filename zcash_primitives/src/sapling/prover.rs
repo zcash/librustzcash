@@ -7,10 +7,11 @@ use rand_core::RngCore;
 use crate::{
     sapling::{
         self,
+        bundle::GrothProofBytes,
         value::{NoteValue, ValueCommitTrapdoor},
         MerklePath,
     },
-    transaction::components::{sapling::GrothProofBytes, GROTH_PROOF_SIZE},
+    transaction::components::GROTH_PROOF_SIZE,
 };
 
 use super::{
@@ -188,11 +189,12 @@ pub mod mock {
     use crate::{
         sapling::{
             self,
+            bundle::GrothProofBytes,
             circuit::ValueCommitmentOpening,
             value::{NoteValue, ValueCommitTrapdoor},
             Diversifier, PaymentAddress, ProofGenerationKey, Rseed,
         },
-        transaction::components::{sapling::GrothProofBytes, GROTH_PROOF_SIZE},
+        transaction::components::GROTH_PROOF_SIZE,
     };
 
     pub struct MockSpendProver;

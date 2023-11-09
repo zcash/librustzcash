@@ -12,10 +12,9 @@ use zcash_primitives::{
     consensus,
     sapling::{
         self,
-        note_encryption::{PreparedIncomingViewingKey, SaplingDomain},
+        note_encryption::{CompactOutputDescription, PreparedIncomingViewingKey, SaplingDomain},
         SaplingIvk,
     },
-    transaction::components::sapling::CompactOutputDescription,
     zip32::{sapling::DiversifiableFullViewingKey, AccountId, Scope},
 };
 

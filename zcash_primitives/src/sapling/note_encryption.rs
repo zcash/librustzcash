@@ -19,6 +19,7 @@ use crate::{
     consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{
+        bundle::{GrothProofBytes, OutputDescription},
         keys::{
             DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
             SharedSecret,
@@ -26,10 +27,7 @@ use crate::{
         value::ValueCommitment,
         Diversifier, Note, PaymentAddress, Rseed,
     },
-    transaction::components::{
-        amount::NonNegativeAmount,
-        sapling::{self, OutputDescription},
-    },
+    transaction::components::amount::NonNegativeAmount,
 };
 
 use super::note::ExtractedNoteCommitment;
@@ -333,6 +331,31 @@ impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
     }
 }
 
+#[derive(Clone)]
+pub struct CompactOutputDescription {
+    pub ephemeral_key: EphemeralKeyBytes,
+    pub cmu: ExtractedNoteCommitment,
+    pub enc_ciphertext: [u8; COMPACT_NOTE_SIZE],
+}
+
+memuse::impl_no_dynamic_usage!(CompactOutputDescription);
+
+impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>
+    for CompactOutputDescription
+{
+    fn ephemeral_key(&self) -> EphemeralKeyBytes {
+        self.ephemeral_key.clone()
+    }
+
+    fn cmstar_bytes(&self) -> [u8; 32] {
+        self.cmu.to_bytes()
+    }
+
+    fn enc_ciphertext(&self) -> &[u8; COMPACT_NOTE_SIZE] {
+        &self.enc_ciphertext
+    }
+}
+
 /// Creates a new encryption context for the given note.
 ///
 /// Setting `ovk` to `None` represents the `ovk = ⊥` case, where the note cannot be
@@ -457,7 +480,7 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ock: &OutgoingCipherKey,
-    output: &OutputDescription<sapling::GrothProofBytes>,
+    output: &OutputDescription<GrothProofBytes>,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
         params: params.clone(),
@@ -479,7 +502,7 @@ pub fn try_sapling_output_recovery<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     ovk: &OutgoingViewingKey,
-    output: &OutputDescription<sapling::GrothProofBytes>,
+    output: &OutputDescription<GrothProofBytes>,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
     let domain = SaplingDomain {
         params: params.clone(),
@@ -509,7 +532,7 @@ mod tests {
     use super::{
         prf_ock, sapling_note_encryption, try_sapling_compact_note_decryption,
         try_sapling_note_decryption, try_sapling_output_recovery,
-        try_sapling_output_recovery_with_ock, SaplingDomain,
+        try_sapling_output_recovery_with_ock, CompactOutputDescription, SaplingDomain,
     };
 
     use crate::{
@@ -521,6 +544,7 @@ mod tests {
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::{
+            bundle::{GrothProofBytes, OutputDescription},
             keys::{DiversifiedTransmissionKey, EphemeralSecretKey},
             note::ExtractedNoteCommitment,
             note_encryption::PreparedIncomingViewingKey,
@@ -528,10 +552,7 @@ mod tests {
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
             Diversifier, PaymentAddress, Rseed, SaplingIvk,
         },
-        transaction::components::{
-            sapling::{self, CompactOutputDescription, OutputDescription},
-            GROTH_PROOF_SIZE,
-        },
+        transaction::components::GROTH_PROOF_SIZE,
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(
@@ -541,7 +562,7 @@ mod tests {
         OutgoingViewingKey,
         OutgoingCipherKey,
         PreparedIncomingViewingKey,
-        OutputDescription<sapling::GrothProofBytes>,
+        OutputDescription<GrothProofBytes>,
     ) {
         let ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
         let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
@@ -577,7 +598,7 @@ mod tests {
     ) -> (
         OutgoingViewingKey,
         OutgoingCipherKey,
-        OutputDescription<sapling::GrothProofBytes>,
+        OutputDescription<GrothProofBytes>,
     ) {
         let diversifier = Diversifier([0; 11]);
         let pa = ivk.to_payment_address(diversifier).unwrap();
