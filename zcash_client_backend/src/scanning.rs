@@ -381,14 +381,12 @@ pub(crate) fn scan_block_with_runner<
                     // The default for m.sapling_commitment_tree_size is zero, so we need to check
                     // that the subtraction will not underflow; if it would do so, we were given
                     // invalid chain metadata for a block with Sapling outputs.
-                    if m.sapling_commitment_tree_size >= sapling_output_count {
-                        Ok(m.sapling_commitment_tree_size - sapling_output_count)
-                    } else {
-                        Err(ScanError::TreeSizeInvalid {
+                    m.sapling_commitment_tree_size
+                        .checked_sub(sapling_output_count)
+                        .ok_or(ScanError::TreeSizeInvalid {
                             protocol: ShieldedProtocol::Sapling,
                             at_height: cur_height,
                         })
-                    }
                 },
             )
         },
@@ -427,14 +425,12 @@ pub(crate) fn scan_block_with_runner<
                     // The default for m.orchard_commitment_tree_size is zero, so we need to check
                     // that the subtraction will not underflow; if it would do so, we were given
                     // invalid chain metadata for a block with Orchard actions.
-                    if m.orchard_commitment_tree_size >= orchard_action_count {
-                        Ok(m.orchard_commitment_tree_size - orchard_action_count)
-                    } else {
-                        Err(ScanError::TreeSizeInvalid {
+                    m.orchard_commitment_tree_size
+                        .checked_sub(orchard_action_count)
+                        .ok_or(ScanError::TreeSizeInvalid {
                             protocol: ShieldedProtocol::Orchard,
                             at_height: cur_height,
                         })
-                    }
                 },
             )
         },
