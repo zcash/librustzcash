@@ -378,12 +378,12 @@ pub(crate) fn scan_block_with_runner<
                         .try_into()
                         .expect("Sapling output count cannot exceed a u32");
 
+                    // The default for m.sapling_commitment_tree_size is zero, so we need to check
+                    // that the subtraction will not underflow; if it would do so, we were given
+                    // invalid chain metadata for a block with Sapling outputs.
                     if m.sapling_commitment_tree_size >= sapling_output_count {
                         Ok(m.sapling_commitment_tree_size - sapling_output_count)
                     } else {
-                        // The default for m.sapling_commitment_tree_size is zero, so we need to check
-                        // that the subtraction will not underflow; if it would do so, we given invalid
-                        // chain metadata for a block with Sapling outputs.
                         Err(ScanError::TreeSizeInvalid {
                             protocol: ShieldedProtocol::Sapling,
                             at_height: cur_height,
@@ -425,8 +425,8 @@ pub(crate) fn scan_block_with_runner<
                         .expect("Orchard action count cannot exceed a u32");
 
                     // The default for m.orchard_commitment_tree_size is zero, so we need to check
-                    // that the subtraction will not underflow; if it would do so, we given invalid
-                    // chain metadata for a block with Orchard actions.
+                    // that the subtraction will not underflow; if it would do so, we were given
+                    // invalid chain metadata for a block with Orchard actions.
                     if m.orchard_commitment_tree_size >= orchard_action_count {
                         Ok(m.orchard_commitment_tree_size - orchard_action_count)
                     } else {
