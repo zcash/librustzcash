@@ -943,7 +943,7 @@ impl FsBlockDb {
     /// files as described for [`FsBlockDb`].
     ///
     /// An application using this constructor should ensure that they call
-    /// [`zcash_client_sqlite::chain::init::init_blockmetadb`] at application startup to ensure
+    /// [`crate::chain::init::init_blockmeta_db`] at application startup to ensure
     /// that the resulting metadata database is properly initialized and has had all required
     /// migrations applied before use.
     pub fn for_path<P: AsRef<Path>>(fsblockdb_root: P) -> Result<Self, FsBlockDbError> {
