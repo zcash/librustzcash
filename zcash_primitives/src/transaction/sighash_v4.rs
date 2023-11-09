@@ -11,6 +11,7 @@ use crate::{
 
 use super::{
     components::{
+        sapling as sapling_serialization,
         sprout::JsDescription,
         transparent::{self, TxIn, TxOut},
     },
@@ -123,7 +124,7 @@ fn shielded_spends_hash<
 fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]) -> Blake2bHash {
     let mut data = Vec::with_capacity(shielded_outputs.len() * 948);
     for s_out in shielded_outputs {
-        s_out.write_v4(&mut data).unwrap();
+        sapling_serialization::write_output_v4(&mut data, s_out).unwrap();
     }
     Blake2bParams::new()
         .hash_length(32)

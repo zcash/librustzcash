@@ -26,7 +26,7 @@ use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::{
         self, builder as sapling_builder,
-        bundle::{OutputDescription, OutputDescriptionV5, SpendDescription, SpendDescriptionV5},
+        bundle::{OutputDescription, SpendDescription},
         redjubjub,
     },
 };
@@ -606,10 +606,10 @@ impl Transaction {
             let vb = Self::read_amount(&mut reader)?;
             #[allow(clippy::redundant_closure)]
             let ss: Vec<SpendDescription<sapling::bundle::Authorized>> =
-                Vector::read(&mut reader, |r| SpendDescription::read(r))?;
+                Vector::read(&mut reader, |r| sapling_serialization::read_spend_v4(r))?;
             #[allow(clippy::redundant_closure)]
             let so: Vec<OutputDescription<sapling::bundle::GrothProofBytes>> =
-                Vector::read(&mut reader, |r| OutputDescription::read(r))?;
+                Vector::read(&mut reader, |r| sapling_serialization::read_output_v4(r))?;
             (vb, ss, so)
         } else {
             (Amount::zero(), vec![], vec![])
@@ -750,8 +750,8 @@ impl Transaction {
     fn read_v5_sapling<R: Read>(
         mut reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized>>> {
-        let sd_v5s = Vector::read(&mut reader, SpendDescriptionV5::read)?;
-        let od_v5s = Vector::read(&mut reader, OutputDescriptionV5::read)?;
+        let sd_v5s = Vector::read(&mut reader, sapling_serialization::read_spend_v5)?;
+        let od_v5s = Vector::read(&mut reader, sapling_serialization::read_output_v5)?;
         let n_spends = sd_v5s.len();
         let n_outputs = od_v5s.len();
         let value_balance = if n_spends > 0 || n_outputs > 0 {
@@ -770,7 +770,7 @@ impl Transaction {
             sapling_serialization::read_zkproof(r)
         })?;
         let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| {
-            SpendDescription::read_spend_auth_sig(r)
+            sapling_serialization::read_spend_auth_sig(r)
         })?;
         let v_output_proofs = Array::read(&mut reader, n_outputs, |r| {
             sapling_serialization::read_zkproof(r)
@@ -859,14 +859,14 @@ impl Transaction {
                 self.sapling_bundle
                     .as_ref()
                     .map_or(&[], |b| b.shielded_spends()),
-                |w, e| e.write_v4(w),
+                |w, e| sapling_serialization::write_spend_v4(w, e),
             )?;
             Vector::write(
                 &mut writer,
                 self.sapling_bundle
                     .as_ref()
                     .map_or(&[], |b| b.shielded_outputs()),
-                |w, e| e.write_v4(w),
+                |w, e| sapling_serialization::write_output_v4(w, e),
             )?;
         } else if self.sapling_bundle.is_some() {
             return Err(io::Error::new(
@@ -955,11 +955,11 @@ impl Transaction {
     ) -> io::Result<()> {
         if let Some(bundle) = sapling_bundle {
             Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
-                e.write_v5_without_witness_data(w)
+                sapling_serialization::write_spend_v5_without_witness_data(w, e)
             })?;
 
             Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
-                e.write_v5_without_proof(w)
+                sapling_serialization::write_output_v5_without_proof(w, e)
             })?;
 
             if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {

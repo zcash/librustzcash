@@ -68,153 +68,159 @@ pub fn read_zkproof<R: Read>(mut reader: R) -> io::Result<GrothProofBytes> {
     Ok(zkproof)
 }
 
-impl SpendDescription<Authorized> {
-    pub fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
-        let mut nullifier = Nullifier([0u8; 32]);
-        reader.read_exact(&mut nullifier.0)?;
-        Ok(nullifier)
-    }
-
-    /// Consensus rules (§4.4):
-    /// - Canonical encoding is enforced here.
-    /// - "Not small order" is enforced in SaplingVerificationContext::check_spend()
-    pub fn read_rk<R: Read>(mut reader: R) -> io::Result<PublicKey> {
-        PublicKey::read(&mut reader)
-    }
-
-    /// Consensus rules (§4.4):
-    /// - Canonical encoding is enforced here.
-    /// - Signature validity is enforced in SaplingVerificationContext::check_spend()
-    pub fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
-        Signature::read(&mut reader)
-    }
-
-    pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        // Consensus rules (§4.4) & (§4.5):
-        // - Canonical encoding is enforced here.
-        // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
-        //   (located in zcash_proofs::sapling::verifier).
-        let cv = read_value_commitment(&mut reader)?;
-        // Consensus rules (§7.3) & (§7.4):
-        // - Canonical encoding is enforced here
-        let anchor = read_base(&mut reader, "anchor")?;
-        let nullifier = Self::read_nullifier(&mut reader)?;
-        let rk = Self::read_rk(&mut reader)?;
-        let zkproof = read_zkproof(&mut reader)?;
-        let spend_auth_sig = Self::read_spend_auth_sig(&mut reader)?;
-
-        Ok(SpendDescription::from_parts(
-            cv,
-            anchor,
-            nullifier,
-            rk,
-            zkproof,
-            spend_auth_sig,
-        ))
-    }
-
-    pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv().to_bytes())?;
-        writer.write_all(self.anchor().to_repr().as_ref())?;
-        writer.write_all(&self.nullifier().0)?;
-        self.rk().write(&mut writer)?;
-        writer.write_all(self.zkproof())?;
-        self.spend_auth_sig().write(&mut writer)
-    }
-
-    pub fn write_v5_without_witness_data<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv().to_bytes())?;
-        writer.write_all(&self.nullifier().0)?;
-        self.rk().write(&mut writer)
-    }
+pub(crate) fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
+    let mut nullifier = Nullifier([0u8; 32]);
+    reader.read_exact(&mut nullifier.0)?;
+    Ok(nullifier)
 }
 
-impl SpendDescriptionV5 {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let cv = read_value_commitment(&mut reader)?;
-        let nullifier = SpendDescription::read_nullifier(&mut reader)?;
-        let rk = SpendDescription::read_rk(&mut reader)?;
-
-        Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
-    }
+/// Consensus rules (§4.4):
+/// - Canonical encoding is enforced here.
+/// - "Not small order" is enforced in SaplingVerificationContext::check_spend()
+pub(crate) fn read_rk<R: Read>(mut reader: R) -> io::Result<PublicKey> {
+    PublicKey::read(&mut reader)
 }
 
-impl OutputDescription<GrothProofBytes> {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        // Consensus rules (§4.5):
-        // - Canonical encoding is enforced here.
-        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        //   (located in zcash_proofs::sapling::verifier).
-        let cv = read_value_commitment(&mut reader)?;
-
-        // Consensus rule (§7.4): Canonical encoding is enforced here
-        let cmu = read_cmu(&mut reader)?;
-
-        // Consensus rules (§4.5):
-        // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
-        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
-        reader.read_exact(&mut ephemeral_key.0)?;
-
-        let mut enc_ciphertext = [0u8; 580];
-        let mut out_ciphertext = [0u8; 80];
-        reader.read_exact(&mut enc_ciphertext)?;
-        reader.read_exact(&mut out_ciphertext)?;
-
-        let zkproof = read_zkproof(&mut reader)?;
-
-        Ok(OutputDescription::from_parts(
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-            zkproof,
-        ))
-    }
-
-    pub fn write_v4<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv().to_bytes())?;
-        writer.write_all(self.cmu().to_bytes().as_ref())?;
-        writer.write_all(self.ephemeral_key().as_ref())?;
-        writer.write_all(self.enc_ciphertext())?;
-        writer.write_all(self.out_ciphertext())?;
-        writer.write_all(self.zkproof())
-    }
-
-    pub fn write_v5_without_proof<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.cv().to_bytes())?;
-        writer.write_all(self.cmu().to_bytes().as_ref())?;
-        writer.write_all(self.ephemeral_key().as_ref())?;
-        writer.write_all(self.enc_ciphertext())?;
-        writer.write_all(self.out_ciphertext())
-    }
+/// Consensus rules (§4.4):
+/// - Canonical encoding is enforced here.
+/// - Signature validity is enforced in SaplingVerificationContext::check_spend()
+pub(crate) fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
+    Signature::read(&mut reader)
 }
 
-impl OutputDescriptionV5 {
-    pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let cv = read_value_commitment(&mut reader)?;
-        let cmu = read_cmu(&mut reader)?;
+pub(crate) fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
+    // Consensus rules (§4.4) & (§4.5):
+    // - Canonical encoding is enforced here.
+    // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
+    //   (located in zcash_proofs::sapling::verifier).
+    let cv = read_value_commitment(&mut reader)?;
+    // Consensus rules (§7.3) & (§7.4):
+    // - Canonical encoding is enforced here
+    let anchor = read_base(&mut reader, "anchor")?;
+    let nullifier = read_nullifier(&mut reader)?;
+    let rk = read_rk(&mut reader)?;
+    let zkproof = read_zkproof(&mut reader)?;
+    let spend_auth_sig = read_spend_auth_sig(&mut reader)?;
 
-        // Consensus rules (§4.5):
-        // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
-        // - "Not small order" is enforced in SaplingVerificationContext::check_output()
-        let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
-        reader.read_exact(&mut ephemeral_key.0)?;
+    Ok(SpendDescription::from_parts(
+        cv,
+        anchor,
+        nullifier,
+        rk,
+        zkproof,
+        spend_auth_sig,
+    ))
+}
 
-        let mut enc_ciphertext = [0u8; 580];
-        let mut out_ciphertext = [0u8; 80];
-        reader.read_exact(&mut enc_ciphertext)?;
-        reader.read_exact(&mut out_ciphertext)?;
+pub(crate) fn write_spend_v4<W: Write>(
+    mut writer: W,
+    spend: &SpendDescription<Authorized>,
+) -> io::Result<()> {
+    writer.write_all(&spend.cv().to_bytes())?;
+    writer.write_all(spend.anchor().to_repr().as_ref())?;
+    writer.write_all(&spend.nullifier().0)?;
+    spend.rk().write(&mut writer)?;
+    writer.write_all(spend.zkproof())?;
+    spend.spend_auth_sig().write(&mut writer)
+}
 
-        Ok(OutputDescriptionV5::from_parts(
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-        ))
-    }
+pub(crate) fn write_spend_v5_without_witness_data<W: Write>(
+    mut writer: W,
+    spend: &SpendDescription<Authorized>,
+) -> io::Result<()> {
+    writer.write_all(&spend.cv().to_bytes())?;
+    writer.write_all(&spend.nullifier().0)?;
+    spend.rk().write(&mut writer)
+}
+
+pub(crate) fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
+    let cv = read_value_commitment(&mut reader)?;
+    let nullifier = read_nullifier(&mut reader)?;
+    let rk = read_rk(&mut reader)?;
+
+    Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
+}
+
+pub(crate) fn read_output_v4<R: Read>(
+    mut reader: &mut R,
+) -> io::Result<OutputDescription<GrothProofBytes>> {
+    // Consensus rules (§4.5):
+    // - Canonical encoding is enforced here.
+    // - "Not small order" is enforced in SaplingVerificationContext::check_output()
+    //   (located in zcash_proofs::sapling::verifier).
+    let cv = read_value_commitment(&mut reader)?;
+
+    // Consensus rule (§7.4): Canonical encoding is enforced here
+    let cmu = read_cmu(&mut reader)?;
+
+    // Consensus rules (§4.5):
+    // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
+    // - "Not small order" is enforced in SaplingVerificationContext::check_output()
+    let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
+    reader.read_exact(&mut ephemeral_key.0)?;
+
+    let mut enc_ciphertext = [0u8; 580];
+    let mut out_ciphertext = [0u8; 80];
+    reader.read_exact(&mut enc_ciphertext)?;
+    reader.read_exact(&mut out_ciphertext)?;
+
+    let zkproof = read_zkproof(&mut reader)?;
+
+    Ok(OutputDescription::from_parts(
+        cv,
+        cmu,
+        ephemeral_key,
+        enc_ciphertext,
+        out_ciphertext,
+        zkproof,
+    ))
+}
+
+pub(crate) fn write_output_v4<W: Write>(
+    mut writer: W,
+    output: &OutputDescription<GrothProofBytes>,
+) -> io::Result<()> {
+    writer.write_all(&output.cv().to_bytes())?;
+    writer.write_all(output.cmu().to_bytes().as_ref())?;
+    writer.write_all(output.ephemeral_key().as_ref())?;
+    writer.write_all(output.enc_ciphertext())?;
+    writer.write_all(output.out_ciphertext())?;
+    writer.write_all(output.zkproof())
+}
+
+pub(crate) fn write_output_v5_without_proof<W: Write>(
+    mut writer: W,
+    output: &OutputDescription<GrothProofBytes>,
+) -> io::Result<()> {
+    writer.write_all(&output.cv().to_bytes())?;
+    writer.write_all(output.cmu().to_bytes().as_ref())?;
+    writer.write_all(output.ephemeral_key().as_ref())?;
+    writer.write_all(output.enc_ciphertext())?;
+    writer.write_all(output.out_ciphertext())
+}
+
+pub(crate) fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5> {
+    let cv = read_value_commitment(&mut reader)?;
+    let cmu = read_cmu(&mut reader)?;
+
+    // Consensus rules (§4.5):
+    // - Canonical encoding is enforced in librustzcash_sapling_check_output by zcashd
+    // - "Not small order" is enforced in SaplingVerificationContext::check_output()
+    let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
+    reader.read_exact(&mut ephemeral_key.0)?;
+
+    let mut enc_ciphertext = [0u8; 580];
+    let mut out_ciphertext = [0u8; 80];
+    reader.read_exact(&mut enc_ciphertext)?;
+    reader.read_exact(&mut out_ciphertext)?;
+
+    Ok(OutputDescriptionV5::from_parts(
+        cv,
+        cmu,
+        ephemeral_key,
+        enc_ciphertext,
+        out_ciphertext,
+    ))
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]

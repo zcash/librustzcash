@@ -124,6 +124,13 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
+- `zcash_primitives::sapling::bundle`:
+  - `SpendDescription::{read, read_nullifier, read_rk, read_spend_auth_sig}`
+  - `SpendDescription::{write_v4, write_v5_without_witness_data}`
+  - `SpendDescriptionV5::read`
+  - `OutputDescription::read`
+  - `OutputDescription::{write_v4, write_v5_without_proof}`
+  - `OutputDescriptionV5::read`
 - `zcash_primitives::transaction::components::sapling`:
   - The following types were removed from this module (moved into
     `zcash_primitives::sapling::bundle`):
