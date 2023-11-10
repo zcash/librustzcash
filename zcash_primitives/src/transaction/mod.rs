@@ -13,22 +13,17 @@ mod tests;
 
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use ff::PrimeField;
 use memuse::DynamicUsage;
 use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
-use zcash_encoding::{Array, CompactSize, Vector};
+use zcash_encoding::{CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
-    sapling::{
-        self, builder as sapling_builder,
-        bundle::{OutputDescription, SpendDescription},
-        redjubjub,
-    },
+    sapling::{self, builder as sapling_builder, redjubjub},
 };
 
 use self::{
@@ -602,18 +597,8 @@ impl Transaction {
             0u32.into()
         };
 
-        let (value_balance, shielded_spends, shielded_outputs) = if version.has_sapling() {
-            let vb = Self::read_amount(&mut reader)?;
-            #[allow(clippy::redundant_closure)]
-            let ss: Vec<SpendDescription<sapling::bundle::Authorized>> =
-                Vector::read(&mut reader, |r| sapling_serialization::read_spend_v4(r))?;
-            #[allow(clippy::redundant_closure)]
-            let so: Vec<OutputDescription<sapling::bundle::GrothProofBytes>> =
-                Vector::read(&mut reader, |r| sapling_serialization::read_output_v4(r))?;
-            (vb, ss, so)
-        } else {
-            (Amount::zero(), vec![], vec![])
-        };
+        let (value_balance, shielded_spends, shielded_outputs) =
+            sapling_serialization::read_v4_components(&mut reader, version.has_sapling())?;
 
         let sprout_bundle = if version.has_sprout() {
             let joinsplits = Vector::read(&mut reader, |r| {
@@ -699,7 +684,7 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_v5_header_fragment(&mut reader)?;
         let transparent_bundle = Self::read_transparent(&mut reader)?;
-        let sapling_bundle = Self::read_v5_sapling(&mut reader)?;
+        let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_bundle = orchard_serialization::read_v5_bundle(&mut reader)?;
 
         #[cfg(feature = "zfuture")]
@@ -743,72 +728,7 @@ impl Transaction {
     pub fn temporary_zcashd_read_v5_sapling<R: Read>(
         reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized>>> {
-        Self::read_v5_sapling(reader)
-    }
-
-    #[allow(clippy::redundant_closure)]
-    fn read_v5_sapling<R: Read>(
-        mut reader: R,
-    ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized>>> {
-        let sd_v5s = Vector::read(&mut reader, sapling_serialization::read_spend_v5)?;
-        let od_v5s = Vector::read(&mut reader, sapling_serialization::read_output_v5)?;
-        let n_spends = sd_v5s.len();
-        let n_outputs = od_v5s.len();
-        let value_balance = if n_spends > 0 || n_outputs > 0 {
-            Self::read_amount(&mut reader)?
-        } else {
-            Amount::zero()
-        };
-
-        let anchor = if n_spends > 0 {
-            Some(sapling_serialization::read_base(&mut reader, "anchor")?)
-        } else {
-            None
-        };
-
-        let v_spend_proofs = Array::read(&mut reader, n_spends, |r| {
-            sapling_serialization::read_zkproof(r)
-        })?;
-        let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| {
-            sapling_serialization::read_spend_auth_sig(r)
-        })?;
-        let v_output_proofs = Array::read(&mut reader, n_outputs, |r| {
-            sapling_serialization::read_zkproof(r)
-        })?;
-
-        let binding_sig = if n_spends > 0 || n_outputs > 0 {
-            Some(redjubjub::Signature::read(&mut reader)?)
-        } else {
-            None
-        };
-
-        let shielded_spends = sd_v5s
-            .into_iter()
-            .zip(
-                v_spend_proofs
-                    .into_iter()
-                    .zip(v_spend_auth_sigs.into_iter()),
-            )
-            .map(|(sd_5, (zkproof, spend_auth_sig))| {
-                // the following `unwrap` is safe because we know n_spends > 0.
-                sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
-            })
-            .collect();
-
-        let shielded_outputs = od_v5s
-            .into_iter()
-            .zip(v_output_proofs.into_iter())
-            .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
-            .collect();
-
-        Ok(binding_sig.map(|binding_sig| {
-            sapling::Bundle::from_parts(
-                shielded_spends,
-                shielded_outputs,
-                value_balance,
-                sapling::bundle::Authorized { binding_sig },
-            )
-        }))
+        sapling_serialization::read_v5_bundle(reader)
     }
 
     #[cfg(feature = "zfuture")]
@@ -846,34 +766,11 @@ impl Transaction {
             writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
-        if self.version.has_sapling() {
-            writer.write_all(
-                &self
-                    .sapling_bundle
-                    .as_ref()
-                    .map_or(Amount::zero(), |b| *b.value_balance())
-                    .to_i64_le_bytes(),
-            )?;
-            Vector::write(
-                &mut writer,
-                self.sapling_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.shielded_spends()),
-                |w, e| sapling_serialization::write_spend_v4(w, e),
-            )?;
-            Vector::write(
-                &mut writer,
-                self.sapling_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.shielded_outputs()),
-                |w, e| sapling_serialization::write_output_v4(w, e),
-            )?;
-        } else if self.sapling_bundle.is_some() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Sapling components may not be present if Sapling is not active.",
-            ));
-        }
+        sapling_serialization::write_v4_components(
+            &mut writer,
+            self.sapling_bundle.as_ref(),
+            self.version.has_sapling(),
+        )?;
 
         if self.version.has_sprout() {
             if let Some(bundle) = self.sprout_bundle.as_ref() {
@@ -942,59 +839,11 @@ impl Transaction {
         sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized>>,
         writer: W,
     ) -> io::Result<()> {
-        Self::write_v5_sapling_inner(sapling_bundle, writer)
+        sapling_serialization::write_v5_bundle(writer, sapling_bundle)
     }
 
     pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
-        Self::write_v5_sapling_inner(self.sapling_bundle.as_ref(), writer)
-    }
-
-    fn write_v5_sapling_inner<W: Write>(
-        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized>>,
-        mut writer: W,
-    ) -> io::Result<()> {
-        if let Some(bundle) = sapling_bundle {
-            Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
-                sapling_serialization::write_spend_v5_without_witness_data(w, e)
-            })?;
-
-            Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
-                sapling_serialization::write_output_v5_without_proof(w, e)
-            })?;
-
-            if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-                writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
-            }
-            if !bundle.shielded_spends().is_empty() {
-                writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
-            }
-
-            Array::write(
-                &mut writer,
-                bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
-                |w, e| w.write_all(e),
-            )?;
-            Array::write(
-                &mut writer,
-                bundle.shielded_spends().iter().map(|s| s.spend_auth_sig()),
-                |w, e| e.write(w),
-            )?;
-
-            Array::write(
-                &mut writer,
-                bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
-                |w, e| w.write_all(e),
-            )?;
-
-            if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-                bundle.authorization().binding_sig.write(&mut writer)?;
-            }
-        } else {
-            CompactSize::write(&mut writer, 0)?;
-            CompactSize::write(&mut writer, 0)?;
-        }
-
-        Ok(())
+        sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
     }
 
     #[cfg(feature = "zfuture")]

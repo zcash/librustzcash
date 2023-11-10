@@ -2,20 +2,24 @@ use ff::PrimeField;
 
 use std::io::{self, Read, Write};
 
+use zcash_encoding::{Array, CompactSize, Vector};
 use zcash_note_encryption::EphemeralKeyBytes;
 
-use crate::sapling::{
-    bundle::{
-        Authorized, GrothProofBytes, OutputDescription, OutputDescriptionV5, SpendDescription,
-        SpendDescriptionV5,
+use crate::{
+    sapling::{
+        bundle::{
+            Authorized, Bundle, GrothProofBytes, OutputDescription, OutputDescriptionV5,
+            SpendDescription, SpendDescriptionV5,
+        },
+        note::ExtractedNoteCommitment,
+        redjubjub::{self, PublicKey, Signature},
+        value::ValueCommitment,
+        Nullifier,
     },
-    note::ExtractedNoteCommitment,
-    redjubjub::{PublicKey, Signature},
-    value::ValueCommitment,
-    Nullifier,
+    transaction::Transaction,
 };
 
-use super::GROTH_PROOF_SIZE;
+use super::{Amount, GROTH_PROOF_SIZE};
 
 pub mod fees;
 
@@ -68,7 +72,7 @@ pub fn read_zkproof<R: Read>(mut reader: R) -> io::Result<GrothProofBytes> {
     Ok(zkproof)
 }
 
-pub(crate) fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
+fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
     let mut nullifier = Nullifier([0u8; 32]);
     reader.read_exact(&mut nullifier.0)?;
     Ok(nullifier)
@@ -77,18 +81,18 @@ pub(crate) fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
 /// Consensus rules (§4.4):
 /// - Canonical encoding is enforced here.
 /// - "Not small order" is enforced in SaplingVerificationContext::check_spend()
-pub(crate) fn read_rk<R: Read>(mut reader: R) -> io::Result<PublicKey> {
+fn read_rk<R: Read>(mut reader: R) -> io::Result<PublicKey> {
     PublicKey::read(&mut reader)
 }
 
 /// Consensus rules (§4.4):
 /// - Canonical encoding is enforced here.
 /// - Signature validity is enforced in SaplingVerificationContext::check_spend()
-pub(crate) fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
+fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
     Signature::read(&mut reader)
 }
 
-pub(crate) fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
+fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
     // Consensus rules (§4.4) & (§4.5):
     // - Canonical encoding is enforced here.
     // - "Not small order" is enforced in SaplingVerificationContext::(check_spend()/check_output())
@@ -112,10 +116,7 @@ pub(crate) fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescripti
     ))
 }
 
-pub(crate) fn write_spend_v4<W: Write>(
-    mut writer: W,
-    spend: &SpendDescription<Authorized>,
-) -> io::Result<()> {
+fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>) -> io::Result<()> {
     writer.write_all(&spend.cv().to_bytes())?;
     writer.write_all(spend.anchor().to_repr().as_ref())?;
     writer.write_all(&spend.nullifier().0)?;
@@ -124,7 +125,7 @@ pub(crate) fn write_spend_v4<W: Write>(
     spend.spend_auth_sig().write(&mut writer)
 }
 
-pub(crate) fn write_spend_v5_without_witness_data<W: Write>(
+fn write_spend_v5_without_witness_data<W: Write>(
     mut writer: W,
     spend: &SpendDescription<Authorized>,
 ) -> io::Result<()> {
@@ -133,7 +134,7 @@ pub(crate) fn write_spend_v5_without_witness_data<W: Write>(
     spend.rk().write(&mut writer)
 }
 
-pub(crate) fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
+fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
     let cv = read_value_commitment(&mut reader)?;
     let nullifier = read_nullifier(&mut reader)?;
     let rk = read_rk(&mut reader)?;
@@ -141,9 +142,7 @@ pub(crate) fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDesc
     Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
 }
 
-pub(crate) fn read_output_v4<R: Read>(
-    mut reader: &mut R,
-) -> io::Result<OutputDescription<GrothProofBytes>> {
+fn read_output_v4<R: Read>(mut reader: &mut R) -> io::Result<OutputDescription<GrothProofBytes>> {
     // Consensus rules (§4.5):
     // - Canonical encoding is enforced here.
     // - "Not small order" is enforced in SaplingVerificationContext::check_output()
@@ -188,7 +187,7 @@ pub(crate) fn write_output_v4<W: Write>(
     writer.write_all(output.zkproof())
 }
 
-pub(crate) fn write_output_v5_without_proof<W: Write>(
+fn write_output_v5_without_proof<W: Write>(
     mut writer: W,
     output: &OutputDescription<GrothProofBytes>,
 ) -> io::Result<()> {
@@ -199,7 +198,7 @@ pub(crate) fn write_output_v5_without_proof<W: Write>(
     writer.write_all(output.out_ciphertext())
 }
 
-pub(crate) fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5> {
+fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5> {
     let cv = read_value_commitment(&mut reader)?;
     let cmu = read_cmu(&mut reader)?;
 
@@ -221,6 +220,169 @@ pub(crate) fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDe
         enc_ciphertext,
         out_ciphertext,
     ))
+}
+
+/// Reads the Sapling components of a v4 transaction.
+#[allow(clippy::type_complexity)]
+pub(crate) fn read_v4_components<R: Read>(
+    mut reader: R,
+    tx_has_sapling: bool,
+) -> io::Result<(
+    Amount,
+    Vec<SpendDescription<Authorized>>,
+    Vec<OutputDescription<GrothProofBytes>>,
+)> {
+    if tx_has_sapling {
+        let vb = Transaction::read_amount(&mut reader)?;
+        #[allow(clippy::redundant_closure)]
+        let ss: Vec<SpendDescription<Authorized>> =
+            Vector::read(&mut reader, |r| read_spend_v4(r))?;
+        #[allow(clippy::redundant_closure)]
+        let so: Vec<OutputDescription<GrothProofBytes>> =
+            Vector::read(&mut reader, |r| read_output_v4(r))?;
+        Ok((vb, ss, so))
+    } else {
+        Ok((Amount::zero(), vec![], vec![]))
+    }
+}
+
+/// Writes the Sapling components of a v4 transaction.
+pub(crate) fn write_v4_components<W: Write>(
+    mut writer: W,
+    bundle: Option<&Bundle<Authorized>>,
+    tx_has_sapling: bool,
+) -> io::Result<()> {
+    if tx_has_sapling {
+        writer.write_all(
+            &bundle
+                .map_or(Amount::zero(), |b| *b.value_balance())
+                .to_i64_le_bytes(),
+        )?;
+        Vector::write(
+            &mut writer,
+            bundle.map_or(&[], |b| b.shielded_spends()),
+            |w, e| write_spend_v4(w, e),
+        )?;
+        Vector::write(
+            &mut writer,
+            bundle.map_or(&[], |b| b.shielded_outputs()),
+            |w, e| write_output_v4(w, e),
+        )?;
+    } else if bundle.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Sapling components may not be present if Sapling is not active.",
+        ));
+    }
+
+    Ok(())
+}
+
+/// Reads a [`Bundle`] from a v5 transaction format.
+#[allow(clippy::redundant_closure)]
+pub(crate) fn read_v5_bundle<R: Read>(mut reader: R) -> io::Result<Option<Bundle<Authorized>>> {
+    let sd_v5s = Vector::read(&mut reader, read_spend_v5)?;
+    let od_v5s = Vector::read(&mut reader, read_output_v5)?;
+    let n_spends = sd_v5s.len();
+    let n_outputs = od_v5s.len();
+    let value_balance = if n_spends > 0 || n_outputs > 0 {
+        Transaction::read_amount(&mut reader)?
+    } else {
+        Amount::zero()
+    };
+
+    let anchor = if n_spends > 0 {
+        Some(read_base(&mut reader, "anchor")?)
+    } else {
+        None
+    };
+
+    let v_spend_proofs = Array::read(&mut reader, n_spends, |r| read_zkproof(r))?;
+    let v_spend_auth_sigs = Array::read(&mut reader, n_spends, |r| read_spend_auth_sig(r))?;
+    let v_output_proofs = Array::read(&mut reader, n_outputs, |r| read_zkproof(r))?;
+
+    let binding_sig = if n_spends > 0 || n_outputs > 0 {
+        Some(redjubjub::Signature::read(&mut reader)?)
+    } else {
+        None
+    };
+
+    let shielded_spends = sd_v5s
+        .into_iter()
+        .zip(
+            v_spend_proofs
+                .into_iter()
+                .zip(v_spend_auth_sigs.into_iter()),
+        )
+        .map(|(sd_5, (zkproof, spend_auth_sig))| {
+            // the following `unwrap` is safe because we know n_spends > 0.
+            sd_5.into_spend_description(anchor.unwrap(), zkproof, spend_auth_sig)
+        })
+        .collect();
+
+    let shielded_outputs = od_v5s
+        .into_iter()
+        .zip(v_output_proofs.into_iter())
+        .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
+        .collect();
+
+    Ok(binding_sig.map(|binding_sig| {
+        Bundle::from_parts(
+            shielded_spends,
+            shielded_outputs,
+            value_balance,
+            Authorized { binding_sig },
+        )
+    }))
+}
+
+/// Writes a [`Bundle`] in the v5 transaction format.
+pub(crate) fn write_v5_bundle<W: Write>(
+    mut writer: W,
+    sapling_bundle: Option<&Bundle<Authorized>>,
+) -> io::Result<()> {
+    if let Some(bundle) = sapling_bundle {
+        Vector::write(&mut writer, bundle.shielded_spends(), |w, e| {
+            write_spend_v5_without_witness_data(w, e)
+        })?;
+
+        Vector::write(&mut writer, bundle.shielded_outputs(), |w, e| {
+            write_output_v5_without_proof(w, e)
+        })?;
+
+        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+            writer.write_all(&bundle.value_balance().to_i64_le_bytes())?;
+        }
+        if !bundle.shielded_spends().is_empty() {
+            writer.write_all(bundle.shielded_spends()[0].anchor().to_repr().as_ref())?;
+        }
+
+        Array::write(
+            &mut writer,
+            bundle.shielded_spends().iter().map(|s| &s.zkproof()[..]),
+            |w, e| w.write_all(e),
+        )?;
+        Array::write(
+            &mut writer,
+            bundle.shielded_spends().iter().map(|s| s.spend_auth_sig()),
+            |w, e| e.write(w),
+        )?;
+
+        Array::write(
+            &mut writer,
+            bundle.shielded_outputs().iter().map(|s| &s.zkproof()[..]),
+            |w, e| w.write_all(e),
+        )?;
+
+        if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
+            bundle.authorization().binding_sig.write(&mut writer)?;
+        }
+    } else {
+        CompactSize::write(&mut writer, 0)?;
+        CompactSize::write(&mut writer, 0)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(any(test, feature = "test-dependencies"))]
