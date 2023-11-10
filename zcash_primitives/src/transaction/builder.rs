@@ -14,16 +14,14 @@ use crate::{
     memo::MemoBytes,
     sapling::{
         self,
+        builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
         prover::{OutputProver, SpendProver},
         redjubjub, Diversifier, Note, PaymentAddress,
     },
     transaction::{
         components::{
             amount::{Amount, BalanceError},
-            sapling::{
-                builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
-                fees as sapling_fees,
-            },
+            sapling::fees as sapling_fees,
             transparent::{self, builder::TransparentBuilder},
         },
         fees::FeeRule,

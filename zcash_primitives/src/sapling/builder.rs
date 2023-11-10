@@ -13,6 +13,10 @@ use crate::{
     memo::MemoBytes,
     sapling::{
         self,
+        bundle::{
+            Authorization, Authorized, Bundle, GrothProofBytes, MapAuth, OutputDescription,
+            SpendDescription,
+        },
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
         note_encryption::sapling_note_encryption,
         prover::{OutputProver, SpendProver},
@@ -29,10 +33,7 @@ use crate::{
         builder::Progress,
         components::{
             amount::{Amount, NonNegativeAmount},
-            sapling::{
-                fees, Authorization, Authorized, Bundle, GrothProofBytes, MapAuth,
-                OutputDescription, SpendDescription,
-            },
+            sapling::fees,
         },
     },
     zip32::ExtendedSpendingKey,
@@ -147,17 +148,17 @@ impl SpendDescriptionInfo {
         )
         .ok_or(Error::SpendProof)?;
 
-        Ok(SpendDescription {
+        Ok(SpendDescription::from_parts(
             cv,
             anchor,
             nullifier,
             rk,
             zkproof,
-            spend_auth_sig: SigningParts {
+            SigningParts {
                 ak,
                 alpha: self.alpha,
             },
-        })
+        ))
     }
 }
 
@@ -248,14 +249,14 @@ impl SaplingOutputInfo {
 
         let epk = encryptor.epk();
 
-        OutputDescription {
+        OutputDescription::from_parts(
             cv,
             cmu,
-            ephemeral_key: epk.to_bytes(),
+            epk.to_bytes(),
             enc_ciphertext,
             out_ciphertext,
             zkproof,
-        }
+        )
     }
 }
 
@@ -341,7 +342,7 @@ impl<P> SaplingBuilder<P> {
     ///
     /// This may be larger than the number of outputs that have been added to the builder,
     /// depending on whether padding is going to be applied.
-    pub(in crate::transaction) fn bundle_output_count(&self) -> usize {
+    pub(crate) fn bundle_output_count(&self) -> usize {
         // This matches the padding behaviour in `Self::build`.
         match self.spends.len() {
             0 => self.outputs.len(),
@@ -529,15 +530,15 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             None
         } else {
             Some((
-                Bundle {
+                Bundle::from_parts(
                     shielded_spends,
                     shielded_outputs,
                     value_balance,
-                    authorization: InProgress {
+                    InProgress {
                         sigs: Unsigned { bsk },
                         _proof_state: PhantomData::default(),
                     },
-                },
+                ),
                 tx_metadata,
             ))
         };
@@ -676,7 +677,8 @@ impl<S: InProgressSignatures> Bundle<InProgress<Unproven, S>> {
         rng: impl RngCore,
         progress_notifier: Option<&Sender<Progress>>,
     ) -> Bundle<InProgress<Proven, S>> {
-        let total_progress = self.shielded_spends.len() as u32 + self.shielded_outputs.len() as u32;
+        let total_progress =
+            self.shielded_spends().len() as u32 + self.shielded_outputs().len() as u32;
         self.map_authorization(CreateProofs::new(
             spend_prover,
             output_prover,
@@ -803,7 +805,7 @@ impl<P: InProgressProofs> Bundle<InProgress<P, PartiallyAuthorized>> {
     /// This will apply signatures for all notes controlled by this spending key.
     pub fn sign<R: RngCore + CryptoRng>(self, mut rng: R, ask: &PrivateKey) -> Self {
         let expected_ak = PublicKey::from_private(ask, SPENDING_KEY_GENERATOR);
-        let sighash = self.authorization.sigs.sighash;
+        let sighash = self.authorization().sigs.sighash;
         self.map_authorization((
             |proof| proof,
             |proof| proof,
@@ -827,7 +829,7 @@ impl<P: InProgressProofs> Bundle<InProgress<P, PartiallyAuthorized>> {
     }
 
     fn append_signature(self, signature: &Signature) -> Result<Self, Error> {
-        let sighash = self.authorization.sigs.sighash;
+        let sighash = self.authorization().sigs.sighash;
         let mut signature_valid_for = 0usize;
         let bundle = self.map_authorization((
             |proof| proof,
@@ -884,16 +886,14 @@ pub mod testing {
             TEST_NETWORK,
         },
         sapling::{
+            bundle::{Authorized, Bundle},
             prover::mock::{MockOutputProver, MockSpendProver},
             redjubjub::PrivateKey,
             testing::{arb_node, arb_note},
             value::testing::arb_positive_note_value,
             Diversifier,
         },
-        transaction::components::{
-            amount::MAX_MONEY,
-            sapling::{Authorized, Bundle},
-        },
+        transaction::components::amount::MAX_MONEY,
         zip32::sapling::testing::arb_extended_spending_key,
     };
     use incrementalmerkletree::{

@@ -7,8 +7,8 @@ use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::BlockHeight,
     merkle_tree::read_commitment_tree,
-    sapling::{note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH},
-    transaction::{components::sapling, TxId},
+    sapling::{self, note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH},
+    transaction::TxId,
 };
 
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
@@ -116,8 +116,12 @@ impl compact_formats::CompactSaplingOutput {
     }
 }
 
-impl<Proof> From<&sapling::OutputDescription<Proof>> for compact_formats::CompactSaplingOutput {
-    fn from(out: &sapling::OutputDescription<Proof>) -> compact_formats::CompactSaplingOutput {
+impl<Proof> From<&sapling::bundle::OutputDescription<Proof>>
+    for compact_formats::CompactSaplingOutput
+{
+    fn from(
+        out: &sapling::bundle::OutputDescription<Proof>,
+    ) -> compact_formats::CompactSaplingOutput {
         compact_formats::CompactSaplingOutput {
             cmu: out.cmu().to_bytes().to_vec(),
             ephemeral_key: out.ephemeral_key().as_ref().to_vec(),
@@ -126,11 +130,13 @@ impl<Proof> From<&sapling::OutputDescription<Proof>> for compact_formats::Compac
     }
 }
 
-impl TryFrom<compact_formats::CompactSaplingOutput> for sapling::CompactOutputDescription {
+impl TryFrom<compact_formats::CompactSaplingOutput>
+    for sapling::note_encryption::CompactOutputDescription
+{
     type Error = ();
 
     fn try_from(value: compact_formats::CompactSaplingOutput) -> Result<Self, Self::Error> {
-        Ok(sapling::CompactOutputDescription {
+        Ok(sapling::note_encryption::CompactOutputDescription {
             cmu: value.cmu()?,
             ephemeral_key: value.ephemeral_key()?,
             enc_ciphertext: value.ciphertext.try_into().map_err(|_| ())?,
@@ -144,10 +150,10 @@ impl compact_formats::CompactSaplingSpend {
     }
 }
 
-impl<A: sapling::Authorization> From<&sapling::SpendDescription<A>>
+impl<A: sapling::bundle::Authorization> From<&sapling::bundle::SpendDescription<A>>
     for compact_formats::CompactSaplingSpend
 {
-    fn from(spend: &sapling::SpendDescription<A>) -> compact_formats::CompactSaplingSpend {
+    fn from(spend: &sapling::bundle::SpendDescription<A>) -> compact_formats::CompactSaplingSpend {
         compact_formats::CompactSaplingSpend {
             nf: spend.nullifier().to_vec(),
         }

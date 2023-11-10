@@ -31,10 +31,10 @@
 //! you should only need to interact with [`NoteValue`] (which can be safely constructed
 //! from a `u64`) and `valueBalanceSapling` (which can be represented as an `i64`).
 //!
-//! [`Bundle`]: crate::transaction::components::sapling::Bundle
-//! [`Bundle::value_balance`]: crate::transaction::components::sapling::Bundle::value_balance
-//! [`SaplingBuilder::value_balance`]: crate::transaction::components::sapling::builder::SaplingBuilder::value_balance
-//! [`SaplingBuilder::add_output`]: crate::transaction::components::sapling::builder::SaplingBuilder::add_output
+//! [`Bundle`]: crate::sapling::Bundle
+//! [`Bundle::value_balance`]: crate::sapling::Bundle::value_balance
+//! [`SaplingBuilder::value_balance`]: crate::sapling::builder::SaplingBuilder::value_balance
+//! [`SaplingBuilder::add_output`]: crate::sapling::builder::SaplingBuilder::add_output
 //! [Rust documentation]: https://doc.rust-lang.org/stable/std/primitive.i64.html
 
 use bitvec::{array::BitArray, order::Lsb0};

@@ -1,6 +1,8 @@
 //! Structs and constants specific to the Sapling shielded pool.
 
 mod address;
+pub mod builder;
+pub mod bundle;
 pub mod circuit;
 pub mod constants;
 pub mod group_hash;
@@ -24,6 +26,7 @@ use constants::SPENDING_KEY_GENERATOR;
 use self::redjubjub::{PrivateKey, PublicKey, Signature};
 
 pub use address::PaymentAddress;
+pub use bundle::Bundle;
 pub use keys::{Diversifier, NullifierDerivingKey, ProofGenerationKey, SaplingIvk, ViewingKey};
 pub use note::{nullifier::Nullifier, Note, Rseed};
 pub use tree::{

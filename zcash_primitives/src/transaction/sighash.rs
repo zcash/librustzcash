@@ -1,15 +1,14 @@
-use crate::legacy::Script;
 use blake2b_simd::Hash as Blake2bHash;
 
 use super::{
-    components::{
-        amount::NonNegativeAmount,
-        sapling::{self, GrothProofBytes},
-        transparent,
-    },
+    components::{amount::NonNegativeAmount, transparent},
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     Authorization, TransactionData, TxDigests, TxVersion,
+};
+use crate::{
+    legacy::Script,
+    sapling::{self, bundle::GrothProofBytes},
 };
 
 #[cfg(feature = "zfuture")]
@@ -79,7 +78,7 @@ pub trait TransparentAuthorizingContext: transparent::Authorization {
 pub fn signature_hash<
     'a,
     TA: TransparentAuthorizingContext,
-    SA: sapling::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA, TransparentAuth = TA>,
 >(
     tx: &TransactionData<A>,
