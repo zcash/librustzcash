@@ -54,6 +54,14 @@ and this library adheres to Rust's notion of
   - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
 - `zcash_primitives::transaction`:
   - `builder::get_fee`
+  - `components::sapling`:
+    - Sapling bundle component parsers, behind the `temporary-zcashd` feature
+      flag:
+      - `temporary_zcashd_read_spend_v4`
+      - `temporary_zcashd_read_output_v4`
+      - `temporary_zcashd_write_output_v4`
+      - `temporary_zcashd_read_v4_components`
+      - `temporary_zcashd_write_v4_components`
   - `fees::StandardFeeRule`
   - Constants in `fees::zip317`:
     - `MARGINAL_FEE`

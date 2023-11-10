@@ -92,6 +92,13 @@ fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
     Signature::read(&mut reader)
 }
 
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_read_spend_v4<R: Read>(
+    reader: R,
+) -> io::Result<SpendDescription<Authorized>> {
+    read_spend_v4(reader)
+}
+
 fn read_spend_v4<R: Read>(mut reader: R) -> io::Result<SpendDescription<Authorized>> {
     // Consensus rules (§4.4) & (§4.5):
     // - Canonical encoding is enforced here.
@@ -142,6 +149,13 @@ fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> 
     Ok(SpendDescriptionV5::from_parts(cv, nullifier, rk))
 }
 
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_read_output_v4<R: Read>(
+    mut reader: R,
+) -> io::Result<OutputDescription<GrothProofBytes>> {
+    read_output_v4(&mut reader)
+}
+
 fn read_output_v4<R: Read>(mut reader: &mut R) -> io::Result<OutputDescription<GrothProofBytes>> {
     // Consensus rules (§4.5):
     // - Canonical encoding is enforced here.
@@ -173,6 +187,14 @@ fn read_output_v4<R: Read>(mut reader: &mut R) -> io::Result<OutputDescription<G
         out_ciphertext,
         zkproof,
     ))
+}
+
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_write_output_v4<W: Write>(
+    writer: W,
+    output: &OutputDescription<GrothProofBytes>,
+) -> io::Result<()> {
+    write_output_v4(writer, output)
 }
 
 pub(crate) fn write_output_v4<W: Write>(
@@ -223,6 +245,20 @@ fn read_output_v5<R: Read>(mut reader: &mut R) -> io::Result<OutputDescriptionV5
 }
 
 /// Reads the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
+#[allow(clippy::type_complexity)]
+pub fn temporary_zcashd_read_v4_components<R: Read>(
+    reader: R,
+    tx_has_sapling: bool,
+) -> io::Result<(
+    Amount,
+    Vec<SpendDescription<Authorized>>,
+    Vec<OutputDescription<GrothProofBytes>>,
+)> {
+    read_v4_components(reader, tx_has_sapling)
+}
+
+/// Reads the Sapling components of a v4 transaction.
 #[allow(clippy::type_complexity)]
 pub(crate) fn read_v4_components<R: Read>(
     mut reader: R,
@@ -244,6 +280,16 @@ pub(crate) fn read_v4_components<R: Read>(
     } else {
         Ok((Amount::zero(), vec![], vec![]))
     }
+}
+
+/// Writes the Sapling components of a v4 transaction.
+#[cfg(feature = "temporary-zcashd")]
+pub fn temporary_zcashd_write_v4_components<W: Write>(
+    writer: W,
+    bundle: Option<&Bundle<Authorized>>,
+    tx_has_sapling: bool,
+) -> io::Result<()> {
+    write_v4_components(writer, bundle, tx_has_sapling)
 }
 
 /// Writes the Sapling components of a v4 transaction.
