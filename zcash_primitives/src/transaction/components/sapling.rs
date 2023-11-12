@@ -3,7 +3,7 @@ use ff::PrimeField;
 use std::io::{self, Read, Write};
 
 use zcash_encoding::{Array, CompactSize, Vector};
-use zcash_note_encryption::EphemeralKeyBytes;
+use zcash_note_encryption::{EphemeralKeyBytes, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE};
 
 use crate::{
     sapling::{
@@ -172,8 +172,8 @@ fn read_output_v4<R: Read>(mut reader: &mut R) -> io::Result<OutputDescription<G
     let mut ephemeral_key = EphemeralKeyBytes([0u8; 32]);
     reader.read_exact(&mut ephemeral_key.0)?;
 
-    let mut enc_ciphertext = [0u8; 580];
-    let mut out_ciphertext = [0u8; 80];
+    let mut enc_ciphertext = [0u8; ENC_CIPHERTEXT_SIZE];
+    let mut out_ciphertext = [0u8; OUT_CIPHERTEXT_SIZE];
     reader.read_exact(&mut enc_ciphertext)?;
     reader.read_exact(&mut out_ciphertext)?;
 

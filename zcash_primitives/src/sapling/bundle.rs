@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use memuse::DynamicUsage;
 
 use zcash_note_encryption::{
-    EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
+    EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
 };
 
 use crate::{
@@ -431,8 +431,8 @@ pub struct OutputDescription<Proof> {
     cv: ValueCommitment,
     cmu: ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    enc_ciphertext: [u8; 580],
-    out_ciphertext: [u8; 80],
+    enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
+    out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
     zkproof: Proof,
 }
 
@@ -452,12 +452,12 @@ impl<Proof> OutputDescription<Proof> {
     }
 
     /// Returns the encrypted note ciphertext.
-    pub fn enc_ciphertext(&self) -> &[u8; 580] {
+    pub fn enc_ciphertext(&self) -> &[u8; ENC_CIPHERTEXT_SIZE] {
         &self.enc_ciphertext
     }
 
     /// Returns the output recovery ciphertext.
-    pub fn out_ciphertext(&self) -> &[u8; 80] {
+    pub fn out_ciphertext(&self) -> &[u8; OUT_CIPHERTEXT_SIZE] {
         &self.out_ciphertext
     }
 
@@ -471,8 +471,8 @@ impl<Proof> OutputDescription<Proof> {
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        enc_ciphertext: [u8; 580],
-        out_ciphertext: [u8; 80],
+        enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
+        out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
         zkproof: Proof,
     ) -> Self {
         Self::from_parts(
@@ -489,8 +489,8 @@ impl<Proof> OutputDescription<Proof> {
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        enc_ciphertext: [u8; 580],
-        out_ciphertext: [u8; 80],
+        enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
+        out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
         zkproof: Proof,
     ) -> Self {
         OutputDescription {
@@ -515,10 +515,10 @@ impl<Proof> OutputDescription<Proof> {
     pub(crate) fn ephemeral_key_mut(&mut self) -> &mut EphemeralKeyBytes {
         &mut self.ephemeral_key
     }
-    pub(crate) fn enc_ciphertext_mut(&mut self) -> &mut [u8; 580] {
+    pub(crate) fn enc_ciphertext_mut(&mut self) -> &mut [u8; ENC_CIPHERTEXT_SIZE] {
         &mut self.enc_ciphertext
     }
-    pub(crate) fn out_ciphertext_mut(&mut self) -> &mut [u8; 80] {
+    pub(crate) fn out_ciphertext_mut(&mut self) -> &mut [u8; OUT_CIPHERTEXT_SIZE] {
         &mut self.out_ciphertext
     }
 }
@@ -564,8 +564,8 @@ pub struct OutputDescriptionV5 {
     cv: ValueCommitment,
     cmu: ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    enc_ciphertext: [u8; 580],
-    out_ciphertext: [u8; 80],
+    enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
+    out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
 }
 
 memuse::impl_no_dynamic_usage!(OutputDescriptionV5);
@@ -575,8 +575,8 @@ impl OutputDescriptionV5 {
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        enc_ciphertext: [u8; 580],
-        out_ciphertext: [u8; 80],
+        enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
+        out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
     ) -> Self {
         Self {
             cv,
@@ -634,7 +634,10 @@ pub mod testing {
         transaction::components::{amount::testing::arb_amount, GROTH_PROOF_SIZE},
     };
 
-    use super::{Authorized, Bundle, GrothProofBytes, OutputDescription, SpendDescription};
+    use super::{
+        Authorized, Bundle, GrothProofBytes, OutputDescription, SpendDescription,
+        ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
+    };
 
     prop_compose! {
         fn arb_extended_point()(rng_seed in prop::array::uniform32(any::<u8>())) -> jubjub::ExtendedPoint {
@@ -684,13 +687,13 @@ pub mod testing {
             cmu in vec(any::<u8>(), 64)
                 .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
                 .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
-            enc_ciphertext in vec(any::<u8>(), 580)
-                .prop_map(|v| <[u8;580]>::try_from(v.as_slice()).unwrap()),
+            enc_ciphertext in vec(any::<u8>(), ENC_CIPHERTEXT_SIZE)
+                .prop_map(|v| <[u8; ENC_CIPHERTEXT_SIZE]>::try_from(v.as_slice()).unwrap()),
             epk in arb_extended_point(),
-            out_ciphertext in vec(any::<u8>(), 80)
-                .prop_map(|v| <[u8;80]>::try_from(v.as_slice()).unwrap()),
+            out_ciphertext in vec(any::<u8>(), OUT_CIPHERTEXT_SIZE)
+                .prop_map(|v| <[u8; OUT_CIPHERTEXT_SIZE]>::try_from(v.as_slice()).unwrap()),
             zkproof in vec(any::<u8>(), GROTH_PROOF_SIZE)
-                .prop_map(|v| <[u8;GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
+                .prop_map(|v| <[u8; GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
         ) -> OutputDescription<GrothProofBytes> {
             let cv = ValueCommitment::derive(value, rcv);
             let cmu = ExtractedNoteCommitment::from_bytes(&cmu.to_bytes()).unwrap();
