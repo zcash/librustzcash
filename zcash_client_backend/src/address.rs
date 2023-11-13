@@ -135,8 +135,8 @@ impl UnifiedAddress {
         self.transparent.as_ref()
     }
 
-    fn to_address(&self, net: Network) -> ZcashAddress {
-        let ua = unified::Address::try_from_items(
+    fn to_unified(&self) -> unified::Address {
+        unified::Address::try_from_items(
             self.unknown
                 .iter()
                 .map(|(typecode, data)| unified::Receiver::Unknown {
@@ -161,8 +161,40 @@ impl UnifiedAddress {
                 )
                 .collect(),
         )
-        .expect("UnifiedAddress should only be constructed safely");
-        ZcashAddress::from_unified(net, ua)
+        .expect("UnifiedAddress should only be constructed safely")
+    }
+
+    fn to_address(&self, net: Network) -> ZcashAddress {
+        ZcashAddress::from_unified(net, self.to_unified())
+    }
+
+    /// Returns the raw encoding of this `UnifiedAddress` as specified in ZIP 316
+    pub fn write_as_raw_encoding<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+        for item in self.to_unified().items() {
+            match item {
+                unified::Receiver::Orchard(data) => {
+                    writer.write_all(&[3])?;
+                    writer.write_all(&data)?;
+                }
+                unified::Receiver::Sapling(data) => {
+                    writer.write_all(&[2])?;
+                    writer.write_all(&data)?;
+                }
+                unified::Receiver::P2sh(data) => {
+                    writer.write_all(&[1])?;
+                    writer.write_all(&data)?;
+                }
+                unified::Receiver::P2pkh(data) => {
+                    writer.write_all(&[0])?;
+                    writer.write_all(&data)?;
+                }
+                unified::Receiver::Unknown { typecode, data } => {
+                    zcash_encoding::CompactSize::write(&mut writer, typecode as usize)?;
+                    writer.write_all(&data)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Returns the string encoding of this `UnifiedAddress` for the given network.
