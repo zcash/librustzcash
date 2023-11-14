@@ -5,7 +5,10 @@
 //!
 //! The specification for ZIP 321 URIs may be found at <https://zips.z.cash/zip-0321>
 use core::fmt::Debug;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+};
 
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use nom::{
@@ -43,6 +46,51 @@ pub enum Zip321Error {
     RecipientMissing(usize),
     /// The ZIP 321 URI was malformed and failed to parse.
     ParseError(String),
+}
+
+impl Display for Zip321Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Zip321Error::InvalidBase64(err) => {
+                write!(f, "Memo value was not correctly base64 encoded: {:?}", err)
+            }
+            Zip321Error::MemoBytesError(err) => write!(
+                f,
+                "Memo exceeded maximum length or violated utf-8 encodiding restrictions: {:?}.",
+                err
+            ),
+            Zip321Error::TooManyPayments(n) => write!(
+                f,
+                "Cannot create a Zcash transaction containing {} payments",
+                n
+            ),
+            Zip321Error::DuplicateParameter(param, idx) => write!(
+                f,
+                "There is a duplicate {} parameter at index {}",
+                param.name(),
+                idx
+            ),
+            Zip321Error::TransparentMemo(idx) => write!(
+                f,
+                "Payment {} is invalid: cannot send a memo to a transparent recipient address.",
+                idx
+            ),
+            Zip321Error::RecipientMissing(idx) => {
+                write!(f, "Payment {} is missing its recipient address.", idx)
+            }
+            Zip321Error::ParseError(s) => write!(f, "Parse failure: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for Zip321Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Zip321Error::InvalidBase64(err) => Some(err),
+            Zip321Error::MemoBytesError(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
@@ -439,6 +487,20 @@ mod parse {
         Label(String),
         Message(String),
         Other(String, String),
+    }
+
+    impl Param {
+        /// Returns the name of the parameter from which this value was parsed.
+        pub fn name(&self) -> String {
+            match self {
+                Param::Addr(_) => "address".to_owned(),
+                Param::Amount(_) => "amount".to_owned(),
+                Param::Memo(_) => "memo".to_owned(),
+                Param::Label(_) => "label".to_owned(),
+                Param::Message(_) => "message".to_owned(),
+                Param::Other(name, _) => name.clone(),
+            }
+        }
     }
 
     /// A [`Param`] value with its associated index.

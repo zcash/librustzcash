@@ -1071,6 +1071,8 @@ pub(crate) fn input_selector(
     GreedyInputSelector::new(change_strategy, DustOutputPolicy::default())
 }
 
+// Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
+// the same proposal value.
 pub(crate) fn check_proposal_serialization_roundtrip(
     db_data: &WalletDb<rusqlite::Connection, Network>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,

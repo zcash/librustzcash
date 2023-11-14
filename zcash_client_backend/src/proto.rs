@@ -1,6 +1,10 @@
 //! Generated code for handling light client protobuf structs.
 
-use std::{array::TryFromSliceError, io};
+use std::{
+    array::TryFromSliceError,
+    fmt::{self, Display},
+    io,
+};
 
 use incrementalmerkletree::frontier::CommitmentTree;
 
@@ -205,25 +209,88 @@ impl service::TreeState {
     }
 }
 
+/// Constant for the V1 proposal serialization version.
 pub const PROPOSAL_SER_V1: u32 = 1;
 
+/// Errors that can occur in the process of decoding a [`Proposal`] from its protobuf
+/// representation.
 #[derive(Debug, Clone)]
 pub enum ProposalDecodingError<DbError> {
+    /// The ZIP 321 transaction request URI was invalid.
     Zip321(Zip321Error),
+    /// A transaction identifier string did not decode to a valid transaction ID.
     TxIdInvalid(TryFromSliceError),
+    /// A failure occurred trying to retrievean unspent note or UTXO from the wallet database.
     InputRetrieval(DbError),
+    /// The unspent note or UTXO corresponding to a proposal input was not found in the wallet
+    /// database.
     InputNotFound(TxId, PoolType, u32),
+    /// The transaction balance, or a component thereof, failed to decode correctly.
     BalanceInvalid,
+    /// Failed to decode a ZIP-302 compliant memo from the provided memo bytes.
     MemoInvalid(memo::Error),
+    /// The serialization version returned by the protobuf was not recognized.
     VersionInvalid(u32),
-    ZeroMinConf,
+    /// The proposal did not correctly specify a standard fee rule.
     FeeRuleNotSpecified,
+    /// The proposal violated balance or structural constraints.
     ProposalInvalid(ProposalError),
+    /// A `sapling_inputs` field was present, but contained no input note references.
+    EmptySaplingInputs,
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
     fn from(value: Zip321Error) -> Self {
         Self::Zip321(value)
+    }
+}
+
+impl<E: Display> Display for ProposalDecodingError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProposalDecodingError::Zip321(err) => write!(f, "Transaction request invalid: {}", err),
+            ProposalDecodingError::TxIdInvalid(err) => {
+                write!(f, "Invalid transaction id: {:?}", err)
+            }
+            ProposalDecodingError::InputRetrieval(err) => write!(
+                f,
+                "An error occurred retrieving a transaction intput: {}",
+                err
+            ),
+            ProposalDecodingError::InputNotFound(txid, pool, idx) => write!(
+                f,
+                "No {} input found for txid {}, index {}",
+                pool, txid, idx
+            ),
+            ProposalDecodingError::BalanceInvalid => {
+                write!(f, "An error occurred decoding the proposal balance.")
+            }
+            ProposalDecodingError::MemoInvalid(err) => {
+                write!(f, "An error occurred decoding a proposed memo: {}", err)
+            }
+            ProposalDecodingError::VersionInvalid(v) => {
+                write!(f, "Unrecognized proposal version {}", v)
+            }
+            ProposalDecodingError::FeeRuleNotSpecified => {
+                write!(f, "Proposal did not specify a known fee rule.")
+            }
+            ProposalDecodingError::ProposalInvalid(err) => write!(f, "{}", err),
+            ProposalDecodingError::EmptySaplingInputs => write!(
+                f,
+                "A `sapling_inputs` field was present, but contained no Sapling note references."
+            ),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for ProposalDecodingError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ProposalDecodingError::Zip321(e) => Some(e),
+            ProposalDecodingError::InputRetrieval(e) => Some(e),
+            ProposalDecodingError::MemoInvalid(e) => Some(e),
+            _ => None,
+        }
     }
 }
 
@@ -272,7 +339,7 @@ impl proposal::Proposal {
                 .balance()
                 .proposed_change()
                 .iter()
-                .map(|cv| match cv {
+                .map(|change| match change {
                     ChangeValue::Sapling { value, memo } => proposal::ChangeValue {
                         value: Some(proposal::change_value::Value::SaplingValue(
                             proposal::SaplingChange {
@@ -342,7 +409,7 @@ impl proposal::Proposal {
                         wallet_db
                             .get_unspent_transparent_output(&outpoint)
                             .map_err(ProposalDecodingError::InputRetrieval)?
-                            .ok_or_else(|| {
+                            .ok_or({
                                 ProposalDecodingError::InputNotFound(
                                     txid,
                                     PoolType::Transparent,
@@ -352,7 +419,7 @@ impl proposal::Proposal {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let sapling_inputs = self.sapling_inputs.as_ref().and_then(|s_in| {
+                let sapling_inputs = self.sapling_inputs.as_ref().map(|s_in| {
                     s_in.inputs
                         .iter()
                         .map(|s_in| {
@@ -364,7 +431,7 @@ impl proposal::Proposal {
                                 .get_spendable_sapling_note(&txid, s_in.index)
                                 .map_err(ProposalDecodingError::InputRetrieval)
                                 .and_then(|opt| {
-                                    opt.ok_or_else(|| {
+                                    opt.ok_or({
                                         ProposalDecodingError::InputNotFound(
                                             txid,
                                             PoolType::Shielded(ShieldedProtocol::Sapling),
@@ -374,12 +441,13 @@ impl proposal::Proposal {
                                 })
                         })
                         .collect::<Result<Vec<_>, _>>()
-                        .map(|notes| {
-                            NonEmpty::from_vec(notes).map(|notes| {
-                                SaplingInputs::from_parts(s_in.anchor_height.into(), notes)
-                            })
+                        .and_then(|notes| {
+                            NonEmpty::from_vec(notes)
+                                .map(|notes| {
+                                    SaplingInputs::from_parts(s_in.anchor_height.into(), notes)
+                                })
+                                .ok_or(ProposalDecodingError::EmptySaplingInputs)
                         })
-                        .transpose()
                 });
 
                 let proto_balance = self
@@ -390,8 +458,11 @@ impl proposal::Proposal {
                     proto_balance
                         .proposed_change
                         .iter()
-                        .filter_map(|cv| {
-                            cv.value.as_ref().map(
+                        .filter_map(|change| {
+                            // An empty `value` field can be treated as though the whole
+                            // `ChangeValue` was absent; this optionality is an artifact of
+                            // protobuf encoding.
+                            change.value.as_ref().map(
                                 |cv| -> Result<ChangeValue, ProposalDecodingError<_>> {
                                     match cv {
                                         proposal::change_value::Value::SaplingValue(sc) => {

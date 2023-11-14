@@ -81,7 +81,7 @@ where
     FE: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self {
+        match self {
             Error::DataSource(e) => {
                 write!(
                     f,
