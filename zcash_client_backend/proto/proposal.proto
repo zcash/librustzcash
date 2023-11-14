@@ -31,7 +31,7 @@ message Proposal {
 }
 
 message SaplingInputs {
-    // Returns the Sapling anchor height to be used in creating the transaction.
+    // The Sapling anchor height to be used in creating the transaction
     uint32 anchorHeight = 1;
     // The unique identifier and amount for each proposed Sapling input
     repeated ProposedInput inputs = 2;
@@ -46,7 +46,7 @@ message ProposedInput {
 
 // The fee rule used in constructing a Proposal
 enum FeeRule {
-    // Protobuf requires that enums have a zero descriminant as the default
+    // Protobuf requires that enums have a zero discriminant as the default
     // value. However, we need to require that a known fee rule is selected,
     // and we do not want to fall back to any default, so sending the
     // FeeRuleNotSpecified value will be treated as an error.

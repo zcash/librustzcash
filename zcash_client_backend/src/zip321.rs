@@ -154,8 +154,8 @@ impl TransactionRequest {
 
     /// Returns the total value of payments to be made.
     ///
-    /// Returns `Err` in the case of overflow, if payment values are negative, or the value is
-    /// outside the valid range of Zcash values. .
+    /// Returns `Err` in the case of overflow, or the value is
+    /// outside the range `0..=MAX_MONEY` zatoshis.
     pub fn total(&self) -> Result<NonNegativeAmount, ()> {
         if self.payments.is_empty() {
             Ok(NonNegativeAmount::ZERO)

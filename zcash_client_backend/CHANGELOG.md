@@ -28,8 +28,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::proto::`
   - `PROPOSAL_SER_V1`
   - `ProposalError`
-  - `proposal::Proposal::{from_standard_proposal, try_into_standard_proposal}`
-  - `proposal::ProposedInput::parse_txid`
+  - `proposal` module, for parsing and serializing transaction proposals.
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
      wallet::{ReceivedSaplingNote, WalletTransparentOutput},

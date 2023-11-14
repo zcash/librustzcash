@@ -206,15 +206,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> TransparentInput
 
     fn get_unspent_transparent_output(
         &self,
-        _outpoint: &OutPoint,
+        outpoint: &OutPoint,
     ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::get_unspent_transparent_output(self.conn.borrow(), _outpoint);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
+        wallet::get_unspent_transparent_output(self.conn.borrow(), outpoint)
     }
 
     fn get_unspent_transparent_outputs(

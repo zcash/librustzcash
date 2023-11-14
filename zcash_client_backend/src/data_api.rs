@@ -222,8 +222,11 @@ pub trait SaplingInputSource {
     /// or a UUID.
     type NoteRef: Copy + Debug + Eq + Ord;
 
-    /// Returns a received Sapling note, or Ok(None) if the note is not known to belong to the
-    /// wallet or if the note is not spendable.
+    /// Fetches a spendable Sapling note by indexing into the specified transaction's
+    /// [`sapling::Bundle::shielded_outputs`].
+    ///
+    /// Returns `Ok(None)` if the note is not known to belong to the wallet or if the note
+    /// is not spendable.
     fn get_spendable_sapling_note(
         &self,
         txid: &TxId,
@@ -247,8 +250,10 @@ pub trait TransparentInputSource {
     /// The type of errors produced by a wallet backend.
     type Error;
 
-    /// Returns a received transparent UTXO, or Ok(None) if the UTXO is not known to belong to the
-    /// wallet or is not spendable.
+    /// Fetches a spendable transparent output.
+    ///
+    /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
+    /// spendable.
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,

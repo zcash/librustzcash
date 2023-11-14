@@ -90,10 +90,25 @@ pub struct Proposal<FeeRuleT, NoteRef> {
     is_shielding: bool,
 }
 
+/// Errors that
+#[derive(Debug, Clone)]
+pub enum ProposalError {
+    RequestInvalid,
+    Overflow,
+    BalanceError {
+        input_total: NonNegativeAmount,
+        output_total: NonNegativeAmount,
+    },
+    ShieldingFlagInvalid,
+}
+
 impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
-    /// Constructs a [`Proposal`] from its constituent parts.
+    /// Constructs a validated [`Proposal`] from its constituent parts.
+    ///
+    /// This operation validaes the proposal for balance consistency and agreement between
+    /// the `is_shielding` flag and the structure of the proposal.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_parts(
+    pub fn from_parts(
         transaction_request: TransactionRequest,
         transparent_inputs: Vec<WalletTransparentOutput>,
         sapling_inputs: Option<SaplingInputs<NoteRef>>,
@@ -101,19 +116,35 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         fee_rule: FeeRuleT,
         min_target_height: BlockHeight,
         is_shielding: bool,
-    ) -> Result<Self, ()> {
-        let transparent_total = transparent_inputs
+    ) -> Result<Self, ProposalError> {
+        let transparent_input_total = transparent_inputs
             .iter()
             .map(|out| out.txout().value)
-            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))?;
-        let sapling_total = sapling_inputs
+            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
+                (acc? + a).ok_or(ProposalError::Overflow)
+            })?;
+        let sapling_input_total = sapling_inputs
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.value())
-            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))?;
-        let input_total = (transparent_total + sapling_total).ok_or(())?;
+            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
+                (acc? + a).ok_or(ProposalError::Overflow)
+            })?;
+        let input_total =
+            (transparent_input_total + sapling_input_total).ok_or(ProposalError::Overflow)?;
 
-        let output_total = (transaction_request.total()? + balance.total()).ok_or(())?;
+        let request_total = transaction_request
+            .total()
+            .map_err(|_| ProposalError::RequestInvalid)?;
+        let output_total = (request_total + balance.total()).ok_or(ProposalError::Overflow)?;
+
+        if is_shielding
+            && (transparent_input_total == NonNegativeAmount::ZERO
+                || sapling_input_total > NonNegativeAmount::ZERO
+                || request_total > NonNegativeAmount::ZERO)
+        {
+            return Err(ProposalError::ShieldingFlagInvalid);
+        }
 
         if input_total == output_total {
             Ok(Self {
@@ -126,7 +157,10 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                 is_shielding,
             })
         } else {
-            Err(())
+            Err(ProposalError::BalanceError {
+                input_total,
+                output_total,
+            })
         }
     }
 

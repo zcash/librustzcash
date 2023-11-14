@@ -135,8 +135,8 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
     ))
 }
 
-// The `clippy::let_and_return` lint is explicitly allowed here because a bug in the Rust compiler
-// (https://github.com/rust-lang/rust/issues/114633) fails to identify that the `result` temporary
+// The `clippy::let_and_return` lint is explicitly allowed here because a bug in Clippy
+// (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.
 #[allow(clippy::let_and_return)]
 pub(crate) fn get_spendable_sapling_note(

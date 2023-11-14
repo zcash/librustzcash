@@ -1,6 +1,6 @@
 //! Generated code for handling light client protobuf structs.
 
-use std::io;
+use std::{array::TryFromSliceError, io};
 
 use incrementalmerkletree::frontier::CommitmentTree;
 
@@ -22,7 +22,7 @@ use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
 use crate::{
     data_api::{
-        wallet::input_selection::{Proposal, SaplingInputs},
+        wallet::input_selection::{Proposal, ProposalError, SaplingInputs},
         PoolType, SaplingInputSource, ShieldedProtocol, TransparentInputSource,
     },
     fees::{ChangeValue, TransactionBalance},
@@ -207,10 +207,10 @@ impl service::TreeState {
 
 pub const PROPOSAL_SER_V1: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProposalError<DbError> {
+#[derive(Debug, Clone)]
+pub enum ProposalDecodingError<DbError> {
     Zip321(Zip321Error),
-    TxIdInvalid(Vec<u8>),
+    TxIdInvalid(TryFromSliceError),
     InputRetrieval(DbError),
     InputNotFound(TxId, PoolType, u32),
     BalanceInvalid,
@@ -218,17 +218,18 @@ pub enum ProposalError<DbError> {
     VersionInvalid(u32),
     ZeroMinConf,
     FeeRuleNotSpecified,
+    ProposalInvalid(ProposalError),
 }
 
-impl<E> From<Zip321Error> for ProposalError<E> {
+impl<E> From<Zip321Error> for ProposalDecodingError<E> {
     fn from(value: Zip321Error) -> Self {
         Self::Zip321(value)
     }
 }
 
 impl proposal::ProposedInput {
-    pub fn parse_txid(&self) -> Result<TxId, Vec<u8>> {
-        Ok(TxId::from_bytes(self.txid.clone().try_into()?))
+    pub fn parse_txid(&self) -> Result<TxId, TryFromSliceError> {
+        Ok(TxId::from_bytes(self.txid[..].try_into()?))
     }
 }
 
@@ -311,7 +312,7 @@ impl proposal::Proposal {
         &self,
         params: &P,
         wallet_db: &DbT,
-    ) -> Result<Proposal<StandardFeeRule, DbT::NoteRef>, ProposalError<DbError>>
+    ) -> Result<Proposal<StandardFeeRule, DbT::NoteRef>, ProposalDecodingError<DbError>>
     where
         DbT: TransparentInputSource<Error = DbError> + SaplingInputSource<Error = DbError>,
     {
@@ -323,7 +324,7 @@ impl proposal::Proposal {
                     proposal::FeeRule::Zip313 => StandardFeeRule::Zip313,
                     proposal::FeeRule::Zip317 => StandardFeeRule::Zip317,
                     proposal::FeeRule::NotSpecified => {
-                        return Err(ProposalError::FeeRuleNotSpecified);
+                        return Err(ProposalDecodingError::FeeRuleNotSpecified);
                     }
                 };
 
@@ -333,14 +334,16 @@ impl proposal::Proposal {
                     .transparent_inputs
                     .iter()
                     .map(|t_in| {
-                        let txid = t_in.parse_txid().map_err(ProposalError::TxIdInvalid)?;
+                        let txid = t_in
+                            .parse_txid()
+                            .map_err(ProposalDecodingError::TxIdInvalid)?;
                         let outpoint = OutPoint::new(txid.into(), t_in.index);
 
                         wallet_db
                             .get_unspent_transparent_output(&outpoint)
-                            .map_err(ProposalError::InputRetrieval)?
+                            .map_err(ProposalDecodingError::InputRetrieval)?
                             .ok_or_else(|| {
-                                ProposalError::InputNotFound(
+                                ProposalDecodingError::InputNotFound(
                                     txid,
                                     PoolType::Transparent,
                                     t_in.index,
@@ -353,14 +356,16 @@ impl proposal::Proposal {
                     s_in.inputs
                         .iter()
                         .map(|s_in| {
-                            let txid = s_in.parse_txid().map_err(ProposalError::TxIdInvalid)?;
+                            let txid = s_in
+                                .parse_txid()
+                                .map_err(ProposalDecodingError::TxIdInvalid)?;
 
                             wallet_db
                                 .get_spendable_sapling_note(&txid, s_in.index)
-                                .map_err(ProposalError::InputRetrieval)
+                                .map_err(ProposalDecodingError::InputRetrieval)
                                 .and_then(|opt| {
                                     opt.ok_or_else(|| {
-                                        ProposalError::InputNotFound(
+                                        ProposalDecodingError::InputNotFound(
                                             txid,
                                             PoolType::Shielded(ShieldedProtocol::Sapling),
                                             s_in.index,
@@ -377,37 +382,42 @@ impl proposal::Proposal {
                         .transpose()
                 });
 
-                let balance = self.balance.as_ref().ok_or(ProposalError::BalanceInvalid)?;
+                let proto_balance = self
+                    .balance
+                    .as_ref()
+                    .ok_or(ProposalDecodingError::BalanceInvalid)?;
                 let balance = TransactionBalance::new(
-                    balance
+                    proto_balance
                         .proposed_change
                         .iter()
                         .filter_map(|cv| {
-                            cv.value
-                                .as_ref()
-                                .map(|cv| -> Result<ChangeValue, ProposalError<_>> {
+                            cv.value.as_ref().map(
+                                |cv| -> Result<ChangeValue, ProposalDecodingError<_>> {
                                     match cv {
                                         proposal::change_value::Value::SaplingValue(sc) => {
                                             Ok(ChangeValue::sapling(
-                                                NonNegativeAmount::from_u64(sc.amount)
-                                                    .map_err(|_| ProposalError::BalanceInvalid)?,
+                                                NonNegativeAmount::from_u64(sc.amount).map_err(
+                                                    |_| ProposalDecodingError::BalanceInvalid,
+                                                )?,
                                                 sc.memo
                                                     .as_ref()
                                                     .map(|bytes| {
-                                                        MemoBytes::from_bytes(&bytes.value)
-                                                            .map_err(ProposalError::MemoInvalid)
+                                                        MemoBytes::from_bytes(&bytes.value).map_err(
+                                                            ProposalDecodingError::MemoInvalid,
+                                                        )
                                                     })
                                                     .transpose()?,
                                             ))
                                         }
                                     }
-                                })
+                                },
+                            )
                         })
                         .collect::<Result<Vec<_>, _>>()?,
-                    NonNegativeAmount::from_u64(balance.fee_required)
-                        .map_err(|_| ProposalError::BalanceInvalid)?,
+                    NonNegativeAmount::from_u64(proto_balance.fee_required)
+                        .map_err(|_| ProposalDecodingError::BalanceInvalid)?,
                 )
-                .map_err(|_| ProposalError::BalanceInvalid)?;
+                .map_err(|_| ProposalDecodingError::BalanceInvalid)?;
 
                 Proposal::from_parts(
                     transaction_request,
@@ -418,9 +428,9 @@ impl proposal::Proposal {
                     self.min_target_height.into(),
                     self.is_shielding,
                 )
-                .map_err(|_| ProposalError::BalanceInvalid)
+                .map_err(ProposalDecodingError::ProposalInvalid)
             }
-            other => Err(ProposalError::VersionInvalid(other)),
+            other => Err(ProposalDecodingError::VersionInvalid(other)),
         }
     }
 }
