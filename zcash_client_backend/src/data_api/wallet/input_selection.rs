@@ -1,7 +1,7 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
 
 use core::marker::PhantomData;
-use std::fmt::{self, Debug};
+use std::fmt::{self, Debug, Display};
 
 use nonempty::NonEmpty;
 use zcash_primitives::{
@@ -79,6 +79,7 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
 }
 
 /// The inputs to be consumed and outputs to be produced in a proposed transaction.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Proposal<FeeRuleT, NoteRef> {
     transaction_request: TransactionRequest,
     transparent_inputs: Vec<WalletTransparentOutput>,
@@ -89,7 +90,119 @@ pub struct Proposal<FeeRuleT, NoteRef> {
     is_shielding: bool,
 }
 
+/// Errors that can occur in construction of a [`Proposal`].
+#[derive(Debug, Clone)]
+pub enum ProposalError {
+    /// The total output value of the transaction request is not a valid Zcash amount.
+    RequestTotalInvalid,
+    /// The total of transaction inputs overflows the valid range of Zcash values.
+    Overflow,
+    /// The input total and output total of the payment request are not equal to one another. The
+    /// sum of transaction outputs, change, and fees is required to be exactly equal to the value
+    /// of provided inputs.
+    BalanceError {
+        input_total: NonNegativeAmount,
+        output_total: NonNegativeAmount,
+    },
+    /// The `is_shielding` flag may only be set to `true` under the following conditions:
+    /// * The total of transparent inputs is nonzero
+    /// * There exist no Sapling inputs
+    /// * There provided transaction request is empty; i.e. the only output values specified
+    ///   are change and fee amounts.
+    ShieldingInvalid,
+}
+
+impl Display for ProposalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProposalError::RequestTotalInvalid => write!(
+                f,
+                "The total requested output value is not a valid Zcash amount."
+            ),
+            ProposalError::Overflow => write!(
+                f,
+                "The total of transaction inputs overflows the valid range of Zcash values."
+            ),
+            ProposalError::BalanceError {
+                input_total,
+                output_total,
+            } => write!(
+                f,
+                "Balance error: the output total {} was not equal to the input total {}",
+                u64::from(*output_total),
+                u64::from(*input_total)
+            ),
+            ProposalError::ShieldingInvalid => write!(
+                f,
+                "The proposal violates the rules for a shielding transaction."
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProposalError {}
+
 impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
+    /// Constructs a validated [`Proposal`] from its constituent parts.
+    ///
+    /// This operation validates the proposal for balance consistency and agreement between
+    /// the `is_shielding` flag and the structure of the proposal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        transaction_request: TransactionRequest,
+        transparent_inputs: Vec<WalletTransparentOutput>,
+        sapling_inputs: Option<SaplingInputs<NoteRef>>,
+        balance: TransactionBalance,
+        fee_rule: FeeRuleT,
+        min_target_height: BlockHeight,
+        is_shielding: bool,
+    ) -> Result<Self, ProposalError> {
+        let transparent_input_total = transparent_inputs
+            .iter()
+            .map(|out| out.txout().value)
+            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
+                (acc? + a).ok_or(ProposalError::Overflow)
+            })?;
+        let sapling_input_total = sapling_inputs
+            .iter()
+            .flat_map(|s_in| s_in.notes().iter())
+            .map(|out| out.value())
+            .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
+            .ok_or(ProposalError::Overflow)?;
+        let input_total =
+            (transparent_input_total + sapling_input_total).ok_or(ProposalError::Overflow)?;
+
+        let request_total = transaction_request
+            .total()
+            .map_err(|_| ProposalError::RequestTotalInvalid)?;
+        let output_total = (request_total + balance.total()).ok_or(ProposalError::Overflow)?;
+
+        if is_shielding
+            && (transparent_input_total == NonNegativeAmount::ZERO
+                || sapling_input_total > NonNegativeAmount::ZERO
+                || request_total > NonNegativeAmount::ZERO)
+        {
+            return Err(ProposalError::ShieldingInvalid);
+        }
+
+        if input_total == output_total {
+            Ok(Self {
+                transaction_request,
+                transparent_inputs,
+                sapling_inputs,
+                balance,
+                fee_rule,
+                min_target_height,
+                is_shielding,
+            })
+        } else {
+            Err(ProposalError::BalanceError {
+                input_total,
+                output_total,
+            })
+        }
+    }
+
     /// Returns the transaction request that describes the payments to be made.
     pub fn transaction_request(&self) -> &TransactionRequest {
         &self.transaction_request
@@ -147,12 +260,24 @@ impl<FeeRuleT, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
 }
 
 /// The Sapling inputs to a proposed transaction.
+#[derive(Clone, PartialEq, Eq)]
 pub struct SaplingInputs<NoteRef> {
     anchor_height: BlockHeight,
     notes: NonEmpty<ReceivedSaplingNote<NoteRef>>,
 }
 
 impl<NoteRef> SaplingInputs<NoteRef> {
+    /// Constructs a [`SaplingInputs`] from its constituent parts.
+    pub fn from_parts(
+        anchor_height: BlockHeight,
+        notes: NonEmpty<ReceivedSaplingNote<NoteRef>>,
+    ) -> Self {
+        Self {
+            anchor_height,
+            notes,
+        }
+    }
+
     /// Returns the anchor height for Sapling inputs that should be used when constructing the
     /// proposed transaction.
     pub fn anchor_height(&self) -> BlockHeight {

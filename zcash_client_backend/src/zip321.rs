@@ -5,7 +5,10 @@
 //!
 //! The specification for ZIP 321 URIs may be found at <https://zips.z.cash/zip-0321>
 use core::fmt::Debug;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+};
 
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use nom::{
@@ -24,7 +27,7 @@ use std::cmp::Ordering;
 use crate::address::RecipientAddress;
 
 /// Errors that may be produced in decoding of payment requests.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Zip321Error {
     /// A memo field in the ZIP 321 URI was not properly base-64 encoded
     InvalidBase64(base64::DecodeError),
@@ -45,6 +48,51 @@ pub enum Zip321Error {
     ParseError(String),
 }
 
+impl Display for Zip321Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Zip321Error::InvalidBase64(err) => {
+                write!(f, "Memo value was not correctly base64-encoded: {:?}", err)
+            }
+            Zip321Error::MemoBytesError(err) => write!(
+                f,
+                "Memo exceeded maximum length or violated UTF-8 encoding restrictions: {:?}",
+                err
+            ),
+            Zip321Error::TooManyPayments(n) => write!(
+                f,
+                "Cannot create a Zcash transaction containing {} payments",
+                n
+            ),
+            Zip321Error::DuplicateParameter(param, idx) => write!(
+                f,
+                "There is a duplicate {} parameter at index {}",
+                param.name(),
+                idx
+            ),
+            Zip321Error::TransparentMemo(idx) => write!(
+                f,
+                "Payment {} is invalid: cannot send a memo to a transparent recipient address",
+                idx
+            ),
+            Zip321Error::RecipientMissing(idx) => {
+                write!(f, "Payment {} is missing its recipient address", idx)
+            }
+            Zip321Error::ParseError(s) => write!(f, "Parse failure: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for Zip321Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Zip321Error::InvalidBase64(err) => Some(err),
+            Zip321Error::MemoBytesError(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
 ///
 /// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
@@ -63,7 +111,7 @@ pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
 }
 
 /// A single payment being requested.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
     /// The payment address to which the payment should be sent.
     pub recipient_address: RecipientAddress,
@@ -121,7 +169,7 @@ impl Payment {
 /// When constructing a transaction in response to such a request,
 /// a separate output should be added to the transaction for each
 /// payment value in the request.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionRequest {
     payments: Vec<Payment>,
 }
@@ -150,6 +198,21 @@ impl TransactionRequest {
     /// Returns the slice of payments that make up this request.
     pub fn payments(&self) -> &[Payment] {
         &self.payments[..]
+    }
+
+    /// Returns the total value of payments to be made.
+    ///
+    /// Returns `Err` in the case of overflow, or if the value is
+    /// outside the range `0..=MAX_MONEY` zatoshis.
+    pub fn total(&self) -> Result<NonNegativeAmount, ()> {
+        if self.payments.is_empty() {
+            Ok(NonNegativeAmount::ZERO)
+        } else {
+            self.payments
+                .iter()
+                .map(|p| p.amount)
+                .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))
+        }
     }
 
     /// A utility for use in tests to help check round-trip serialization properties.
@@ -416,7 +479,7 @@ mod parse {
 
     /// A data type that defines the possible parameter types which may occur within a
     /// ZIP 321 URI.
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Param {
         Addr(Box<RecipientAddress>),
         Amount(NonNegativeAmount),
@@ -426,8 +489,22 @@ mod parse {
         Other(String, String),
     }
 
+    impl Param {
+        /// Returns the name of the parameter from which this value was parsed.
+        pub fn name(&self) -> String {
+            match self {
+                Param::Addr(_) => "address".to_owned(),
+                Param::Amount(_) => "amount".to_owned(),
+                Param::Memo(_) => "memo".to_owned(),
+                Param::Label(_) => "label".to_owned(),
+                Param::Message(_) => "message".to_owned(),
+                Param::Other(name, _) => name.clone(),
+            }
+        }
+    }
+
     /// A [`Param`] value with its associated index.
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct IndexedParam {
         pub param: Param,
         pub payment_index: usize,

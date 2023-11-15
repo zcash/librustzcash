@@ -173,6 +173,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSour
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
 
+    fn get_spendable_sapling_note(
+        &self,
+        txid: &TxId,
+        index: u32,
+    ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), txid, index)
+    }
+
     fn select_spendable_sapling_notes(
         &self,
         account: AccountId,
@@ -195,6 +203,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> TransparentInput
     for WalletDb<C, P>
 {
     type Error = SqliteClientError;
+
+    fn get_unspent_transparent_output(
+        &self,
+        outpoint: &OutPoint,
+    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+        wallet::get_unspent_transparent_output(self.conn.borrow(), outpoint)
+    }
 
     fn get_unspent_transparent_outputs(
         &self,

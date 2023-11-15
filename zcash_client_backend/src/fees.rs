@@ -54,6 +54,9 @@ impl ChangeValue {
 pub struct TransactionBalance {
     proposed_change: Vec<ChangeValue>,
     fee_required: NonNegativeAmount,
+
+    // A cache for the sum of proposed change and fee; we compute it on construction anyway, so we
+    // cache the resulting value.
     total: NonNegativeAmount,
 }
 

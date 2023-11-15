@@ -29,7 +29,7 @@ pub struct WalletTx<N> {
     pub sapling_outputs: Vec<WalletSaplingOutput<N>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletTransparentOutput {
     outpoint: OutPoint,
     txout: TxOut,
@@ -175,7 +175,7 @@ impl<N> WalletSaplingOutput<N> {
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceivedSaplingNote<NoteRef> {
     note_id: NoteRef,
     txid: TxId,

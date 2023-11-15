@@ -1,0 +1,86 @@
+// Copyright (c) 2023 The Zcash developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or https://www.opensource.org/licenses/mit-license.php .
+
+syntax = "proto3";
+package cash.z.wallet.sdk.ffi;
+
+// A data structure that describes the inputs to be consumed and outputs to
+// be produced in a proposed transaction.
+message Proposal {
+    uint32 protoVersion = 1;
+    // ZIP 321 serialized transaction request
+    string transactionRequest = 2;
+    // The transparent UTXOs to use as inputs to the transaction.
+    repeated ProposedInput transparentInputs = 3;
+    // The Sapling input notes and anchor height to be used in creating the transaction.
+    SaplingInputs saplingInputs = 4;
+    // The total value, fee amount, and change outputs of the proposed
+    // transaction
+    TransactionBalance balance = 5;
+    // The fee rule used in constructing this proposal
+    FeeRule feeRule = 6;
+    // The target height for which the proposal was constructed
+    //
+    // The chain must contain at least this many blocks in order for the proposal to
+    // be executed.
+    uint32 minTargetHeight = 7;
+    // A flag indicating whether the proposal is for a shielding transaction,
+    // used for determining which OVK to select for wallet-internal outputs.
+    bool isShielding = 8;
+}
+
+message SaplingInputs {
+    // The Sapling anchor height to be used in creating the transaction
+    uint32 anchorHeight = 1;
+    // The unique identifier and amount for each proposed Sapling input
+    repeated ProposedInput inputs = 2;
+}
+
+// The unique identifier and amount for each proposed input.
+message ProposedInput {
+    bytes txid = 1;
+    uint32 index = 2;
+    uint64 value = 3;
+}
+
+// The fee rule used in constructing a Proposal
+enum FeeRule {
+    // Protobuf requires that enums have a zero discriminant as the default
+    // value. However, we need to require that a known fee rule is selected,
+    // and we do not want to fall back to any default, so sending the
+    // FeeRuleNotSpecified value will be treated as an error.
+    FeeRuleNotSpecified = 0;
+    // 10000 ZAT
+    PreZip313 = 1;
+    // 1000 ZAT
+    Zip313 = 2;
+    // MAX(10000, 5000 * logical_actions) ZAT
+    Zip317 = 3;
+}
+
+// The proposed change outputs and fee amount.
+message TransactionBalance {
+    repeated ChangeValue proposedChange = 1;
+    uint64 feeRequired = 2;
+}
+
+// An enumeration of change value types.
+message ChangeValue {
+    oneof value {
+        SaplingChange saplingValue = 1;
+    }
+}
+
+// An object wrapper for memo bytes, to facilitate representing the
+// `change_memo == None` case.
+message MemoBytes {
+    bytes value = 1;
+}
+
+// The amount and memo for a proposed Sapling change output.
+message SaplingChange {
+    uint64 amount = 1;
+    MemoBytes memo = 2;
+}
+

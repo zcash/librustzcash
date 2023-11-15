@@ -4,6 +4,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const COMPACT_FORMATS_PROTO: &str = "proto/compact_formats.proto";
+
+const PROPOSAL_PROTO: &str = "proto/proposal.proto";
+
 const SERVICE_PROTO: &str = "proto/service.proto";
 
 fn main() -> io::Result<()> {
@@ -70,6 +73,15 @@ fn build() -> io::Result<()> {
             "crate::proto::compact_formats::CompactOrchardAction",
         )
         .compile(&[SERVICE_PROTO], &["proto/"])?;
+
+    // Build the proposal types.
+    tonic_build::compile_protos(PROPOSAL_PROTO)?;
+
+    // Copy the generated types into the source tree so changes can be committed.
+    fs::copy(
+        out.join("cash.z.wallet.sdk.ffi.rs"),
+        "src/proto/proposal.rs",
+    )?;
 
     // Copy the generated types into the source tree so changes can be committed. The
     // file has the same name as for the compact format types because they have the

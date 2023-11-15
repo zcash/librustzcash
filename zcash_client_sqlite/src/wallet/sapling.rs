@@ -135,6 +135,38 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
     ))
 }
 
+// The `clippy::let_and_return` lint is explicitly allowed here because a bug in Clippy
+// (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
+// is required in order to resolve the borrows involved in the `query_and_then` call.
+#[allow(clippy::let_and_return)]
+pub(crate) fn get_spendable_sapling_note(
+    conn: &Connection,
+    txid: &TxId,
+    index: u32,
+) -> Result<Option<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+    let mut stmt_select_note = conn.prepare_cached(
+        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
+         FROM sapling_received_notes
+         INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
+         WHERE txid = :txid
+         AND output_index = :output_index
+         AND spent IS NULL",
+    )?;
+
+    let result = stmt_select_note
+        .query_and_then(
+            named_params![
+               ":txid": txid.as_ref(),
+               ":output_index": index,
+            ],
+            to_spendable_note,
+        )?
+        .next()
+        .transpose();
+
+    result
+}
+
 /// Utility method for determining whether we have any spendable notes
 ///
 /// If the tip shard has unscanned ranges below the anchor height and greater than or equal to
