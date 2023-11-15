@@ -220,14 +220,14 @@ pub enum ProposalDecodingError<DbError> {
     Zip321(Zip321Error),
     /// A transaction identifier string did not decode to a valid transaction ID.
     TxIdInvalid(TryFromSliceError),
-    /// A failure occurred trying to retrievean unspent note or UTXO from the wallet database.
+    /// A failure occurred trying to retrieve an unspent note or UTXO from the wallet database.
     InputRetrieval(DbError),
     /// The unspent note or UTXO corresponding to a proposal input was not found in the wallet
     /// database.
     InputNotFound(TxId, PoolType, u32),
     /// The transaction balance, or a component thereof, failed to decode correctly.
     BalanceInvalid,
-    /// Failed to decode a ZIP-302 compliant memo from the provided memo bytes.
+    /// Failed to decode a ZIP-302-compliant memo from the provided memo bytes.
     MemoInvalid(memo::Error),
     /// The serialization version returned by the protobuf was not recognized.
     VersionInvalid(u32),
@@ -235,8 +235,8 @@ pub enum ProposalDecodingError<DbError> {
     FeeRuleNotSpecified,
     /// The proposal violated balance or structural constraints.
     ProposalInvalid(ProposalError),
-    /// A `sapling_inputs` field was present, but contained no input note references.
-    EmptySaplingInputs,
+    /// An inputs field for the given protocol was present, but contained no input note references.
+    EmptyShieldedInputs(ShieldedProtocol),
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -254,7 +254,7 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             }
             ProposalDecodingError::InputRetrieval(err) => write!(
                 f,
-                "An error occurred retrieving a transaction intput: {}",
+                "An error occurred retrieving a transaction input: {}",
                 err
             ),
             ProposalDecodingError::InputNotFound(txid, pool, idx) => write!(
@@ -275,9 +275,10 @@ impl<E: Display> Display for ProposalDecodingError<E> {
                 write!(f, "Proposal did not specify a known fee rule.")
             }
             ProposalDecodingError::ProposalInvalid(err) => write!(f, "{}", err),
-            ProposalDecodingError::EmptySaplingInputs => write!(
+            ProposalDecodingError::EmptyShieldedInputs(protocol) => write!(
                 f,
-                "A `sapling_inputs` field was present, but contained no Sapling note references."
+                "An inputs field was present for {:?}, but contained no note references.",
+                protocol
             ),
         }
     }
@@ -446,7 +447,11 @@ impl proposal::Proposal {
                                 .map(|notes| {
                                     SaplingInputs::from_parts(s_in.anchor_height.into(), notes)
                                 })
-                                .ok_or(ProposalDecodingError::EmptySaplingInputs)
+                                .ok_or({
+                                    ProposalDecodingError::EmptyShieldedInputs(
+                                        ShieldedProtocol::Sapling,
+                                    )
+                                })
                         })
                 });
 

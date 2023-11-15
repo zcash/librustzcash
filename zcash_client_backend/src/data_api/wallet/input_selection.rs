@@ -145,7 +145,7 @@ impl std::error::Error for ProposalError {}
 impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// Constructs a validated [`Proposal`] from its constituent parts.
     ///
-    /// This operation validaes the proposal for balance consistency and agreement between
+    /// This operation validates the proposal for balance consistency and agreement between
     /// the `is_shielding` flag and the structure of the proposal.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -167,9 +167,8 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
             .map(|out| out.value())
-            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
-                (acc? + a).ok_or(ProposalError::Overflow)
-            })?;
+            .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
+            .ok_or(ProposalError::Overflow)?;
         let input_total =
             (transparent_input_total + sapling_input_total).ok_or(ProposalError::Overflow)?;
 

@@ -52,11 +52,11 @@ impl Display for Zip321Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Zip321Error::InvalidBase64(err) => {
-                write!(f, "Memo value was not correctly base64 encoded: {:?}", err)
+                write!(f, "Memo value was not correctly base64-encoded: {:?}", err)
             }
             Zip321Error::MemoBytesError(err) => write!(
                 f,
-                "Memo exceeded maximum length or violated utf-8 encodiding restrictions: {:?}.",
+                "Memo exceeded maximum length or violated UTF-8 encoding restrictions: {:?}",
                 err
             ),
             Zip321Error::TooManyPayments(n) => write!(
@@ -72,11 +72,11 @@ impl Display for Zip321Error {
             ),
             Zip321Error::TransparentMemo(idx) => write!(
                 f,
-                "Payment {} is invalid: cannot send a memo to a transparent recipient address.",
+                "Payment {} is invalid: cannot send a memo to a transparent recipient address",
                 idx
             ),
             Zip321Error::RecipientMissing(idx) => {
-                write!(f, "Payment {} is missing its recipient address.", idx)
+                write!(f, "Payment {} is missing its recipient address", idx)
             }
             Zip321Error::ParseError(s) => write!(f, "Parse failure: {}", s),
         }
@@ -202,7 +202,7 @@ impl TransactionRequest {
 
     /// Returns the total value of payments to be made.
     ///
-    /// Returns `Err` in the case of overflow, or the value is
+    /// Returns `Err` in the case of overflow, or if the value is
     /// outside the range `0..=MAX_MONEY` zatoshis.
     pub fn total(&self) -> Result<NonNegativeAmount, ()> {
         if self.payments.is_empty() {

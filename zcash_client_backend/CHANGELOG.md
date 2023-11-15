@@ -25,6 +25,7 @@ and this library adheres to Rust's notion of
   - `ReceivedSaplingNote::from_parts`
   - `ReceivedSaplingNote::{txid, output_index, diversifier, rseed, note_commitment_tree_position}`
 - `zcash_client_backend::zip321::TransactionRequest::total`
+- `zcash_client_backend::zip321::parse::Param::name`
 - `zcash_client_backend::proto::`
   - `PROPOSAL_SER_V1`
   - `ProposalError`
