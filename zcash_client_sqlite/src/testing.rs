@@ -770,18 +770,19 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(params, height, &mut rng);
+    let rseed = generate_random_rseed(
+        consensus::sapling_zip212_enforcement(params, height),
+        &mut rng,
+    );
     let note = Note::from_parts(to, NoteValue::from(value), rseed);
-    let encryptor = sapling_note_encryption::<_, Network>(
+    let encryptor = sapling_note_encryption(
         Some(dfvk.fvk().ovk),
         note.clone(),
         MemoBytes::empty(),
         &mut rng,
     );
     let cmu = note.cmu().to_bytes().to_vec();
-    let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-        .0
-        .to_vec();
+    let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
     // Create a fake CompactBlock containing the note
@@ -866,8 +867,9 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
+    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, height);
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(params, height, &mut rng);
+    let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
 
     // Create a fake CompactBlock containing the note
     let cspend = CompactSaplingSpend { nf: nf.to_vec() };
@@ -880,16 +882,14 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     // Create a fake Note for the payment
     ctx.outputs.push({
         let note = Note::from_parts(to, NoteValue::from(value), rseed);
-        let encryptor = sapling_note_encryption::<_, Network>(
+        let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
             MemoBytes::empty(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-            .0
-            .to_vec();
+        let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         CompactSaplingOutput {
@@ -902,22 +902,20 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     // Create a fake Note for the change
     ctx.outputs.push({
         let change_addr = dfvk.default_address().1;
-        let rseed = generate_random_rseed(params, height, &mut rng);
+        let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
         let note = Note::from_parts(
             change_addr,
             NoteValue::from((in_value - value).unwrap()),
             rseed,
         );
-        let encryptor = sapling_note_encryption::<_, Network>(
+        let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
             MemoBytes::empty(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-            .0
-            .to_vec();
+        let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         CompactSaplingOutput {

@@ -267,22 +267,23 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
-type TaggedBatch<P, S> = Batch<(AccountId, S), SaplingDomain<P>, CompactOutputDescription>;
-type TaggedBatchRunner<P, S, T> =
-    BatchRunner<(AccountId, S), SaplingDomain<P>, CompactOutputDescription, T>;
+type TaggedBatch<S> = Batch<(AccountId, S), SaplingDomain, CompactOutputDescription>;
+type TaggedBatchRunner<S, T> =
+    BatchRunner<(AccountId, S), SaplingDomain, CompactOutputDescription, T>;
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
 pub(crate) fn add_block_to_runner<P, S, T>(
     params: &P,
     block: CompactBlock,
-    batch_runner: &mut TaggedBatchRunner<P, S, T>,
+    batch_runner: &mut TaggedBatchRunner<S, T>,
 ) where
     P: consensus::Parameters + Send + 'static,
     S: Clone + Send + 'static,
-    T: Tasks<TaggedBatch<P, S>>,
+    T: Tasks<TaggedBatch<S>>,
 {
     let block_hash = block.hash();
     let block_height = block.height();
+    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, block_height);
 
     for tx in block.vtx.into_iter() {
         let txid = tx.txid();
@@ -298,7 +299,7 @@ pub(crate) fn add_block_to_runner<P, S, T>(
         batch_runner.add_outputs(
             block_hash,
             txid,
-            || SaplingDomain::for_height(params.clone(), block_height),
+            || SaplingDomain::new(zip212_enforcement),
             &outputs,
         )
     }
@@ -330,14 +331,14 @@ fn check_hash_continuity(
 pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,
-    T: Tasks<TaggedBatch<P, K::Scope>> + Sync,
+    T: Tasks<TaggedBatch<K::Scope>> + Sync,
 >(
     params: &P,
     block: CompactBlock,
     vks: &[(&AccountId, K)],
     nullifiers: &[(AccountId, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-    mut batch_runner: Option<&mut TaggedBatchRunner<P, K::Scope, T>>,
+    mut batch_runner: Option<&mut TaggedBatchRunner<K::Scope, T>>,
 ) -> Result<ScannedBlock<K::Nf>, ScanError> {
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
@@ -345,6 +346,7 @@ pub(crate) fn scan_block_with_runner<
 
     let cur_height = block.height();
     let cur_hash = block.hash();
+    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, cur_height);
 
     let initial_sapling_tree_size = prior_block_metadata.and_then(|m| m.sapling_tree_size());
     let mut sapling_commitment_tree_size = initial_sapling_tree_size.map_or_else(
@@ -498,7 +500,7 @@ pub(crate) fn scan_block_with_runner<
                 .into_iter()
                 .map(|output| {
                     (
-                        SaplingDomain::for_height(params.clone(), cur_height),
+                        SaplingDomain::new(zip212_enforcement),
                         CompactOutputDescription::try_from(output)
                             .expect("Invalid output found in compact block decoding."),
                     )
@@ -655,7 +657,7 @@ mod tests {
     use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{BlockHeight, Network},
+        consensus::{sapling_zip212_enforcement, BlockHeight, Network},
         memo::MemoBytes,
         sapling::{
             self,
@@ -726,22 +728,21 @@ mod tests {
         tx_after: bool,
         initial_tree_sizes: Option<(u32, u32)>,
     ) -> CompactBlock {
+        let zip212_enforcement = sapling_zip212_enforcement(&Network::TestNetwork, height);
         let to = dfvk.default_address().1;
 
         // Create a fake Note for the account
         let mut rng = OsRng;
-        let rseed = generate_random_rseed(&Network::TestNetwork, height, &mut rng);
+        let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
         let note = sapling::Note::from_parts(to, NoteValue::from(value), rseed);
-        let encryptor = sapling_note_encryption::<_, Network>(
+        let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
             MemoBytes::empty(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::<Network>::epk_bytes(encryptor.epk())
-            .0
-            .to_vec();
+        let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
         let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
         // Create a fake CompactBlock containing the note

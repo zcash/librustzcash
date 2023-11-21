@@ -7,7 +7,6 @@ use zcash_note_encryption::{
 };
 
 use crate::{
-    consensus,
     sapling::{
         note::ExtractedNoteCommitment,
         note_encryption::{CompactOutputDescription, SaplingDomain},
@@ -533,9 +532,7 @@ impl<Proof: DynamicUsage> DynamicUsage for OutputDescription<Proof> {
     }
 }
 
-impl<P: consensus::Parameters, A> ShieldedOutput<SaplingDomain<P>, ENC_CIPHERTEXT_SIZE>
-    for OutputDescription<A>
-{
+impl<A> ShieldedOutput<SaplingDomain, ENC_CIPHERTEXT_SIZE> for OutputDescription<A> {
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
         self.ephemeral_key.clone()
     }

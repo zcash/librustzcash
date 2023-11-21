@@ -8,6 +8,7 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - Dependency on `bellman 0.14`.
+- `zcash_primitives::consensus::sapling_zip212_enforcement`
 - `zcash_primitives::sapling`:
   - `BatchValidator` (moved from `zcash_proofs::sapling`).
   - `SaplingVerificationContext` (moved from `zcash_proofs::sapling`).
@@ -46,6 +47,8 @@ and this library adheres to Rust's notion of
   - `constants` module.
   - `note_encryption::CompactOutputDescription` (moved from
     `zcash_primitives::transaction::components::sapling`).
+  - `note_encryption::SaplingDomain::new`
+  - `note_encryption::Zip212Enforcement`
   - `prover::{SpendProver, OutputProver}`
   - `value`:
     - `ValueCommitTrapdoor::from_bytes`
@@ -95,12 +98,16 @@ and this library adheres to Rust's notion of
     newtypes.
   - `address::PaymentAddress::create_note` now takes its `value` argument as a
     `NoteValue` instead of as a bare `u64`.
+  - `builder::SaplingBuilder` no longer has a `P: consensus::Parameters` type
+    parameter.
+  - `builder::SaplingBuilder::new` now takes a `Zip212Enforcement` argument
+    instead of a `P: consensus::Parameters` argument and a target height.
   - `builder::SaplingBuilder::add_spend` now takes `extsk` by reference.
   - `builder::SaplingBuilder::build` no longer takes a prover, proving context,
-    or progress notifier. Instead, it has `SpendProver, OutputProver` generic
-    parameters and returns `(UnauthorizedBundle, SaplingMetadata)`. The caller
-    can then use `Bundle::<InProgress<Unproven, _>>::create_proofs` to create
-    spend and output proofs for the bundle.
+    progress notifier, or target height. Instead, it has `SpendProver, OutputProver`
+    generic parameters and returns `(UnauthorizedBundle, SaplingMetadata)`. The
+    caller can then use `Bundle::<InProgress<Unproven, _>>::create_proofs` to
+    create spend and output proofs for the bundle.
   - `builder::Error` has new error variants:
     - `Error::DuplicateSignature`
     - `Error::InvalidExternalSignature`
@@ -108,6 +115,17 @@ and this library adheres to Rust's notion of
   - `bundle::MapAuth` trait methods now take `&mut self` instead of `&self`.
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
     instead of as a bare `u64`.
+  - `note_encryption`:
+    - `SaplingDomain` no longer has a `P: consensus::Parameters` type parameter.
+    - The following methods now take a `Zip212Enforcement` argument instead of a
+      `P: consensus::Parameters` argument:
+      - `plaintext_version_is_valid`
+      - `try_sapling_note_decryption`
+      - `try_sapling_compact_note_decryption`
+      - `try_sapling_output_recovery_with_ock`
+      - `try_sapling_output_recovery`
+  - `util::generate_random_rseed` now takes a `Zip212Enforcement` argument
+    instead of a `P: consensus::Parameters` argument and a height.
 - `zcash_primitives::transaction`:
   - `builder::Builder::{build, build_zfuture}` now take
     `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
@@ -135,13 +153,16 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
-- `zcash_primitives::sapling::bundle`:
-  - `SpendDescription::{read, read_nullifier, read_rk, read_spend_auth_sig}`
-  - `SpendDescription::{write_v4, write_v5_without_witness_data}`
-  - `SpendDescriptionV5::read`
-  - `OutputDescription::read`
-  - `OutputDescription::{write_v4, write_v5_without_proof}`
-  - `OutputDescriptionV5::read`
+- `zcash_primitives::sapling`:
+  - `bundle`:
+    - `SpendDescription::{read, read_nullifier, read_rk, read_spend_auth_sig}`
+    - `SpendDescription::{write_v4, write_v5_without_witness_data}`
+    - `SpendDescriptionV5::read`
+    - `OutputDescription::read`
+    - `OutputDescription::{write_v4, write_v5_without_proof}`
+    - `OutputDescriptionV5::read`
+  - `note_encryption::SaplingDomain::for_height` (use `SaplingDomain::new`
+    instead).
 - `zcash_primitives::transaction::components::sapling`:
   - The following types were removed from this module (moved into
     `zcash_primitives::sapling::bundle`):

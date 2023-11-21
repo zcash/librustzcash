@@ -8,7 +8,6 @@ use rand::{seq::SliceRandom, RngCore};
 use rand_core::CryptoRng;
 
 use crate::{
-    consensus::{self, BlockHeight},
     keys::OutgoingViewingKey,
     memo::MemoBytes,
     sapling::{
@@ -18,7 +17,7 @@ use crate::{
             SpendDescription,
         },
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
-        note_encryption::sapling_note_encryption,
+        note_encryption::{sapling_note_encryption, Zip212Enforcement},
         prover::{OutputProver, SpendProver},
         redjubjub::{PrivateKey, PublicKey, Signature},
         spend_sig_internal,
@@ -174,11 +173,7 @@ struct SaplingOutputInfo {
 }
 
 impl SaplingOutputInfo {
-    fn dummy<P: consensus::Parameters, R: RngCore>(
-        params: &P,
-        mut rng: &mut R,
-        target_height: BlockHeight,
-    ) -> Self {
+    fn dummy<R: RngCore>(mut rng: &mut R, zip212_enforcement: Zip212Enforcement) -> Self {
         // This is a dummy output
         let dummy_to = {
             let mut diversifier = Diversifier([0; 11]);
@@ -192,26 +187,24 @@ impl SaplingOutputInfo {
         };
 
         Self::new_internal(
-            params,
             rng,
-            target_height,
             None,
             dummy_to,
             NoteValue::from_raw(0),
             MemoBytes::empty(),
+            zip212_enforcement,
         )
     }
 
-    fn new_internal<P: consensus::Parameters, R: RngCore>(
-        params: &P,
+    fn new_internal<R: RngCore>(
         rng: &mut R,
-        target_height: BlockHeight,
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: NoteValue,
         memo: MemoBytes,
+        zip212_enforcement: Zip212Enforcement,
     ) -> Self {
-        let rseed = generate_random_rseed_internal(params, target_height, rng);
+        let rseed = generate_random_rseed_internal(zip212_enforcement, rng);
 
         let note = Note::from_parts(to, value, rseed);
 
@@ -223,12 +216,11 @@ impl SaplingOutputInfo {
         }
     }
 
-    fn build<P: consensus::Parameters, Pr: OutputProver, R: RngCore>(
+    fn build<Pr: OutputProver, R: RngCore>(
         self,
         rng: &mut R,
     ) -> OutputDescription<sapling::circuit::Output> {
-        let encryptor =
-            sapling_note_encryption::<R, P>(self.ovk, self.note.clone(), self.memo, rng);
+        let encryptor = sapling_note_encryption::<R>(self.ovk, self.note.clone(), self.memo, rng);
 
         // Construct the value commitment.
         let cv = ValueCommitment::derive(self.note.value(), self.rcv.clone());
@@ -305,24 +297,22 @@ impl SaplingMetadata {
     }
 }
 
-pub struct SaplingBuilder<P> {
-    params: P,
+pub struct SaplingBuilder {
     anchor: Option<bls12_381::Scalar>,
-    target_height: BlockHeight,
     value_balance: ValueSum,
     spends: Vec<SpendDescriptionInfo>,
     outputs: Vec<SaplingOutputInfo>,
+    zip212_enforcement: Zip212Enforcement,
 }
 
-impl<P> SaplingBuilder<P> {
-    pub fn new(params: P, target_height: BlockHeight) -> Self {
+impl SaplingBuilder {
+    pub fn new(zip212_enforcement: Zip212Enforcement) -> Self {
         SaplingBuilder {
-            params,
             anchor: None,
-            target_height,
             value_balance: ValueSum::zero(),
             spends: vec![],
             outputs: vec![],
+            zip212_enforcement,
         }
     }
 
@@ -366,9 +356,7 @@ impl<P> SaplingBuilder<P> {
         self.try_value_balance()
             .expect("we check this when mutating self.value_balance")
     }
-}
 
-impl<P: consensus::Parameters> SaplingBuilder<P> {
     /// Adds a Sapling note to be spent in this transaction.
     ///
     /// Returns an error if the given Merkle path does not have the same anchor as the
@@ -414,13 +402,12 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
         memo: MemoBytes,
     ) -> Result<(), Error> {
         let output = SaplingOutputInfo::new_internal(
-            &self.params,
             &mut rng,
-            self.target_height,
             ovk,
             to,
             value,
             memo,
+            self.zip212_enforcement,
         );
 
         self.value_balance = (self.value_balance - value).ok_or(Error::InvalidAddress)?;
@@ -434,7 +421,6 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
     pub fn build<SP: SpendProver, OP: OutputProver, R: RngCore>(
         self,
         mut rng: R,
-        target_height: BlockHeight,
     ) -> Result<Option<(UnauthorizedBundle, SaplingMetadata)>, Error> {
         let value_balance = self.try_value_balance()?;
 
@@ -486,7 +472,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
                     output
                 } else {
                     // This is a dummy output
-                    SaplingOutputInfo::dummy(&self.params, &mut rng, target_height)
+                    SaplingOutputInfo::dummy(&mut rng, self.zip212_enforcement)
                 }
             })
             .collect::<Vec<_>>();
@@ -505,7 +491,7 @@ impl<P: consensus::Parameters> SaplingBuilder<P> {
             .collect::<Result<Vec<_>, _>>()?;
         let shielded_outputs = output_infos
             .into_iter()
-            .map(|a| a.build::<P, OP, _>(&mut rng))
+            .map(|a| a.build::<OP, _>(&mut rng))
             .collect::<Vec<_>>();
 
         // Verify that bsk and bvk are consistent.
@@ -881,12 +867,9 @@ pub mod testing {
     use rand::{rngs::StdRng, SeedableRng};
 
     use crate::{
-        consensus::{
-            testing::{arb_branch_id, arb_height},
-            TEST_NETWORK,
-        },
         sapling::{
             bundle::{Authorized, Bundle},
+            note_encryption::Zip212Enforcement,
             prover::mock::{MockOutputProver, MockSpendProver},
             redjubjub::PrivateKey,
             testing::{arb_node, arb_note},
@@ -903,7 +886,7 @@ pub mod testing {
     use super::SaplingBuilder;
 
     prop_compose! {
-        fn arb_bundle()(n_notes in 1..30usize)(
+        fn arb_bundle(zip212_enforcement: Zip212Enforcement)(n_notes in 1..30usize)(
             extsk in arb_extended_spending_key(),
             spendable_notes in vec(
                 arb_positive_note_value(MAX_MONEY as u64 / 10000).prop_flat_map(arb_note),
@@ -916,11 +899,10 @@ pub mod testing {
                 n_notes
             ),
             diversifiers in vec(prop::array::uniform11(any::<u8>()).prop_map(Diversifier), n_notes),
-            target_height in arb_branch_id().prop_flat_map(|b| arb_height(b, &TEST_NETWORK)),
             rng_seed in prop::array::uniform32(any::<u8>()),
             fake_sighash_bytes in prop::array::uniform32(any::<u8>()),
         ) -> Bundle<Authorized> {
-            let mut builder = SaplingBuilder::new(TEST_NETWORK, target_height.unwrap());
+            let mut builder = SaplingBuilder::new(zip212_enforcement);
             let mut rng = StdRng::from_seed(rng_seed);
 
             for ((note, path), diversifier) in spendable_notes.into_iter().zip(commitment_trees.into_iter()).zip(diversifiers.into_iter()) {
@@ -933,10 +915,10 @@ pub mod testing {
                 ).unwrap();
             }
 
-            let (bundle, _) = builder.build::<MockSpendProver, MockOutputProver, _>(
-                &mut rng,
-                target_height.unwrap(),
-            ).unwrap().unwrap();
+            let (bundle, _) = builder
+                .build::<MockSpendProver, MockOutputProver, _>(&mut rng)
+                .unwrap()
+                .unwrap();
 
             let bundle = bundle.create_proofs(
                 &MockSpendProver,

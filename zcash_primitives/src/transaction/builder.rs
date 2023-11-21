@@ -158,7 +158,7 @@ pub struct Builder<'a, P, R> {
     target_height: BlockHeight,
     expiry_height: BlockHeight,
     transparent_builder: TransparentBuilder,
-    sapling_builder: SaplingBuilder<P>,
+    sapling_builder: SaplingBuilder,
     orchard_builder: Option<orchard::builder::Builder>,
     // TODO: In the future, instead of taking the spending keys as arguments when calling
     // `add_sapling_spend` or `add_orchard_spend`, we will build an unauthorized, unproven
@@ -261,13 +261,15 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         target_height: BlockHeight,
         orchard_builder: Option<orchard::builder::Builder>,
     ) -> Self {
+        let zip212_enforcement = consensus::sapling_zip212_enforcement(&params, target_height);
+
         Builder {
-            params: params.clone(),
+            params,
             rng,
             target_height,
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::new(params, target_height),
+            sapling_builder: SaplingBuilder::new(zip212_enforcement),
             orchard_builder,
             sapling_asks: vec![],
             orchard_saks: Vec::new(),
@@ -511,7 +513,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         let mut rng = self.rng;
         let (sapling_bundle, tx_metadata) = match self
             .sapling_builder
-            .build::<SP, OP, _>(&mut rng, self.target_height)
+            .build::<SP, OP, _>(&mut rng)
             .map_err(Error::SaplingBuild)?
             .map(|(bundle, tx_metadata)| {
                 // We need to create proofs before signatures, because we still support
@@ -749,6 +751,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use crate::{
         legacy::keys::{AccountPrivKey, IncomingViewingKey},
+        sapling::note_encryption::Zip212Enforcement,
         transaction::{
             builder::{SaplingBuilder, DEFAULT_TX_EXPIRY_DELTA},
             OutPoint, TxOut,
@@ -775,7 +778,7 @@ mod tests {
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::new(TEST_NETWORK, sapling_activation_height),
+            sapling_builder: SaplingBuilder::new(Zip212Enforcement::Off),
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]

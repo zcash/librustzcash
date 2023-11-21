@@ -7,7 +7,7 @@ use std::fmt;
 use std::ops::{Add, Bound, RangeBounds, Sub};
 use zcash_address;
 
-use crate::constants;
+use crate::{constants, sapling::note_encryption::Zip212Enforcement};
 
 /// A wrapper type representing blockchain heights. Safe conversion from
 /// various integer types, as well as addition and subtraction, are provided.
@@ -596,6 +596,25 @@ impl BranchId {
 
     pub fn sprout_uses_groth_proofs(&self) -> bool {
         !matches!(self, BranchId::Sprout | BranchId::Overwinter)
+    }
+}
+
+/// Returns the enforcement policy for ZIP 212 at the given height.
+pub fn sapling_zip212_enforcement(
+    params: &impl Parameters,
+    height: BlockHeight,
+) -> Zip212Enforcement {
+    if params.is_nu_active(NetworkUpgrade::Canopy, height) {
+        let grace_period_end_height =
+            params.activation_height(NetworkUpgrade::Canopy).unwrap() + ZIP212_GRACE_PERIOD;
+
+        if height < grace_period_end_height {
+            Zip212Enforcement::GracePeriod
+        } else {
+            Zip212Enforcement::On
+        }
+    } else {
+        Zip212Enforcement::Off
     }
 }
 
