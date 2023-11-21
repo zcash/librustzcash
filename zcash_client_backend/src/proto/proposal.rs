@@ -35,7 +35,7 @@ pub struct Proposal {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SaplingInputs {
-    /// Returns the Sapling anchor height to be used in creating the transaction.
+    /// The Sapling anchor height to be used in creating the transaction
     #[prost(uint32, tag = "1")]
     pub anchor_height: u32,
     /// The unique identifier and amount for each proposed Sapling input
@@ -99,7 +99,7 @@ pub struct SaplingChange {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum FeeRule {
-    /// Protobuf requires that enums have a zero descriminant as the default
+    /// Protobuf requires that enums have a zero discriminant as the default
     /// value. However, we need to require that a known fee rule is selected,
     /// and we do not want to fall back to any default, so sending the
     /// FeeRuleNotSpecified value will be treated as an error.
