@@ -62,9 +62,9 @@ pub mod sapling {
         ExtendedSpendingKey::from_path(
             &ExtendedSpendingKey::master(seed),
             &[
-                ChildIndex::Hardened(32),
-                ChildIndex::Hardened(coin_type),
-                ChildIndex::Hardened(account.into()),
+                ChildIndex::hardened(32),
+                ChildIndex::hardened(coin_type),
+                account.into(),
             ],
         )
     }

@@ -71,6 +71,10 @@ and this library adheres to Rust's notion of
     - `GRACE_ACTIONS`
     - `P2PKH_STANDARD_INPUT_SIZE`
     - `P2PKH_STANDARD_OUTPUT_SIZE`
+- `zcash_primitives::zip32`:
+  - `ChildIndex::hardened`
+  - `ChildIndex::index`
+  - `impl From<AccountId> for ChildIndex`
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::sapling::prover::mock::{MockSpendProver, MockOutputProver}`
 - Additions related to `zcash_primitive::components::amount::Amount`
@@ -155,6 +159,9 @@ and this library adheres to Rust's notion of
     - `fees::fixed::FeeRule::fixed_fee`
     - `fees::zip317::FeeRule::marginal_fee`
     - `sighash::TransparentAuthorizingContext::input_amounts`
+- `zcash_primitives::zip32`:
+  - `ChildIndex` has been changed from an enum to an opaque struct, and no
+    longer supports non-hardened indices.
 
 ### Removed
 - `zcash_primitives::constants`:
@@ -189,6 +196,7 @@ and this library adheres to Rust's notion of
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
 - `zcash_primitives::zip32`:
+  - `ChildIndex::Hardened` (use `ChildIndex::hardened` instead).
   - `ChildIndex::NonHardened`
   - `sapling::ExtendedFullViewingKey::derive_child`
 

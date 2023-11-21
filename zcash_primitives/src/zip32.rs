@@ -35,6 +35,13 @@ impl From<AccountId> for u32 {
     }
 }
 
+impl From<AccountId> for ChildIndex {
+    fn from(id: AccountId) -> Self {
+        // Account IDs are always hardened in derivation paths.
+        ChildIndex::hardened(id.0)
+    }
+}
+
 impl ConditionallySelectable for AccountId {
     fn conditional_select(a0: &Self, a1: &Self, c: Choice) -> Self {
         AccountId(u32::conditional_select(&a0.0, &a1.0, c))
@@ -43,30 +50,34 @@ impl ConditionallySelectable for AccountId {
 
 // ZIP 32 structures
 
-/// A child index for a derived key
+/// A child index for a derived key.
+///
+/// Only hardened derivation is supported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChildIndex {
-    Hardened(u32), // Hardened(n) == n + (1 << 31) == n' in path notation
-}
+pub struct ChildIndex(u32);
 
 impl ChildIndex {
     pub fn from_index(i: u32) -> Option<Self> {
         if i >= (1 << 31) {
-            Some(ChildIndex::Hardened(i - (1 << 31)))
+            Some(ChildIndex(i))
         } else {
             None
         }
     }
 
-    fn master() -> Self {
-        // TODO: This is invalid; fixed in next commit.
-        ChildIndex::Hardened(0)
+    /// Constructs a hardened `ChildIndex` from the given value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value >= (1 << 31)`.
+    pub const fn hardened(value: u32) -> Self {
+        assert!(value < (1 << 31));
+        Self(value + (1 << 31))
     }
 
-    fn value(&self) -> u32 {
-        match *self {
-            ChildIndex::Hardened(i) => i + (1 << 31),
-        }
+    /// Returns the index as a 32-bit integer, including the hardened bit.
+    pub fn index(&self) -> u32 {
+        self.0
     }
 }
 

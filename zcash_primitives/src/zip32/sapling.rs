@@ -231,12 +231,39 @@ impl DiversifierKey {
     }
 }
 
+/// The derivation index associated with a key.
+///
+/// Master keys are never derived via the ZIP 32 child derivation process, but they have
+/// an index in their encoding. This type allows the encoding to be represented, while
+/// also enabling the derivation methods to only accept [`ChildIndex`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeyIndex {
+    Master,
+    Child(ChildIndex),
+}
+
+impl KeyIndex {
+    fn new(depth: u8, i: u32) -> Option<Self> {
+        match i {
+            0 if depth == 0 => Some(KeyIndex::Master),
+            _ => ChildIndex::from_index(i).map(KeyIndex::Child),
+        }
+    }
+
+    fn index(&self) -> u32 {
+        match self {
+            KeyIndex::Master => 0,
+            KeyIndex::Child(i) => i.index(),
+        }
+    }
+}
+
 /// A Sapling extended spending key
 #[derive(Clone)]
 pub struct ExtendedSpendingKey {
     depth: u8,
     parent_fvk_tag: FvkTag,
-    child_index: ChildIndex,
+    child_index: KeyIndex,
     chain_code: ChainCode,
     pub expsk: ExpandedSpendingKey,
     dk: DiversifierKey,
@@ -279,7 +306,7 @@ impl ExtendedSpendingKey {
         ExtendedSpendingKey {
             depth: 0,
             parent_fvk_tag: FvkTag::master(),
-            child_index: ChildIndex::master(),
+            child_index: KeyIndex::Master,
             chain_code: ChainCode(c_m),
             expsk: ExpandedSpendingKey::from_spending_key(sk_m),
             dk: DiversifierKey::master(sk_m),
@@ -303,7 +330,7 @@ impl ExtendedSpendingKey {
 
         let mut ci_bytes = [0u8; 4];
         ci_bytes[..].copy_from_slice(&b[5..9]);
-        let child_index = ChildIndex::from_index(u32::from_le_bytes(ci_bytes))
+        let child_index = KeyIndex::new(depth, u32::from_le_bytes(ci_bytes))
             .ok_or(DecodingError::UnsupportedChildIndex)?;
 
         let mut chain_code = ChainCode([0u8; 32]);
@@ -331,7 +358,7 @@ impl ExtendedSpendingKey {
         let mut tag = [0; 4];
         reader.read_exact(&mut tag)?;
         let child_index = reader.read_u32::<LittleEndian>().and_then(|i| {
-            ChildIndex::from_index(i).ok_or_else(|| {
+            KeyIndex::new(depth, i).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::Unsupported,
                     "Non-hardened keys are not supported",
@@ -360,7 +387,7 @@ impl ExtendedSpendingKey {
         let mut result = [0u8; 169];
         result[0] = self.depth;
         result[1..5].copy_from_slice(&self.parent_fvk_tag.as_bytes()[..]);
-        result[5..9].copy_from_slice(&self.child_index.value().to_le_bytes()[..]);
+        result[5..9].copy_from_slice(&self.child_index.index().to_le_bytes()[..]);
         result[9..41].copy_from_slice(&self.chain_code.as_bytes()[..]);
         result[41..137].copy_from_slice(&self.expsk.to_bytes()[..]);
         result[137..169].copy_from_slice(&self.dk.as_bytes()[..]);
@@ -385,15 +412,13 @@ impl ExtendedSpendingKey {
     #[must_use]
     pub fn derive_child(&self, i: ChildIndex) -> Self {
         let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
-        let tmp = match i {
-            ChildIndex::Hardened(i) => {
-                let mut le_i = [0; 4];
-                LittleEndian::write_u32(&mut le_i, i + (1 << 31));
-                prf_expand_vec(
-                    &self.chain_code.0,
-                    &[&[0x11], &self.expsk.to_bytes(), &self.dk.0, &le_i],
-                )
-            }
+        let tmp = {
+            let mut le_i = [0; 4];
+            LittleEndian::write_u32(&mut le_i, i.index());
+            prf_expand_vec(
+                &self.chain_code.0,
+                &[&[0x11], &self.expsk.to_bytes(), &self.dk.0, &le_i],
+            )
         };
         let i_l = &tmp.as_bytes()[..32];
         let mut c_i = [0u8; 32];
@@ -402,7 +427,7 @@ impl ExtendedSpendingKey {
         ExtendedSpendingKey {
             depth: self.depth + 1,
             parent_fvk_tag: FvkFingerprint::from(&fvk).tag(),
-            child_index: i,
+            child_index: KeyIndex::Child(i),
             chain_code: ChainCode(c_i),
             expsk: {
                 let mut ask = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x13]).as_array());
@@ -483,7 +508,7 @@ impl ExtendedSpendingKey {
 pub struct ExtendedFullViewingKey {
     depth: u8,
     parent_fvk_tag: FvkTag,
-    child_index: ChildIndex,
+    child_index: KeyIndex,
     chain_code: ChainCode,
     pub fvk: FullViewingKey,
     pub(crate) dk: DiversifierKey,
@@ -518,7 +543,7 @@ impl ExtendedFullViewingKey {
         let mut tag = [0; 4];
         reader.read_exact(&mut tag)?;
         let child_index = reader.read_u32::<LittleEndian>().and_then(|i| {
-            ChildIndex::from_index(i).ok_or_else(|| {
+            KeyIndex::new(depth, i).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::Unsupported,
                     "Non-hardened keys are not supported",
@@ -544,7 +569,7 @@ impl ExtendedFullViewingKey {
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_u8(self.depth)?;
         writer.write_all(&self.parent_fvk_tag.0)?;
-        writer.write_u32::<LittleEndian>(self.child_index.value())?;
+        writer.write_u32::<LittleEndian>(self.child_index.index())?;
         writer.write_all(&self.chain_code.0)?;
         writer.write_all(&self.fvk.to_bytes())?;
         writer.write_all(&self.dk.0)?;
@@ -787,7 +812,7 @@ mod tests {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
 
-        let i_5h = ChildIndex::Hardened(5);
+        let i_5h = ChildIndex::hardened(5);
         let _ = xsk_m.derive_child(i_5h);
     }
 
@@ -796,17 +821,17 @@ mod tests {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
 
-        let xsk_5h = xsk_m.derive_child(ChildIndex::Hardened(5));
+        let xsk_5h = xsk_m.derive_child(ChildIndex::hardened(5));
         assert_eq!(
-            ExtendedSpendingKey::from_path(&xsk_m, &[ChildIndex::Hardened(5)]),
+            ExtendedSpendingKey::from_path(&xsk_m, &[ChildIndex::hardened(5)]),
             xsk_5h
         );
 
-        let xsk_5h_7 = xsk_5h.derive_child(ChildIndex::Hardened(7));
+        let xsk_5h_7 = xsk_5h.derive_child(ChildIndex::hardened(7));
         assert_eq!(
             ExtendedSpendingKey::from_path(
                 &xsk_m,
-                &[ChildIndex::Hardened(5), ChildIndex::Hardened(7)]
+                &[ChildIndex::hardened(5), ChildIndex::hardened(7)]
             ),
             xsk_5h_7
         );
@@ -1567,9 +1592,9 @@ mod tests {
             24, 25, 26, 27, 28, 29, 30, 31,
         ];
 
-        let i1h = ChildIndex::Hardened(1);
-        let i2h = ChildIndex::Hardened(2);
-        let i3h = ChildIndex::Hardened(3);
+        let i1h = ChildIndex::hardened(1);
+        let i2h = ChildIndex::hardened(2);
+        let i3h = ChildIndex::hardened(3);
 
         let m = ExtendedSpendingKey::master(&seed);
         let m_1h = m.derive_child(i1h);
