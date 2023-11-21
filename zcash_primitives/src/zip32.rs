@@ -5,12 +5,10 @@
 use memuse::{self, DynamicUsage};
 use subtle::{Choice, ConditionallySelectable};
 
-use crate::sapling::{Diversifier, NullifierDerivingKey, PaymentAddress, ViewingKey};
 pub mod fingerprint;
-pub mod sapling;
 
 #[deprecated(note = "Please use the types exported from the `zip32::sapling` module instead.")]
-pub use sapling::{
+pub use crate::sapling::zip32::{
     sapling_address, sapling_default_address, sapling_derive_internal_fvk, sapling_find_address,
     DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,
     ZIP32_SAPLING_FVFP_PERSONALIZATION, ZIP32_SAPLING_INT_PERSONALIZATION,

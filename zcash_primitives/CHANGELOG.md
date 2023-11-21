@@ -54,6 +54,7 @@ and this library adheres to Rust's notion of
     - `ValueCommitTrapdoor::from_bytes`
     - `impl Sub<TrapdoorSum> for TrapdoorSum`
     - `impl Sub<CommitmentSum> for CommitmentSum`
+  - `zip32` module (moved from `zcash_primitives::zip32::sapling`).
   - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
 - `zcash_primitives::transaction`:
   - `builder::get_fee`
@@ -198,6 +199,7 @@ and this library adheres to Rust's notion of
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
 - `zcash_primitives::zip32`:
+  - `sapling` module (moved from `zcash_primitives::sapling::zip32`).
   - `ChildIndex::Hardened` (use `ChildIndex::hardened` instead).
   - `ChildIndex::NonHardened`
   - `sapling::ExtendedFullViewingKey::derive_child`

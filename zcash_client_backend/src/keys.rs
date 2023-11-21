@@ -28,7 +28,7 @@ use {
 };
 
 pub mod sapling {
-    pub use zcash_primitives::zip32::sapling::{
+    pub use zcash_primitives::sapling::zip32::{
         DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,
     };
     use zcash_primitives::zip32::{AccountId, ChildIndex};

@@ -429,6 +429,7 @@ pub(crate) mod tests {
         sapling::{
             note_encryption::try_sapling_output_recovery,
             prover::{OutputProver, SpendProver},
+            zip32::ExtendedSpendingKey,
             Node, Note, PaymentAddress,
         },
         transaction::{
@@ -438,7 +439,7 @@ pub(crate) mod tests {
             },
             Transaction,
         },
-        zip32::{sapling::ExtendedSpendingKey, Scope},
+        zip32::Scope,
     };
 
     use zcash_client_backend::{

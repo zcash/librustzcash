@@ -11,10 +11,7 @@ use fpe::ff1::{BinaryNumeralString, FF1};
 use std::io::{self, Read, Write};
 use std::ops::AddAssign;
 
-use super::{
-    ChainCode, ChildIndex, Diversifier, DiversifierIndex, NullifierDerivingKey, PaymentAddress,
-    Scope, ViewingKey,
-};
+use super::{Diversifier, NullifierDerivingKey, PaymentAddress, ViewingKey};
 use crate::{
     keys::{prf_expand, prf_expand_vec},
     sapling::{
@@ -22,6 +19,7 @@ use crate::{
         keys::{DecodingError, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey},
         SaplingIvk,
     },
+    zip32::{ChainCode, ChildIndex, DiversifierIndex, Scope},
 };
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";

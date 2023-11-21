@@ -17,6 +17,7 @@ mod tree;
 pub mod util;
 pub mod value;
 mod verifier;
+pub mod zip32;
 
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};

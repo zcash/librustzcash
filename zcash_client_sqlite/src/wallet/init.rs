@@ -176,8 +176,9 @@ mod tests {
 
     use zcash_primitives::{
         consensus::{self, BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        sapling::zip32::ExtendedFullViewingKey,
         transaction::{TransactionData, TxVersion},
-        zip32::{sapling::ExtendedFullViewingKey, AccountId},
+        zip32::AccountId,
     };
 
     use crate::{testing::TestBuilder, wallet::scanning::priority_code, WalletDb};
