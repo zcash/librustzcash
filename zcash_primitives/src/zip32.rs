@@ -81,14 +81,20 @@ impl ChildIndex {
     }
 }
 
-/// A BIP-32 chain code
+/// A value that is needed, in addition to a spending key, in order to derive descendant
+/// keys and addresses of that key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChainCode([u8; 32]);
 
 impl ChainCode {
-    /// Returns byte representation of the chain code, as required for
+    /// Constructs a `ChainCode` from the given array.
+    pub fn new(c: [u8; 32]) -> Self {
+        Self(c)
+    }
+
+    /// Returns the byte representation of the chain code, as required for
     /// [ZIP 32](https://zips.z.cash/zip-0032) encoding.
-    fn as_bytes(&self) -> &[u8; 32] {
+    pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 }

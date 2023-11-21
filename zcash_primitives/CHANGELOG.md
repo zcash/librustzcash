@@ -74,6 +74,8 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::zip32`:
   - `ChildIndex::hardened`
   - `ChildIndex::index`
+  - `ChainCode::new`
+  - `ChainCode::as_bytes`
   - `impl From<AccountId> for ChildIndex`
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::sapling::prover::mock::{MockSpendProver, MockOutputProver}`

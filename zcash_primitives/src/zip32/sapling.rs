@@ -307,7 +307,7 @@ impl ExtendedSpendingKey {
             depth: 0,
             parent_fvk_tag: FvkTag::master(),
             child_index: KeyIndex::Master,
-            chain_code: ChainCode(c_m),
+            chain_code: ChainCode::new(c_m),
             expsk: ExpandedSpendingKey::from_spending_key(sk_m),
             dk: DiversifierKey::master(sk_m),
         }
@@ -333,8 +333,8 @@ impl ExtendedSpendingKey {
         let child_index = KeyIndex::new(depth, u32::from_le_bytes(ci_bytes))
             .ok_or(DecodingError::UnsupportedChildIndex)?;
 
-        let mut chain_code = ChainCode([0u8; 32]);
-        chain_code.0[..].copy_from_slice(&b[9..41]);
+        let mut c = [0u8; 32];
+        c[..].copy_from_slice(&b[9..41]);
 
         let expsk = ExpandedSpendingKey::from_bytes(&b[41..137])?;
 
@@ -345,7 +345,7 @@ impl ExtendedSpendingKey {
             depth,
             parent_fvk_tag,
             child_index,
-            chain_code,
+            chain_code: ChainCode::new(c),
             expsk,
             dk,
         })
@@ -375,7 +375,7 @@ impl ExtendedSpendingKey {
             depth,
             parent_fvk_tag: FvkTag(tag),
             child_index,
-            chain_code: ChainCode(c),
+            chain_code: ChainCode::new(c),
             expsk,
             dk: DiversifierKey(dk),
         })
@@ -416,7 +416,7 @@ impl ExtendedSpendingKey {
             let mut le_i = [0; 4];
             LittleEndian::write_u32(&mut le_i, i.index());
             prf_expand_vec(
-                &self.chain_code.0,
+                self.chain_code.as_bytes(),
                 &[&[0x11], &self.expsk.to_bytes(), &self.dk.0, &le_i],
             )
         };
@@ -428,7 +428,7 @@ impl ExtendedSpendingKey {
             depth: self.depth + 1,
             parent_fvk_tag: FvkFingerprint::from(&fvk).tag(),
             child_index: KeyIndex::Child(i),
-            chain_code: ChainCode(c_i),
+            chain_code: ChainCode::new(c_i),
             expsk: {
                 let mut ask = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x13]).as_array());
                 let mut nsk = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x14]).as_array());
@@ -560,7 +560,7 @@ impl ExtendedFullViewingKey {
             depth,
             parent_fvk_tag: FvkTag(tag),
             child_index,
-            chain_code: ChainCode(c),
+            chain_code: ChainCode::new(c),
             fvk,
             dk: DiversifierKey(dk),
         })
@@ -570,7 +570,7 @@ impl ExtendedFullViewingKey {
         writer.write_u8(self.depth)?;
         writer.write_all(&self.parent_fvk_tag.0)?;
         writer.write_u32::<LittleEndian>(self.child_index.index())?;
-        writer.write_all(&self.chain_code.0)?;
+        writer.write_all(self.chain_code.as_bytes())?;
         writer.write_all(&self.fvk.to_bytes())?;
         writer.write_all(&self.dk.0)?;
 
@@ -1617,7 +1617,7 @@ mod tests {
 
             assert_eq!(xsk.expsk.ovk.0, tv.ovk);
             assert_eq!(xsk.dk.0, tv.dk);
-            assert_eq!(xsk.chain_code.0, tv.c);
+            assert_eq!(xsk.chain_code.as_bytes(), &tv.c);
 
             let mut ser = vec![];
             xsk.write(&mut ser).unwrap();
@@ -1632,7 +1632,7 @@ mod tests {
 
             assert_eq!(internal_xsk.expsk.ovk.0, tv.internal_ovk);
             assert_eq!(internal_xsk.dk.0, tv.internal_dk);
-            assert_eq!(internal_xsk.chain_code.0, tv.c);
+            assert_eq!(internal_xsk.chain_code.as_bytes(), &tv.c);
 
             let mut ser = vec![];
             internal_xsk.write(&mut ser).unwrap();
@@ -1645,7 +1645,7 @@ mod tests {
 
             assert_eq!(xfvk.fvk.ovk.0, tv.ovk);
             assert_eq!(xfvk.dk.0, tv.dk);
-            assert_eq!(xfvk.chain_code.0, tv.c);
+            assert_eq!(xfvk.chain_code.as_bytes(), &tv.c);
 
             assert_eq!(xfvk.fvk.vk.ivk().to_repr().as_ref(), tv.ivk);
 
@@ -1689,7 +1689,7 @@ mod tests {
 
             assert_eq!(internal_xfvk.fvk.ovk.0, tv.internal_ovk);
             assert_eq!(internal_xfvk.dk.0, tv.internal_dk);
-            assert_eq!(internal_xfvk.chain_code.0, tv.c);
+            assert_eq!(internal_xfvk.chain_code.as_bytes(), &tv.c);
 
             assert_eq!(
                 internal_xfvk.fvk.vk.ivk().to_repr().as_ref(),
