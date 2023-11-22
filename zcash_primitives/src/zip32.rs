@@ -46,26 +46,26 @@ impl ConditionallySelectable for AccountId {
 /// A child index for a derived key
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChildIndex {
-    NonHardened(u32),
     Hardened(u32), // Hardened(n) == n + (1 << 31) == n' in path notation
 }
 
 impl ChildIndex {
-    pub fn from_index(i: u32) -> Self {
-        match i {
-            n if n >= (1 << 31) => ChildIndex::Hardened(n - (1 << 31)),
-            n => ChildIndex::NonHardened(n),
+    pub fn from_index(i: u32) -> Option<Self> {
+        if i >= (1 << 31) {
+            Some(ChildIndex::Hardened(i - (1 << 31)))
+        } else {
+            None
         }
     }
 
     fn master() -> Self {
-        ChildIndex::from_index(0)
+        // TODO: This is invalid; fixed in next commit.
+        ChildIndex::Hardened(0)
     }
 
     fn value(&self) -> u32 {
         match *self {
             ChildIndex::Hardened(i) => i + (1 << 31),
-            ChildIndex::NonHardened(i) => i,
         }
     }
 }

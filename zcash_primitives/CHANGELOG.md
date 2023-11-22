@@ -120,6 +120,7 @@ and this library adheres to Rust's notion of
   - `bundle::MapAuth` trait methods now take `&mut self` instead of `&self`.
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
     instead of as a bare `u64`.
+  - `keys::DecodingError` has a new variant `UnsupportedChildIndex`.
   - `note_encryption`:
     - `SaplingDomain` no longer has a `P: consensus::Parameters` type parameter.
     - The following methods now take a `Zip212Enforcement` argument instead of a
@@ -187,6 +188,9 @@ and this library adheres to Rust's notion of
   - `Bundle::<Unauthorized>::apply_signatures` (use
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
+- `zcash_primitives::zip32`:
+  - `ChildIndex::NonHardened`
+  - `sapling::ExtendedFullViewingKey::derive_child`
 
 ## [0.13.0] - 2023-09-25
 ### Added
