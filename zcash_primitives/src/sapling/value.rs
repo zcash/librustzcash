@@ -101,6 +101,13 @@ impl ValueCommitTrapdoor {
         jubjub::Scalar::from_repr(bytes).map(ValueCommitTrapdoor)
     }
 
+    /// Constructs the zero trapdoor.
+    ///
+    /// This is only for use in ZIP 304 signatures.
+    pub(crate) fn zero() -> Self {
+        Self(jubjub::Scalar::zero())
+    }
+
     /// Returns the inner Jubjub scalar representing this trapdoor.
     ///
     /// This is public for access by `zcash_proofs`.

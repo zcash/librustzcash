@@ -3079,6 +3079,7 @@ version = "0.13.0"
 dependencies = [
  "aes",
  "assert_matches",
+ "base64",
  "bellman",
  "bip0039",
  "bitvec",
@@ -3111,6 +3112,7 @@ dependencies = [
  "sha2",
  "subtle",
  "tracing",
+ "wagyu-zcash-parameters",
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",

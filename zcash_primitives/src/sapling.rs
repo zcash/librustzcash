@@ -17,6 +17,7 @@ mod tree;
 pub mod util;
 pub mod value;
 mod verifier;
+pub mod zip304;
 
 use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
@@ -79,6 +80,19 @@ pub(crate) fn verify_spend_sig(
     // We compute `rk` (needed for key prefixing)
     let rk = ak.randomize(alpha, SPENDING_KEY_GENERATOR);
 
+    verify_spend_sig_internal(&rk, sighash, sig)
+}
+
+/// Verifies a spendAuthSig.
+///
+/// This only exists because the RedJubjub implementation inside `zcash_primitives` does
+/// not implement key prefixing (which was added in response to a Sapling audit). This
+/// will be fixed by migrating to the redjubjub crate.
+pub(crate) fn verify_spend_sig_internal(
+    rk: &PublicKey,
+    sighash: &[u8; 32],
+    sig: &Signature,
+) -> bool {
     // Compute the signature's message for rk/spend_auth_sig
     let mut data_to_be_signed = [0u8; 64];
     data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
