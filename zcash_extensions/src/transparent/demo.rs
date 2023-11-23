@@ -513,6 +513,7 @@ mod tests {
                 NetworkUpgrade::Heartwood => Some(BlockHeight::from_u32(903_800)),
                 NetworkUpgrade::Canopy => Some(BlockHeight::from_u32(1_028_500)),
                 NetworkUpgrade::Nu5 => Some(BlockHeight::from_u32(1_200_000)),
+                NetworkUpgrade::Nu6 => Some(BlockHeight::from_u32(1_300_000)),
                 NetworkUpgrade::ZFuture => Some(BlockHeight::from_u32(1_400_000)),
             }
         }
