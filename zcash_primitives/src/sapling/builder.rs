@@ -30,10 +30,7 @@ use crate::{
     },
     transaction::{
         builder::Progress,
-        components::{
-            amount::{Amount, NonNegativeAmount},
-            sapling::fees,
-        },
+        components::{amount::NonNegativeAmount, sapling::fees},
     },
     zip32::ExtendedSpendingKey,
 };
@@ -343,16 +340,16 @@ impl SaplingBuilder {
     /// Returns the net value represented by the spends and outputs added to this builder,
     /// or an error if the values added to this builder overflow the range of a Zcash
     /// monetary amount.
-    fn try_value_balance(&self) -> Result<Amount, Error> {
+    fn try_value_balance<V: TryFrom<i64>>(&self) -> Result<V, Error> {
         self.value_balance
             .try_into()
             .map_err(|_| ())
-            .and_then(Amount::from_i64)
+            .and_then(|vb| V::try_from(vb).map_err(|_| ()))
             .map_err(|()| Error::InvalidAmount)
     }
 
     /// Returns the net value represented by the spends and outputs added to this builder.
-    pub fn value_balance(&self) -> Amount {
+    pub fn value_balance<V: TryFrom<i64>>(&self) -> V {
         self.try_value_balance()
             .expect("we check this when mutating self.value_balance")
     }
@@ -381,7 +378,7 @@ impl SaplingBuilder {
         }
 
         self.value_balance = (self.value_balance + note.value()).ok_or(Error::InvalidAmount)?;
-        self.try_value_balance()?;
+        self.try_value_balance::<i64>()?;
 
         let spend =
             SpendDescriptionInfo::new_internal(&mut rng, extsk, diversifier, note, merkle_path);
@@ -411,17 +408,17 @@ impl SaplingBuilder {
         );
 
         self.value_balance = (self.value_balance - value).ok_or(Error::InvalidAddress)?;
-        self.try_value_balance()?;
+        self.try_value_balance::<i64>()?;
 
         self.outputs.push(output);
 
         Ok(())
     }
 
-    pub fn build<SP: SpendProver, OP: OutputProver, R: RngCore>(
+    pub fn build<SP: SpendProver, OP: OutputProver, R: RngCore, V: TryFrom<i64>>(
         self,
         mut rng: R,
-    ) -> Result<Option<(UnauthorizedBundle, SaplingMetadata)>, Error> {
+    ) -> Result<Option<(UnauthorizedBundle<V>, SaplingMetadata)>, Error> {
         let value_balance = self.try_value_balance()?;
 
         // Record initial positions of spends and outputs
@@ -536,7 +533,7 @@ impl SaplingBuilder {
 /// Type alias for an in-progress bundle that has no proofs or signatures.
 ///
 /// This is returned by [`SaplingBuilder::build`].
-pub type UnauthorizedBundle = Bundle<InProgress<Unproven, Unsigned>>;
+pub type UnauthorizedBundle<V> = Bundle<InProgress<Unproven, Unsigned>, V>;
 
 /// Marker trait representing bundle proofs in the process of being created.
 pub trait InProgressProofs: fmt::Debug {
@@ -654,7 +651,7 @@ impl<'a, S: InProgressSignatures, SP: SpendProver, OP: OutputProver, R: RngCore>
     }
 }
 
-impl<S: InProgressSignatures> Bundle<InProgress<Unproven, S>> {
+impl<S: InProgressSignatures, V> Bundle<InProgress<Unproven, S>, V> {
     /// Creates the proofs for this bundle.
     pub fn create_proofs<SP: SpendProver, OP: OutputProver>(
         self,
@@ -662,7 +659,7 @@ impl<S: InProgressSignatures> Bundle<InProgress<Unproven, S>> {
         output_prover: &OP,
         rng: impl RngCore,
         progress_notifier: Option<&Sender<Progress>>,
-    ) -> Bundle<InProgress<Proven, S>> {
+    ) -> Bundle<InProgress<Proven, S>, V> {
         let total_progress =
             self.shielded_spends().len() as u32 + self.shielded_outputs().len() as u32;
         self.map_authorization(CreateProofs::new(
@@ -737,7 +734,7 @@ impl MaybeSigned {
     }
 }
 
-impl<P: InProgressProofs> Bundle<InProgress<P, Unsigned>> {
+impl<P: InProgressProofs, V> Bundle<InProgress<P, Unsigned>, V> {
     /// Loads the sighash into this bundle, preparing it for signing.
     ///
     /// This API ensures that all signatures are created over the same sighash.
@@ -745,7 +742,7 @@ impl<P: InProgressProofs> Bundle<InProgress<P, Unsigned>> {
         self,
         mut rng: R,
         sighash: [u8; 32],
-    ) -> Bundle<InProgress<P, PartiallyAuthorized>> {
+    ) -> Bundle<InProgress<P, PartiallyAuthorized>, V> {
         self.map_authorization((
             |proof| proof,
             |proof| proof,
@@ -765,7 +762,7 @@ impl<P: InProgressProofs> Bundle<InProgress<P, Unsigned>> {
     }
 }
 
-impl Bundle<InProgress<Proven, Unsigned>> {
+impl<V> Bundle<InProgress<Proven, Unsigned>, V> {
     /// Applies signatures to this bundle, in order to authorize it.
     ///
     /// This is a helper method that wraps [`Bundle::prepare`], [`Bundle::sign`], and
@@ -775,7 +772,7 @@ impl Bundle<InProgress<Proven, Unsigned>> {
         mut rng: R,
         sighash: [u8; 32],
         signing_keys: &[PrivateKey],
-    ) -> Result<Bundle<Authorized>, Error> {
+    ) -> Result<Bundle<Authorized, V>, Error> {
         signing_keys
             .iter()
             .fold(self.prepare(&mut rng, sighash), |partial, ask| {
@@ -785,7 +782,7 @@ impl Bundle<InProgress<Proven, Unsigned>> {
     }
 }
 
-impl<P: InProgressProofs> Bundle<InProgress<P, PartiallyAuthorized>> {
+impl<P: InProgressProofs, V> Bundle<InProgress<P, PartiallyAuthorized>, V> {
     /// Signs this bundle with the given [`PrivateKey`].
     ///
     /// This will apply signatures for all notes controlled by this spending key.
@@ -842,11 +839,11 @@ impl<P: InProgressProofs> Bundle<InProgress<P, PartiallyAuthorized>> {
     }
 }
 
-impl Bundle<InProgress<Proven, PartiallyAuthorized>> {
+impl<V> Bundle<InProgress<Proven, PartiallyAuthorized>, V> {
     /// Finalizes this bundle, enabling it to be included in a transaction.
     ///
     /// Returns an error if any signatures are missing.
-    pub fn finalize(self) -> Result<Bundle<Authorized>, Error> {
+    pub fn finalize(self) -> Result<Bundle<Authorized, V>, Error> {
         self.try_map_authorization((
             Ok,
             Ok,
@@ -862,6 +859,8 @@ impl Bundle<InProgress<Proven, PartiallyAuthorized>> {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
+    use std::fmt;
+
     use proptest::collection::vec;
     use proptest::prelude::*;
     use rand::{rngs::StdRng, SeedableRng};
@@ -876,7 +875,6 @@ pub mod testing {
             value::testing::arb_positive_note_value,
             Diversifier,
         },
-        transaction::components::amount::MAX_MONEY,
         zip32::sapling::testing::arb_extended_spending_key,
     };
     use incrementalmerkletree::{
@@ -885,53 +883,70 @@ pub mod testing {
 
     use super::SaplingBuilder;
 
-    prop_compose! {
-        fn arb_bundle(zip212_enforcement: Zip212Enforcement)(n_notes in 1..30usize)(
-            extsk in arb_extended_spending_key(),
-            spendable_notes in vec(
-                arb_positive_note_value(MAX_MONEY as u64 / 10000).prop_flat_map(arb_note),
-                n_notes
-            ),
-            commitment_trees in vec(
-                arb_commitment_tree::<_, _, 32>(n_notes, arb_node()).prop_map(
-                    |t| IncrementalWitness::from_tree(t).path().unwrap()
-                ),
-                n_notes
-            ),
-            diversifiers in vec(prop::array::uniform11(any::<u8>()).prop_map(Diversifier), n_notes),
-            rng_seed in prop::array::uniform32(any::<u8>()),
-            fake_sighash_bytes in prop::array::uniform32(any::<u8>()),
-        ) -> Bundle<Authorized> {
-            let mut builder = SaplingBuilder::new(zip212_enforcement);
-            let mut rng = StdRng::from_seed(rng_seed);
+    #[allow(dead_code)]
+    fn arb_bundle<V: fmt::Debug + From<i64>>(
+        max_money: u64,
+        zip212_enforcement: Zip212Enforcement,
+    ) -> impl Strategy<Value = Bundle<Authorized, V>> {
+        (1..30usize)
+            .prop_flat_map(move |n_notes| {
+                (
+                    arb_extended_spending_key(),
+                    vec(
+                        arb_positive_note_value(max_money / 10000).prop_flat_map(arb_note),
+                        n_notes,
+                    ),
+                    vec(
+                        arb_commitment_tree::<_, _, 32>(n_notes, arb_node())
+                            .prop_map(|t| IncrementalWitness::from_tree(t).path().unwrap()),
+                        n_notes,
+                    ),
+                    vec(
+                        prop::array::uniform11(any::<u8>()).prop_map(Diversifier),
+                        n_notes,
+                    ),
+                    prop::array::uniform32(any::<u8>()),
+                    prop::array::uniform32(any::<u8>()),
+                )
+            })
+            .prop_map(
+                move |(
+                    extsk,
+                    spendable_notes,
+                    commitment_trees,
+                    diversifiers,
+                    rng_seed,
+                    fake_sighash_bytes,
+                )| {
+                    let mut builder = SaplingBuilder::new(zip212_enforcement);
+                    let mut rng = StdRng::from_seed(rng_seed);
 
-            for ((note, path), diversifier) in spendable_notes.into_iter().zip(commitment_trees.into_iter()).zip(diversifiers.into_iter()) {
-                builder.add_spend(
-                    &mut rng,
-                    &extsk,
-                    diversifier,
-                    note,
-                    path
-                ).unwrap();
-            }
+                    for ((note, path), diversifier) in spendable_notes
+                        .into_iter()
+                        .zip(commitment_trees.into_iter())
+                        .zip(diversifiers.into_iter())
+                    {
+                        builder
+                            .add_spend(&mut rng, &extsk, diversifier, note, path)
+                            .unwrap();
+                    }
 
-            let (bundle, _) = builder
-                .build::<MockSpendProver, MockOutputProver, _>(&mut rng)
-                .unwrap()
-                .unwrap();
+                    let (bundle, _) = builder
+                        .build::<MockSpendProver, MockOutputProver, _, _>(&mut rng)
+                        .unwrap()
+                        .unwrap();
 
-            let bundle = bundle.create_proofs(
-                &MockSpendProver,
-                &MockOutputProver,
-                &mut rng,
-                None,
-            );
+                    let bundle =
+                        bundle.create_proofs(&MockSpendProver, &MockOutputProver, &mut rng, None);
 
-            bundle.apply_signatures(
-                &mut rng,
-                fake_sighash_bytes,
-                &[PrivateKey(extsk.expsk.ask)],
-            ).unwrap()
-        }
+                    bundle
+                        .apply_signatures(
+                            &mut rng,
+                            fake_sighash_bytes,
+                            &[PrivateKey(extsk.expsk.ask)],
+                        )
+                        .unwrap()
+                },
+            )
     }
 }

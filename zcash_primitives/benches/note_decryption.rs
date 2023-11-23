@@ -17,6 +17,7 @@ use zcash_primitives::{
         value::NoteValue,
         Diversifier, SaplingIvk,
     },
+    transaction::components::Amount,
 };
 
 #[cfg(unix)]
@@ -46,7 +47,7 @@ fn bench_note_decryption(c: &mut Criterion) {
             )
             .unwrap();
         let (bundle, _) = builder
-            .build::<MockSpendProver, MockOutputProver, _>(&mut rng)
+            .build::<MockSpendProver, MockOutputProver, _, Amount>(&mut rng)
             .unwrap()
             .unwrap();
         bundle.shielded_outputs()[0].clone()

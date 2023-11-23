@@ -256,7 +256,7 @@ pub(crate) fn hash_transparent_txid_data(
 
 /// Implements [ZIP 244 section T.3](https://zips.z.cash/zip-0244#t-3-sapling-digest)
 fn hash_sapling_txid_data<A: sapling::bundle::Authorization>(
-    bundle: &sapling::Bundle<A>,
+    bundle: &sapling::Bundle<A, Amount>,
 ) -> Blake2bHash {
     let mut h = hasher(ZCASH_SAPLING_HASH_PERSONALIZATION);
     if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
@@ -328,7 +328,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth>>,
+        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
     ) -> Self::SaplingDigest {
         sapling_bundle.map(hash_sapling_txid_data)
     }
@@ -467,7 +467,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized>>,
+        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, Amount>>,
     ) -> Blake2bHash {
         let mut h = hasher(ZCASH_SAPLING_SIGS_HASH_PERSONALIZATION);
         if let Some(bundle) = sapling_bundle {

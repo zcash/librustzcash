@@ -45,7 +45,11 @@ impl BatchValidator {
     /// `BatchValidator` can continue to be used regardless, but some or all of the proofs
     /// and signatures from this bundle may have already been added to the batch even if
     /// it fails other consensus rules.
-    pub fn check_bundle(&mut self, bundle: Bundle<Authorized>, sighash: [u8; 32]) -> bool {
+    pub fn check_bundle<V: Copy + Into<i64>>(
+        &mut self,
+        bundle: Bundle<Authorized, V>,
+        sighash: [u8; 32],
+    ) -> bool {
         self.bundles_added = true;
 
         let mut ctx = SaplingVerificationContextInner::new();

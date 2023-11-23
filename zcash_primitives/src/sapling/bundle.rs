@@ -14,7 +14,7 @@ use crate::{
         value::ValueCommitment,
         Nullifier,
     },
-    transaction::components::{Amount, GROTH_PROOF_SIZE},
+    transaction::components::GROTH_PROOF_SIZE,
 };
 
 pub type GrothProofBytes = [u8; GROTH_PROOF_SIZE];
@@ -151,20 +151,20 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct Bundle<A: Authorization> {
+pub struct Bundle<A: Authorization, V> {
     shielded_spends: Vec<SpendDescription<A>>,
     shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
-    value_balance: Amount,
+    value_balance: V,
     authorization: A,
 }
 
-impl<A: Authorization> Bundle<A> {
+impl<A: Authorization, V> Bundle<A, V> {
     /// Constructs a `Bundle` from its constituent parts.
     #[cfg(feature = "temporary-zcashd")]
     pub fn temporary_zcashd_from_parts(
         shielded_spends: Vec<SpendDescription<A>>,
         shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
-        value_balance: Amount,
+        value_balance: V,
         authorization: A,
     ) -> Self {
         Self::from_parts(
@@ -179,7 +179,7 @@ impl<A: Authorization> Bundle<A> {
     pub(crate) fn from_parts(
         shielded_spends: Vec<SpendDescription<A>>,
         shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
-        value_balance: Amount,
+        value_balance: V,
         authorization: A,
     ) -> Self {
         Bundle {
@@ -203,7 +203,7 @@ impl<A: Authorization> Bundle<A> {
     /// Returns the net value moved into or out of the Sapling shielded pool.
     ///
     /// This is the sum of Sapling spends minus the sum of Sapling outputs.
-    pub fn value_balance(&self) -> &Amount {
+    pub fn value_balance(&self) -> &V {
         &self.value_balance
     }
 
@@ -215,7 +215,7 @@ impl<A: Authorization> Bundle<A> {
     }
 
     /// Transitions this bundle from one authorization state to another.
-    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, mut f: F) -> Bundle<B> {
+    pub fn map_authorization<B: Authorization, F: MapAuth<A, B>>(self, mut f: F) -> Bundle<B, V> {
         Bundle {
             shielded_spends: self
                 .shielded_spends
@@ -250,7 +250,7 @@ impl<A: Authorization> Bundle<A> {
     pub fn try_map_authorization<B: Authorization, F: TryMapAuth<A, B>>(
         self,
         mut f: F,
-    ) -> Result<Bundle<B>, F::Error> {
+    ) -> Result<Bundle<B, V>, F::Error> {
         Ok(Bundle {
             shielded_spends: self
                 .shielded_spends
@@ -286,20 +286,28 @@ impl<A: Authorization> Bundle<A> {
     }
 }
 
-impl DynamicUsage for Bundle<Authorized> {
+impl<V: DynamicUsage> DynamicUsage for Bundle<Authorized, V> {
     fn dynamic_usage(&self) -> usize {
-        self.shielded_spends.dynamic_usage() + self.shielded_outputs.dynamic_usage()
+        self.shielded_spends.dynamic_usage()
+            + self.shielded_outputs.dynamic_usage()
+            + self.value_balance.dynamic_usage()
     }
 
     fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
         let bounds = (
             self.shielded_spends.dynamic_usage_bounds(),
             self.shielded_outputs.dynamic_usage_bounds(),
+            self.value_balance.dynamic_usage_bounds(),
         );
 
         (
-            bounds.0 .0 + bounds.1 .0,
-            bounds.0 .1.zip(bounds.1 .1).map(|(a, b)| a + b),
+            bounds.0 .0 + bounds.1 .0 + bounds.2 .0,
+            bounds
+                .0
+                 .1
+                .zip(bounds.1 .1)
+                .zip(bounds.2 .1)
+                .map(|((a, b), c)| a + b + c),
         )
     }
 }
@@ -611,6 +619,8 @@ impl<A> From<OutputDescription<A>> for CompactOutputDescription {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
+    use std::fmt;
+
     use ff::Field;
     use group::{Group, GroupEncoding};
     use proptest::collection::vec;
@@ -628,7 +638,7 @@ pub mod testing {
             },
             Nullifier,
         },
-        transaction::components::{amount::testing::arb_amount, GROTH_PROOF_SIZE},
+        transaction::components::GROTH_PROOF_SIZE,
     };
 
     use super::{
@@ -705,32 +715,40 @@ pub mod testing {
         }
     }
 
-    prop_compose! {
-        pub fn arb_bundle()(
-            n_spends in 0usize..30,
-            n_outputs in 0usize..30,
-        )(
-            shielded_spends in vec(arb_spend_description(n_spends), n_spends),
-            shielded_outputs in vec(arb_output_description(n_outputs), n_outputs),
-            value_balance in arb_amount(),
-            rng_seed in prop::array::uniform32(prop::num::u8::ANY),
-            fake_bvk_bytes in prop::array::uniform32(prop::num::u8::ANY),
-        ) -> Option<Bundle<Authorized>> {
-            if shielded_spends.is_empty() && shielded_outputs.is_empty() {
-                None
-            } else {
-                let mut rng = StdRng::from_seed(rng_seed);
-                let bsk = PrivateKey(jubjub::Fr::random(&mut rng));
-
-                Some(
-                    Bundle {
-                        shielded_spends,
-                        shielded_outputs,
-                        value_balance,
-                        authorization: Authorized { binding_sig: bsk.sign(&fake_bvk_bytes, &mut rng, VALUE_COMMITMENT_RANDOMNESS_GENERATOR) },
-                    }
+    pub fn arb_bundle<V: Copy + fmt::Debug + 'static>(
+        value_balance: V,
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, V>>> {
+        (0usize..30, 0usize..30)
+            .prop_flat_map(|(n_spends, n_outputs)| {
+                (
+                    vec(arb_spend_description(n_spends), n_spends),
+                    vec(arb_output_description(n_outputs), n_outputs),
+                    prop::array::uniform32(prop::num::u8::ANY),
+                    prop::array::uniform32(prop::num::u8::ANY),
                 )
-            }
-        }
+            })
+            .prop_map(
+                move |(shielded_spends, shielded_outputs, rng_seed, fake_bvk_bytes)| {
+                    if shielded_spends.is_empty() && shielded_outputs.is_empty() {
+                        None
+                    } else {
+                        let mut rng = StdRng::from_seed(rng_seed);
+                        let bsk = PrivateKey(jubjub::Fr::random(&mut rng));
+
+                        Some(Bundle {
+                            shielded_spends,
+                            shielded_outputs,
+                            value_balance,
+                            authorization: Authorized {
+                                binding_sig: bsk.sign(
+                                    &fake_bvk_bytes,
+                                    &mut rng,
+                                    VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+                                ),
+                            },
+                        })
+                    }
+                },
+            )
     }
 }
