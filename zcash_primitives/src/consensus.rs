@@ -517,7 +517,7 @@ impl TryFrom<u32> for BranchId {
             0xe9ff_75a6 => Ok(BranchId::Canopy),
             0xc2d6_d0b4 => Ok(BranchId::Nu5),
             #[cfg(feature = "unstable-nu6")]
-            0xc8e71055 => Ok(BranchId::Nu6),
+            0xc8e7_1055 => Ok(BranchId::Nu6),
             #[cfg(feature = "zfuture")]
             0xffff_ffff => Ok(BranchId::ZFuture),
             _ => Err("Unknown consensus branch ID"),
@@ -536,7 +536,7 @@ impl From<BranchId> for u32 {
             BranchId::Canopy => 0xe9ff_75a6,
             BranchId::Nu5 => 0xc2d6_d0b4,
             #[cfg(feature = "unstable-nu6")]
-            BranchId::Nu6 => 0xc8e71055,
+            BranchId::Nu6 => 0xc8e7_1055,
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => 0xffff_ffff,
         }
