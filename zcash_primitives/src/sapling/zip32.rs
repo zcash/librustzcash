@@ -350,7 +350,7 @@ impl ExtendedSpendingKey {
         })
     }
 
-    /// Reads and decodes the encoded form of the extended spending key as define in
+    /// Reads and decodes the encoded form of the extended spending key as defined in
     /// [ZIP 32](https://zips.z.cash/zip-0032) from the provided reader.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let depth = reader.read_u8()?;

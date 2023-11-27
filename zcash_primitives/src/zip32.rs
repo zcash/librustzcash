@@ -55,6 +55,9 @@ impl ConditionallySelectable for AccountId {
 pub struct ChildIndex(u32);
 
 impl ChildIndex {
+    /// Parses the given ZIP 32 child index.
+    ///
+    /// Returns `None` if the hardened bit is not set.
     pub fn from_index(i: u32) -> Option<Self> {
         if i >= (1 << 31) {
             Some(ChildIndex(i))
