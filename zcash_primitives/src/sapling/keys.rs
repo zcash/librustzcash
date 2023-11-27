@@ -33,7 +33,8 @@ pub enum DecodingError {
     InvalidAsk,
     /// Could not decode the `nsk` bytes to a jubjub field element.
     InvalidNsk,
-    /// A non-hardened extended spending key was found, which is unsupported.
+    /// An extended spending key had an unsupported child index: either a non-hardened
+    /// index, or a non-zero index at depth 0.
     UnsupportedChildIndex,
 }
 

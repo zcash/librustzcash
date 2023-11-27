@@ -242,9 +242,10 @@ enum KeyIndex {
 
 impl KeyIndex {
     fn new(depth: u8, i: u32) -> Option<Self> {
-        match i {
-            0 if depth == 0 => Some(KeyIndex::Master),
-            _ => ChildIndex::from_index(i).map(KeyIndex::Child),
+        match (depth == 0, i) {
+            (true, 0) => Some(KeyIndex::Master),
+            (false, _) => ChildIndex::from_index(i).map(KeyIndex::Child),
+            _ => None,
         }
     }
 
@@ -359,7 +360,7 @@ impl ExtendedSpendingKey {
             KeyIndex::new(depth, i).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::Unsupported,
-                    "Non-hardened keys are not supported",
+                    "Unsupported child index in encoding",
                 )
             })
         })?;
@@ -544,7 +545,7 @@ impl ExtendedFullViewingKey {
             KeyIndex::new(depth, i).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::Unsupported,
-                    "Non-hardened keys are not supported",
+                    "Unsupported child index in encoding",
                 )
             })
         })?;
