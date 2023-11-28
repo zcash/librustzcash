@@ -9,7 +9,7 @@ use zcash_primitives::{
         self,
         note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
         prover::{OutputProver, SpendProver},
-        zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
+        zip32::DiversifiableFullViewingKey,
         Node,
     },
     transaction::{
@@ -590,10 +590,9 @@ where
     if let Some(sapling_inputs) = proposal.sapling_inputs() {
         wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
             for selected in sapling_inputs.notes() {
-                let (note, key, merkle_path) = select_key_for_note(
+                let (note, scope, merkle_path) = select_key_for_note(
                     sapling_tree,
                     selected,
-                    usk.sapling(),
                     &dfvk,
                     sapling_inputs.anchor_height(),
                 )?
@@ -604,6 +603,11 @@ where
                         output_index: selected.output_index(),
                     })
                 })?;
+
+                let key = match scope {
+                    Scope::External => usk.sapling().clone(),
+                    Scope::Internal => usk.sapling().derive_internal(),
+                };
 
                 builder.add_sapling_spend(key, note, merkle_path)?;
             }
@@ -885,13 +889,9 @@ fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
         SAPLING_SHARD_HEIGHT,
     >,
     selected: &ReceivedSaplingNote<N>,
-    extsk: &ExtendedSpendingKey,
     dfvk: &DiversifiableFullViewingKey,
     anchor_height: BlockHeight,
-) -> Result<
-    Option<(sapling::Note, ExtendedSpendingKey, sapling::MerklePath)>,
-    ShardTreeError<S::Error>,
-> {
+) -> Result<Option<(sapling::Note, Scope, sapling::MerklePath)>, ShardTreeError<S::Error>> {
     // Attempt to reconstruct the note being spent using both the internal and external dfvks
     // corresponding to the unified spending key, checking against the witness we are using
     // to spend the note that we've used the correct key.
@@ -910,10 +910,10 @@ fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
 
     Ok(external_note
         .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
-        .map(|n| (n, extsk.clone(), merkle_path.clone()))
+        .map(|n| (n, Scope::External, merkle_path.clone()))
         .or_else(|| {
             internal_note
                 .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
-                .map(|n| (n, extsk.derive_internal(), merkle_path))
+                .map(|n| (n, Scope::Internal, merkle_path))
         }))
 }
