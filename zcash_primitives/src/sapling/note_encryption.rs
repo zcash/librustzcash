@@ -492,6 +492,7 @@ mod tests {
         keys::OutgoingViewingKey,
         sapling::{
             bundle::{GrothProofBytes, OutputDescription},
+            circuit::GROTH_PROOF_SIZE,
             keys::{DiversifiedTransmissionKey, EphemeralSecretKey},
             note::ExtractedNoteCommitment,
             note_encryption::PreparedIncomingViewingKey,
@@ -499,7 +500,6 @@ mod tests {
             value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
             Diversifier, PaymentAddress, Rseed, SaplingIvk,
         },
-        transaction::components::GROTH_PROOF_SIZE,
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(

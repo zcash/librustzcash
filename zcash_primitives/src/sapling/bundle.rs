@@ -6,15 +6,13 @@ use zcash_note_encryption::{
     EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
 };
 
-use crate::{
-    sapling::{
-        note::ExtractedNoteCommitment,
-        note_encryption::{CompactOutputDescription, SaplingDomain},
-        redjubjub::{self, PublicKey, Signature},
-        value::ValueCommitment,
-        Nullifier,
-    },
-    transaction::components::GROTH_PROOF_SIZE,
+use crate::sapling::{
+    circuit::GROTH_PROOF_SIZE,
+    note::ExtractedNoteCommitment,
+    note_encryption::{CompactOutputDescription, SaplingDomain},
+    redjubjub::{self, PublicKey, Signature},
+    value::ValueCommitment,
+    Nullifier,
 };
 
 pub type GrothProofBytes = [u8; GROTH_PROOF_SIZE];
