@@ -511,9 +511,8 @@ pub(crate) mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
-        sapling::Node,
+        sapling::{zip32::DiversifiableFullViewingKey, Node},
         transaction::components::amount::NonNegativeAmount,
-        zip32::DiversifiableFullViewingKey,
     };
 
     use crate::{

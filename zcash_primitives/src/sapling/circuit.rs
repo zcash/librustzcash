@@ -29,6 +29,9 @@ mod constants;
 mod ecc;
 mod pedersen_hash;
 
+// π_A + π_B + π_C
+pub(crate) const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
+
 /// The opening (value and randomness) of a Sapling value commitment.
 #[derive(Clone)]
 pub struct ValueCommitmentOpening {

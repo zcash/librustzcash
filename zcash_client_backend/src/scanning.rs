@@ -666,10 +666,11 @@ mod tests {
             note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
             util::generate_random_rseed,
             value::NoteValue,
+            zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
             Nullifier, SaplingIvk,
         },
         transaction::components::amount::NonNegativeAmount,
-        zip32::{AccountId, DiversifiableFullViewingKey, ExtendedSpendingKey},
+        zip32::AccountId,
     };
 
     use crate::{
@@ -739,7 +740,7 @@ mod tests {
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            MemoBytes::empty(),
+            *MemoBytes::empty().as_array(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();

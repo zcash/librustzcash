@@ -1040,7 +1040,13 @@ pub(crate) mod tests {
                 );
 
                 if result.is_some() {
-                    return Ok(result);
+                    return Ok(result.map(|(note, addr, memo)| {
+                        (
+                            note,
+                            addr,
+                            MemoBytes::from_bytes(&memo).expect("correct length"),
+                        )
+                    }));
                 }
             }
 

@@ -485,7 +485,7 @@ mod tests {
         constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
-        sapling::{self, Node, Rseed},
+        sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed},
         transaction::{
             builder::Builder,
             components::{
@@ -495,7 +495,6 @@ mod tests {
             fees::fixed,
             Transaction, TransactionData, TxVersion,
         },
-        zip32::ExtendedSpendingKey,
     };
     use zcash_proofs::prover::LocalTxProver;
 

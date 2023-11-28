@@ -6,7 +6,6 @@ use rand_core::OsRng;
 use zcash_note_encryption::batch;
 use zcash_primitives::{
     consensus::{sapling_zip212_enforcement, NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
-    memo::MemoBytes,
     sapling::{
         builder::SaplingBuilder,
         note_encryption::{
@@ -38,13 +37,7 @@ fn bench_note_decryption(c: &mut Criterion) {
 
         let mut builder = SaplingBuilder::new(zip212_enforcement);
         builder
-            .add_output(
-                &mut rng,
-                None,
-                pa,
-                NoteValue::from_raw(100),
-                MemoBytes::empty(),
-            )
+            .add_output(&mut rng, None, pa, NoteValue::from_raw(100), None)
             .unwrap();
         let (bundle, _) = builder
             .build::<MockSpendProver, MockOutputProver, _, Amount>(&mut rng)

@@ -5,7 +5,6 @@ use incrementalmerkletree::Position;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
-    keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     sapling,
     transaction::{
@@ -262,7 +261,7 @@ pub enum OvkPolicy {
     ///
     /// Transaction outputs will be decryptable by the recipients, and whoever controls
     /// the provided outgoing viewing key.
-    Custom(OutgoingViewingKey),
+    Custom(sapling::keys::OutgoingViewingKey),
 
     /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.

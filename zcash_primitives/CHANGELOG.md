@@ -112,6 +112,8 @@ and this library adheres to Rust's notion of
   - `builder::SaplingBuilder::new` now takes a `Zip212Enforcement` argument
     instead of a `P: consensus::Parameters` argument and a target height.
   - `builder::SaplingBuilder::add_spend` now takes `extsk` by reference.
+  - `builder::SaplingBuilder::add_output` now takes an `Option<[u8; 512]>` memo
+    instead of a `MemoBytes`.
   - `builder::SaplingBuilder::build` no longer takes a prover, proving context,
     progress notifier, or target height. Instead, it has `SpendProver, OutputProver`
     generic parameters and returns `(UnauthorizedBundle, SaplingMetadata)`. The
@@ -135,6 +137,13 @@ and this library adheres to Rust's notion of
       - `plaintext_version_is_valid`
       - `try_sapling_note_decryption`
       - `try_sapling_compact_note_decryption`
+      - `try_sapling_output_recovery_with_ock`
+      - `try_sapling_output_recovery`
+    - `SaplingDomain::Memo` now has type `[u8; 512]` instead of `MemoBytes`.
+    - `sapling_note_encryption` now takes `memo` as a `[u8; 512]` instead of
+      `MemoBytes`.
+    - The following methods now return `[u8; 512]` instead of `MemoBytes`:
+      - `try_sapling_note_decryption`
       - `try_sapling_output_recovery_with_ock`
       - `try_sapling_output_recovery`
   - `util::generate_random_rseed` now takes a `Zip212Enforcement` argument

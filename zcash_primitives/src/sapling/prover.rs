@@ -4,14 +4,12 @@ use bellman::groth16::{create_random_proof, Proof};
 use bls12_381::Bls12;
 use rand_core::RngCore;
 
-use crate::{
-    sapling::{
-        self,
-        bundle::GrothProofBytes,
-        value::{NoteValue, ValueCommitTrapdoor},
-        MerklePath,
-    },
-    transaction::components::GROTH_PROOF_SIZE,
+use crate::sapling::{
+    self,
+    bundle::GrothProofBytes,
+    circuit::GROTH_PROOF_SIZE,
+    value::{NoteValue, ValueCommitTrapdoor},
+    MerklePath,
 };
 
 use super::{

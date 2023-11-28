@@ -15,17 +15,14 @@ use zcash_note_encryption::{
     ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
 };
 
-use crate::{
-    memo::MemoBytes,
-    sapling::{
-        bundle::{GrothProofBytes, OutputDescription},
-        keys::{
-            DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
-            SharedSecret,
-        },
-        value::{NoteValue, ValueCommitment},
-        Diversifier, Note, PaymentAddress, Rseed,
+use crate::sapling::{
+    bundle::{GrothProofBytes, OutputDescription},
+    keys::{
+        DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
+        SharedSecret,
     },
+    value::{NoteValue, ValueCommitment},
+    Diversifier, Note, PaymentAddress, Rseed,
 };
 
 use super::note::ExtractedNoteCommitment;
@@ -145,7 +142,7 @@ impl Domain for SaplingDomain {
     type ValueCommitment = ValueCommitment;
     type ExtractedCommitment = ExtractedNoteCommitment;
     type ExtractedCommitmentBytes = [u8; 32];
-    type Memo = MemoBytes;
+    type Memo = [u8; 512];
 
     fn derive_esk(note: &Self::Note) -> Option<Self::EphemeralSecretKey> {
         note.derive_esk()
@@ -209,7 +206,7 @@ impl Domain for SaplingDomain {
             }
         }
 
-        input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&memo.as_array()[..]);
+        input[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE].copy_from_slice(&memo[..]);
 
         NotePlaintextBytes(input)
     }
@@ -286,7 +283,9 @@ impl Domain for SaplingDomain {
     }
 
     fn extract_memo(&self, plaintext: &NotePlaintextBytes) -> Self::Memo {
-        MemoBytes::from_bytes(&plaintext.0[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]).unwrap()
+        plaintext.0[COMPACT_NOTE_SIZE..NOTE_PLAINTEXT_SIZE]
+            .try_into()
+            .expect("correct length")
     }
 }
 
@@ -361,7 +360,6 @@ impl ShieldedOutput<SaplingDomain, COMPACT_NOTE_SIZE> for CompactOutputDescripti
 /// use zcash_primitives::{
 ///     keys::{OutgoingViewingKey, prf_expand},
 ///     consensus::{TEST_NETWORK, NetworkUpgrade, Parameters},
-///     memo::MemoBytes,
 ///     sapling::{
 ///         note_encryption::{sapling_note_encryption, Zip212Enforcement},
 ///         util::generate_random_rseed,
@@ -388,14 +386,14 @@ impl ShieldedOutput<SaplingDomain, COMPACT_NOTE_SIZE> for CompactOutputDescripti
 /// let note = to.create_note(value, rseed);
 /// let cmu = note.cmu();
 ///
-/// let mut enc = sapling_note_encryption(ovk, note, MemoBytes::empty(), &mut rng);
+/// let mut enc = sapling_note_encryption(ovk, note, [0x37; 512], &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
 /// ```
 pub fn sapling_note_encryption<R: RngCore>(
     ovk: Option<OutgoingViewingKey>,
     note: Note,
-    memo: MemoBytes,
+    memo: [u8; 512],
     rng: &mut R,
 ) -> NoteEncryption<SaplingDomain> {
     let esk = note.generate_or_derive_esk_internal(rng);
@@ -416,7 +414,7 @@ pub fn try_sapling_note_decryption<Output: ShieldedOutput<SaplingDomain, ENC_CIP
     ivk: &PreparedIncomingViewingKey,
     output: &Output,
     zip212_enforcement: Zip212Enforcement,
-) -> Option<(Note, PaymentAddress, MemoBytes)> {
+) -> Option<(Note, PaymentAddress, [u8; 512])> {
     let domain = SaplingDomain::new(zip212_enforcement);
     try_note_decryption(&domain, ivk, output)
 }
@@ -444,7 +442,7 @@ pub fn try_sapling_output_recovery_with_ock(
     ock: &OutgoingCipherKey,
     output: &OutputDescription<GrothProofBytes>,
     zip212_enforcement: Zip212Enforcement,
-) -> Option<(Note, PaymentAddress, MemoBytes)> {
+) -> Option<(Note, PaymentAddress, [u8; 512])> {
     let domain = SaplingDomain::new(zip212_enforcement);
     try_output_recovery_with_ock(&domain, ock, output, output.out_ciphertext())
 }
@@ -461,7 +459,7 @@ pub fn try_sapling_output_recovery(
     ovk: &OutgoingViewingKey,
     output: &OutputDescription<GrothProofBytes>,
     zip212_enforcement: Zip212Enforcement,
-) -> Option<(Note, PaymentAddress, MemoBytes)> {
+) -> Option<(Note, PaymentAddress, [u8; 512])> {
     let domain = SaplingDomain::new(zip212_enforcement);
     try_output_recovery_with_ovk(&domain, ovk, output, output.cv(), output.out_ciphertext())
 }
@@ -490,19 +488,15 @@ mod tests {
         Zip212Enforcement,
     };
 
-    use crate::{
-        keys::OutgoingViewingKey,
-        memo::MemoBytes,
-        sapling::{
-            bundle::{GrothProofBytes, OutputDescription},
-            keys::{DiversifiedTransmissionKey, EphemeralSecretKey},
-            note::ExtractedNoteCommitment,
-            note_encryption::PreparedIncomingViewingKey,
-            util::generate_random_rseed,
-            value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
-            Diversifier, PaymentAddress, Rseed, SaplingIvk,
-        },
-        transaction::components::GROTH_PROOF_SIZE,
+    use crate::sapling::{
+        bundle::{GrothProofBytes, OutputDescription},
+        circuit::GROTH_PROOF_SIZE,
+        keys::{DiversifiedTransmissionKey, EphemeralSecretKey, OutgoingViewingKey},
+        note::ExtractedNoteCommitment,
+        note_encryption::PreparedIncomingViewingKey,
+        util::generate_random_rseed,
+        value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+        Diversifier, PaymentAddress, Rseed, SaplingIvk,
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(
@@ -561,7 +555,7 @@ mod tests {
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let ne = sapling_note_encryption(Some(ovk), note, MemoBytes::empty(), &mut rng);
+        let ne = sapling_note_encryption(Some(ovk), note, [0x37; 512], &mut rng);
         let epk = ne.epk();
         let ock = prf_ock(&ovk, &cv, &cmu.to_bytes(), &epk.to_bytes());
 
@@ -1415,7 +1409,7 @@ mod tests {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
-                    assert_eq!(&decrypted_memo.as_array()[..], &tv.memo[..]);
+                    assert_eq!(&decrypted_memo[..], &tv.memo[..]);
                 }
                 None => panic!("Note decryption failed"),
             }
@@ -1436,7 +1430,7 @@ mod tests {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
-                    assert_eq!(&decrypted_memo.as_array()[..], &tv.memo[..]);
+                    assert_eq!(&decrypted_memo[..], &tv.memo[..]);
                 }
                 None => panic!("Output recovery failed"),
             }
@@ -1449,7 +1443,7 @@ mod tests {
                 [Some(((decrypted_note, decrypted_to, decrypted_memo), i))] => {
                     assert_eq!(decrypted_note, &note);
                     assert_eq!(decrypted_to, &to);
-                    assert_eq!(&decrypted_memo.as_array()[..], &tv.memo[..]);
+                    assert_eq!(&decrypted_memo[..], &tv.memo[..]);
                     assert_eq!(*i, 0);
                 }
                 _ => panic!("Note decryption failed"),
@@ -1475,12 +1469,7 @@ mod tests {
             // Test encryption
             //
 
-            let ne = NoteEncryption::<SaplingDomain>::new_with_esk(
-                esk,
-                Some(ovk),
-                note,
-                MemoBytes::from_bytes(&tv.memo).unwrap(),
-            );
+            let ne = NoteEncryption::<SaplingDomain>::new_with_esk(esk, Some(ovk), note, tv.memo);
 
             assert_eq!(ne.encrypt_note_plaintext().as_ref(), &tv.c_enc[..]);
             assert_eq!(

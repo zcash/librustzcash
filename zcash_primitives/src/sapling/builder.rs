@@ -8,8 +8,6 @@ use rand::{seq::SliceRandom, RngCore};
 use rand_core::CryptoRng;
 
 use crate::{
-    keys::OutgoingViewingKey,
-    memo::MemoBytes,
     sapling::{
         self,
         bundle::{
@@ -17,6 +15,7 @@ use crate::{
             SpendDescription,
         },
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
+        keys::OutgoingViewingKey,
         note_encryption::{sapling_note_encryption, Zip212Enforcement},
         prover::{OutputProver, SpendProver},
         redjubjub::{PrivateKey, PublicKey, Signature},
@@ -25,14 +24,14 @@ use crate::{
         value::{
             CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment, ValueSum,
         },
-        verify_spend_sig, Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey,
-        SaplingIvk,
+        verify_spend_sig,
+        zip32::ExtendedSpendingKey,
+        Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey, SaplingIvk,
     },
     transaction::{
         builder::Progress,
         components::{amount::NonNegativeAmount, sapling::fees},
     },
-    zip32::ExtendedSpendingKey,
 };
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
@@ -165,7 +164,7 @@ struct SaplingOutputInfo {
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
     note: Note,
-    memo: MemoBytes,
+    memo: Option<[u8; 512]>,
     rcv: ValueCommitTrapdoor,
 }
 
@@ -188,7 +187,7 @@ impl SaplingOutputInfo {
             None,
             dummy_to,
             NoteValue::from_raw(0),
-            MemoBytes::empty(),
+            None,
             zip212_enforcement,
         )
     }
@@ -198,7 +197,7 @@ impl SaplingOutputInfo {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: NoteValue,
-        memo: MemoBytes,
+        memo: Option<[u8; 512]>,
         zip212_enforcement: Zip212Enforcement,
     ) -> Self {
         let rseed = generate_random_rseed_internal(zip212_enforcement, rng);
@@ -217,7 +216,16 @@ impl SaplingOutputInfo {
         self,
         rng: &mut R,
     ) -> OutputDescription<sapling::circuit::Output> {
-        let encryptor = sapling_note_encryption::<R>(self.ovk, self.note.clone(), self.memo, rng);
+        let encryptor = sapling_note_encryption::<R>(
+            self.ovk,
+            self.note.clone(),
+            self.memo.unwrap_or_else(|| {
+                let mut memo = [0; 512];
+                memo[0] = 0xf6;
+                memo
+            }),
+            rng,
+        );
 
         // Construct the value commitment.
         let cv = ValueCommitment::derive(self.note.value(), self.rcv.clone());
@@ -396,7 +404,7 @@ impl SaplingBuilder {
         ovk: Option<OutgoingViewingKey>,
         to: PaymentAddress,
         value: NoteValue,
-        memo: MemoBytes,
+        memo: Option<[u8; 512]>,
     ) -> Result<(), Error> {
         let output = SaplingOutputInfo::new_internal(
             &mut rng,
