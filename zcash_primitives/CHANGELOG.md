@@ -96,6 +96,8 @@ and this library adheres to Rust's notion of
   - `SaplingVerificationContext::{check_spend, check_output}` now take
     the `PreparedSpendVerifyingKey` and `PreparedOutputVerifyingKey`
     newtypes.
+  - `SaplingVerificationContext::final_check` now takes its `value_balance`
+    argument as `V: Into<i64>` instead of `Amount`.
   - `address::PaymentAddress::create_note` now takes its `value` argument as a
     `NoteValue` instead of as a bare `u64`.
   - `builder::SaplingBuilder` no longer has a `P: consensus::Parameters` type
@@ -112,6 +114,9 @@ and this library adheres to Rust's notion of
     - `Error::DuplicateSignature`
     - `Error::InvalidExternalSignature`
     - `Error::MissingSignatures`
+  - `bundle::Bundle` now has a second generic parameter `V`.
+  - `bundle::Bundle::value_balance` now returns `&V` instead of `&Amount`.
+  - `bundle::testing::arb_bundle` now takes a `value_balance: V` argument.
   - `bundle::MapAuth` trait methods now take `&mut self` instead of `&self`.
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
     instead of as a bare `u64`.

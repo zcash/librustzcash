@@ -513,7 +513,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         let mut rng = self.rng;
         let (sapling_bundle, tx_metadata) = match self
             .sapling_builder
-            .build::<SP, OP, _>(&mut rng)
+            .build::<SP, OP, _, _>(&mut rng)
             .map_err(Error::SaplingBuild)?
             .map(|(bundle, tx_metadata)| {
                 // We need to create proofs before signatures, because we still support

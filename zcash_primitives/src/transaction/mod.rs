@@ -309,7 +309,7 @@ pub struct TransactionData<A: Authorization> {
     expiry_height: BlockHeight,
     transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
     sprout_bundle: Option<sprout::Bundle>,
-    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
     #[cfg(feature = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
@@ -324,7 +324,7 @@ impl<A: Authorization> TransactionData<A> {
         expiry_height: BlockHeight,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
-        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
     ) -> Self {
         TransactionData {
@@ -350,7 +350,7 @@ impl<A: Authorization> TransactionData<A> {
         expiry_height: BlockHeight,
         transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
         sprout_bundle: Option<sprout::Bundle>,
-        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth>>,
+        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
         tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
     ) -> Self {
@@ -391,7 +391,7 @@ impl<A: Authorization> TransactionData<A> {
         self.sprout_bundle.as_ref()
     }
 
-    pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth>> {
+    pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, Amount>> {
         self.sapling_bundle.as_ref()
     }
 
@@ -460,8 +460,8 @@ impl<A: Authorization> TransactionData<A> {
             Option<transparent::Bundle<A::TransparentAuth>>,
         ) -> Option<transparent::Bundle<B::TransparentAuth>>,
         f_sapling: impl FnOnce(
-            Option<sapling::Bundle<A::SaplingAuth>>,
-        ) -> Option<sapling::Bundle<B::SaplingAuth>>,
+            Option<sapling::Bundle<A::SaplingAuth, Amount>>,
+        ) -> Option<sapling::Bundle<B::SaplingAuth, Amount>>,
         f_orchard: impl FnOnce(
             Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
         ) -> Option<orchard::bundle::Bundle<B::OrchardAuth, Amount>>,
@@ -727,7 +727,7 @@ impl Transaction {
     #[cfg(feature = "temporary-zcashd")]
     pub fn temporary_zcashd_read_v5_sapling<R: Read>(
         reader: R,
-    ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized>>> {
+    ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized, Amount>>> {
         sapling_serialization::read_v5_bundle(reader)
     }
 
@@ -836,7 +836,7 @@ impl Transaction {
 
     #[cfg(feature = "temporary-zcashd")]
     pub fn temporary_zcashd_write_v5_sapling<W: Write>(
-        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized>>,
+        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, Amount>>,
         writer: W,
     ) -> io::Result<()> {
         sapling_serialization::write_v5_bundle(writer, sapling_bundle)
@@ -915,7 +915,7 @@ pub trait TransactionDigest<A: Authorization> {
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth>>,
+        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
     ) -> Self::SaplingDigest;
 
     fn digest_orchard(

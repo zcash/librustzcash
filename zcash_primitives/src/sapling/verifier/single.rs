@@ -2,15 +2,12 @@ use bellman::groth16::{verify_proof, Proof};
 use bls12_381::Bls12;
 
 use super::SaplingVerificationContextInner;
-use crate::{
-    sapling::{
-        circuit::{PreparedOutputVerifyingKey, PreparedSpendVerifyingKey},
-        constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
-        note::ExtractedNoteCommitment,
-        redjubjub::{PublicKey, Signature},
-        value::ValueCommitment,
-    },
-    transaction::components::Amount,
+use crate::sapling::{
+    circuit::{PreparedOutputVerifyingKey, PreparedSpendVerifyingKey},
+    constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
+    note::ExtractedNoteCommitment,
+    redjubjub::{PublicKey, Signature},
+    value::ValueCommitment,
 };
 
 /// A context object for verifying the Sapling components of a single Zcash transaction.
@@ -80,9 +77,9 @@ impl SaplingVerificationContext {
     /// Perform consensus checks on the valueBalance and bindingSig parts of a
     /// Sapling transaction. All SpendDescriptions and OutputDescriptions must
     /// have been checked before calling this function.
-    pub fn final_check(
+    pub fn final_check<V: Into<i64>>(
         &self,
-        value_balance: Amount,
+        value_balance: V,
         sighash_value: &[u8; 32],
         binding_sig: Signature,
     ) -> bool {

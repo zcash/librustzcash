@@ -23,10 +23,9 @@ use crate::{
             DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
             SharedSecret,
         },
-        value::ValueCommitment,
+        value::{NoteValue, ValueCommitment},
         Diversifier, Note, PaymentAddress, Rseed,
     },
-    transaction::components::amount::NonNegativeAmount,
 };
 
 use super::note::ExtractedNoteCommitment;
@@ -93,12 +92,11 @@ where
             .try_into()
             .expect("Note plaintext is checked to have length >= COMPACT_NOTE_SIZE."),
     );
-    let value = NonNegativeAmount::from_u64_le_bytes(
+    let value = NoteValue::from_bytes(
         plaintext[12..20]
             .try_into()
             .expect("Note plaintext is checked to have length >= COMPACT_NOTE_SIZE."),
-    )
-    .ok()?;
+    );
     let r: [u8; 32] = plaintext[20..COMPACT_NOTE_SIZE]
         .try_into()
         .expect("Note plaintext is checked to have length >= COMPACT_NOTE_SIZE.");
@@ -114,7 +112,7 @@ where
 
     // `diversifier` was checked by `get_pk_d`.
     let to = PaymentAddress::from_parts_unchecked(diversifier, pk_d)?;
-    let note = to.create_note(value.into(), rseed);
+    let note = to.create_note(value, rseed);
     Some((note, to))
 }
 

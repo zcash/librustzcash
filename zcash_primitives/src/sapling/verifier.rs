@@ -2,13 +2,10 @@ use bellman::{gadgets::multipack, groth16::Proof};
 use bls12_381::Bls12;
 use group::{ff::PrimeField, Curve, GroupEncoding};
 
-use crate::{
-    sapling::{
-        note::ExtractedNoteCommitment,
-        redjubjub::{PublicKey, Signature},
-        value::{CommitmentSum, ValueCommitment},
-    },
-    transaction::components::Amount,
+use crate::sapling::{
+    note::ExtractedNoteCommitment,
+    redjubjub::{PublicKey, Signature},
+    value::{CommitmentSum, ValueCommitment},
 };
 
 mod single;
@@ -145,9 +142,9 @@ impl SaplingVerificationContextInner {
     /// Perform consensus checks on the valueBalance and bindingSig parts of a
     /// Sapling transaction. All SpendDescriptions and OutputDescriptions must
     /// have been checked before calling this function.
-    fn final_check(
+    fn final_check<V: Into<i64>>(
         &self,
-        value_balance: Amount,
+        value_balance: V,
         sighash_value: &[u8; 32],
         binding_sig: Signature,
         binding_sig_verifier: impl FnOnce(PublicKey, [u8; 64], Signature) -> bool,
