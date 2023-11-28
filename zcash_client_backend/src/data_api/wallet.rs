@@ -741,10 +741,12 @@ where
                 {
                     tx.sapling_bundle().and_then(|bundle| {
                         try_sapling_note_decryption(
-                            params,
-                            proposal.min_target_height(),
                             &internal_ivk,
                             &bundle.shielded_outputs()[output_index],
+                            consensus::sapling_zip212_enforcement(
+                                params,
+                                proposal.min_target_height(),
+                            ),
                         )
                         .map(|(note, _, _)| (account, note))
                     })

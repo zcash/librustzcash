@@ -16,7 +16,6 @@ use zcash_note_encryption::{
 };
 
 use crate::{
-    consensus::{self, BlockHeight, NetworkUpgrade::Canopy, ZIP212_GRACE_PERIOD},
     memo::MemoBytes,
     sapling::{
         bundle::{GrothProofBytes, OutputDescription},
@@ -62,10 +61,19 @@ pub fn prf_ock(
     )
 }
 
+/// The enforcement policy for ZIP 212 that should be applied when creating or decrypting
+/// Sapling outputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zip212Enforcement {
+    Off,
+    GracePeriod,
+    On,
+}
+
 /// `get_pk_d` must check that the diversifier contained within the note plaintext is a
 /// valid Sapling diversifier.
-fn sapling_parse_note_plaintext_without_memo<F, P: consensus::Parameters>(
-    domain: &SaplingDomain<P>,
+fn sapling_parse_note_plaintext_without_memo<F>(
+    domain: &SaplingDomain,
     plaintext: &[u8],
     get_pk_d: F,
 ) -> Option<(Note, PaymentAddress)>
@@ -75,7 +83,7 @@ where
     assert!(plaintext.len() >= COMPACT_NOTE_SIZE);
 
     // Check note plaintext version
-    if !plaintext_version_is_valid(&domain.params, domain.height, plaintext[0]) {
+    if !plaintext_version_is_valid(domain.zip212_enforcement, plaintext[0]) {
         return None;
     }
 
@@ -110,33 +118,19 @@ where
     Some((note, to))
 }
 
-pub struct SaplingDomain<P: consensus::Parameters> {
-    params: P,
-    height: BlockHeight,
+pub struct SaplingDomain {
+    zip212_enforcement: Zip212Enforcement,
 }
 
-impl<P: consensus::Parameters + DynamicUsage> DynamicUsage for SaplingDomain<P> {
-    fn dynamic_usage(&self) -> usize {
-        self.params.dynamic_usage() + self.height.dynamic_usage()
-    }
+memuse::impl_no_dynamic_usage!(SaplingDomain);
 
-    fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-        let (params_lower, params_upper) = self.params.dynamic_usage_bounds();
-        let (height_lower, height_upper) = self.height.dynamic_usage_bounds();
-        (
-            params_lower + height_lower,
-            params_upper.zip(height_upper).map(|(a, b)| a + b),
-        )
+impl SaplingDomain {
+    pub fn new(zip212_enforcement: Zip212Enforcement) -> Self {
+        Self { zip212_enforcement }
     }
 }
 
-impl<P: consensus::Parameters> SaplingDomain<P> {
-    pub fn for_height(params: P, height: BlockHeight) -> Self {
-        Self { params, height }
-    }
-}
-
-impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
+impl Domain for SaplingDomain {
     type EphemeralSecretKey = EphemeralSecretKey;
     // It is acceptable for this to be a point rather than a byte array, because we
     // enforce by consensus that points must not be small-order, and all points with
@@ -298,7 +292,7 @@ impl<P: consensus::Parameters> Domain for SaplingDomain<P> {
     }
 }
 
-impl<P: consensus::Parameters> BatchDomain for SaplingDomain<P> {
+impl BatchDomain for SaplingDomain {
     fn batch_kdf<'a>(
         items: impl Iterator<Item = (Option<Self::SharedSecret>, &'a EphemeralKeyBytes)>,
     ) -> Vec<Option<Self::SymmetricKey>> {
@@ -340,9 +334,7 @@ pub struct CompactOutputDescription {
 
 memuse::impl_no_dynamic_usage!(CompactOutputDescription);
 
-impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>
-    for CompactOutputDescription
-{
+impl ShieldedOutput<SaplingDomain, COMPACT_NOTE_SIZE> for CompactOutputDescription {
     fn ephemeral_key(&self) -> EphemeralKeyBytes {
         self.ephemeral_key.clone()
     }
@@ -370,10 +362,10 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZ
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
 ///     keys::{OutgoingViewingKey, prf_expand},
-///     consensus::{TEST_NETWORK, TestNetwork, NetworkUpgrade, Parameters},
+///     consensus::{TEST_NETWORK, NetworkUpgrade, Parameters},
 ///     memo::MemoBytes,
 ///     sapling::{
-///         note_encryption::sapling_note_encryption,
+///         note_encryption::{sapling_note_encryption, Zip212Enforcement},
 ///         util::generate_random_rseed,
 ///         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
 ///         Diversifier, PaymentAddress, Rseed, SaplingIvk,
@@ -391,80 +383,54 @@ impl<P: consensus::Parameters> ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZ
 /// let rcv = ValueCommitTrapdoor::random(&mut rng);
 /// let cv = ValueCommitment::derive(value, rcv);
 /// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
-/// let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
+/// let rseed = generate_random_rseed(
+///     Zip212Enforcement::GracePeriod,
+///     &mut rng,
+/// );
 /// let note = to.create_note(value, rseed);
 /// let cmu = note.cmu();
 ///
-/// let mut enc = sapling_note_encryption::<_, TestNetwork>(ovk, note, MemoBytes::empty(), &mut rng);
+/// let mut enc = sapling_note_encryption(ovk, note, MemoBytes::empty(), &mut rng);
 /// let encCiphertext = enc.encrypt_note_plaintext();
 /// let outCiphertext = enc.encrypt_outgoing_plaintext(&cv, &cmu, &mut rng);
 /// ```
-pub fn sapling_note_encryption<R: RngCore, P: consensus::Parameters>(
+pub fn sapling_note_encryption<R: RngCore>(
     ovk: Option<OutgoingViewingKey>,
     note: Note,
     memo: MemoBytes,
     rng: &mut R,
-) -> NoteEncryption<SaplingDomain<P>> {
+) -> NoteEncryption<SaplingDomain> {
     let esk = note.generate_or_derive_esk_internal(rng);
     NoteEncryption::new_with_esk(esk, ovk, note, memo)
 }
 
 #[allow(clippy::if_same_then_else)]
 #[allow(clippy::needless_bool)]
-pub fn plaintext_version_is_valid<P: consensus::Parameters>(
-    params: &P,
-    height: BlockHeight,
-    leadbyte: u8,
-) -> bool {
-    if params.is_nu_active(Canopy, height) {
-        let grace_period_end_height =
-            params.activation_height(Canopy).unwrap() + ZIP212_GRACE_PERIOD;
-
-        if height < grace_period_end_height && leadbyte != 0x01 && leadbyte != 0x02 {
-            // non-{0x01,0x02} received after Canopy activation and before grace period has elapsed
-            false
-        } else if height >= grace_period_end_height && leadbyte != 0x02 {
-            // non-0x02 received past (Canopy activation height + grace period)
-            false
-        } else {
-            true
-        }
-    } else {
-        // return false if non-0x01 received when Canopy is not active
-        leadbyte == 0x01
+pub fn plaintext_version_is_valid(zip212_enforcement: Zip212Enforcement, leadbyte: u8) -> bool {
+    match zip212_enforcement {
+        Zip212Enforcement::Off => leadbyte == 0x01,
+        Zip212Enforcement::GracePeriod => leadbyte == 0x01 || leadbyte == 0x02,
+        Zip212Enforcement::On => leadbyte == 0x02,
     }
 }
 
-pub fn try_sapling_note_decryption<
-    P: consensus::Parameters,
-    Output: ShieldedOutput<SaplingDomain<P>, ENC_CIPHERTEXT_SIZE>,
->(
-    params: &P,
-    height: BlockHeight,
+pub fn try_sapling_note_decryption<Output: ShieldedOutput<SaplingDomain, ENC_CIPHERTEXT_SIZE>>(
     ivk: &PreparedIncomingViewingKey,
     output: &Output,
+    zip212_enforcement: Zip212Enforcement,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
-    let domain = SaplingDomain {
-        params: params.clone(),
-        height,
-    };
+    let domain = SaplingDomain::new(zip212_enforcement);
     try_note_decryption(&domain, ivk, output)
 }
 
 pub fn try_sapling_compact_note_decryption<
-    P: consensus::Parameters,
-    Output: ShieldedOutput<SaplingDomain<P>, COMPACT_NOTE_SIZE>,
+    Output: ShieldedOutput<SaplingDomain, COMPACT_NOTE_SIZE>,
 >(
-    params: &P,
-    height: BlockHeight,
     ivk: &PreparedIncomingViewingKey,
     output: &Output,
+    zip212_enforcement: Zip212Enforcement,
 ) -> Option<(Note, PaymentAddress)> {
-    let domain = SaplingDomain {
-        params: params.clone(),
-        height,
-    };
-
+    let domain = SaplingDomain::new(zip212_enforcement);
     try_compact_note_decryption(&domain, ivk, output)
 }
 
@@ -476,17 +442,12 @@ pub fn try_sapling_compact_note_decryption<
 ///
 /// Implements part of section 4.19.3 of the Zcash Protocol Specification.
 /// For decryption using a Full Viewing Key see [`try_sapling_output_recovery`].
-pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
-    params: &P,
-    height: BlockHeight,
+pub fn try_sapling_output_recovery_with_ock(
     ock: &OutgoingCipherKey,
     output: &OutputDescription<GrothProofBytes>,
+    zip212_enforcement: Zip212Enforcement,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
-    let domain = SaplingDomain {
-        params: params.clone(),
-        height,
-    };
-
+    let domain = SaplingDomain::new(zip212_enforcement);
     try_output_recovery_with_ock(&domain, ock, output, output.out_ciphertext())
 }
 
@@ -498,17 +459,12 @@ pub fn try_sapling_output_recovery_with_ock<P: consensus::Parameters>(
 ///
 /// Implements section 4.19.3 of the Zcash Protocol Specification.
 #[allow(clippy::too_many_arguments)]
-pub fn try_sapling_output_recovery<P: consensus::Parameters>(
-    params: &P,
-    height: BlockHeight,
+pub fn try_sapling_output_recovery(
     ovk: &OutgoingViewingKey,
     output: &OutputDescription<GrothProofBytes>,
+    zip212_enforcement: Zip212Enforcement,
 ) -> Option<(Note, PaymentAddress, MemoBytes)> {
-    let domain = SaplingDomain {
-        params: params.clone(),
-        height,
-    };
-
+    let domain = SaplingDomain::new(zip212_enforcement);
     try_output_recovery_with_ovk(&domain, ovk, output, output.cv(), output.out_ciphertext())
 }
 
@@ -533,14 +489,10 @@ mod tests {
         prf_ock, sapling_note_encryption, try_sapling_compact_note_decryption,
         try_sapling_note_decryption, try_sapling_output_recovery,
         try_sapling_output_recovery_with_ock, CompactOutputDescription, SaplingDomain,
+        Zip212Enforcement,
     };
 
     use crate::{
-        consensus::{
-            BlockHeight,
-            NetworkUpgrade::{Canopy, Sapling},
-            Parameters, TestNetwork, TEST_NETWORK, ZIP212_GRACE_PERIOD,
-        },
         keys::OutgoingViewingKey,
         memo::MemoBytes,
         sapling::{
@@ -556,7 +508,7 @@ mod tests {
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(
-        height: BlockHeight,
+        zip212_enforcement: Zip212Enforcement,
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
@@ -567,23 +519,20 @@ mod tests {
         let ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
         let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
 
-        let (ovk, ock, output) = random_enc_ciphertext_with(height, &ivk, rng);
+        let (ovk, ock, output) = random_enc_ciphertext_with(&ivk, zip212_enforcement, rng);
 
-        assert!(
-            try_sapling_note_decryption(&TEST_NETWORK, height, &prepared_ivk, &output).is_some()
-        );
+        assert!(try_sapling_note_decryption(&prepared_ivk, &output, zip212_enforcement).is_some());
         assert!(try_sapling_compact_note_decryption(
-            &TEST_NETWORK,
-            height,
             &prepared_ivk,
             &CompactOutputDescription::from(output.clone()),
+            zip212_enforcement,
         )
         .is_some());
 
-        let ovk_output_recovery = try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output);
+        let ovk_output_recovery = try_sapling_output_recovery(&ovk, &output, zip212_enforcement);
 
         let ock_output_recovery =
-            try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output);
+            try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement);
         assert!(ovk_output_recovery.is_some());
         assert!(ock_output_recovery.is_some());
         assert_eq!(ovk_output_recovery, ock_output_recovery);
@@ -592,8 +541,8 @@ mod tests {
     }
 
     fn random_enc_ciphertext_with<R: RngCore + CryptoRng>(
-        height: BlockHeight,
         ivk: &SaplingIvk,
+        zip212_enforcement: Zip212Enforcement,
         mut rng: &mut R,
     ) -> (
         OutgoingViewingKey,
@@ -608,18 +557,13 @@ mod tests {
         let rcv = ValueCommitTrapdoor::random(&mut rng);
         let cv = ValueCommitment::derive(value, rcv);
 
-        let rseed = generate_random_rseed(&TEST_NETWORK, height, &mut rng);
+        let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
 
         let note = pa.create_note(value, rseed);
         let cmu = note.cmu();
 
         let ovk = OutgoingViewingKey([0; 32]);
-        let ne = sapling_note_encryption::<_, TestNetwork>(
-            Some(ovk),
-            note,
-            MemoBytes::empty(),
-            &mut rng,
-        );
+        let ne = sapling_note_encryption(Some(ovk), note, MemoBytes::empty(), &mut rng);
         let epk = ne.epk();
         let ock = prf_ock(&ovk, &cv, &cmu.to_bytes(), &epk.to_bytes());
 
@@ -761,20 +705,20 @@ mod tests {
     #[test]
     fn decryption_with_invalid_ivk() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, _, output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, _, output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             assert_eq!(
                 try_sapling_note_decryption(
-                    &TEST_NETWORK,
-                    height,
                     &PreparedIncomingViewingKey::new(&SaplingIvk(jubjub::Fr::random(&mut rng))),
-                    &output
+                    &output,
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -784,18 +728,19 @@ mod tests {
     #[test]
     fn decryption_with_invalid_epk() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.ephemeral_key_mut() = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
 
             assert_eq!(
-                try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output,),
+                try_sapling_note_decryption(&ivk, &output, zip212_enforcement,),
                 None
             );
         }
@@ -804,19 +749,20 @@ mod tests {
     #[test]
     fn decryption_with_invalid_cmu() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
             *output.cmu_mut() =
                 ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
                     .unwrap();
 
             assert_eq!(
-                try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
+                try_sapling_note_decryption(&ivk, &output, zip212_enforcement,),
                 None
             );
         }
@@ -825,17 +771,18 @@ mod tests {
     #[test]
     fn decryption_with_invalid_tag() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
             output.enc_ciphertext_mut()[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
 
             assert_eq!(
-                try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
+                try_sapling_note_decryption(&ivk, &output, zip212_enforcement,),
                 None
             );
         }
@@ -844,16 +791,15 @@ mod tests {
     #[test]
     fn decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let canopy_activation_height = TEST_NETWORK.activation_height(Canopy).unwrap();
-        let heights = [
-            canopy_activation_height - 1,
-            canopy_activation_height,
-            canopy_activation_height + ZIP212_GRACE_PERIOD,
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
         let leadbytes = [0x02, 0x03, 0x01];
 
-        for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
-            let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for (zip212_enforcement, leadbyte) in zip212_states.into_iter().zip(leadbytes) {
+            let (ovk, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -865,7 +811,7 @@ mod tests {
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
-                try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
+                try_sapling_note_decryption(&ivk, &output, zip212_enforcement),
                 None
             );
         }
@@ -874,13 +820,14 @@ mod tests {
     #[test]
     fn decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -892,7 +839,7 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
+                try_sapling_note_decryption(&ivk, &output, zip212_enforcement),
                 None
             );
         }
@@ -901,13 +848,14 @@ mod tests {
     #[test]
     fn decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -920,7 +868,7 @@ mod tests {
             );
 
             assert_eq!(
-                try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output),
+                try_sapling_note_decryption(&ivk, &output, zip212_enforcement),
                 None
             );
         }
@@ -929,20 +877,20 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_ivk() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, _, output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, _, output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
-                    &TEST_NETWORK,
-                    height,
                     &PreparedIncomingViewingKey::new(&SaplingIvk(jubjub::Fr::random(&mut rng))),
-                    &CompactOutputDescription::from(output)
+                    &CompactOutputDescription::from(output),
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -952,21 +900,21 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_epk() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
             *output.ephemeral_key_mut() = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
-                    &TEST_NETWORK,
-                    height,
                     &ivk,
-                    &CompactOutputDescription::from(output)
+                    &CompactOutputDescription::from(output),
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -976,23 +924,23 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_cmu() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
             *output.cmu_mut() =
                 ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
                     .unwrap();
 
             assert_eq!(
                 try_sapling_compact_note_decryption(
-                    &TEST_NETWORK,
-                    height,
                     &ivk,
-                    &CompactOutputDescription::from(output)
+                    &CompactOutputDescription::from(output),
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -1002,16 +950,15 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let canopy_activation_height = TEST_NETWORK.activation_height(Canopy).unwrap();
-        let heights = [
-            canopy_activation_height - 1,
-            canopy_activation_height,
-            canopy_activation_height + ZIP212_GRACE_PERIOD,
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
         let leadbytes = [0x02, 0x03, 0x01];
 
-        for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
-            let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for (zip212_enforcement, leadbyte) in zip212_states.into_iter().zip(leadbytes) {
+            let (ovk, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -1024,10 +971,9 @@ mod tests {
             );
             assert_eq!(
                 try_sapling_compact_note_decryption(
-                    &TEST_NETWORK,
-                    height,
                     &ivk,
-                    &CompactOutputDescription::from(output)
+                    &CompactOutputDescription::from(output),
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -1037,13 +983,14 @@ mod tests {
     #[test]
     fn compact_decryption_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -1056,10 +1003,9 @@ mod tests {
             );
             assert_eq!(
                 try_sapling_compact_note_decryption(
-                    &TEST_NETWORK,
-                    height,
                     &ivk,
-                    &CompactOutputDescription::from(output)
+                    &CompactOutputDescription::from(output),
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -1069,13 +1015,14 @@ mod tests {
     #[test]
     fn compact_decryption_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, _, ivk, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, _, ivk, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -1088,10 +1035,9 @@ mod tests {
             );
             assert_eq!(
                 try_sapling_compact_note_decryption(
-                    &TEST_NETWORK,
-                    height,
                     &ivk,
-                    &CompactOutputDescription::from(output)
+                    &CompactOutputDescription::from(output),
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -1101,17 +1047,18 @@ mod tests {
     #[test]
     fn recovery_with_invalid_ovk() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (mut ovk, _, _, output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (mut ovk, _, _, output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             ovk.0[0] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
         }
@@ -1120,20 +1067,20 @@ mod tests {
     #[test]
     fn recovery_with_invalid_ock() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (_, _, _, output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (_, _, _, output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             assert_eq!(
                 try_sapling_output_recovery_with_ock(
-                    &TEST_NETWORK,
-                    height,
                     &OutgoingCipherKey([0u8; 32]),
                     &output,
+                    zip212_enforcement,
                 ),
                 None
             );
@@ -1143,20 +1090,21 @@ mod tests {
     #[test]
     fn recovery_with_invalid_cv() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, _, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, _, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
             *output.cv_mut() = ValueCommitment::derive(
                 NoteValue::from_raw(7),
                 ValueCommitTrapdoor::random(&mut rng),
             );
 
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement,),
                 None
             );
         }
@@ -1165,24 +1113,25 @@ mod tests {
     #[test]
     fn recovery_with_invalid_cmu() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
             *output.cmu_mut() =
                 ExtractedNoteCommitment::from_bytes(&bls12_381::Scalar::random(&mut rng).to_repr())
                     .unwrap();
 
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
 
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1191,22 +1140,23 @@ mod tests {
     #[test]
     fn recovery_with_invalid_epk() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
             *output.ephemeral_key_mut() = jubjub::ExtendedPoint::random(&mut rng).to_bytes().into();
 
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
 
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1215,21 +1165,22 @@ mod tests {
     #[test]
     fn recovery_with_invalid_enc_tag() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             output.enc_ciphertext_mut()[ENC_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1238,21 +1189,22 @@ mod tests {
     #[test]
     fn recovery_with_invalid_out_tag() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             output.out_ciphertext_mut()[OUT_CIPHERTEXT_SIZE - 1] ^= 0xff;
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1261,16 +1213,15 @@ mod tests {
     #[test]
     fn recovery_with_invalid_version_byte() {
         let mut rng = OsRng;
-        let canopy_activation_height = TEST_NETWORK.activation_height(Canopy).unwrap();
-        let heights = [
-            canopy_activation_height - 1,
-            canopy_activation_height,
-            canopy_activation_height + ZIP212_GRACE_PERIOD,
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
         let leadbytes = [0x02, 0x03, 0x01];
 
-        for (&height, &leadbyte) in heights.iter().zip(leadbytes.iter()) {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for (zip212_enforcement, leadbyte) in zip212_states.into_iter().zip(leadbytes) {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -1282,11 +1233,11 @@ mod tests {
                 |pt| pt[0] = leadbyte,
             );
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1295,13 +1246,14 @@ mod tests {
     #[test]
     fn recovery_with_invalid_diversifier() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -1313,11 +1265,11 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_invalid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1326,13 +1278,14 @@ mod tests {
     #[test]
     fn recovery_with_incorrect_diversifier() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.enc_ciphertext_mut() = reencrypt_enc_ciphertext(
                 &ovk,
@@ -1344,11 +1297,11 @@ mod tests {
                 |pt| pt[1..12].copy_from_slice(&find_valid_diversifier().0),
             );
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1357,13 +1310,14 @@ mod tests {
     #[test]
     fn recovery_with_invalid_pk_d() {
         let mut rng = OsRng;
-        let heights = [
-            TEST_NETWORK.activation_height(Sapling).unwrap(),
-            TEST_NETWORK.activation_height(Canopy).unwrap(),
+        let zip212_states = [
+            Zip212Enforcement::Off,
+            Zip212Enforcement::GracePeriod,
+            Zip212Enforcement::On,
         ];
 
-        for &height in heights.iter() {
-            let (ovk, ock, _, mut output) = random_enc_ciphertext(height, &mut rng);
+        for zip212_enforcement in zip212_states {
+            let (ovk, ock, _, mut output) = random_enc_ciphertext(zip212_enforcement, &mut rng);
 
             *output.out_ciphertext_mut() = reencrypt_out_ciphertext(
                 &ovk,
@@ -1374,11 +1328,11 @@ mod tests {
                 |pt| pt[0..32].copy_from_slice(&jubjub::ExtendedPoint::random(rng).to_bytes()),
             );
             assert_eq!(
-                try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output,),
+                try_sapling_output_recovery(&ovk, &output, zip212_enforcement),
                 None
             );
             assert_eq!(
-                try_sapling_output_recovery_with_ock(&TEST_NETWORK, height, &ock, &output,),
+                try_sapling_output_recovery_with_ock(&ock, &output, zip212_enforcement),
                 None
             );
         }
@@ -1412,7 +1366,7 @@ mod tests {
             };
         }
 
-        let height = TEST_NETWORK.activation_height(Sapling).unwrap();
+        let zip212_enforcement = Zip212Enforcement::Off;
 
         for tv in test_vectors {
             //
@@ -1459,7 +1413,7 @@ mod tests {
             // (Tested first because it only requires immutable references.)
             //
 
-            match try_sapling_note_decryption(&TEST_NETWORK, height, &ivk, &output) {
+            match try_sapling_note_decryption(&ivk, &output, zip212_enforcement) {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
@@ -1469,10 +1423,9 @@ mod tests {
             }
 
             match try_sapling_compact_note_decryption(
-                &TEST_NETWORK,
-                height,
                 &ivk,
                 &CompactOutputDescription::from(output.clone()),
+                zip212_enforcement,
             ) {
                 Some((decrypted_note, decrypted_to)) => {
                     assert_eq!(decrypted_note, note);
@@ -1481,7 +1434,7 @@ mod tests {
                 None => panic!("Compact note decryption failed"),
             }
 
-            match try_sapling_output_recovery(&TEST_NETWORK, height, &ovk, &output) {
+            match try_sapling_output_recovery(&ovk, &output, zip212_enforcement) {
                 Some((decrypted_note, decrypted_to, decrypted_memo)) => {
                     assert_eq!(decrypted_note, note);
                     assert_eq!(decrypted_to, to);
@@ -1492,10 +1445,7 @@ mod tests {
 
             match &batch::try_note_decryption(
                 &[ivk.clone()],
-                &[(
-                    SaplingDomain::for_height(TEST_NETWORK, height),
-                    output.clone(),
-                )],
+                &[(SaplingDomain::new(zip212_enforcement), output.clone())],
             )[..]
             {
                 [Some(((decrypted_note, decrypted_to, decrypted_memo), i))] => {
@@ -1510,7 +1460,7 @@ mod tests {
             match &batch::try_compact_note_decryption(
                 &[ivk.clone()],
                 &[(
-                    SaplingDomain::for_height(TEST_NETWORK, height),
+                    SaplingDomain::new(zip212_enforcement),
                     CompactOutputDescription::from(output.clone()),
                 )],
             )[..]
@@ -1527,7 +1477,7 @@ mod tests {
             // Test encryption
             //
 
-            let ne = NoteEncryption::<SaplingDomain<TestNetwork>>::new_with_esk(
+            let ne = NoteEncryption::<SaplingDomain>::new_with_esk(
                 esk,
                 Some(ovk),
                 note,
@@ -1545,7 +1495,7 @@ mod tests {
     #[test]
     fn batching() {
         let mut rng = OsRng;
-        let height = TEST_NETWORK.activation_height(Canopy).unwrap();
+        let zip212_enforcement = Zip212Enforcement::On;
 
         // Test batch trial-decryption with multiple IVKs and outputs.
         let invalid_ivk = PreparedIncomingViewingKey::new(&SaplingIvk(jubjub::Fr::random(rng)));
@@ -1553,8 +1503,8 @@ mod tests {
         let outputs: Vec<_> = (0..10)
             .map(|_| {
                 (
-                    SaplingDomain::for_height(TEST_NETWORK, height),
-                    random_enc_ciphertext_with(height, &valid_ivk, &mut rng).2,
+                    SaplingDomain::new(zip212_enforcement),
+                    random_enc_ciphertext_with(&valid_ivk, zip212_enforcement, &mut rng).2,
                 )
             })
             .collect();
@@ -1574,7 +1524,7 @@ mod tests {
             assert!(result.is_some());
             assert_eq!(
                 result,
-                &try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, output)
+                &try_sapling_note_decryption(&valid_ivk, output, zip212_enforcement)
                     .map(|r| (r, 1))
             );
         }

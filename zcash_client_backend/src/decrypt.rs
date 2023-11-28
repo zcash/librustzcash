@@ -56,6 +56,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     tx: &Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Vec<DecryptedOutput<sapling::Note>> {
+    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, height);
     tx.sapling_bundle()
         .iter()
         .flat_map(|bundle| {
@@ -76,19 +77,18 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                         .iter()
                         .enumerate()
                         .flat_map(move |(index, output)| {
-                            try_sapling_note_decryption(params, height, &ivk_external, output)
+                            try_sapling_note_decryption(&ivk_external, output, zip212_enforcement)
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {
                                     try_sapling_note_decryption(
-                                        params,
-                                        height,
                                         &ivk_internal,
                                         output,
+                                        zip212_enforcement,
                                     )
                                     .map(|ret| (ret, TransferType::WalletInternal))
                                 })
                                 .or_else(|| {
-                                    try_sapling_output_recovery(params, height, &ovk, output)
+                                    try_sapling_output_recovery(&ovk, output, zip212_enforcement)
                                         .map(|ret| (ret, TransferType::Outgoing))
                                 })
                                 .into_iter()

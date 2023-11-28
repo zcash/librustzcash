@@ -5,7 +5,7 @@ use ff::Field;
 use rand_core::OsRng;
 use zcash_note_encryption::batch;
 use zcash_primitives::{
-    consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
+    consensus::{sapling_zip212_enforcement, NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
     memo::MemoBytes,
     sapling::{
         builder::SaplingBuilder,
@@ -25,6 +25,7 @@ use pprof::criterion::{Output, PProfProfiler};
 fn bench_note_decryption(c: &mut Criterion) {
     let mut rng = OsRng;
     let height = TEST_NETWORK.activation_height(Canopy).unwrap();
+    let zip212_enforcement = sapling_zip212_enforcement(&TEST_NETWORK, height);
 
     let valid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
     let invalid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
@@ -34,7 +35,7 @@ fn bench_note_decryption(c: &mut Criterion) {
         let diversifier = Diversifier([0; 11]);
         let pa = valid_ivk.to_payment_address(diversifier).unwrap();
 
-        let mut builder = SaplingBuilder::new(TEST_NETWORK, height);
+        let mut builder = SaplingBuilder::new(zip212_enforcement);
         builder
             .add_output(
                 &mut rng,
@@ -45,7 +46,7 @@ fn bench_note_decryption(c: &mut Criterion) {
             )
             .unwrap();
         let (bundle, _) = builder
-            .build::<MockSpendProver, MockOutputProver, _>(&mut rng, height)
+            .build::<MockSpendProver, MockOutputProver, _>(&mut rng)
             .unwrap()
             .unwrap();
         bundle.shielded_outputs()[0].clone()
@@ -59,27 +60,25 @@ fn bench_note_decryption(c: &mut Criterion) {
         group.throughput(Throughput::Elements(1));
 
         group.bench_function("valid", |b| {
-            b.iter(|| {
-                try_sapling_note_decryption(&TEST_NETWORK, height, &valid_ivk, &output).unwrap()
-            })
+            b.iter(|| try_sapling_note_decryption(&valid_ivk, &output, zip212_enforcement).unwrap())
         });
 
         group.bench_function("invalid", |b| {
-            b.iter(|| try_sapling_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &output))
+            b.iter(|| try_sapling_note_decryption(&invalid_ivk, &output, zip212_enforcement))
         });
 
         let compact = CompactOutputDescription::from(output.clone());
 
         group.bench_function("compact-valid", |b| {
             b.iter(|| {
-                try_sapling_compact_note_decryption(&TEST_NETWORK, height, &valid_ivk, &compact)
+                try_sapling_compact_note_decryption(&valid_ivk, &compact, zip212_enforcement)
                     .unwrap()
             })
         });
 
         group.bench_function("compact-invalid", |b| {
             b.iter(|| {
-                try_sapling_compact_note_decryption(&TEST_NETWORK, height, &invalid_ivk, &compact)
+                try_sapling_compact_note_decryption(&invalid_ivk, &compact, zip212_enforcement)
             })
         });
     }
@@ -93,7 +92,7 @@ fn bench_note_decryption(c: &mut Criterion) {
 
             let outputs: Vec<_> = iter::repeat(output.clone())
                 .take(noutputs)
-                .map(|output| (SaplingDomain::for_height(TEST_NETWORK, height), output))
+                .map(|output| (SaplingDomain::new(zip212_enforcement), output))
                 .collect();
 
             group.bench_function(

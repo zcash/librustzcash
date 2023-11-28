@@ -423,7 +423,7 @@ pub(crate) mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
-        consensus::BranchId,
+        consensus::{sapling_zip212_enforcement, BranchId},
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
         sapling::{
@@ -1033,10 +1033,9 @@ pub(crate) mod tests {
             for output in tx.sapling_bundle().unwrap().shielded_outputs() {
                 // Find the output that decrypts with the external OVK
                 let result = try_sapling_output_recovery(
-                    &st.network(),
-                    h1,
                     &dfvk.to_ovk(Scope::External),
                     output,
+                    sapling_zip212_enforcement(&st.network(), h1),
                 );
 
                 if result.is_some() {
