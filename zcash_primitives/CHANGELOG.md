@@ -111,7 +111,9 @@ and this library adheres to Rust's notion of
     parameter.
   - `builder::SaplingBuilder::new` now takes a `Zip212Enforcement` argument
     instead of a `P: consensus::Parameters` argument and a target height.
-  - `builder::SaplingBuilder::add_spend` now takes `extsk` by reference.
+  - `builder::SaplingBuilder::add_spend` now takes `extsk` by reference. Also,
+    it no longer takes a `diversifier` argument as the diversifier may be obtained
+    from the note.
   - `builder::SaplingBuilder::add_output` now takes an `Option<[u8; 512]>` memo
     instead of a `MemoBytes`.
   - `builder::SaplingBuilder::build` no longer takes a prover, proving context,
@@ -151,6 +153,8 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction`:
   - `builder::Builder::{build, build_zfuture}` now take
     `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
+  - `builder::Builder::add_sapling_spend` no longer takes a `diversifier`
+    argument as the diversifier may be obtained from the note.
   - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
     instead of `Amount`.
   - `Unauthorized::SaplingAuth` now has type `InProgress<Proven, Unsigned>`.

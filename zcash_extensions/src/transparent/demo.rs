@@ -823,7 +823,7 @@ mod tests {
 
         let mut builder_a = demo_builder(tx_height);
         builder_a
-            .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
+            .add_sapling_spend(extsk, note1, witness1.path().unwrap())
             .unwrap();
 
         let value = NonNegativeAmount::const_from_u64(100000);

@@ -15,7 +15,7 @@ use crate::{
         self,
         builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
         prover::{OutputProver, SpendProver},
-        redjubjub, Diversifier, Note, PaymentAddress,
+        redjubjub, Note, PaymentAddress,
     },
     transaction::{
         components::{
@@ -328,12 +328,11 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     pub fn add_sapling_spend(
         &mut self,
         extsk: sapling::zip32::ExtendedSpendingKey,
-        diversifier: Diversifier,
         note: Note,
         merkle_path: sapling::MerklePath,
     ) -> Result<(), sapling_builder::Error> {
         self.sapling_builder
-            .add_spend(&mut self.rng, &extsk, diversifier, note, merkle_path)?;
+            .add_spend(&mut self.rng, &extsk, note, merkle_path)?;
 
         self.sapling_asks
             .push(redjubjub::PrivateKey(extsk.expsk.ask));
@@ -842,7 +841,7 @@ mod tests {
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
-            .add_sapling_spend(extsk, *to.diversifier(), note1, witness1.path().unwrap())
+            .add_sapling_spend(extsk, note1, witness1.path().unwrap())
             .unwrap();
 
         builder
@@ -933,12 +932,7 @@ mod tests {
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
             builder
-                .add_sapling_spend(
-                    extsk.clone(),
-                    *to.diversifier(),
-                    note1.clone(),
-                    witness1.path().unwrap(),
-                )
+                .add_sapling_spend(extsk.clone(), note1.clone(), witness1.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_output(
@@ -974,15 +968,10 @@ mod tests {
         {
             let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
             builder
-                .add_sapling_spend(
-                    extsk.clone(),
-                    *to.diversifier(),
-                    note1,
-                    witness1.path().unwrap(),
-                )
+                .add_sapling_spend(extsk.clone(), note1, witness1.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_spend(extsk, *to.diversifier(), note2, witness2.path().unwrap())
+                .add_sapling_spend(extsk, note2, witness2.path().unwrap())
                 .unwrap();
             builder
                 .add_sapling_output(
