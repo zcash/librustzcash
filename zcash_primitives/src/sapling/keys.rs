@@ -33,6 +33,9 @@ pub enum DecodingError {
     InvalidAsk,
     /// Could not decode the `nsk` bytes to a jubjub field element.
     InvalidNsk,
+    /// An extended spending key had an unsupported child index: either a non-hardened
+    /// index, or a non-zero index at depth 0.
+    UnsupportedChildIndex,
 }
 
 /// An outgoing viewing key
@@ -101,7 +104,9 @@ impl ExpandedSpendingKey {
             DecodingError::InvalidNsk => {
                 io::Error::new(io::ErrorKind::InvalidData, "nsk not in field")
             }
-            DecodingError::LengthInvalid { .. } => unreachable!(),
+            DecodingError::LengthInvalid { .. } | DecodingError::UnsupportedChildIndex => {
+                unreachable!()
+            }
         })
     }
 

@@ -54,6 +54,7 @@ and this library adheres to Rust's notion of
     - `ValueCommitTrapdoor::from_bytes`
     - `impl Sub<TrapdoorSum> for TrapdoorSum`
     - `impl Sub<CommitmentSum> for CommitmentSum`
+  - `zip32` module (moved from `zcash_primitives::zip32::sapling`).
   - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
 - `zcash_primitives::transaction`:
   - `builder::get_fee`
@@ -71,6 +72,12 @@ and this library adheres to Rust's notion of
     - `GRACE_ACTIONS`
     - `P2PKH_STANDARD_INPUT_SIZE`
     - `P2PKH_STANDARD_OUTPUT_SIZE`
+- `zcash_primitives::zip32`:
+  - `ChildIndex::hardened`
+  - `ChildIndex::index`
+  - `ChainCode::new`
+  - `ChainCode::as_bytes`
+  - `impl From<AccountId> for ChildIndex`
 - Test helpers, behind the `test-dependencies` feature flag:
   - `zcash_primitives::sapling::prover::mock::{MockSpendProver, MockOutputProver}`
 - Additions related to `zcash_primitive::components::amount::Amount`
@@ -120,6 +127,7 @@ and this library adheres to Rust's notion of
   - `bundle::MapAuth` trait methods now take `&mut self` instead of `&self`.
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
     instead of as a bare `u64`.
+  - `keys::DecodingError` has a new variant `UnsupportedChildIndex`.
   - `note_encryption`:
     - `SaplingDomain` no longer has a `P: consensus::Parameters` type parameter.
     - The following methods now take a `Zip212Enforcement` argument instead of a
@@ -154,6 +162,9 @@ and this library adheres to Rust's notion of
     - `fees::fixed::FeeRule::fixed_fee`
     - `fees::zip317::FeeRule::marginal_fee`
     - `sighash::TransparentAuthorizingContext::input_amounts`
+- `zcash_primitives::zip32`:
+  - `ChildIndex` has been changed from an enum to an opaque struct, and no
+    longer supports non-hardened indices.
 
 ### Removed
 - `zcash_primitives::constants`:
@@ -187,6 +198,11 @@ and this library adheres to Rust's notion of
   - `Bundle::<Unauthorized>::apply_signatures` (use
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
+- `zcash_primitives::zip32`:
+  - `sapling` module (moved from `zcash_primitives::sapling::zip32`).
+  - `ChildIndex::Hardened` (use `ChildIndex::hardened` instead).
+  - `ChildIndex::NonHardened`
+  - `sapling::ExtendedFullViewingKey::derive_child`
 
 ## [0.13.0] - 2023-09-25
 ### Added

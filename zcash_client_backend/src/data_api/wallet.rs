@@ -9,6 +9,7 @@ use zcash_primitives::{
         self,
         note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
         prover::{OutputProver, SpendProver},
+        zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
         Node,
     },
     transaction::{
@@ -17,7 +18,7 @@ use zcash_primitives::{
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
-    zip32::{sapling::DiversifiableFullViewingKey, sapling::ExtendedSpendingKey, AccountId, Scope},
+    zip32::{AccountId, Scope},
 };
 
 use crate::{

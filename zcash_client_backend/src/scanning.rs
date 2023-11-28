@@ -13,9 +13,10 @@ use zcash_primitives::{
     sapling::{
         self,
         note_encryption::{CompactOutputDescription, PreparedIncomingViewingKey, SaplingDomain},
+        zip32::DiversifiableFullViewingKey,
         SaplingIvk,
     },
-    zip32::{sapling::DiversifiableFullViewingKey, AccountId, Scope},
+    zip32::{AccountId, Scope},
 };
 
 use crate::data_api::{BlockMetadata, ScannedBlock, ShieldedProtocol};

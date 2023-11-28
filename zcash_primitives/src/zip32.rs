@@ -5,12 +5,10 @@
 use memuse::{self, DynamicUsage};
 use subtle::{Choice, ConditionallySelectable};
 
-use crate::sapling::{Diversifier, NullifierDerivingKey, PaymentAddress, ViewingKey};
 pub mod fingerprint;
-pub mod sapling;
 
 #[deprecated(note = "Please use the types exported from the `zip32::sapling` module instead.")]
-pub use sapling::{
+pub use crate::sapling::zip32::{
     sapling_address, sapling_default_address, sapling_derive_internal_fvk, sapling_find_address,
     DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,
     ZIP32_SAPLING_FVFP_PERSONALIZATION, ZIP32_SAPLING_INT_PERSONALIZATION,
@@ -35,6 +33,13 @@ impl From<AccountId> for u32 {
     }
 }
 
+impl From<AccountId> for ChildIndex {
+    fn from(id: AccountId) -> Self {
+        // Account IDs are always hardened in derivation paths.
+        ChildIndex::hardened(id.0)
+    }
+}
+
 impl ConditionallySelectable for AccountId {
     fn conditional_select(a0: &Self, a1: &Self, c: Choice) -> Self {
         AccountId(u32::conditional_select(&a0.0, &a1.0, c))
@@ -43,41 +48,54 @@ impl ConditionallySelectable for AccountId {
 
 // ZIP 32 structures
 
-/// A child index for a derived key
+/// A child index for a derived key.
+///
+/// Only hardened derivation is supported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChildIndex {
-    NonHardened(u32),
-    Hardened(u32), // Hardened(n) == n + (1 << 31) == n' in path notation
-}
+pub struct ChildIndex(u32);
 
 impl ChildIndex {
-    pub fn from_index(i: u32) -> Self {
-        match i {
-            n if n >= (1 << 31) => ChildIndex::Hardened(n - (1 << 31)),
-            n => ChildIndex::NonHardened(n),
+    /// Parses the given ZIP 32 child index.
+    ///
+    /// Returns `None` if the hardened bit is not set.
+    pub fn from_index(i: u32) -> Option<Self> {
+        if i >= (1 << 31) {
+            Some(ChildIndex(i))
+        } else {
+            None
         }
     }
 
-    fn master() -> Self {
-        ChildIndex::from_index(0)
+    /// Constructs a hardened `ChildIndex` from the given value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value >= (1 << 31)`.
+    pub const fn hardened(value: u32) -> Self {
+        assert!(value < (1 << 31));
+        Self(value + (1 << 31))
     }
 
-    fn value(&self) -> u32 {
-        match *self {
-            ChildIndex::Hardened(i) => i + (1 << 31),
-            ChildIndex::NonHardened(i) => i,
-        }
+    /// Returns the index as a 32-bit integer, including the hardened bit.
+    pub fn index(&self) -> u32 {
+        self.0
     }
 }
 
-/// A BIP-32 chain code
+/// A value that is needed, in addition to a spending key, in order to derive descendant
+/// keys and addresses of that key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChainCode([u8; 32]);
 
 impl ChainCode {
-    /// Returns byte representation of the chain code, as required for
+    /// Constructs a `ChainCode` from the given array.
+    pub fn new(c: [u8; 32]) -> Self {
+        Self(c)
+    }
+
+    /// Returns the byte representation of the chain code, as required for
     /// [ZIP 32](https://zips.z.cash/zip-0032) encoding.
-    fn as_bytes(&self) -> &[u8; 32] {
+    pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 }

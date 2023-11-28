@@ -865,17 +865,15 @@ pub mod testing {
     use proptest::prelude::*;
     use rand::{rngs::StdRng, SeedableRng};
 
-    use crate::{
-        sapling::{
-            bundle::{Authorized, Bundle},
-            note_encryption::Zip212Enforcement,
-            prover::mock::{MockOutputProver, MockSpendProver},
-            redjubjub::PrivateKey,
-            testing::{arb_node, arb_note},
-            value::testing::arb_positive_note_value,
-            Diversifier,
-        },
-        zip32::sapling::testing::arb_extended_spending_key,
+    use crate::sapling::{
+        bundle::{Authorized, Bundle},
+        note_encryption::Zip212Enforcement,
+        prover::mock::{MockOutputProver, MockSpendProver},
+        redjubjub::PrivateKey,
+        testing::{arb_node, arb_note},
+        value::testing::arb_positive_note_value,
+        zip32::testing::arb_extended_spending_key,
+        Diversifier,
     };
     use incrementalmerkletree::{
         frontier::testing::arb_commitment_tree, witness::IncrementalWitness,

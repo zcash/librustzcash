@@ -49,6 +49,7 @@ use zcash_primitives::{
         note_encryption::{sapling_note_encryption, SaplingDomain},
         util::generate_random_rseed,
         value::NoteValue,
+        zip32::DiversifiableFullViewingKey,
         Note, Nullifier, PaymentAddress,
     },
     transaction::{
@@ -56,7 +57,7 @@ use zcash_primitives::{
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
-    zip32::{sapling::DiversifiableFullViewingKey, DiversifierIndex},
+    zip32::DiversifierIndex,
 };
 
 use crate::{
