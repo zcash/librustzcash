@@ -605,7 +605,7 @@ where
                     })
                 })?;
 
-                builder.add_sapling_spend(key, selected.diversifier(), note, merkle_path)?;
+                builder.add_sapling_spend(key, note, merkle_path)?;
             }
             Ok(())
         })?;

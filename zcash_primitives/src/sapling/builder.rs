@@ -74,7 +74,6 @@ impl fmt::Display for Error {
 #[derive(Debug, Clone)]
 pub struct SpendDescriptionInfo {
     proof_generation_key: ProofGenerationKey,
-    diversifier: Diversifier,
     note: Note,
     alpha: jubjub::Fr,
     merkle_path: MerklePath,
@@ -97,13 +96,11 @@ impl SpendDescriptionInfo {
     fn new_internal<R: RngCore>(
         mut rng: &mut R,
         extsk: &ExtendedSpendingKey,
-        diversifier: Diversifier,
         note: Note,
         merkle_path: MerklePath,
     ) -> Self {
         SpendDescriptionInfo {
             proof_generation_key: extsk.expsk.proof_generation_key(),
-            diversifier,
             note,
             alpha: jubjub::Fr::random(&mut rng),
             merkle_path,
@@ -133,7 +130,7 @@ impl SpendDescriptionInfo {
 
         let zkproof = Pr::prepare_circuit(
             self.proof_generation_key,
-            self.diversifier,
+            *self.note.recipient().diversifier(),
             *self.note.rseed(),
             self.note.value(),
             self.alpha,
@@ -370,7 +367,6 @@ impl SaplingBuilder {
         &mut self,
         mut rng: R,
         extsk: &ExtendedSpendingKey,
-        diversifier: Diversifier,
         note: Note,
         merkle_path: MerklePath,
     ) -> Result<(), Error> {
@@ -388,8 +384,7 @@ impl SaplingBuilder {
         self.value_balance = (self.value_balance + note.value()).ok_or(Error::InvalidAmount)?;
         self.try_value_balance::<i64>()?;
 
-        let spend =
-            SpendDescriptionInfo::new_internal(&mut rng, extsk, diversifier, note, merkle_path);
+        let spend = SpendDescriptionInfo::new_internal(&mut rng, extsk, note, merkle_path);
 
         self.spends.push(spend);
 
@@ -881,7 +876,6 @@ pub mod testing {
         testing::{arb_node, arb_note},
         value::testing::arb_positive_note_value,
         zip32::testing::arb_extended_spending_key,
-        Diversifier,
     };
     use incrementalmerkletree::{
         frontier::testing::arb_commitment_tree, witness::IncrementalWitness,
@@ -907,34 +901,20 @@ pub mod testing {
                             .prop_map(|t| IncrementalWitness::from_tree(t).path().unwrap()),
                         n_notes,
                     ),
-                    vec(
-                        prop::array::uniform11(any::<u8>()).prop_map(Diversifier),
-                        n_notes,
-                    ),
                     prop::array::uniform32(any::<u8>()),
                     prop::array::uniform32(any::<u8>()),
                 )
             })
             .prop_map(
-                move |(
-                    extsk,
-                    spendable_notes,
-                    commitment_trees,
-                    diversifiers,
-                    rng_seed,
-                    fake_sighash_bytes,
-                )| {
+                move |(extsk, spendable_notes, commitment_trees, rng_seed, fake_sighash_bytes)| {
                     let mut builder = SaplingBuilder::new(zip212_enforcement);
                     let mut rng = StdRng::from_seed(rng_seed);
 
-                    for ((note, path), diversifier) in spendable_notes
+                    for (note, path) in spendable_notes
                         .into_iter()
                         .zip(commitment_trees.into_iter())
-                        .zip(diversifiers.into_iter())
                     {
-                        builder
-                            .add_spend(&mut rng, &extsk, diversifier, note, path)
-                            .unwrap();
+                        builder.add_spend(&mut rng, &extsk, note, path).unwrap();
                     }
 
                     let (bundle, _) = builder
