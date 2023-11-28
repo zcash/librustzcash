@@ -179,9 +179,10 @@ pub struct ReceivedSaplingNote<NoteRef> {
     note_id: NoteRef,
     txid: TxId,
     output_index: u16,
-    diversifier: sapling::Diversifier,
-    note_value: NonNegativeAmount,
-    rseed: sapling::Rseed,
+    // FIXME: We do not yet expose the note directly, because while we know its diversifier to be
+    // correct, the recipient address may have been reconstructed from persisted data using the
+    // incorrect IVK.
+    note: sapling::Note,
     note_commitment_tree_position: Position,
 }
 
@@ -190,18 +191,14 @@ impl<NoteRef> ReceivedSaplingNote<NoteRef> {
         note_id: NoteRef,
         txid: TxId,
         output_index: u16,
-        diversifier: sapling::Diversifier,
-        note_value: NonNegativeAmount,
-        rseed: sapling::Rseed,
+        note: sapling::Note,
         note_commitment_tree_position: Position,
     ) -> Self {
         ReceivedSaplingNote {
             note_id,
             txid,
             output_index,
-            diversifier,
-            note_value,
-            rseed,
+            note,
             note_commitment_tree_position,
         }
     }
@@ -209,7 +206,6 @@ impl<NoteRef> ReceivedSaplingNote<NoteRef> {
     pub fn internal_note_id(&self) -> &NoteRef {
         &self.note_id
     }
-
     pub fn txid(&self) -> &TxId {
         &self.txid
     }
@@ -217,13 +213,16 @@ impl<NoteRef> ReceivedSaplingNote<NoteRef> {
         self.output_index
     }
     pub fn diversifier(&self) -> sapling::Diversifier {
-        self.diversifier
+        *self.note.recipient().diversifier()
     }
     pub fn value(&self) -> NonNegativeAmount {
-        self.note_value
+        self.note
+            .value()
+            .try_into()
+            .expect("Sapling notes must have values in the range of valid non-negative ZEC values.")
     }
     pub fn rseed(&self) -> sapling::Rseed {
-        self.rseed
+        *self.note.rseed()
     }
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
@@ -236,7 +235,10 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedSaplingNote<NoteRef> 
     }
 
     fn value(&self) -> NonNegativeAmount {
-        self.note_value
+        self.note
+            .value()
+            .try_into()
+            .expect("Sapling notes must have values in the range of valid non-negative ZEC values.")
     }
 }
 

@@ -6,7 +6,7 @@ use rusqlite::{named_params, params, types::Value, Connection, Row};
 use std::rc::Rc;
 
 use zcash_primitives::{
-    consensus::BlockHeight,
+    consensus::{self, BlockHeight},
     memo::MemoBytes,
     sapling::{self, Diversifier, Note, Nullifier, Rseed},
     transaction::{
@@ -17,6 +17,7 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
+    keys::UnifiedFullViewingKey,
     wallet::{ReceivedSaplingNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
@@ -84,7 +85,10 @@ impl ReceivedSaplingOutput for DecryptedOutput<Note> {
     }
 }
 
-fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, SqliteClientError> {
+fn to_spendable_note<P: consensus::Parameters>(
+    params: &P,
+    row: &Row,
+) -> Result<ReceivedSaplingNote<ReceivedNoteId>, SqliteClientError> {
     let note_id = ReceivedNoteId(row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
@@ -124,13 +128,36 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
         })?);
 
+    let ufvk_str: String = row.get(7)?;
+    let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+        .map_err(SqliteClientError::CorruptedData)?;
+
+    let is_change: bool = row.get(8)?;
+
+    // FIXME: We attempt to recover the recipient address for the received note based upon the
+    // change flag; however, this is inaccurate for change notes received prior to the switch to
+    // internal receivers. However, for now it's okay, because we don't use the recipient directly
+    // in spends; instead, we use just the diversifier component. A future migration will update
+    // the persistent received note information so that the note can be definitively linked to
+    // either the internal or external key component.
+    let external_address = ufvk
+        .sapling()
+        .and_then(|dfvk| dfvk.diversified_address(diversifier));
+    let internal_address = ufvk
+        .sapling()
+        .and_then(|dfvk| dfvk.diversified_change_address(diversifier));
+    let recipient = if is_change {
+        internal_address.or(external_address)
+    } else {
+        external_address
+    }
+    .ok_or_else(|| SqliteClientError::CorruptedData("Diversifier invalid.".to_owned()))?;
+
     Ok(ReceivedSaplingNote::from_parts(
         note_id,
         txid,
         output_index,
-        diversifier,
-        note_value,
-        rseed,
+        sapling::Note::from_parts(recipient, note_value.into(), rseed),
         note_commitment_tree_position,
     ))
 }
@@ -139,14 +166,17 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
 // (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.
 #[allow(clippy::let_and_return)]
-pub(crate) fn get_spendable_sapling_note(
+pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     conn: &Connection,
+    params: &P,
     txid: &TxId,
     index: u32,
 ) -> Result<Option<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
     let mut stmt_select_note = conn.prepare_cached(
-        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
+        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+                accounts.ufvk, is_change
          FROM sapling_received_notes
+         INNER JOIN accounts on accounts.account = sapling_received_notes.account
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
          WHERE txid = :txid
          AND output_index = :output_index
@@ -159,7 +189,7 @@ pub(crate) fn get_spendable_sapling_note(
                ":txid": txid.as_ref(),
                ":output_index": index,
             ],
-            to_spendable_note,
+            |r| to_spendable_note(params, r),
         )?
         .next()
         .transpose();
@@ -182,8 +212,8 @@ fn unscanned_tip_exists(
         "SELECT EXISTS (
              SELECT 1 FROM v_sapling_shard_unscanned_ranges range
              WHERE range.block_range_start <= :anchor_height
-             AND :anchor_height BETWEEN 
-                range.subtree_start_height 
+             AND :anchor_height BETWEEN
+                range.subtree_start_height
                 AND IFNULL(range.subtree_end_height, :anchor_height)
          )",
         named_params![":anchor_height": u32::from(anchor_height),],
@@ -191,8 +221,9 @@ fn unscanned_tip_exists(
     )
 }
 
-pub(crate) fn select_spendable_sapling_notes(
+pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
+    params: &P,
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
@@ -229,13 +260,16 @@ pub(crate) fn select_spendable_sapling_notes(
     // 4) Match the selected notes against the witnesses at the desired height.
     let mut stmt_select_notes = conn.prepare_cached(
         "WITH eligible AS (
-             SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+             SELECT
+                 id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
-                    OVER (PARTITION BY account, spent ORDER BY id_note) AS so_far
+                    OVER (PARTITION BY sapling_received_notes.account, spent ORDER BY id_note) AS so_far,
+                 accounts.ufvk as ufvk, is_change
              FROM sapling_received_notes
+             INNER JOIN accounts on accounts.account = sapling_received_notes.account
              INNER JOIN transactions
                 ON transactions.id_tx = sapling_received_notes.tx
-             WHERE account = :account
+             WHERE sapling_received_notes.account = :account
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
@@ -251,10 +285,10 @@ pub(crate) fn select_spendable_sapling_notes(
                 AND unscanned.block_range_end > :wallet_birthday
              )
          )
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, is_change
          FROM eligible WHERE so_far < :target_value
          UNION
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, is_change
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
@@ -269,7 +303,7 @@ pub(crate) fn select_spendable_sapling_notes(
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
         ],
-        to_spendable_note,
+        |r| to_spendable_note(params, r),
     )?;
 
     notes.collect::<Result<_, _>>()
@@ -1514,6 +1548,7 @@ pub(crate) mod tests {
         // Verify that the received note is not considered spendable
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
+            &st.wallet().params,
             AccountId::from(0),
             Amount::const_from_i64(300000),
             received_tx_height + 10,
@@ -1529,6 +1564,7 @@ pub(crate) mod tests {
         // Verify that the received note is now considered spendable
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
+            &st.wallet().params,
             AccountId::from(0),
             Amount::const_from_i64(300000),
             received_tx_height + 10,
@@ -1582,6 +1618,7 @@ pub(crate) mod tests {
         // Verify that our note is considered spendable
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
+            &st.wallet().params,
             account,
             Amount::const_from_i64(300000),
             birthday.height() + 5,

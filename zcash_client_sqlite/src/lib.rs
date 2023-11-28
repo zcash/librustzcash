@@ -178,7 +178,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSour
         txid: &TxId,
         index: u32,
     ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
-        wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), txid, index)
+        wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), &self.params, txid, index)
     }
 
     fn select_spendable_sapling_notes(
@@ -190,6 +190,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSour
     ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
         wallet::sapling::select_spendable_sapling_notes(
             self.conn.borrow(),
+            &self.params,
             account,
             target_value,
             anchor_height,
