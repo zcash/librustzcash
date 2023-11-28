@@ -9,7 +9,6 @@ use rand::{rngs::OsRng, CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade},
-    keys::OutgoingViewingKey,
     legacy::TransparentAddress,
     memo::MemoBytes,
     sapling::{
@@ -29,7 +28,6 @@ use crate::{
         txid::TxIdDigester,
         Transaction, TransactionData, TxVersion, Unauthorized,
     },
-    zip32::ExtendedSpendingKey,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -329,7 +327,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// paths for previous Sapling notes.
     pub fn add_sapling_spend(
         &mut self,
-        extsk: ExtendedSpendingKey,
+        extsk: sapling::zip32::ExtendedSpendingKey,
         diversifier: Diversifier,
         note: Note,
         merkle_path: sapling::MerklePath,
@@ -346,7 +344,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// Adds a Sapling address to send funds to.
     pub fn add_sapling_output(
         &mut self,
-        ovk: Option<OutgoingViewingKey>,
+        ovk: Option<sapling::keys::OutgoingViewingKey>,
         to: PaymentAddress,
         value: NonNegativeAmount,
         memo: MemoBytes,
@@ -737,9 +735,8 @@ mod tests {
         consensus::{NetworkUpgrade, Parameters, TEST_NETWORK},
         legacy::TransparentAddress,
         memo::MemoBytes,
-        sapling::{self, Node, Rseed},
+        sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed},
         transaction::components::amount::{Amount, BalanceError, NonNegativeAmount},
-        zip32::ExtendedSpendingKey,
     };
 
     use super::{Builder, Error};

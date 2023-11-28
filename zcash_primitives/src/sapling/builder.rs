@@ -8,7 +8,6 @@ use rand::{seq::SliceRandom, RngCore};
 use rand_core::CryptoRng;
 
 use crate::{
-    keys::OutgoingViewingKey,
     sapling::{
         self,
         bundle::{
@@ -16,6 +15,7 @@ use crate::{
             SpendDescription,
         },
         constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
+        keys::OutgoingViewingKey,
         note_encryption::{sapling_note_encryption, Zip212Enforcement},
         prover::{OutputProver, SpendProver},
         redjubjub::{PrivateKey, PublicKey, Signature},
@@ -24,14 +24,14 @@ use crate::{
         value::{
             CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment, ValueSum,
         },
-        verify_spend_sig, Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey,
-        SaplingIvk,
+        verify_spend_sig,
+        zip32::ExtendedSpendingKey,
+        Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey, SaplingIvk,
     },
     transaction::{
         builder::Progress,
         components::{amount::NonNegativeAmount, sapling::fees},
     },
-    zip32::ExtendedSpendingKey,
 };
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding

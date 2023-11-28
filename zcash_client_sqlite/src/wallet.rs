@@ -1976,11 +1976,11 @@ mod tests {
         },
         zcash_primitives::{
             consensus::BlockHeight,
+            sapling::zip32::ExtendedSpendingKey,
             transaction::{
                 components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
                 fees::fixed::FeeRule as FixedFeeRule,
             },
-            zip32::ExtendedSpendingKey,
         },
     };
 

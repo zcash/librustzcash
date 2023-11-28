@@ -326,8 +326,8 @@ mod tests {
 
     use zcash_primitives::{
         block::BlockHash,
+        sapling::zip32::ExtendedSpendingKey,
         transaction::{components::amount::NonNegativeAmount, fees::zip317::FeeRule},
-        zip32::ExtendedSpendingKey,
     };
 
     use zcash_client_backend::{

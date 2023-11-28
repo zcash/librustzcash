@@ -14,8 +14,10 @@ use zcash_address::unified::{self, Encoding};
 use zcash_primitives::{
     consensus,
     legacy::TransparentAddress,
-    sapling,
-    zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    sapling::{
+        self,
+        zip32::{ExtendedFullViewingKey, ExtendedSpendingKey},
+    },
 };
 
 fn bech32_encode<F>(hrp: &str, write: F) -> String
@@ -449,7 +451,10 @@ pub fn decode_transparent_address(
 
 #[cfg(test)]
 mod tests {
-    use zcash_primitives::{constants, sapling::PaymentAddress, zip32::ExtendedSpendingKey};
+    use zcash_primitives::{
+        constants,
+        sapling::{zip32::ExtendedSpendingKey, PaymentAddress},
+    };
 
     use super::{
         decode_extended_full_viewing_key, decode_extended_spending_key, decode_payment_address,

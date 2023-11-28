@@ -488,18 +488,15 @@ mod tests {
         Zip212Enforcement,
     };
 
-    use crate::{
-        keys::OutgoingViewingKey,
-        sapling::{
-            bundle::{GrothProofBytes, OutputDescription},
-            circuit::GROTH_PROOF_SIZE,
-            keys::{DiversifiedTransmissionKey, EphemeralSecretKey},
-            note::ExtractedNoteCommitment,
-            note_encryption::PreparedIncomingViewingKey,
-            util::generate_random_rseed,
-            value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
-            Diversifier, PaymentAddress, Rseed, SaplingIvk,
-        },
+    use crate::sapling::{
+        bundle::{GrothProofBytes, OutputDescription},
+        circuit::GROTH_PROOF_SIZE,
+        keys::{DiversifiedTransmissionKey, EphemeralSecretKey, OutgoingViewingKey},
+        note::ExtractedNoteCommitment,
+        note_encryption::PreparedIncomingViewingKey,
+        util::generate_random_rseed,
+        value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+        Diversifier, PaymentAddress, Rseed, SaplingIvk,
     };
 
     fn random_enc_ciphertext<R: RngCore + CryptoRng>(
