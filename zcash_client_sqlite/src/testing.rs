@@ -779,7 +779,7 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
     let encryptor = sapling_note_encryption(
         Some(dfvk.fvk().ovk),
         note.clone(),
-        MemoBytes::empty(),
+        *MemoBytes::empty().as_array(),
         &mut rng,
     );
     let cmu = note.cmu().to_bytes().to_vec();
@@ -886,7 +886,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            MemoBytes::empty(),
+            *MemoBytes::empty().as_array(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();
@@ -912,7 +912,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            MemoBytes::empty(),
+            *MemoBytes::empty().as_array(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();

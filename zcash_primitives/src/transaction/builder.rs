@@ -356,7 +356,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             ovk,
             to,
             sapling::value::NoteValue::from_raw(value.into()),
-            memo,
+            Some(*memo.as_array()),
         )
     }
 

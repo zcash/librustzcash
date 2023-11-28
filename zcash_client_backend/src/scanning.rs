@@ -739,7 +739,7 @@ mod tests {
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
-            MemoBytes::empty(),
+            *MemoBytes::empty().as_array(),
             &mut rng,
         );
         let cmu = note.cmu().to_bytes().to_vec();

@@ -96,7 +96,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                                     index,
                                     note,
                                     account,
-                                    memo,
+                                    memo: MemoBytes::from_bytes(&memo).expect("correct length"),
                                     transfer_type,
                                 })
                         })
