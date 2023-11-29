@@ -26,7 +26,8 @@ pub mod merkle_tree;
 use sapling;
 pub mod transaction;
 pub use zip32;
-pub mod zip339;
-
 #[cfg(feature = "zfuture")]
 pub mod extensions;
+#[cfg(feature = "local-consensus")]
+pub mod local_consensus;
+pub mod zip339;

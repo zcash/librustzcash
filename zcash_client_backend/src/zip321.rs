@@ -841,6 +841,9 @@ mod tests {
         transaction::components::{amount::NonNegativeAmount, Amount},
     };
 
+    #[cfg(feature = "local-consensus")]
+    use zcash_primitives::{local_consensus::LocalNetwork, BlockHeight};
+
     use crate::address::Address;
 
     use super::{
@@ -1007,6 +1010,27 @@ mod tests {
         assert_eq!(
             v4r.payments.get(0).map(|p| p.amount),
             Some(NonNegativeAmount::const_from_u64(2100000000000000u64))
+        );
+    }
+
+    #[cfg(feature = "local-consensus")]
+    #[test]
+    fn test_zip321_spec_regtest_valid_examples() {
+        let params = LocalNetwork {
+            overwinter: Some(BlockHeight::from_u32(1)),
+            sapling: Some(BlockHeight::from_u32(1)),
+            blossom: Some(BlockHeight::from_u32(1)),
+            heartwood: Some(BlockHeight::from_u32(1)),
+            canopy: Some(BlockHeight::from_u32(1)),
+            nu5: Some(BlockHeight::from_u32(1)),
+            nu6: Some(BlockHeight::from_u32(1)),
+            z_future: Some(BlockHeight::from_u32(1)),
+        };
+        let valid_1 = "zcash:zregtestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle7505hlz3?amount=1&memo=VGhpcyBpcyBhIHNpbXBsZSBtZW1vLg&message=Thank%20you%20for%20your%20purchase";
+        let v1r = TransactionRequest::from_uri(&params, valid_1).unwrap();
+        assert_eq!(
+            v1r.payments.get(0).map(|p| p.amount),
+            Some(NonNegativeAmount::const_from_u64(100000000))
         );
     }
 

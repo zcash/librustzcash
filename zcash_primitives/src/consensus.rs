@@ -688,11 +688,10 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
-
     use super::{
         BlockHeight, BranchId, NetworkUpgrade, Parameters, MAIN_NETWORK, UPGRADES_IN_ORDER,
     };
+    use std::convert::TryFrom;
 
     #[test]
     fn nu_ordering() {
