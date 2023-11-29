@@ -85,6 +85,7 @@ which = "4"
 [dev-dependencies]
 assert_matches.workspace = true
 gumdrop = "0.8"
+incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 jubjub.workspace = true
 proptest.workspace = true
 rand_core.workspace = true
