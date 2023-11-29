@@ -248,6 +248,7 @@ mod tests {
                 memo BLOB,
                 spent INTEGER,
                 commitment_tree_position INTEGER,
+                recipient_key_scope INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account) REFERENCES accounts(account),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),

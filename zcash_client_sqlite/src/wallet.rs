@@ -75,6 +75,7 @@ use std::ops::RangeInclusive;
 use tracing::debug;
 use zcash_client_backend::data_api::{AccountBalance, Ratio, WalletSummary};
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
+use zcash_primitives::zip32::Scope;
 
 use zcash_client_backend::data_api::{
     scanning::{ScanPriority, ScanRange},
@@ -134,6 +135,13 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
         PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
+    }
+}
+
+pub(crate) fn scope_code(scope: Scope) -> i64 {
+    match scope {
+        Scope::External => 0i64,
+        Scope::Internal => 1i64,
     }
 }
 
