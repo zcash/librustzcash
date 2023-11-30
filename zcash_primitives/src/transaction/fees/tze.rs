@@ -1,10 +1,10 @@
 //! Abstractions and types related to fee calculations for TZE components of a transaction.
 
 use crate::{
-    extensions::transparent::{self as tze},
+    extensions::transparent as tze,
     transaction::components::{
         amount::Amount,
-        tze::{OutPoint, TzeOut},
+        tze::{builder::TzeBuildInput, OutPoint, TzeOut},
     },
 };
 
@@ -15,6 +15,15 @@ pub trait InputView {
     fn outpoint(&self) -> &OutPoint;
     /// The previous output being consumed.
     fn coin(&self) -> &TzeOut;
+}
+
+impl InputView for TzeBuildInput {
+    fn outpoint(&self) -> &OutPoint {
+        self.outpoint()
+    }
+    fn coin(&self) -> &TzeOut {
+        self.coin()
+    }
 }
 
 /// This trait provides a minimized view of a TZE output suitable for use in

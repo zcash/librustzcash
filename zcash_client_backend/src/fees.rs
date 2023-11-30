@@ -6,15 +6,14 @@ use zcash_primitives::{
     transaction::{
         components::{
             amount::{BalanceError, NonNegativeAmount},
-            sapling::fees as sapling,
-            transparent::fees as transparent,
             OutPoint,
         },
-        fees::FeeRule,
+        fees::{transparent, FeeRule},
     },
 };
 
 pub mod fixed;
+pub mod sapling;
 pub mod standard;
 pub mod zip317;
 
@@ -260,11 +259,15 @@ pub trait ChangeStrategy {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use zcash_primitives::transaction::components::{
-        amount::NonNegativeAmount,
-        sapling::fees as sapling,
-        transparent::{fees as transparent, OutPoint, TxOut},
+    use zcash_primitives::transaction::{
+        components::{
+            amount::NonNegativeAmount,
+            transparent::{OutPoint, TxOut},
+        },
+        fees::transparent,
     };
+
+    use super::sapling;
 
     #[derive(Debug)]
     pub(crate) struct TestTransparentInput {

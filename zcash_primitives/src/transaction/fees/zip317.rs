@@ -7,9 +7,12 @@ use core::cmp::max;
 use crate::{
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
-    transaction::components::{
-        amount::{BalanceError, NonNegativeAmount},
-        transparent::{fees as transparent, OutPoint},
+    transaction::{
+        components::{
+            amount::{BalanceError, NonNegativeAmount},
+            transparent::OutPoint,
+        },
+        fees::transparent,
     },
 };
 

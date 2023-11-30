@@ -19,6 +19,8 @@ and this library adheres to Rust's notion of
   - `builder::{InProgressProofs, Unproven, Proven}`
   - `builder::{InProgressSignatures, Unsigned, PartiallyAuthorized}`
   - `builder::{MaybeSigned, SigningParts}`
+  - `builder::{SpendDescriptionInfo::value}`
+  - `builder::{SaplingOutputInfo}`
   - `bundle` module, containing the following types moved from
     `zcash_primitives::transaction::components::sapling`:
     - `Bundle`
@@ -69,6 +71,8 @@ and this library adheres to Rust's notion of
       - `temporary_zcashd_write_output_v4`
       - `temporary_zcashd_read_v4_components`
       - `temporary_zcashd_write_v4_components`
+  - `components::transparent`:
+    - `builder::TransparentInputInfo`
   - `fees::StandardFeeRule`
   - Constants in `fees::zip317`:
     - `MARGINAL_FEE`
@@ -182,7 +186,14 @@ and this library adheres to Rust's notion of
     argument as the diversifier may be obtained from the note.
   - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
     instead of `Amount`.
+  - `components::transparent::fees` has been moved to 
+    `zcash_primitives::transaction::fees::transparent`
+  - `components::transparent::builder::TransparentBuilder::{inputs, outputs}`
+    have changed to return `&[TransparentInputInfo]` and `&[TxOut]` respectively,
+    in order to avoid coupling to the fee traits.
   - `Unauthorized::SaplingAuth` now has type `InProgress<Proven, Unsigned>`.
+  - `fees::FeeRule::fee_required` now takes an additional `orchard_action_count`
+    argument.
   - The following methods now take `NonNegativeAmount` instead of `Amount`:
     - `builder::Builder::{add_sapling_output, add_transparent_output}`
     - `components::transparent::builder::TransparentBuilder::add_output`
@@ -190,12 +201,9 @@ and this library adheres to Rust's notion of
     - `fees::zip317::FeeRule::non_standard`
   - The following methods now return `NonNegativeAmount` instead of `Amount`:
     - `components::amount::testing::arb_nonnegative_amount`
-    - `components::sapling`:
-      - `fees::InputView::value`
-      - `fees::OutputView::value`
-    - `components::transparent`:
-      - `fees::InputView::value`
-      - `fees::OutputView::value`
+    - `fees::transparent`:
+      - `InputView::value`
+      - `OutputView::value`
     - `fees::FeeRule::{fee_required, fee_required_zfuture}`
     - `fees::fixed::FeeRule::fixed_fee`
     - `fees::zip317::FeeRule::marginal_fee`
@@ -237,6 +245,8 @@ and this library adheres to Rust's notion of
   - `SpendDescription::<Unauthorized>::apply_signature`
   - `Bundle::<Unauthorized>::apply_signatures` (use
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
+  - The `fees` module was removed. Its contents were unused in this crate,
+    are now instead made available by `zcash_client_backend::fees::sapling`.
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
 - `zcash_primitives::zip32`:
   - `sapling` module (moved from `zcash_primitives::sapling::zip32`).

@@ -10,7 +10,6 @@ use crate::legacy::{Script, TransparentAddress};
 use super::amount::{Amount, BalanceError, NonNegativeAmount};
 
 pub mod builder;
-pub mod fees;
 
 pub trait Authorization: Debug {
     type ScriptSig: Debug + Clone + PartialEq;

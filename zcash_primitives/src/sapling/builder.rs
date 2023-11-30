@@ -25,10 +25,7 @@ use crate::{
         zip32::ExtendedSpendingKey,
         Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey, SaplingIvk,
     },
-    transaction::{
-        builder::Progress,
-        components::{amount::NonNegativeAmount, sapling::fees},
-    },
+    transaction::builder::Progress,
 };
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
@@ -77,18 +74,6 @@ pub struct SpendDescriptionInfo {
     rcv: ValueCommitTrapdoor,
 }
 
-impl fees::InputView<()> for SpendDescriptionInfo {
-    fn note_id(&self) -> &() {
-        // The builder does not make use of note identifiers, so we can just return the unit value.
-        &()
-    }
-
-    fn value(&self) -> NonNegativeAmount {
-        // An existing note to be spent must have a valid amount value.
-        NonNegativeAmount::from_u64(self.note.value().inner()).unwrap()
-    }
-}
-
 impl SpendDescriptionInfo {
     fn new_internal<R: RngCore>(
         mut rng: &mut R,
@@ -103,6 +88,10 @@ impl SpendDescriptionInfo {
             merkle_path,
             rcv: ValueCommitTrapdoor::random(rng),
         }
+    }
+
+    pub fn value(&self) -> NoteValue {
+        self.note.value()
     }
 
     fn build<Pr: SpendProver>(
@@ -154,7 +143,7 @@ impl SpendDescriptionInfo {
 /// A struct containing the information required in order to construct a
 /// Sapling output to a transaction.
 #[derive(Clone)]
-struct SaplingOutputInfo {
+pub struct SaplingOutputInfo {
     /// `None` represents the `ovk = ⊥` case.
     ovk: Option<OutgoingViewingKey>,
     note: Note,
@@ -249,12 +238,13 @@ impl SaplingOutputInfo {
             zkproof,
         )
     }
-}
 
-impl fees::OutputView for SaplingOutputInfo {
-    fn value(&self) -> NonNegativeAmount {
-        NonNegativeAmount::from_u64(self.note.value().inner())
-            .expect("Note values should be checked at construction.")
+    pub fn recipient(&self) -> PaymentAddress {
+        self.note.recipient()
+    }
+
+    pub fn value(&self) -> NoteValue {
+        self.note.value()
     }
 }
 
@@ -317,12 +307,12 @@ impl SaplingBuilder {
 
     /// Returns the list of Sapling inputs that will be consumed by the transaction being
     /// constructed.
-    pub fn inputs(&self) -> &[impl fees::InputView<()>] {
+    pub fn inputs(&self) -> &[SpendDescriptionInfo] {
         &self.spends
     }
 
     /// Returns the Sapling outputs that will be produced by the transaction being constructed
-    pub fn outputs(&self) -> &[impl fees::OutputView] {
+    pub fn outputs(&self) -> &[SaplingOutputInfo] {
         &self.outputs
     }
 

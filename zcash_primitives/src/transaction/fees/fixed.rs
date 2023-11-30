@@ -1,11 +1,11 @@
 use crate::{
     consensus::{self, BlockHeight},
-    transaction::components::{amount::NonNegativeAmount, transparent::fees as transparent},
-    transaction::fees::zip317,
+    transaction::components::amount::NonNegativeAmount,
+    transaction::fees::{transparent, zip317},
 };
 
 #[cfg(feature = "zfuture")]
-use crate::transaction::components::tze::fees as tze;
+use crate::transaction::fees::tze;
 
 /// A fee rule that always returns a fixed fee, irrespective of the structure of
 /// the transaction being constructed.
@@ -72,6 +72,7 @@ impl super::FutureFeeRule for FeeRule {
         _transparent_outputs: &[impl transparent::OutputView],
         _sapling_input_count: usize,
         _sapling_output_count: usize,
+        _orchard_action_count: usize,
         _tze_inputs: &[impl tze::InputView],
         _tze_outputs: &[impl tze::OutputView],
     ) -> Result<NonNegativeAmount, Self::Error> {
