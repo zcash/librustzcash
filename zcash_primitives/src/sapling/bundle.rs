@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 
 use memuse::DynamicUsage;
+use redjubjub::{Binding, SpendAuth};
 
 use zcash_note_encryption::{
     EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
@@ -10,7 +11,6 @@ use crate::sapling::{
     circuit::GROTH_PROOF_SIZE,
     note::ExtractedNoteCommitment,
     note_encryption::{CompactOutputDescription, SaplingDomain},
-    redjubjub::{self, PublicKey, Signature},
     value::ValueCommitment,
     Nullifier,
 };
@@ -29,13 +29,13 @@ pub trait Authorization: Debug {
 #[derive(Debug, Copy, Clone)]
 pub struct Authorized {
     // TODO: Make this private.
-    pub binding_sig: redjubjub::Signature,
+    pub binding_sig: redjubjub::Signature<Binding>,
 }
 
 impl Authorization for Authorized {
     type SpendProof = GrothProofBytes;
     type OutputProof = GrothProofBytes;
-    type AuthSig = redjubjub::Signature;
+    type AuthSig = redjubjub::Signature<SpendAuth>;
 }
 
 /// A map from one bundle authorization to another.
@@ -315,7 +315,7 @@ pub struct SpendDescription<A: Authorization> {
     cv: ValueCommitment,
     anchor: bls12_381::Scalar,
     nullifier: Nullifier,
-    rk: PublicKey,
+    rk: redjubjub::VerificationKey<SpendAuth>,
     zkproof: A::SpendProof,
     spend_auth_sig: A::AuthSig,
 }
@@ -336,7 +336,7 @@ impl<A: Authorization> SpendDescription<A> {
         cv: ValueCommitment,
         anchor: bls12_381::Scalar,
         nullifier: Nullifier,
-        rk: PublicKey,
+        rk: redjubjub::VerificationKey<SpendAuth>,
         zkproof: A::SpendProof,
         spend_auth_sig: A::AuthSig,
     ) -> Self {
@@ -347,7 +347,7 @@ impl<A: Authorization> SpendDescription<A> {
         cv: ValueCommitment,
         anchor: bls12_381::Scalar,
         nullifier: Nullifier,
-        rk: PublicKey,
+        rk: redjubjub::VerificationKey<SpendAuth>,
         zkproof: A::SpendProof,
         spend_auth_sig: A::AuthSig,
     ) -> Self {
@@ -377,7 +377,7 @@ impl<A: Authorization> SpendDescription<A> {
     }
 
     /// Returns the randomized verification key for the note being spent.
-    pub fn rk(&self) -> &PublicKey {
+    pub fn rk(&self) -> &redjubjub::VerificationKey<SpendAuth> {
         &self.rk
     }
 
@@ -406,11 +406,15 @@ impl DynamicUsage for SpendDescription<Authorized> {
 pub struct SpendDescriptionV5 {
     cv: ValueCommitment,
     nullifier: Nullifier,
-    rk: PublicKey,
+    rk: redjubjub::VerificationKey<SpendAuth>,
 }
 
 impl SpendDescriptionV5 {
-    pub(crate) fn from_parts(cv: ValueCommitment, nullifier: Nullifier, rk: PublicKey) -> Self {
+    pub(crate) fn from_parts(
+        cv: ValueCommitment,
+        nullifier: Nullifier,
+        rk: redjubjub::VerificationKey<SpendAuth>,
+    ) -> Self {
         Self { cv, nullifier, rk }
     }
 
@@ -418,7 +422,7 @@ impl SpendDescriptionV5 {
         self,
         anchor: bls12_381::Scalar,
         zkproof: GrothProofBytes,
-        spend_auth_sig: Signature,
+        spend_auth_sig: redjubjub::Signature<SpendAuth>,
     ) -> SpendDescription<Authorized> {
         SpendDescription {
             cv: self.cv,
@@ -627,9 +631,7 @@ pub mod testing {
 
     use crate::{
         sapling::{
-            constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
             note::ExtractedNoteCommitment,
-            redjubjub::{PrivateKey, PublicKey},
             value::{
                 testing::{arb_note_value_bounded, arb_trapdoor},
                 ValueCommitment, MAX_NOTE_VALUE,
@@ -669,8 +671,8 @@ pub mod testing {
             fake_sighash_bytes in prop::array::uniform32(prop::num::u8::ANY),
         ) -> SpendDescription<Authorized> {
             let mut rng = StdRng::from_seed(rng_seed);
-            let sk1 = PrivateKey(jubjub::Fr::random(&mut rng));
-            let rk = PublicKey::from_private(&sk1, SPENDING_KEY_GENERATOR);
+            let sk1 = redjubjub::SigningKey::new(&mut rng);
+            let rk = redjubjub::VerificationKey::from(&sk1);
             let cv = ValueCommitment::derive(value, rcv);
             SpendDescription {
                 cv,
@@ -678,7 +680,7 @@ pub mod testing {
                 nullifier,
                 rk,
                 zkproof,
-                spend_auth_sig: sk1.sign(&fake_sighash_bytes, &mut rng, SPENDING_KEY_GENERATOR),
+                spend_auth_sig: sk1.sign(&mut rng, &fake_sighash_bytes),
             }
         }
     }
@@ -731,18 +733,14 @@ pub mod testing {
                         None
                     } else {
                         let mut rng = StdRng::from_seed(rng_seed);
-                        let bsk = PrivateKey(jubjub::Fr::random(&mut rng));
+                        let bsk = redjubjub::SigningKey::new(&mut rng);
 
                         Some(Bundle {
                             shielded_spends,
                             shielded_outputs,
                             value_balance,
                             authorization: Authorized {
-                                binding_sig: bsk.sign(
-                                    &fake_bvk_bytes,
-                                    &mut rng,
-                                    VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
-                                ),
+                                binding_sig: bsk.sign(&mut rng, &fake_bvk_bytes),
                             },
                         })
                     }

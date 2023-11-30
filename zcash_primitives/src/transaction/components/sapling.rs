@@ -1,4 +1,5 @@
 use ff::PrimeField;
+use redjubjub::SpendAuth;
 
 use std::io::{self, Read, Write};
 
@@ -12,7 +13,6 @@ use crate::{
             SpendDescription, SpendDescriptionV5,
         },
         note::ExtractedNoteCommitment,
-        redjubjub::{self, PublicKey, Signature},
         value::ValueCommitment,
         Nullifier,
     },
@@ -81,15 +81,20 @@ fn read_nullifier<R: Read>(mut reader: R) -> io::Result<Nullifier> {
 /// Consensus rules (§4.4):
 /// - Canonical encoding is enforced here.
 /// - "Not small order" is enforced in SaplingVerificationContext::check_spend()
-fn read_rk<R: Read>(mut reader: R) -> io::Result<PublicKey> {
-    PublicKey::read(&mut reader)
+fn read_rk<R: Read>(mut reader: R) -> io::Result<redjubjub::VerificationKey<SpendAuth>> {
+    let mut bytes = [0; 32];
+    reader.read_exact(&mut bytes)?;
+    redjubjub::VerificationKey::try_from(bytes)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Consensus rules (§4.4):
 /// - Canonical encoding is enforced here.
 /// - Signature validity is enforced in SaplingVerificationContext::check_spend()
-fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<Signature> {
-    Signature::read(&mut reader)
+fn read_spend_auth_sig<R: Read>(mut reader: R) -> io::Result<redjubjub::Signature<SpendAuth>> {
+    let mut sig = [0; 64];
+    reader.read_exact(&mut sig)?;
+    Ok(redjubjub::Signature::from(sig))
 }
 
 #[cfg(feature = "temporary-zcashd")]
@@ -127,9 +132,9 @@ fn write_spend_v4<W: Write>(mut writer: W, spend: &SpendDescription<Authorized>)
     writer.write_all(&spend.cv().to_bytes())?;
     writer.write_all(spend.anchor().to_repr().as_ref())?;
     writer.write_all(&spend.nullifier().0)?;
-    spend.rk().write(&mut writer)?;
+    writer.write_all(&<[u8; 32]>::from(*spend.rk()))?;
     writer.write_all(spend.zkproof())?;
-    spend.spend_auth_sig().write(&mut writer)
+    writer.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
 }
 
 fn write_spend_v5_without_witness_data<W: Write>(
@@ -138,7 +143,7 @@ fn write_spend_v5_without_witness_data<W: Write>(
 ) -> io::Result<()> {
     writer.write_all(&spend.cv().to_bytes())?;
     writer.write_all(&spend.nullifier().0)?;
-    spend.rk().write(&mut writer)
+    writer.write_all(&<[u8; 32]>::from(*spend.rk()))
 }
 
 fn read_spend_v5<R: Read>(mut reader: &mut R) -> io::Result<SpendDescriptionV5> {
@@ -350,7 +355,9 @@ pub(crate) fn read_v5_bundle<R: Read>(
     let v_output_proofs = Array::read(&mut reader, n_outputs, |r| read_zkproof(r))?;
 
     let binding_sig = if n_spends > 0 || n_outputs > 0 {
-        Some(redjubjub::Signature::read(&mut reader)?)
+        let mut sig = [0; 64];
+        reader.read_exact(&mut sig)?;
+        Some(redjubjub::Signature::from(sig))
     } else {
         None
     };
@@ -413,7 +420,7 @@ pub(crate) fn write_v5_bundle<W: Write>(
         Array::write(
             &mut writer,
             bundle.shielded_spends().iter().map(|s| s.spend_auth_sig()),
-            |w, e| e.write(w),
+            |w, e| w.write_all(&<[u8; 64]>::from(**e)),
         )?;
 
         Array::write(
@@ -423,7 +430,7 @@ pub(crate) fn write_v5_bundle<W: Write>(
         )?;
 
         if !(bundle.shielded_spends().is_empty() && bundle.shielded_outputs().is_empty()) {
-            bundle.authorization().binding_sig.write(&mut writer)?;
+            writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
         }
     } else {
         CompactSize::write(&mut writer, 0)?;

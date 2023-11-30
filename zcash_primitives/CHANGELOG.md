@@ -100,6 +100,10 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::sapling`:
   - `BatchValidator::validate` now takes the `SpendVerifyingKey` and
     `OutputVerifyingKey` newtypes.
+  - `SaplingVerificationContext::new` now always creates a context with ZIP 216
+    rules enforced, and no longer has a boolean for configuring this.
+  - `SaplingVerificationContext::{check_spend, final_check}` now use the
+    `redjubjub` crate types for `rk`, `spend_auth_sig`, and `binding_sig`.
   - `SaplingVerificationContext::{check_spend, check_output}` now take
     the `PreparedSpendVerifyingKey` and `PreparedOutputVerifyingKey`
     newtypes.
@@ -127,6 +131,15 @@ and this library adheres to Rust's notion of
     - `Error::MissingSignatures`
   - `bundle::Bundle` now has a second generic parameter `V`.
   - `bundle::Bundle::value_balance` now returns `&V` instead of `&Amount`.
+  - `bundle::Authorized::binding_sig` now has type `redjubjub::Signature<Binding>`.
+  - `bundle::Authorized::AuthSig` now has type `redjubjub::Signature<SpendAuth>`.
+  - `bundle::SpendDescription::temporary_zcashd_from_parts` now takes `rk` as
+    `redjubjub::VerificationKey<SpendAuth>` instead of
+    `zcash_primitives::sapling::redjubjub::PublicKey`.
+  - `bundle::SpendDescription::rk` now returns `&redjubjub::VerificationKey<SpendAuth>`.
+  - `bundle::SpendDescriptionV5::into_spend_description` now takes
+    `spend_auth_sig` as `redjubjub::Signature<SpendAuth>` instead of
+    `zcash_primitives::sapling::redjubjub::Signature`.
   - `bundle::testing::arb_bundle` now takes a `value_balance: V` argument.
   - `bundle::MapAuth` trait methods now take `&mut self` instead of `&self`.
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
@@ -150,6 +163,11 @@ and this library adheres to Rust's notion of
       - `try_sapling_output_recovery`
   - `util::generate_random_rseed` now takes a `Zip212Enforcement` argument
     instead of a `P: consensus::Parameters` argument and a height.
+  - `value::TrapdoorSum::into_bsk` now returns `redjubjub::SigningKey<Binding>`
+    instead of `zcash_primitives::sapling::redjubjub::PrivateKey`.
+  - `value::CommitmentSum::into_bvk` now returns
+    `redjubjub::VerificationKey<Binding>` instead of
+    `zcash_primitives::sapling::redjubjub::PublicKey`.
 - `zcash_primitives::transaction`:
   - `builder::Builder::{build, build_zfuture}` now take
     `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
@@ -192,6 +210,8 @@ and this library adheres to Rust's notion of
     - `OutputDescriptionV5::read`
   - `note_encryption::SaplingDomain::for_height` (use `SaplingDomain::new`
     instead).
+  - `redjubjub` module (use the `redjubjub` crate instead).
+  - `spend_sig` (use `redjubjub::SigningKey::{randomize, sign}` instead).
 - `zcash_primitives::transaction::components::sapling`:
   - The following types were removed from this module (moved into
     `zcash_primitives::sapling::bundle`):

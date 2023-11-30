@@ -1,10 +1,10 @@
 use bellman::{gadgets::multipack, groth16::Proof};
 use bls12_381::Bls12;
-use group::{ff::PrimeField, Curve, GroupEncoding};
+use group::{ff::PrimeField, Curve};
+use redjubjub::{Binding, SpendAuth};
 
 use crate::sapling::{
     note::ExtractedNoteCommitment,
-    redjubjub::{PublicKey, Signature},
     value::{CommitmentSum, ValueCommitment},
 };
 
@@ -36,18 +36,17 @@ impl SaplingVerificationContextInner {
         cv: &ValueCommitment,
         anchor: bls12_381::Scalar,
         nullifier: &[u8; 32],
-        rk: &PublicKey,
-        sighash_value: &[u8; 32],
-        spend_auth_sig: &Signature,
+        rk: &redjubjub::VerificationKey<SpendAuth>,
         zkproof: Proof<Bls12>,
         verifier_ctx: &mut C,
-        spend_auth_sig_verifier: impl FnOnce(&mut C, &PublicKey, [u8; 64], &Signature) -> bool,
+        spend_auth_sig_verifier: impl FnOnce(&mut C, &redjubjub::VerificationKey<SpendAuth>) -> bool,
         proof_verifier: impl FnOnce(&mut C, Proof<Bls12>, [bls12_381::Scalar; 7]) -> bool,
     ) -> bool {
         // The "cv is not small order" happens when a SpendDescription is deserialized.
         // This happens when transactions or blocks are received over the network, or when
         // mined blocks are introduced via the `submitblock` RPC method on full nodes.
-        if rk.0.is_small_order().into() {
+        let rk_affine = jubjub::AffinePoint::from_bytes((*rk).into()).unwrap();
+        if rk_affine.is_small_order().into() {
             return false;
         }
 
@@ -57,14 +56,8 @@ impl SaplingVerificationContextInner {
         // Grab the nullifier as a sequence of bytes
         let nullifier = &nullifier[..];
 
-        // Compute the signature's message for rk/spend_auth_sig
-        let mut data_to_be_signed = [0u8; 64];
-        data_to_be_signed[0..32].copy_from_slice(&rk.0.to_bytes());
-        data_to_be_signed[32..64].copy_from_slice(&sighash_value[..]);
-
         // Verify the spend_auth_sig
-        let rk_affine = rk.0.to_affine();
-        if !spend_auth_sig_verifier(verifier_ctx, rk, data_to_be_signed, spend_auth_sig) {
+        if !spend_auth_sig_verifier(verifier_ctx, rk) {
             return false;
         }
 
@@ -145,19 +138,12 @@ impl SaplingVerificationContextInner {
     fn final_check<V: Into<i64>>(
         &self,
         value_balance: V,
-        sighash_value: &[u8; 32],
-        binding_sig: Signature,
-        binding_sig_verifier: impl FnOnce(PublicKey, [u8; 64], Signature) -> bool,
+        binding_sig_verifier: impl FnOnce(redjubjub::VerificationKey<Binding>) -> bool,
     ) -> bool {
         // Compute the final bvk.
         let bvk = self.cv_sum.into_bvk(value_balance);
 
-        // Compute the signature's message for bvk/binding_sig
-        let mut data_to_be_signed = [0u8; 64];
-        data_to_be_signed[0..32].copy_from_slice(&bvk.0.to_bytes());
-        data_to_be_signed[32..64].copy_from_slice(&sighash_value[..]);
-
         // Verify the binding_sig
-        binding_sig_verifier(bvk, data_to_be_signed, binding_sig)
+        binding_sig_verifier(bvk)
     }
 }

@@ -154,7 +154,7 @@ pub(crate) fn hash_sapling_spends<A: sapling::bundle::Authorization>(
 
             nh.write_all(&s_spend.cv().to_bytes()).unwrap();
             nh.write_all(&s_spend.anchor().to_repr()).unwrap();
-            s_spend.rk().write(&mut nh).unwrap();
+            nh.write_all(&<[u8; 32]>::from(*s_spend.rk())).unwrap();
         }
 
         let compact_digest = ch.finalize();
@@ -476,14 +476,16 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
             }
 
             for spend in bundle.shielded_spends() {
-                spend.spend_auth_sig().write(&mut h).unwrap();
+                h.write_all(&<[u8; 64]>::from(*spend.spend_auth_sig()))
+                    .unwrap();
             }
 
             for output in bundle.shielded_outputs() {
                 h.write_all(output.zkproof()).unwrap();
             }
 
-            bundle.authorization().binding_sig.write(&mut h).unwrap();
+            h.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))
+                .unwrap();
         }
         h.finalize()
     }

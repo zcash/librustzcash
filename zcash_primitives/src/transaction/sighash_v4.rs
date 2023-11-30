@@ -112,7 +112,7 @@ fn shielded_spends_hash<
         data.extend_from_slice(&s_spend.cv().to_bytes());
         data.extend_from_slice(s_spend.anchor().to_repr().as_ref());
         data.extend_from_slice(s_spend.nullifier().as_ref());
-        s_spend.rk().write(&mut data).unwrap();
+        data.extend_from_slice(&<[u8; 32]>::from(*s_spend.rk()));
         data.extend_from_slice(s_spend.zkproof());
     }
     Blake2bParams::new()

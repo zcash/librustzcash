@@ -6,6 +6,7 @@ use std::fmt;
 use std::sync::mpsc::Sender;
 
 use rand::{rngs::OsRng, CryptoRng, RngCore};
+use redjubjub::SpendAuth;
 
 use crate::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade},
@@ -15,7 +16,7 @@ use crate::{
         self,
         builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
         prover::{OutputProver, SpendProver},
-        redjubjub, Note, PaymentAddress,
+        Note, PaymentAddress,
     },
     transaction::{
         components::{
@@ -162,7 +163,7 @@ pub struct Builder<'a, P, R> {
     // `add_sapling_spend` or `add_orchard_spend`, we will build an unauthorized, unproven
     // transaction, and then the caller will be responsible for using the spending keys or their
     // derivatives for proving and signing to complete transaction creation.
-    sapling_asks: Vec<redjubjub::PrivateKey>,
+    sapling_asks: Vec<redjubjub::SigningKey<SpendAuth>>,
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(feature = "zfuture")]
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
@@ -334,8 +335,11 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         self.sapling_builder
             .add_spend(&mut self.rng, &extsk, note, merkle_path)?;
 
-        self.sapling_asks
-            .push(redjubjub::PrivateKey(extsk.expsk.ask));
+        // TODO: store a `redjubjub::SigningKey` inside `extsk`.
+        self.sapling_asks.push(
+            redjubjub::SigningKey::try_from(extsk.expsk.ask.to_bytes())
+                .expect("valid scalar is valid signing key"),
+        );
 
         Ok(())
     }

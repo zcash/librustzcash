@@ -68,21 +68,11 @@ impl BatchValidator {
                 *spend.anchor(),
                 &spend.nullifier().0,
                 spend.rk(),
-                &sighash,
-                spend.spend_auth_sig(),
                 zkproof,
                 self,
-                |this, rk, _, spend_auth_sig| {
-                    let rk = redjubjub::VerificationKeyBytes::<redjubjub::SpendAuth>::from(
-                        rk.0.to_bytes(),
-                    );
-                    let spend_auth_sig = {
-                        let mut buf = [0; 64];
-                        spend_auth_sig.write(&mut buf[..]).unwrap();
-                        redjubjub::Signature::<redjubjub::SpendAuth>::from(buf)
-                    };
-
-                    this.signatures.queue((rk, spend_auth_sig, &sighash));
+                |this, rk| {
+                    this.signatures
+                        .queue(((*rk).into(), *spend.spend_auth_sig(), &sighash));
                     true
                 },
                 |this, proof, public_inputs| {
@@ -125,23 +115,11 @@ impl BatchValidator {
         }
 
         // Check the whole-bundle consensus rules, and batch the binding signature.
-        ctx.final_check(
-            *bundle.value_balance(),
-            &sighash,
-            bundle.authorization().binding_sig,
-            |bvk, _, binding_sig| {
-                let bvk =
-                    redjubjub::VerificationKeyBytes::<redjubjub::Binding>::from(bvk.0.to_bytes());
-                let binding_sig = {
-                    let mut buf = [0; 64];
-                    binding_sig.write(&mut buf[..]).unwrap();
-                    redjubjub::Signature::<redjubjub::Binding>::from(buf)
-                };
-
-                self.signatures.queue((bvk, binding_sig, &sighash));
-                true
-            },
-        )
+        ctx.final_check(*bundle.value_balance(), |bvk| {
+            self.signatures
+                .queue((bvk.into(), bundle.authorization().binding_sig, &sighash));
+            true
+        })
     }
 
     /// Batch-validates the accumulated bundles.
