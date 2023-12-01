@@ -3,7 +3,7 @@
 use core::fmt;
 use std::{marker::PhantomData, sync::mpsc::Sender};
 
-use group::{ff::Field, GroupEncoding};
+use group::ff::Field;
 use rand::{seq::SliceRandom, RngCore};
 use rand_core::CryptoRng;
 use redjubjub::{Binding, SpendAuth};
@@ -15,7 +15,7 @@ use crate::{
             Authorization, Authorized, Bundle, GrothProofBytes, MapAuth, OutputDescription,
             SpendDescription,
         },
-        keys::OutgoingViewingKey,
+        keys::{OutgoingViewingKey, SpendAuthorizingKey, SpendValidatingKey},
         note_encryption::{sapling_note_encryption, Zip212Enforcement},
         prover::{OutputProver, SpendProver},
         util::generate_random_rseed_internal,
@@ -114,8 +114,7 @@ impl SpendDescriptionInfo {
         // Construct the value commitment.
         let cv = ValueCommitment::derive(self.note.value(), self.rcv.clone());
 
-        let ak = redjubjub::VerificationKey::try_from(self.proof_generation_key.ak.to_bytes())
-            .expect("valid points are valid verification keys");
+        let ak = self.proof_generation_key.ak.clone();
 
         // This is the result of the re-randomization, we compute it for the caller
         let rk = ak.randomize(&self.alpha);
@@ -691,7 +690,7 @@ impl InProgressSignatures for Unsigned {
 pub struct SigningParts {
     /// The spend validating key for this spend description. Used to match spend
     /// authorizing keys to spend descriptions they can create signatures for.
-    ak: redjubjub::VerificationKey<SpendAuth>,
+    ak: SpendValidatingKey,
     /// The randomization needed to derive the actual signing key for this note.
     alpha: jubjub::Scalar,
 }
@@ -760,7 +759,7 @@ impl<V> Bundle<InProgress<Proven, Unsigned>, V> {
         self,
         mut rng: R,
         sighash: [u8; 32],
-        signing_keys: &[redjubjub::SigningKey<SpendAuth>],
+        signing_keys: &[SpendAuthorizingKey],
     ) -> Result<Bundle<Authorized, V>, Error> {
         signing_keys
             .iter()
@@ -775,20 +774,15 @@ impl<P: InProgressProofs, V> Bundle<InProgress<P, PartiallyAuthorized>, V> {
     /// Signs this bundle with the given [`redjubjub::SigningKey`].
     ///
     /// This will apply signatures for all notes controlled by this spending key.
-    pub fn sign<R: RngCore + CryptoRng>(
-        self,
-        mut rng: R,
-        ask: &redjubjub::SigningKey<SpendAuth>,
-    ) -> Self {
-        let expected_ak = redjubjub::VerificationKey::from(ask);
+    pub fn sign<R: RngCore + CryptoRng>(self, mut rng: R, ask: &SpendAuthorizingKey) -> Self {
+        let expected_ak = ask.into();
         let sighash = self.authorization().sigs.sighash;
         self.map_authorization((
             |proof| proof,
             |proof| proof,
             |maybe| match maybe {
                 MaybeSigned::SigningMetadata(parts) if parts.ak == expected_ak => {
-                    let rsk = ask.randomize(&parts.alpha);
-                    MaybeSigned::Signature(rsk.sign(&mut rng, &sighash))
+                    MaybeSigned::Signature(ask.randomize(&parts.alpha).sign(&mut rng, &sighash))
                 }
                 s => s,
             },
@@ -920,12 +914,7 @@ pub mod testing {
                         bundle.create_proofs(&MockSpendProver, &MockOutputProver, &mut rng, None);
 
                     bundle
-                        .apply_signatures(
-                            &mut rng,
-                            fake_sighash_bytes,
-                            &[redjubjub::SigningKey::try_from(extsk.expsk.ask.to_bytes())
-                                .expect("valid scalars are valid signing keys")],
-                        )
+                        .apply_signatures(&mut rng, fake_sighash_bytes, &[extsk.expsk.ask])
                         .unwrap()
                 },
             )

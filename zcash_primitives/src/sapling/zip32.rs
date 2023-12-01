@@ -16,7 +16,10 @@ use crate::{
     keys::{prf_expand, prf_expand_vec},
     sapling::{
         constants::PROOF_GENERATION_KEY_GENERATOR,
-        keys::{DecodingError, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey},
+        keys::{
+            DecodingError, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey,
+            SpendAuthorizingKey,
+        },
         SaplingIvk,
     },
     zip32::{ChainCode, ChildIndex, DiversifierIndex, Scope},
@@ -98,7 +101,7 @@ pub fn sapling_derive_internal_fvk(
     (
         FullViewingKey {
             vk: ViewingKey {
-                ak: fvk.vk.ak,
+                ak: fvk.vk.ak.clone(),
                 nk: nk_internal,
             },
             ovk: ovk_internal,
@@ -408,6 +411,12 @@ impl ExtendedSpendingKey {
         xsk
     }
 
+    /// Derives the child key at the given (hardened) index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the child key has `ask = 0`. This has a negligible probability of
+    /// occurring.
     #[must_use]
     pub fn derive_child(&self, i: ChildIndex) -> Self {
         let fvk = FullViewingKey::from_expanded_spending_key(&self.expsk);
@@ -431,10 +440,15 @@ impl ExtendedSpendingKey {
             expsk: {
                 let mut ask = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x13]).as_array());
                 let mut nsk = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x14]).as_array());
-                ask.add_assign(&self.expsk.ask);
+                ask.add_assign(self.expsk.ask.to_scalar());
                 nsk.add_assign(&self.expsk.nsk);
                 let ovk = derive_child_ovk(&self.expsk.ovk, i_l);
-                ExpandedSpendingKey { ask, nsk, ovk }
+                ExpandedSpendingKey {
+                    ask: SpendAuthorizingKey::from_scalar(ask)
+                        .expect("negligible chance of ask == 0"),
+                    nsk,
+                    ovk,
+                }
             },
             dk: self.dk.derive_child(i_l),
         }
@@ -474,7 +488,7 @@ impl ExtendedSpendingKey {
             child_index: self.child_index,
             chain_code: self.chain_code,
             expsk: ExpandedSpendingKey {
-                ask: self.expsk.ask,
+                ask: self.expsk.ask.clone(),
                 nsk: nsk_internal,
                 ovk: ovk_internal,
             },
@@ -1611,7 +1625,7 @@ mod tests {
         let xsks = [m, m_1h, m_1h_2h, m_1h_2h_3h];
 
         for (xsk, tv) in xsks.iter().zip(test_vectors.iter()) {
-            assert_eq!(xsk.expsk.ask.to_repr().as_ref(), tv.ask.unwrap());
+            assert_eq!(xsk.expsk.ask.to_bytes(), tv.ask.unwrap());
             assert_eq!(xsk.expsk.nsk.to_repr().as_ref(), tv.nsk.unwrap());
 
             assert_eq!(xsk.expsk.ovk.0, tv.ovk);
@@ -1623,7 +1637,7 @@ mod tests {
             assert_eq!(&ser[..], &tv.xsk.unwrap()[..]);
 
             let internal_xsk = xsk.derive_internal();
-            assert_eq!(internal_xsk.expsk.ask.to_repr().as_ref(), tv.ask.unwrap());
+            assert_eq!(internal_xsk.expsk.ask.to_bytes(), tv.ask.unwrap());
             assert_eq!(
                 internal_xsk.expsk.nsk.to_repr().as_ref(),
                 tv.internal_nsk.unwrap()

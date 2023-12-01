@@ -45,6 +45,8 @@ and this library adheres to Rust's notion of
   - `circuit::{SpendVerifyingKey, PreparedSpendVerifyingKey}`
   - `circuit::{OutputVerifyingKey, PreparedOutputVerifyingKey}`
   - `constants` module.
+  - `keys::SpendAuthorizingKey`
+  - `keys::SpendValidatingKey`
   - `note_encryption::CompactOutputDescription` (moved from
     `zcash_primitives::transaction::components::sapling`).
   - `note_encryption::SaplingDomain::new`
@@ -145,6 +147,9 @@ and this library adheres to Rust's notion of
   - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
     instead of as a bare `u64`.
   - `keys::DecodingError` has a new variant `UnsupportedChildIndex`.
+  - `keys::ExpandedSpendingKey.ask` now has type `SpendAuthorizingKey`.
+  - `keys::ProofGenerationKey.ak` now has type `SpendValidatingKey`.
+  - `keys::ViewingKey.ak` now has type `SpendValidatingKey`.
   - `note_encryption`:
     - `SaplingDomain` no longer has a `P: consensus::Parameters` type parameter.
     - The following methods now take a `Zip212Enforcement` argument instead of a
@@ -236,6 +241,12 @@ and this library adheres to Rust's notion of
   - `ChildIndex::Hardened` (use `ChildIndex::hardened` instead).
   - `ChildIndex::NonHardened`
   - `sapling::ExtendedFullViewingKey::derive_child`
+
+### Fixed
+- `zcash_primitives::keys::ExpandedSpendingKey::from_spending_key` now panics if the
+  spending key expands to `ask = 0`. This has a negligible probability of occurring.
+- `zcash_primitives::zip32::ExtendedSpendingKey::derive_child` now panics if the
+  child key has `ask = 0`. This has a negligible probability of occurring.
 
 ## [0.13.0] - 2023-09-25
 ### Added
