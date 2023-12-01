@@ -10,6 +10,7 @@ members = [
     "zcash_history",
     "zcash_primitives",
     "zcash_proofs",
+    "zip32",
 ]
 
 [workspace.package]
@@ -33,6 +34,7 @@ zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.13", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.13", path = "zcash_proofs", default-features = false }
+zip32 = { version = "0.0", path = "zip32" }
 
 # Shielded protocols
 ff = "0.13"
