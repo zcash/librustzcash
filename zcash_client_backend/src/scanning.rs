@@ -243,7 +243,7 @@ impl fmt::Display for ScanError {
 /// [`WalletSaplingOutput`]s, whereas the implementation for [`SaplingIvk`] cannot
 /// do so and will return the unit value in those outputs instead.
 ///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: zcash_primitives::sapling::zip32::ExtendedFullViewingKey
 /// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`ScanningKey`]: crate::scanning::ScanningKey

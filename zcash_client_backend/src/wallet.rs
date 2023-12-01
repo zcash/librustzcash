@@ -253,7 +253,7 @@ pub enum OvkPolicy {
     /// Transaction outputs will be decryptable by the sender, in addition to the
     /// recipients.
     ///
-    /// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+    /// [`ExtendedFullViewingKey`]: zcash_primitives::sapling::zip32::ExtendedFullViewingKey
     Sender,
 
     /// Use a custom outgoing viewing key. This might for instance be derived from a

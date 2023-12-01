@@ -188,14 +188,14 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
 /// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk);
 /// ```
-/// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
+/// [`ExtendedSpendingKey`]: zcash_primitives::sapling::zip32::ExtendedSpendingKey
 pub fn encode_extended_spending_key(hrp: &str, extsk: &ExtendedSpendingKey) -> String {
     bech32_encode(hrp, |w| extsk.write(w))
 }
 
 /// Decodes an [`ExtendedSpendingKey`] from a Bech32-encoded string.
 ///
-/// [`ExtendedSpendingKey`]: zcash_primitives::zip32::ExtendedSpendingKey
+/// [`ExtendedSpendingKey`]: zcash_primitives::sapling::zip32::ExtendedSpendingKey
 pub fn decode_extended_spending_key(
     hrp: &str,
     s: &str,
@@ -210,26 +210,26 @@ pub fn decode_extended_spending_key(
 /// ```
 /// use zcash_primitives::{
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
+///     sapling::zip32::ExtendedFullViewingKey,
 ///     zip32::AccountId,
 /// };
 /// use zcash_client_backend::{
 ///     encoding::encode_extended_full_viewing_key,
 ///     keys::sapling,
 /// };
-/// use zcash_primitives::zip32::ExtendedFullViewingKey;
 ///
 /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
 /// let extfvk = extsk.to_extended_full_viewing_key();
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: zcash_primitives::sapling::zip32::ExtendedFullViewingKey
 pub fn encode_extended_full_viewing_key(hrp: &str, extfvk: &ExtendedFullViewingKey) -> String {
     bech32_encode(hrp, |w| extfvk.write(w))
 }
 
 /// Decodes an [`ExtendedFullViewingKey`] from a Bech32-encoded string.
 ///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: zcash_primitives::sapling::zip32::ExtendedFullViewingKey
 pub fn decode_extended_full_viewing_key(
     hrp: &str,
     s: &str,

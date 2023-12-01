@@ -7,14 +7,6 @@ use subtle::{Choice, ConditionallySelectable};
 
 pub mod fingerprint;
 
-#[deprecated(note = "Please use the types exported from the `zip32::sapling` module instead.")]
-pub use crate::sapling::zip32::{
-    sapling_address, sapling_default_address, sapling_derive_internal_fvk, sapling_find_address,
-    DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,
-    ZIP32_SAPLING_FVFP_PERSONALIZATION, ZIP32_SAPLING_INT_PERSONALIZATION,
-    ZIP32_SAPLING_MASTER_PERSONALIZATION,
-};
-
 /// A type-safe wrapper for account identifiers.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AccountId(u32);

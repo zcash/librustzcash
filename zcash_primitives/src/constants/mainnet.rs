@@ -9,7 +9,7 @@ pub const COIN_TYPE: u32 = 133;
 ///
 /// Defined in [ZIP 32].
 ///
-/// [`ExtendedSpendingKey`]: crate::zip32::ExtendedSpendingKey
+/// [`ExtendedSpendingKey`]: crate::sapling::zip32::ExtendedSpendingKey
 /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
 pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-main";
 
@@ -17,7 +17,7 @@ pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-main";
 ///
 /// Defined in [ZIP 32].
 ///
-/// [`ExtendedFullViewingKey`]: crate::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: crate::sapling::zip32::ExtendedFullViewingKey
 /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
 pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviews";
 
