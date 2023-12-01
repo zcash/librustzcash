@@ -691,8 +691,8 @@ pub mod testing {
 mod tests {
     use group::{Group, GroupEncoding};
 
-    use super::FullViewingKey;
-    use crate::sapling::constants::SPENDING_KEY_GENERATOR;
+    use super::{FullViewingKey, SpendAuthorizingKey, SpendValidatingKey};
+    use crate::sapling::{constants::SPENDING_KEY_GENERATOR, test_vectors};
 
     #[test]
     fn ak_must_be_prime_order() {
@@ -715,5 +715,32 @@ mod tests {
 
         // nk is allowed to be the identity.
         assert!(FullViewingKey::read(&buf[..]).is_ok());
+    }
+
+    #[test]
+    fn spend_auth_sig_test_vectors() {
+        for tv in test_vectors::signatures::make_test_vectors() {
+            let sk = SpendAuthorizingKey::from_bytes(&tv.sk).unwrap();
+            let vk = SpendValidatingKey::from_bytes(&tv.vk).unwrap();
+            let rvk = redjubjub::VerificationKey::try_from(tv.rvk).unwrap();
+            let sig = redjubjub::Signature::from(tv.sig);
+            let rsig = redjubjub::Signature::from(tv.rsig);
+
+            let alpha = jubjub::Scalar::from_bytes(&tv.alpha).unwrap();
+
+            assert_eq!(<[u8; 32]>::from(sk.randomize(&alpha)), tv.rsk);
+            assert_eq!(vk.randomize(&alpha), rvk);
+
+            // assert_eq!(vk.0.verify(&tv.m, &sig), Ok(()));
+            // assert_eq!(rvk.verify(&tv.m, &rsig), Ok(()));
+            assert_eq!(
+                vk.0.verify(&tv.m, &rsig),
+                Err(redjubjub::Error::InvalidSignature),
+            );
+            assert_eq!(
+                rvk.verify(&tv.m, &sig),
+                Err(redjubjub::Error::InvalidSignature),
+            );
+        }
     }
 }

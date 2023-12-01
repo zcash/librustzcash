@@ -34,3 +34,6 @@ pub mod testing {
         note::testing::arb_note, tree::testing::arb_node,
     };
 }
+
+#[cfg(test)]
+mod test_vectors;
