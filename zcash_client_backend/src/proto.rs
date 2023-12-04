@@ -9,17 +9,13 @@ use std::{
 use incrementalmerkletree::frontier::CommitmentTree;
 
 use nonempty::NonEmpty;
-use sapling::{note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH};
+use sapling::{self, note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::{self, BlockHeight, Parameters},
     memo::{self, MemoBytes},
     merkle_tree::read_commitment_tree,
-    transaction::{
-        components::{amount::NonNegativeAmount, OutPoint},
-        fees::StandardFeeRule,
-        TxId,
-    },
+    transaction::{components::amount::NonNegativeAmount, fees::StandardFeeRule, TxId},
 };
 
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
@@ -27,12 +23,15 @@ use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 use crate::{
     data_api::{
         wallet::input_selection::{Proposal, ProposalError, SaplingInputs},
-        SaplingInputSource, TransparentInputSource,
+        InputSource,
     },
     fees::{ChangeValue, TransactionBalance},
     zip321::{TransactionRequest, Zip321Error},
     PoolType, ShieldedProtocol,
 };
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::transaction::components::OutPoint;
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]
@@ -384,7 +383,7 @@ impl proposal::Proposal {
         wallet_db: &DbT,
     ) -> Result<Proposal<StandardFeeRule, DbT::NoteRef>, ProposalDecodingError<DbError>>
     where
-        DbT: TransparentInputSource<Error = DbError> + SaplingInputSource<Error = DbError>,
+        DbT: InputSource<Error = DbError>,
     {
         match self.proto_version {
             PROPOSAL_SER_V1 => {
@@ -407,18 +406,28 @@ impl proposal::Proposal {
                         let txid = t_in
                             .parse_txid()
                             .map_err(ProposalDecodingError::TxIdInvalid)?;
-                        let outpoint = OutPoint::new(txid.into(), t_in.index);
 
-                        wallet_db
-                            .get_unspent_transparent_output(&outpoint)
-                            .map_err(ProposalDecodingError::InputRetrieval)?
-                            .ok_or({
-                                ProposalDecodingError::InputNotFound(
-                                    txid,
-                                    PoolType::Transparent,
-                                    t_in.index,
-                                )
-                            })
+                        #[cfg(not(feature = "transparent-inputs"))]
+                        return Err(ProposalDecodingError::InputNotFound(
+                            txid,
+                            PoolType::Transparent,
+                            t_in.index,
+                        ));
+
+                        #[cfg(feature = "transparent-inputs")]
+                        {
+                            let outpoint = OutPoint::new(txid.into(), t_in.index);
+                            wallet_db
+                                .get_unspent_transparent_output(&outpoint)
+                                .map_err(ProposalDecodingError::InputRetrieval)?
+                                .ok_or({
+                                    ProposalDecodingError::InputNotFound(
+                                        txid,
+                                        PoolType::Transparent,
+                                        t_in.index,
+                                    )
+                                })
+                        }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
@@ -431,7 +440,7 @@ impl proposal::Proposal {
                                 .map_err(ProposalDecodingError::TxIdInvalid)?;
 
                             wallet_db
-                                .get_spendable_sapling_note(&txid, s_in.index)
+                                .get_spendable_note(&txid, ShieldedProtocol::Sapling, s_in.index)
                                 .map_err(ProposalDecodingError::InputRetrieval)
                                 .and_then(|opt| {
                                     opt.ok_or({
