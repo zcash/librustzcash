@@ -573,7 +573,7 @@ where
         Some(dfvk.to_ovk(Scope::Internal))
     };
 
-    let (sapling_anchor, sapling_inputs) = proposal.sapling_inputs().map_or_else(
+    let (sapling_anchor, sapling_inputs) = proposal.shielded_inputs().map_or_else(
         || Ok((sapling::Anchor::empty_tree(), vec![])),
         |inputs| {
             wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {

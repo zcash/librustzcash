@@ -22,7 +22,7 @@ use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
 use crate::{
     data_api::{
-        wallet::input_selection::{Proposal, ProposalError, SaplingInputs},
+        wallet::input_selection::{Proposal, ProposalError, ShieldedInputs},
         InputSource,
     },
     fees::{ChangeValue, TransactionBalance},
@@ -221,6 +221,8 @@ pub enum ProposalDecodingError<DbError> {
     Zip321(Zip321Error),
     /// A transaction identifier string did not decode to a valid transaction ID.
     TxIdInvalid(TryFromSliceError),
+    /// An invalid value pool identifier was encountered.
+    ValuePoolInvalid(i32),
     /// A failure occurred trying to retrieve an unspent note or UTXO from the wallet database.
     InputRetrieval(DbError),
     /// The unspent note or UTXO corresponding to a proposal input was not found in the wallet
@@ -238,6 +240,8 @@ pub enum ProposalDecodingError<DbError> {
     ProposalInvalid(ProposalError),
     /// An inputs field for the given protocol was present, but contained no input note references.
     EmptyShieldedInputs(ShieldedProtocol),
+    /// Change outputs to the specified pool are not supported.
+    InvalidChangeRecipient(PoolType),
 }
 
 impl<E> From<Zip321Error> for ProposalDecodingError<E> {
@@ -252,6 +256,9 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::Zip321(err) => write!(f, "Transaction request invalid: {}", err),
             ProposalDecodingError::TxIdInvalid(err) => {
                 write!(f, "Invalid transaction id: {:?}", err)
+            }
+            ProposalDecodingError::ValuePoolInvalid(id) => {
+                write!(f, "Invalid value pool identifier: {:?}", id)
             }
             ProposalDecodingError::InputRetrieval(err) => write!(
                 f,
@@ -281,6 +288,11 @@ impl<E: Display> Display for ProposalDecodingError<E> {
                 "An inputs field was present for {:?}, but contained no note references.",
                 protocol
             ),
+            ProposalDecodingError::InvalidChangeRecipient(pool_type) => write!(
+                f,
+                "Change outputs to the {} pool are not supported.",
+                pool_type
+            ),
         }
     }
 }
@@ -296,9 +308,37 @@ impl<E: std::error::Error + 'static> std::error::Error for ProposalDecodingError
     }
 }
 
+fn pool_type<T>(pool_id: i32) -> Result<PoolType, ProposalDecodingError<T>> {
+    match proposal::ValuePool::try_from(pool_id) {
+        Ok(proposal::ValuePool::Transparent) => Ok(PoolType::Transparent),
+        Ok(proposal::ValuePool::Sapling) => Ok(PoolType::Shielded(ShieldedProtocol::Sapling)),
+        Ok(proposal::ValuePool::Orchard) => Ok(PoolType::Shielded(ShieldedProtocol::Orchard)),
+        _ => Err(ProposalDecodingError::ValuePoolInvalid(pool_id)),
+    }
+}
+
 impl proposal::ProposedInput {
     pub fn parse_txid(&self) -> Result<TxId, TryFromSliceError> {
         Ok(TxId::from_bytes(self.txid[..].try_into()?))
+    }
+
+    pub fn pool_type<T>(&self) -> Result<PoolType, ProposalDecodingError<T>> {
+        pool_type(self.value_pool)
+    }
+}
+
+impl proposal::ChangeValue {
+    pub fn pool_type<T>(&self) -> Result<PoolType, ProposalDecodingError<T>> {
+        pool_type(self.value_pool)
+    }
+}
+
+impl From<ShieldedProtocol> for proposal::ValuePool {
+    fn from(value: ShieldedProtocol) -> Self {
+        match value {
+            ShieldedProtocol::Sapling => proposal::ValuePool::Sapling,
+            ShieldedProtocol::Orchard => proposal::ValuePool::Orchard,
+        }
     }
 }
 
@@ -311,50 +351,40 @@ impl proposal::Proposal {
     ) -> Option<Self> {
         let transaction_request = value.transaction_request().to_uri(params)?;
 
-        let transparent_inputs = value
+        let anchor_height = value
+            .shielded_inputs()
+            .map_or_else(|| 0, |i| u32::from(i.anchor_height()));
+
+        let inputs = value
             .transparent_inputs()
             .iter()
             .map(|utxo| proposal::ProposedInput {
                 txid: utxo.outpoint().hash().to_vec(),
+                value_pool: proposal::ValuePool::Transparent.into(),
                 index: utxo.outpoint().n(),
                 value: utxo.txout().value.into(),
             })
+            .chain(value.shielded_inputs().iter().flat_map(|s_in| {
+                s_in.notes().iter().map(|rec_note| proposal::ProposedInput {
+                    txid: rec_note.txid().as_ref().to_vec(),
+                    value_pool: proposal::ValuePool::from(rec_note.note().protocol()).into(),
+                    index: rec_note.output_index().into(),
+                    value: rec_note.note().value().into(),
+                })
+            }))
             .collect();
-
-        let sapling_inputs = value
-            .sapling_inputs()
-            .map(|sapling_inputs| proposal::SaplingInputs {
-                anchor_height: sapling_inputs.anchor_height().into(),
-                inputs: sapling_inputs
-                    .notes()
-                    .iter()
-                    .map(|rec_note| proposal::ProposedInput {
-                        txid: rec_note.txid().as_ref().to_vec(),
-                        index: rec_note.output_index().into(),
-                        value: rec_note.value().into(),
-                    })
-                    .collect(),
-            });
 
         let balance = Some(proposal::TransactionBalance {
             proposed_change: value
                 .balance()
                 .proposed_change()
                 .iter()
-                .map(|change| match change.output_pool() {
-                    ShieldedProtocol::Sapling => proposal::ChangeValue {
-                        value: Some(proposal::change_value::Value::SaplingValue(
-                            proposal::SaplingChange {
-                                amount: change.value().into(),
-                                memo: change.memo().map(|memo_bytes| proposal::MemoBytes {
-                                    value: memo_bytes.as_slice().to_vec(),
-                                }),
-                            },
-                        )),
-                    },
-                    ShieldedProtocol::Orchard => {
-                        unimplemented!("FIXME: implement Orchard change outputs!")
-                    }
+                .map(|change| proposal::ChangeValue {
+                    value: change.value().into(),
+                    value_pool: proposal::ValuePool::from(change.output_pool()).into(),
+                    memo: change.memo().map(|memo_bytes| proposal::MemoBytes {
+                        value: memo_bytes.as_slice().to_vec(),
+                    }),
                 })
                 .collect(),
             fee_required: value.balance().fee_required().into(),
@@ -364,8 +394,8 @@ impl proposal::Proposal {
         Some(proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             transaction_request,
-            transparent_inputs,
-            sapling_inputs,
+            anchor_height,
+            inputs,
             balance,
             fee_rule: match value.fee_rule() {
                 StandardFeeRule::PreZip313 => proposal::FeeRule::PreZip313,
@@ -402,72 +432,59 @@ impl proposal::Proposal {
 
                 let transaction_request =
                     TransactionRequest::from_uri(params, &self.transaction_request)?;
-                let transparent_inputs = self
-                    .transparent_inputs
-                    .iter()
-                    .map(|t_in| {
-                        let txid = t_in
-                            .parse_txid()
-                            .map_err(ProposalDecodingError::TxIdInvalid)?;
 
-                        #[cfg(not(feature = "transparent-inputs"))]
-                        return Err(ProposalDecodingError::InputNotFound(
-                            txid,
-                            PoolType::Transparent,
-                            t_in.index,
-                        ));
+                #[cfg(not(feature = "transparent-inputs"))]
+                let transparent_inputs = vec![];
+                #[cfg(feature = "transparent-inputs")]
+                let mut transparent_inputs = vec![];
 
-                        #[cfg(feature = "transparent-inputs")]
-                        {
-                            let outpoint = OutPoint::new(txid.into(), t_in.index);
-                            wallet_db
-                                .get_unspent_transparent_output(&outpoint)
-                                .map_err(ProposalDecodingError::InputRetrieval)?
-                                .ok_or({
-                                    ProposalDecodingError::InputNotFound(
-                                        txid,
-                                        PoolType::Transparent,
-                                        t_in.index,
-                                    )
-                                })
+                let mut received_notes = vec![];
+                for input in self.inputs.iter() {
+                    let txid = input
+                        .parse_txid()
+                        .map_err(ProposalDecodingError::TxIdInvalid)?;
+
+                    match input.pool_type()? {
+                        PoolType::Transparent => {
+                            #[cfg(not(feature = "transparent-inputs"))]
+                            return Err(ProposalDecodingError::ValuePoolInvalid(1));
+
+                            #[cfg(feature = "transparent-inputs")]
+                            {
+                                let outpoint = OutPoint::new(txid.into(), input.index);
+                                transparent_inputs.push(
+                                    wallet_db
+                                        .get_unspent_transparent_output(&outpoint)
+                                        .map_err(ProposalDecodingError::InputRetrieval)?
+                                        .ok_or({
+                                            ProposalDecodingError::InputNotFound(
+                                                txid,
+                                                PoolType::Transparent,
+                                                input.index,
+                                            )
+                                        })?,
+                                );
+                            }
                         }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let sapling_inputs = self.sapling_inputs.as_ref().map(|s_in| {
-                    s_in.inputs
-                        .iter()
-                        .map(|s_in| {
-                            let txid = s_in
-                                .parse_txid()
-                                .map_err(ProposalDecodingError::TxIdInvalid)?;
-
+                        PoolType::Shielded(protocol) => received_notes.push(
                             wallet_db
-                                .get_spendable_note(&txid, ShieldedProtocol::Sapling, s_in.index)
+                                .get_spendable_note(&txid, protocol, input.index)
                                 .map_err(ProposalDecodingError::InputRetrieval)
                                 .and_then(|opt| {
                                     opt.ok_or({
                                         ProposalDecodingError::InputNotFound(
                                             txid,
-                                            PoolType::Shielded(ShieldedProtocol::Sapling),
-                                            s_in.index,
+                                            PoolType::Shielded(protocol),
+                                            input.index,
                                         )
                                     })
-                                })
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                        .and_then(|notes| {
-                            NonEmpty::from_vec(notes)
-                                .map(|notes| {
-                                    SaplingInputs::from_parts(s_in.anchor_height.into(), notes)
-                                })
-                                .ok_or({
-                                    ProposalDecodingError::EmptyShieldedInputs(
-                                        ShieldedProtocol::Sapling,
-                                    )
-                                })
-                        })
-                });
+                                })?,
+                        ),
+                    }
+                }
+
+                let shielded_inputs = NonEmpty::from_vec(received_notes)
+                    .map(|notes| ShieldedInputs::from_parts(self.anchor_height.into(), notes));
 
                 let proto_balance = self
                     .balance
@@ -477,31 +494,23 @@ impl proposal::Proposal {
                     proto_balance
                         .proposed_change
                         .iter()
-                        .filter_map(|change| {
-                            // An empty `value` field can be treated as though the whole
-                            // `ChangeValue` was absent; this optionality is an artifact of
-                            // protobuf encoding.
-                            change.value.as_ref().map(
-                                |cv| -> Result<ChangeValue, ProposalDecodingError<_>> {
-                                    match cv {
-                                        proposal::change_value::Value::SaplingValue(sc) => {
-                                            Ok(ChangeValue::sapling(
-                                                NonNegativeAmount::from_u64(sc.amount).map_err(
-                                                    |_| ProposalDecodingError::BalanceInvalid,
-                                                )?,
-                                                sc.memo
-                                                    .as_ref()
-                                                    .map(|bytes| {
-                                                        MemoBytes::from_bytes(&bytes.value).map_err(
-                                                            ProposalDecodingError::MemoInvalid,
-                                                        )
-                                                    })
-                                                    .transpose()?,
-                                            ))
-                                        }
-                                    }
-                                },
-                            )
+                        .map(|cv| -> Result<ChangeValue, ProposalDecodingError<_>> {
+                            match cv.pool_type()? {
+                                PoolType::Shielded(ShieldedProtocol::Sapling) => {
+                                    Ok(ChangeValue::sapling(
+                                        NonNegativeAmount::from_u64(cv.value)
+                                            .map_err(|_| ProposalDecodingError::BalanceInvalid)?,
+                                        cv.memo
+                                            .as_ref()
+                                            .map(|bytes| {
+                                                MemoBytes::from_bytes(&bytes.value)
+                                                    .map_err(ProposalDecodingError::MemoInvalid)
+                                            })
+                                            .transpose()?,
+                                    ))
+                                }
+                                t => Err(ProposalDecodingError::InvalidChangeRecipient(t)),
+                            }
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                     NonNegativeAmount::from_u64(proto_balance.fee_required)
@@ -512,7 +521,7 @@ impl proposal::Proposal {
                 Proposal::from_parts(
                     transaction_request,
                     transparent_inputs,
-                    sapling_inputs.transpose()?,
+                    shielded_inputs,
                     balance,
                     fee_rule,
                     self.min_target_height.into(),

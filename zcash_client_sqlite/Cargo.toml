@@ -22,6 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
 zcash_encoding.workspace = true
 zcash_primitives.workspace = true
+orchard.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)

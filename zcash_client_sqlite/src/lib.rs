@@ -69,7 +69,7 @@ use zcash_client_backend::{
     },
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
-    wallet::{NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
+    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
 };
 
@@ -172,7 +172,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         txid: &TxId,
         _protocol: ShieldedProtocol,
         index: u32,
-    ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error> {
+    ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), &self.params, txid, index)
     }
 
@@ -183,7 +183,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error> {
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
         wallet::sapling::select_spendable_sapling_notes(
             self.conn.borrow(),
             &self.params,
@@ -363,6 +363,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         panic!(
             "The wallet must be compiled with the transparent-inputs feature to use this method."
         );
+    }
+
+    #[cfg(feature = "orchard")]
+    fn get_orchard_nullifiers(
+        &self,
+        _query: NullifierQuery,
+    ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
+        todo!()
     }
 }
 

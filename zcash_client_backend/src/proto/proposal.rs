@@ -8,13 +8,15 @@ pub struct Proposal {
     /// ZIP 321 serialized transaction request
     #[prost(string, tag = "2")]
     pub transaction_request: ::prost::alloc::string::String,
-    /// The transparent UTXOs to use as inputs to the transaction.
-    #[prost(message, repeated, tag = "3")]
-    pub transparent_inputs: ::prost::alloc::vec::Vec<ProposedInput>,
-    /// The Sapling input notes and anchor height to be used in creating the transaction.
-    #[prost(message, optional, tag = "4")]
-    pub sapling_inputs: ::core::option::Option<SaplingInputs>,
-    /// The total value, fee amount, and change outputs of the proposed
+    /// The anchor height to be used in creating the transaction, if any.
+    /// Setting the anchor height to zero will disallow the use of any shielded
+    /// inputs.
+    #[prost(uint32, tag = "3")]
+    pub anchor_height: u32,
+    /// The inputs to be used in creating the transaction.
+    #[prost(message, repeated, tag = "4")]
+    pub inputs: ::prost::alloc::vec::Vec<ProposedInput>,
+    /// The total value, fee value, and change outputs of the proposed
     /// transaction
     #[prost(message, optional, tag = "5")]
     pub balance: ::core::option::Option<TransactionBalance>,
@@ -32,28 +34,20 @@ pub struct Proposal {
     #[prost(bool, tag = "8")]
     pub is_shielding: bool,
 }
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SaplingInputs {
-    /// The Sapling anchor height to be used in creating the transaction
-    #[prost(uint32, tag = "1")]
-    pub anchor_height: u32,
-    /// The unique identifier and amount for each proposed Sapling input
-    #[prost(message, repeated, tag = "2")]
-    pub inputs: ::prost::alloc::vec::Vec<ProposedInput>,
-}
-/// The unique identifier and amount for each proposed input.
+/// The unique identifier and value for each proposed input.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ProposedInput {
     #[prost(bytes = "vec", tag = "1")]
     pub txid: ::prost::alloc::vec::Vec<u8>,
-    #[prost(uint32, tag = "2")]
+    #[prost(enumeration = "ValuePool", tag = "2")]
+    pub value_pool: i32,
+    #[prost(uint32, tag = "3")]
     pub index: u32,
-    #[prost(uint64, tag = "3")]
+    #[prost(uint64, tag = "4")]
     pub value: u64,
 }
-/// The proposed change outputs and fee amount.
+/// The proposed change outputs and fee value.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionBalance {
@@ -62,21 +56,17 @@ pub struct TransactionBalance {
     #[prost(uint64, tag = "2")]
     pub fee_required: u64,
 }
-/// An enumeration of change value types.
+/// A proposed change output. If the transparent value pool is selected,
+/// the `memo` field must be null.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChangeValue {
-    #[prost(oneof = "change_value::Value", tags = "1")]
-    pub value: ::core::option::Option<change_value::Value>,
-}
-/// Nested message and enum types in `ChangeValue`.
-pub mod change_value {
-    #[allow(clippy::derive_partial_eq_without_eq)]
-    #[derive(Clone, PartialEq, ::prost::Oneof)]
-    pub enum Value {
-        #[prost(message, tag = "1")]
-        SaplingValue(super::SaplingChange),
-    }
+    #[prost(uint64, tag = "1")]
+    pub value: u64,
+    #[prost(enumeration = "ValuePool", tag = "2")]
+    pub value_pool: i32,
+    #[prost(message, optional, tag = "3")]
+    pub memo: ::core::option::Option<MemoBytes>,
 }
 /// An object wrapper for memo bytes, to facilitate representing the
 /// `change_memo == None` case.
@@ -86,14 +76,44 @@ pub struct MemoBytes {
     #[prost(bytes = "vec", tag = "1")]
     pub value: ::prost::alloc::vec::Vec<u8>,
 }
-/// The amount and memo for a proposed Sapling change output.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SaplingChange {
-    #[prost(uint64, tag = "1")]
-    pub amount: u64,
-    #[prost(message, optional, tag = "2")]
-    pub memo: ::core::option::Option<MemoBytes>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ValuePool {
+    /// Protobuf requires that enums have a zero discriminant as the default
+    /// value. However, we need to require that a known value pool is selected,
+    /// and we do not want to fall back to any default, so sending the
+    /// PoolNotSpecified value will be treated as an error.
+    PoolNotSpecified = 0,
+    /// The transparent value pool (P2SH is not distinguished from P2PKH)
+    Transparent = 1,
+    /// The Sapling value pool
+    Sapling = 2,
+    /// The Orchard value pool
+    Orchard = 3,
+}
+impl ValuePool {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ValuePool::PoolNotSpecified => "PoolNotSpecified",
+            ValuePool::Transparent => "Transparent",
+            ValuePool::Sapling => "Sapling",
+            ValuePool::Orchard => "Orchard",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "PoolNotSpecified" => Some(Self::PoolNotSpecified),
+            "Transparent" => Some(Self::Transparent),
+            "Sapling" => Some(Self::Sapling),
+            "Orchard" => Some(Self::Orchard),
+            _ => None,
+        }
+    }
 }
 /// The fee rule used in constructing a Proposal
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

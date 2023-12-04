@@ -21,9 +21,10 @@ and this library adheres to Rust's notion of
       with_orchard_balance_mut, 
       add_unshielded_value
     }`
+  - `WalletRead::get_orchard_nullifiers`
   - `wallet::propose_standard_transfer_to_address`
-  - `wallet::input_selection::Proposal::from_parts`
-  - `wallet::input_selection::SaplingInputs`
+  - `wallet::input_selection::Proposal::{from_parts, shielded_inputs}`
+  - `wallet::input_selection::ShieldedInputs`
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
     functionality and move it behind the `transparent-inputs` feature flag.
@@ -134,8 +135,7 @@ and this library adheres to Rust's notion of
   - `wallet::create_proposed_transaction` now forces implementations to ignore
     the database identifiers for its contained notes by universally quantifying
     the `NoteRef` type parameter.
-  - `wallet::input_selection::Proposal::sapling_inputs` now returns type
-    `Option<&SaplingInputs>`.
+  - Arguments to `wallet::input_selection::Proposal::from_parts` have changed.
   - `wallet::input_selection::Proposal::min_anchor_height` has been removed in
     favor of storing this value in `SaplingInputs`.
   - `wallet::input_selection::GreedyInputSelector` now has relaxed requirements
@@ -146,9 +146,8 @@ and this library adheres to Rust's notion of
   - `ChangeValue` is now a struct. In addition to the existing change value, it
     now also provides the output pool to which change should be sent and an
     optional memo to be associated with the change output.
-  - `fixed::SingleOutputChangeStrategy::new` and
-    `zip317::SingleOutputChangeStrategy::new` each now accept an additional
-    `change_memo` argument.
+  - `fixed::SingleOutputChangeStrategy::new` and `zip317::SingleOutputChangeStrategy::new` 
+    each now accept an additional `change_memo` argument
 - `zcash_client_backend::wallet`:
   - The fields of `ReceivedSaplingNote` are now private. Use
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
@@ -200,9 +199,11 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_client_backend::wallet::ReceivedSaplingNote` has been replaced by
   `zcash_client_backend::ReceivedNote`.
-- `zcash_client_backend::data_api::WalletRead::is_valid_account_extfvk` has been
-  removed; it was unused in the ECC mobile wallet SDKs and has been superseded by
-  `get_account_for_ufvk`.
+- `zcash_client_backend::data_api`
+  - `WalletRead::is_valid_account_extfvk` has been removed; it was unused in
+    the ECC mobile wallet SDKs and has been superseded by `get_account_for_ufvk`.
+  - `wallet::input_selection::Proposal::sapling_inputs` has been replaced
+    by `Proposal::shielded_inputs`
 - `zcash_client_backend::data_api::WalletRead::{
      get_spendable_sapling_notes
      select_spendable_sapling_notes,
