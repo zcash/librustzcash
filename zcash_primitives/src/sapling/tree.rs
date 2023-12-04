@@ -5,13 +5,11 @@ use lazy_static::lazy_static;
 use subtle::CtOption;
 
 use std::fmt;
-use std::io::{self, Read, Write};
 
 use super::{
     note::ExtractedNoteCommitment,
     pedersen_hash::{pedersen_hash, Personalization},
 };
-use crate::merkle_tree::HashSer;
 
 pub const NOTE_COMMITMENT_TREE_DEPTH: u8 = 32;
 pub type CommitmentTree =
@@ -120,23 +118,6 @@ impl Hashable for Node {
 
     fn empty_root(level: Level) -> Self {
         EMPTY_ROOTS[<usize>::from(level)]
-    }
-}
-
-impl HashSer for Node {
-    fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        let mut repr = [0u8; 32];
-        reader.read_exact(&mut repr)?;
-        Option::from(Self::from_bytes(repr)).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Non-canonical encoding of Jubjub base field value.",
-            )
-        })
-    }
-
-    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.to_bytes())
     }
 }
 

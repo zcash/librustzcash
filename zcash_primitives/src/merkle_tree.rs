@@ -23,6 +23,23 @@ pub trait HashSer {
     fn write<W: Write>(&self, writer: W) -> io::Result<()>;
 }
 
+impl HashSer for sapling::Node {
+    fn read<R: Read>(mut reader: R) -> io::Result<Self> {
+        let mut repr = [0u8; 32];
+        reader.read_exact(&mut repr)?;
+        Option::from(Self::from_bytes(repr)).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Non-canonical encoding of Jubjub base field value.",
+            )
+        })
+    }
+
+    fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(&self.to_bytes())
+    }
+}
+
 impl HashSer for MerkleHashOrchard {
     fn read<R: Read>(mut reader: R) -> io::Result<Self>
     where
