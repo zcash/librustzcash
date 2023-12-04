@@ -152,11 +152,11 @@ impl Note {
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub(super) mod testing {
-    use proptest::prelude::*;
+    use proptest::{collection::vec, prelude::*};
 
     use super::{
         super::{testing::arb_payment_address, value::NoteValue},
-        Note, Rseed,
+        ExtractedNoteCommitment, Note, Rseed,
     };
 
     prop_compose! {
@@ -169,6 +169,16 @@ pub(super) mod testing {
                 value,
                 rseed
             }
+        }
+    }
+
+    prop_compose! {
+        pub(crate) fn arb_cmu()(
+            cmu in vec(any::<u8>(), 64)
+                .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
+                .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
+        ) -> ExtractedNoteCommitment {
+            ExtractedNoteCommitment(cmu)
         }
     }
 }

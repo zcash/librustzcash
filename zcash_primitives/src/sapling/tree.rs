@@ -2,6 +2,7 @@ use bitvec::{order::Lsb0, view::AsBits};
 use group::{ff::PrimeField, Curve};
 use incrementalmerkletree::{Hashable, Level};
 use lazy_static::lazy_static;
+use subtle::CtOption;
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -33,6 +34,10 @@ lazy_static! {
 
 /// Compute a parent node in the Sapling commitment tree given its two children.
 pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
+    merkle_hash_field(depth, lhs, rhs).to_repr()
+}
+
+fn merkle_hash_field(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> jubjub::Base {
     let lhs = {
         let mut tmp = [false; 256];
         for (a, b) in tmp.iter_mut().zip(lhs.as_bits::<Lsb0>()) {
@@ -62,55 +67,55 @@ pub fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> [u8; 32] {
     ))
     .to_affine()
     .get_u()
-    .to_repr()
 }
 
 /// A node within the Sapling commitment tree.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Node {
-    pub(super) repr: [u8; 32],
-}
+pub struct Node(jubjub::Base);
 
 impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Node")
-            .field("repr", &hex::encode(self.repr))
+            .field("repr", &hex::encode(self.0.to_bytes()))
             .finish()
     }
 }
 
 impl Node {
-    #[cfg(test)]
-    pub(crate) fn new(repr: [u8; 32]) -> Self {
-        Node { repr }
-    }
-
     /// Creates a tree leaf from the given Sapling note commitment.
     pub fn from_cmu(value: &ExtractedNoteCommitment) -> Self {
-        Node {
-            repr: value.to_bytes(),
-        }
+        Node(value.inner())
     }
 
     /// Constructs a new note commitment tree node from a [`bls12_381::Scalar`]
     pub fn from_scalar(cmu: bls12_381::Scalar) -> Self {
-        Self {
-            repr: cmu.to_repr(),
-        }
+        Self(cmu)
+    }
+
+    /// Parses a tree leaf from the bytes of a Sapling note commitment.
+    ///
+    /// Returns `None` if the provided bytes represent a non-canonical encoding.
+    pub fn from_bytes(bytes: [u8; 32]) -> CtOption<Self> {
+        jubjub::Base::from_repr(bytes).map(Self)
+    }
+
+    /// Returns the canonical byte representation of this node.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0.to_repr()
     }
 }
 
 impl Hashable for Node {
     fn empty_leaf() -> Self {
-        Node {
-            repr: UNCOMMITTED_SAPLING.to_repr(),
-        }
+        Node(*UNCOMMITTED_SAPLING)
     }
 
     fn combine(level: Level, lhs: &Self, rhs: &Self) -> Self {
-        Node {
-            repr: merkle_hash(level.into(), &lhs.repr, &rhs.repr),
-        }
+        Node(merkle_hash_field(
+            level.into(),
+            &lhs.0.to_bytes(),
+            &rhs.0.to_bytes(),
+        ))
     }
 
     fn empty_root(level: Level) -> Self {
@@ -122,18 +127,22 @@ impl HashSer for Node {
     fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut repr = [0u8; 32];
         reader.read_exact(&mut repr)?;
-        Ok(Node { repr })
+        Option::from(Self::from_bytes(repr)).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Non-canonical encoding of Jubjub base field value.",
+            )
+        })
     }
 
     fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.repr.as_ref())
+        writer.write_all(&self.to_bytes())
     }
 }
 
 impl From<Node> for bls12_381::Scalar {
     fn from(node: Node) -> Self {
-        // Tree nodes should be in the prime field.
-        bls12_381::Scalar::from_repr(node.repr).unwrap()
+        node.0
     }
 }
 
@@ -142,12 +151,11 @@ pub(super) mod testing {
     use proptest::prelude::*;
 
     use super::Node;
+    use crate::sapling::note::testing::arb_cmu;
 
     prop_compose! {
-        pub fn arb_node()(value in prop::array::uniform32(prop::num::u8::ANY)) -> Node {
-            Node {
-                repr: value
-            }
+        pub fn arb_node()(cmu in arb_cmu()) -> Node {
+            Node::from_cmu(&cmu)
         }
     }
 }

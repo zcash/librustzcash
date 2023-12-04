@@ -631,7 +631,7 @@ pub mod testing {
 
     use crate::{
         sapling::{
-            note::ExtractedNoteCommitment,
+            note::testing::arb_cmu,
             value::{
                 testing::{arb_note_value_bounded, arb_trapdoor},
                 ValueCommitment, MAX_NOTE_VALUE,
@@ -691,9 +691,7 @@ pub mod testing {
         pub fn arb_output_description(n_outputs: usize)(
             value in arb_note_value_bounded(MAX_NOTE_VALUE.checked_div(n_outputs as u64).unwrap_or(0)),
             rcv in arb_trapdoor(),
-            cmu in vec(any::<u8>(), 64)
-                .prop_map(|v| <[u8;64]>::try_from(v.as_slice()).unwrap())
-                .prop_map(|v| bls12_381::Scalar::from_bytes_wide(&v)),
+            cmu in arb_cmu(),
             enc_ciphertext in vec(any::<u8>(), ENC_CIPHERTEXT_SIZE)
                 .prop_map(|v| <[u8; ENC_CIPHERTEXT_SIZE]>::try_from(v.as_slice()).unwrap()),
             epk in arb_extended_point(),
@@ -703,7 +701,6 @@ pub mod testing {
                 .prop_map(|v| <[u8; GROTH_PROOF_SIZE]>::try_from(v.as_slice()).unwrap()),
         ) -> OutputDescription<GrothProofBytes> {
             let cv = ValueCommitment::derive(value, rcv);
-            let cmu = ExtractedNoteCommitment::from_bytes(&cmu.to_bytes()).unwrap();
             OutputDescription {
                 cv,
                 cmu,

@@ -815,7 +815,7 @@ mod tests {
         for i in 0..16 {
             let cmu = hex::decode(commitments[i]).unwrap();
 
-            let cmu = Node::new(cmu[..].try_into().unwrap());
+            let cmu = Node::from_bytes(cmu[..].try_into().unwrap()).unwrap();
 
             // Witness here
             witnesses.push((IncrementalWitness::from_tree(tree.clone()), last_cmu));

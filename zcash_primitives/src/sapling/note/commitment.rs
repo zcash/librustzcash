@@ -77,6 +77,10 @@ impl ExtractedNoteCommitment {
     pub fn to_bytes(self) -> [u8; 32] {
         self.0.to_repr()
     }
+
+    pub(crate) fn inner(&self) -> jubjub::Base {
+        self.0
+    }
 }
 
 impl From<NoteCommitment> for ExtractedNoteCommitment {
