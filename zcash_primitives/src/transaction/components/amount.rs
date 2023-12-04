@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::error;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
@@ -393,6 +394,8 @@ pub enum BalanceError {
     Overflow,
     Underflow,
 }
+
+impl error::Error for BalanceError {}
 
 impl std::fmt::Display for BalanceError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

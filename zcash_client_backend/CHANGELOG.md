@@ -16,6 +16,12 @@ and this library adheres to Rust's notion of
       sapling_tree_size, orchard_tree_size, orchard_nullifier_map,
       orchard_commitments, into_commitments
     }`
+  - `Balance::{add_spendable_value, add_pending_change_value, add_pending_spendable_value}`
+  - `AccountBalance::{
+      with_sapling_balance_mut, 
+      with_orchard_balance_mut, 
+      add_unshielded_value
+    }`
   - `wallet::propose_standard_transfer_to_address`
   - `wallet::input_selection::Proposal::from_parts`
   - `wallet::input_selection::SaplingInputs`
@@ -54,6 +60,9 @@ and this library adheres to Rust's notion of
   - `ShieldedProtocol` has a new variant for `Orchard`, allowing for better
     reporting to callers trying to perform actions using `Orchard` before it is
     fully supported.
+  - Fields of `Balance` and `AccountBalance` have been made private and the values
+    of these fields have been made available via methods having the same names
+    as the previously-public fields.
   - `chain::scan_cached_blocks` now returns a `ScanSummary` containing metadata
     about the scanned blocks on success.
   - `error::Error` enum changes:
