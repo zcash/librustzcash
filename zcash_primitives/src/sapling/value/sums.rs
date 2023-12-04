@@ -2,8 +2,11 @@ use core::fmt::{self, Debug};
 use core::iter::Sum;
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 
+use group::GroupEncoding;
+use redjubjub::Binding;
+
 use super::{NoteValue, ValueCommitTrapdoor, ValueCommitment};
-use crate::sapling::{constants::VALUE_COMMITMENT_VALUE_GENERATOR, redjubjub};
+use crate::sapling::constants::VALUE_COMMITMENT_VALUE_GENERATOR;
 
 /// A value operation overflowed.
 #[derive(Debug)]
@@ -88,8 +91,9 @@ impl TrapdoorSum {
     /// Transform this trapdoor sum into the corresponding RedJubjub private key.
     ///
     /// This is public for access by `zcash_proofs`.
-    pub fn into_bsk(self) -> redjubjub::PrivateKey {
-        redjubjub::PrivateKey(self.0)
+    pub fn into_bsk(self) -> redjubjub::SigningKey<Binding> {
+        redjubjub::SigningKey::try_from(self.0.to_bytes())
+            .expect("valid scalars are valid signing keys")
     }
 }
 
@@ -156,7 +160,7 @@ impl CommitmentSum {
     /// Transform this value commitment sum into the corresponding RedJubjub public key.
     ///
     /// This is public for access by `zcash_proofs`.
-    pub fn into_bvk<V: Into<i64>>(self, value_balance: V) -> redjubjub::PublicKey {
+    pub fn into_bvk<V: Into<i64>>(self, value_balance: V) -> redjubjub::VerificationKey<Binding> {
         let value: i64 = value_balance.into();
 
         // Compute the absolute value.
@@ -175,7 +179,8 @@ impl CommitmentSum {
         // Subtract `value_balance` from the sum to get the final bvk.
         let bvk = self.0 - VALUE_COMMITMENT_VALUE_GENERATOR * value_balance;
 
-        redjubjub::PublicKey(bvk)
+        redjubjub::VerificationKey::try_from(bvk.to_bytes())
+            .expect("valid points are valid verification keys")
     }
 }
 

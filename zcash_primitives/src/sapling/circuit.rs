@@ -160,7 +160,7 @@ impl Circuit<bls12_381::Scalar> for Spend {
         // Prover witnesses ak (ensures that it's on the curve)
         let ak = ecc::EdwardsPoint::witness(
             cs.namespace(|| "ak"),
-            self.proof_generation_key.as_ref().map(|k| k.ak.into()),
+            self.proof_generation_key.as_ref().map(|k| (&k.ak).into()),
         )?;
 
         // There are no sensible attacks on small order points
@@ -634,9 +634,12 @@ pub struct PreparedOutputVerifyingKey(pub(crate) groth16::PreparedVerifyingKey<B
 
 #[test]
 fn test_input_circuit_with_bls12_381() {
-    use crate::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
+    use crate::sapling::{
+        keys::SpendValidatingKey, pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed,
+    };
+
     use bellman::gadgets::test::*;
-    use group::{ff::Field, Group};
+    use group::ff::Field;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
@@ -654,7 +657,7 @@ fn test_input_circuit_with_bls12_381() {
         };
 
         let proof_generation_key = ProofGenerationKey {
-            ak: jubjub::SubgroupPoint::random(&mut rng),
+            ak: SpendValidatingKey::fake_random(&mut rng),
             nsk: jubjub::Fr::random(&mut rng),
         };
 
@@ -681,7 +684,7 @@ fn test_input_circuit_with_bls12_381() {
         let ar = jubjub::Fr::random(&mut rng);
 
         {
-            let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
+            let rk = jubjub::AffinePoint::from_bytes(viewing_key.rk(ar).into()).unwrap();
             let expected_value_commitment = value_commitment.commitment().to_affine();
             let note = Note::from_parts(
                 payment_address,
@@ -780,9 +783,12 @@ fn test_input_circuit_with_bls12_381() {
 
 #[test]
 fn test_input_circuit_with_bls12_381_external_test_vectors() {
-    use crate::sapling::{pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed};
+    use crate::sapling::{
+        keys::SpendValidatingKey, pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed,
+    };
+
     use bellman::gadgets::test::*;
-    use group::{ff::Field, Group};
+    use group::ff::Field;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
@@ -826,7 +832,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
         };
 
         let proof_generation_key = ProofGenerationKey {
-            ak: jubjub::SubgroupPoint::random(&mut rng),
+            ak: SpendValidatingKey::fake_random(&mut rng),
             nsk: jubjub::Fr::random(&mut rng),
         };
 
@@ -853,7 +859,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
         let ar = jubjub::Fr::random(&mut rng);
 
         {
-            let rk = jubjub::ExtendedPoint::from(viewing_key.rk(ar)).to_affine();
+            let rk = jubjub::AffinePoint::from_bytes(viewing_key.rk(ar).into()).unwrap();
             let expected_value_commitment = value_commitment.commitment().to_affine();
             assert_eq!(
                 expected_value_commitment.get_u(),
@@ -960,9 +966,10 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
 #[test]
 fn test_output_circuit_with_bls12_381() {
-    use crate::sapling::{Diversifier, ProofGenerationKey, Rseed};
+    use crate::sapling::{keys::SpendValidatingKey, Diversifier, ProofGenerationKey, Rseed};
+
     use bellman::gadgets::test::*;
-    use group::{ff::Field, Group};
+    use group::ff::Field;
     use rand_core::{RngCore, SeedableRng};
     use rand_xorshift::XorShiftRng;
 
@@ -978,7 +985,7 @@ fn test_output_circuit_with_bls12_381() {
         };
 
         let nsk = jubjub::Fr::random(&mut rng);
-        let ak = jubjub::SubgroupPoint::random(&mut rng);
+        let ak = SpendValidatingKey::fake_random(&mut rng);
 
         let proof_generation_key = ProofGenerationKey { ak, nsk };
 

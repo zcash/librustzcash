@@ -1,27 +1,25 @@
 use bellman::groth16::{verify_proof, Proof};
 use bls12_381::Bls12;
+use redjubjub::{Binding, SpendAuth};
 
 use super::SaplingVerificationContextInner;
 use crate::sapling::{
     circuit::{PreparedOutputVerifyingKey, PreparedSpendVerifyingKey},
-    constants::{SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR},
     note::ExtractedNoteCommitment,
-    redjubjub::{PublicKey, Signature},
     value::ValueCommitment,
 };
 
 /// A context object for verifying the Sapling components of a single Zcash transaction.
 pub struct SaplingVerificationContext {
     inner: SaplingVerificationContextInner,
-    zip216_enabled: bool,
 }
 
 impl SaplingVerificationContext {
     /// Construct a new context to be used with a single transaction.
-    pub fn new(zip216_enabled: bool) -> Self {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         SaplingVerificationContext {
             inner: SaplingVerificationContextInner::new(),
-            zip216_enabled,
         }
     }
 
@@ -33,25 +31,20 @@ impl SaplingVerificationContext {
         cv: &ValueCommitment,
         anchor: bls12_381::Scalar,
         nullifier: &[u8; 32],
-        rk: PublicKey,
+        rk: redjubjub::VerificationKey<SpendAuth>,
         sighash_value: &[u8; 32],
-        spend_auth_sig: Signature,
+        spend_auth_sig: redjubjub::Signature<SpendAuth>,
         zkproof: Proof<Bls12>,
         verifying_key: &PreparedSpendVerifyingKey,
     ) -> bool {
-        let zip216_enabled = self.zip216_enabled;
         self.inner.check_spend(
             cv,
             anchor,
             nullifier,
             &rk,
-            sighash_value,
-            &spend_auth_sig,
             zkproof,
             &mut (),
-            |_, rk, msg, spend_auth_sig| {
-                rk.verify_with_zip216(&msg, spend_auth_sig, SPENDING_KEY_GENERATOR, zip216_enabled)
-            },
+            |_, rk| rk.verify(sighash_value, &spend_auth_sig).is_ok(),
             |_, proof, public_inputs| {
                 verify_proof(&verifying_key.0, &proof, &public_inputs[..]).is_ok()
             },
@@ -81,20 +74,10 @@ impl SaplingVerificationContext {
         &self,
         value_balance: V,
         sighash_value: &[u8; 32],
-        binding_sig: Signature,
+        binding_sig: redjubjub::Signature<Binding>,
     ) -> bool {
-        self.inner.final_check(
-            value_balance,
-            sighash_value,
-            binding_sig,
-            |bvk, msg, binding_sig| {
-                bvk.verify_with_zip216(
-                    &msg,
-                    &binding_sig,
-                    VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
-                    self.zip216_enabled,
-                )
-            },
-        )
+        self.inner.final_check(value_balance, |bvk| {
+            bvk.verify(sighash_value, &binding_sig).is_ok()
+        })
     }
 }

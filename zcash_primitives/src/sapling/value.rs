@@ -228,9 +228,7 @@ mod tests {
     use super::{
         testing::{arb_note_value_bounded, arb_trapdoor},
         CommitmentSum, OverflowError, TrapdoorSum, ValueCommitment, ValueSum,
-        VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
     };
-    use crate::sapling::redjubjub;
 
     proptest! {
         #[test]
@@ -260,8 +258,7 @@ mod tests {
                 .sum::<CommitmentSum>()
                 .into_bvk(value_balance);
 
-            assert_eq!(redjubjub::PublicKey::from_private(
-                &bsk, VALUE_COMMITMENT_RANDOMNESS_GENERATOR).0, bvk.0);
+            assert_eq!(redjubjub::VerificationKey::from(&bsk), bvk);
         }
     }
 }

@@ -23,7 +23,7 @@ use zcash_encoding::{CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
-    sapling::{self, builder as sapling_builder, redjubjub},
+    sapling::{self, builder as sapling_builder},
 };
 
 use self::{
@@ -626,7 +626,9 @@ impl Transaction {
         let binding_sig = if version.has_sapling()
             && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
         {
-            Some(redjubjub::Signature::read(&mut reader)?)
+            let mut sig = [0; 64];
+            reader.read_exact(&mut sig)?;
+            Some(redjubjub::Signature::from(sig))
         } else {
             None
         };
@@ -786,7 +788,7 @@ impl Transaction {
 
         if self.version.has_sapling() {
             if let Some(bundle) = self.sapling_bundle.as_ref() {
-                bundle.authorization().binding_sig.write(&mut writer)?;
+                writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
             }
         }
 

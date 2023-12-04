@@ -9,7 +9,7 @@ use std::io::{self, Read, Write};
 
 use super::{
     address::PaymentAddress,
-    constants::{self, PROOF_GENERATION_KEY_GENERATOR, SPENDING_KEY_GENERATOR},
+    constants::{self, PROOF_GENERATION_KEY_GENERATOR},
     note_encryption::KDF_SAPLING_PERSONALIZATION,
     spec::{
         crh_ivk, diversify_hash, ka_sapling_agree, ka_sapling_agree_prepared,
@@ -20,10 +20,14 @@ use super::{
 use crate::keys::prf_expand;
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use group::{Curve, Group, GroupEncoding};
+use redjubjub::SpendAuth;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::EphemeralKeyBytes;
+
+#[cfg(test)]
+use rand_core::RngCore;
 
 /// Errors that can occur in the decoding of Sapling spending keys.
 pub enum DecodingError {
@@ -38,6 +42,167 @@ pub enum DecodingError {
     UnsupportedChildIndex,
 }
 
+/// A spend authorizing key, used to create spend authorization signatures.
+///
+/// $\mathsf{ask}$ as defined in [Zcash Protocol Spec § 4.2.2: Sapling Key Components][saplingkeycomponents].
+///
+/// [saplingkeycomponents]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+#[derive(Clone, Debug)]
+pub struct SpendAuthorizingKey(redjubjub::SigningKey<SpendAuth>);
+
+impl PartialEq for SpendAuthorizingKey {
+    fn eq(&self, other: &Self) -> bool {
+        <[u8; 32]>::from(self.0)
+            .ct_eq(&<[u8; 32]>::from(other.0))
+            .into()
+    }
+}
+
+impl Eq for SpendAuthorizingKey {}
+
+impl From<&SpendValidatingKey> for jubjub::ExtendedPoint {
+    fn from(spend_validating_key: &SpendValidatingKey) -> jubjub::ExtendedPoint {
+        jubjub::ExtendedPoint::from_bytes(&spend_validating_key.to_bytes()).unwrap()
+    }
+}
+
+impl SpendAuthorizingKey {
+    /// Derives ask from sk. Internal use only, does not enforce all constraints.
+    fn derive_inner(sk: &[u8]) -> jubjub::Scalar {
+        jubjub::Scalar::from_bytes_wide(prf_expand(sk, &[0x00]).as_array())
+    }
+
+    /// Constructs a `SpendAuthorizingKey` from a raw scalar.
+    pub(crate) fn from_scalar(ask: jubjub::Scalar) -> Option<Self> {
+        if ask.is_zero().into() {
+            None
+        } else {
+            Some(SpendAuthorizingKey(ask.to_bytes().try_into().unwrap()))
+        }
+    }
+
+    /// Derives a `SpendAuthorizingKey` from a spending key.
+    fn from_spending_key(sk: &[u8]) -> Option<Self> {
+        Self::from_scalar(Self::derive_inner(sk))
+    }
+
+    /// Parses a `SpendAuthorizingKey` from its encoded form.
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        <[u8; 32]>::try_from(bytes)
+            .ok()
+            .and_then(|b| {
+                // RedJubjub.Private permits the full set of Jubjub scalars including
+                // zero. However, a SpendAuthorizingKey is further restricted within the
+                // Sapling key tree to be a non-zero scalar.
+                jubjub::Scalar::from_repr(b)
+                    .and_then(|s| {
+                        CtOption::new(
+                            redjubjub::SigningKey::try_from(b)
+                                .expect("RedJubjub permits the set of valid SpendAuthorizingKeys"),
+                            !s.is_zero(),
+                        )
+                    })
+                    .into()
+            })
+            .map(SpendAuthorizingKey)
+    }
+
+    /// Converts this spend authorizing key to its serialized form.
+    pub(crate) fn to_bytes(&self) -> [u8; 32] {
+        <[u8; 32]>::from(self.0)
+    }
+
+    /// Converts this spend authorizing key to a raw scalar.
+    ///
+    /// Only used for ZIP 32 child derivation.
+    pub(crate) fn to_scalar(&self) -> jubjub::Scalar {
+        jubjub::Scalar::from_repr(self.0.into()).unwrap()
+    }
+
+    /// Randomizes this spend authorizing key with the given `randomizer`.
+    ///
+    /// The resulting key can be used to actually sign a spend.
+    pub fn randomize(&self, randomizer: &jubjub::Scalar) -> redjubjub::SigningKey<SpendAuth> {
+        self.0.randomize(randomizer)
+    }
+}
+
+/// A key used to validate spend authorization signatures.
+///
+/// Defined in [Zcash Protocol Spec § 4.2.2: Sapling Key Components][saplingkeycomponents].
+///
+/// [saplingkeycomponents]: https://zips.z.cash/protocol/protocol.pdf#saplingkeycomponents
+#[derive(Clone, Debug)]
+pub struct SpendValidatingKey(redjubjub::VerificationKey<SpendAuth>);
+
+impl From<&SpendAuthorizingKey> for SpendValidatingKey {
+    fn from(ask: &SpendAuthorizingKey) -> Self {
+        SpendValidatingKey((&ask.0).into())
+    }
+}
+
+impl PartialEq for SpendValidatingKey {
+    fn eq(&self, other: &Self) -> bool {
+        <[u8; 32]>::from(self.0)
+            .ct_eq(&<[u8; 32]>::from(other.0))
+            .into()
+    }
+}
+
+impl Eq for SpendValidatingKey {}
+
+impl SpendValidatingKey {
+    /// For circuit tests only.
+    #[cfg(test)]
+    pub(crate) fn fake_random<R: RngCore>(mut rng: R) -> Self {
+        loop {
+            if let Some(k) = Self::from_bytes(&jubjub::SubgroupPoint::random(&mut rng).to_bytes()) {
+                break k;
+            }
+        }
+    }
+
+    /// Only exposed for `zcashd` unit tests.
+    #[cfg(feature = "temporary-zcashd")]
+    pub fn temporary_zcash_from_bytes(bytes: &[u8]) -> Option<Self> {
+        Self::from_bytes(bytes)
+    }
+
+    /// Parses a `SpendValidatingKey` from its encoded form.
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        <[u8; 32]>::try_from(bytes)
+            .ok()
+            .and_then(|b| {
+                // RedJubjub.Public permits the full set of Jubjub points including the
+                // identity and cofactors; this is the type used for `rk` in Spend
+                // descriptions. However, a SpendValidatingKey is further restricted
+                // within the Sapling key tree to be a non-identity element of the
+                // prime-order subgroup.
+                jubjub::SubgroupPoint::from_bytes(&b)
+                    .and_then(|p| {
+                        CtOption::new(
+                            redjubjub::VerificationKey::try_from(b)
+                                .expect("RedJubjub permits the set of valid SpendValidatingKeys"),
+                            !p.is_identity(),
+                        )
+                    })
+                    .into()
+            })
+            .map(SpendValidatingKey)
+    }
+
+    /// Converts this spend validating key to its serialized form,
+    /// `LEBS2OSP_256(repr_J(ak))`.
+    pub(crate) fn to_bytes(&self) -> [u8; 32] {
+        <[u8; 32]>::from(self.0)
+    }
+
+    /// Randomizes this spend validating key with the given `randomizer`.
+    pub fn randomize(&self, randomizer: &jubjub::Scalar) -> redjubjub::VerificationKey<SpendAuth> {
+        self.0.randomize(randomizer)
+    }
+}
+
 /// An outgoing viewing key
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OutgoingViewingKey(pub [u8; 32]);
@@ -45,7 +210,7 @@ pub struct OutgoingViewingKey(pub [u8; 32]);
 /// A Sapling expanded spending key
 #[derive(Clone)]
 pub struct ExpandedSpendingKey {
-    pub ask: jubjub::Fr,
+    pub ask: SpendAuthorizingKey,
     pub nsk: jubjub::Fr,
     pub ovk: OutgoingViewingKey,
 }
@@ -58,8 +223,15 @@ impl fmt::Debug for ExpandedSpendingKey {
 }
 
 impl ExpandedSpendingKey {
+    /// Expands a spending key into its components.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this spending key expands to `ask = 0`. This has a negligible
+    /// probability of occurring.
     pub fn from_spending_key(sk: &[u8]) -> Self {
-        let ask = jubjub::Fr::from_bytes_wide(prf_expand(sk, &[0x00]).as_array());
+        let ask =
+            SpendAuthorizingKey::from_spending_key(sk).expect("negligible chance of ask == 0");
         let nsk = jubjub::Fr::from_bytes_wide(prf_expand(sk, &[0x01]).as_array());
         let mut ovk = OutgoingViewingKey([0u8; 32]);
         ovk.0
@@ -69,7 +241,7 @@ impl ExpandedSpendingKey {
 
     pub fn proof_generation_key(&self) -> ProofGenerationKey {
         ProofGenerationKey {
-            ak: SPENDING_KEY_GENERATOR * self.ask,
+            ak: (&self.ask).into(),
             nsk: self.nsk,
         }
     }
@@ -85,8 +257,7 @@ impl ExpandedSpendingKey {
             });
         }
 
-        let ask = Option::from(jubjub::Fr::from_repr(b[0..32].try_into().unwrap()))
-            .ok_or(DecodingError::InvalidAsk)?;
+        let ask = SpendAuthorizingKey::from_bytes(&b[0..32]).ok_or(DecodingError::InvalidAsk)?;
         let nsk = Option::from(jubjub::Fr::from_repr(b[32..64].try_into().unwrap()))
             .ok_or(DecodingError::InvalidNsk)?;
         let ovk = OutgoingViewingKey(b[64..96].try_into().unwrap());
@@ -119,7 +290,7 @@ impl ExpandedSpendingKey {
     /// [ZIP 32](https://zips.z.cash/zip-0032)
     pub fn to_bytes(&self) -> [u8; 96] {
         let mut result = [0u8; 96];
-        result[0..32].copy_from_slice(&self.ask.to_repr());
+        result[0..32].copy_from_slice(&self.ask.to_bytes());
         result[32..64].copy_from_slice(&self.nsk.to_repr());
         result[64..96].copy_from_slice(&self.ovk.0);
         result
@@ -128,7 +299,7 @@ impl ExpandedSpendingKey {
 
 #[derive(Clone)]
 pub struct ProofGenerationKey {
-    pub ak: jubjub::SubgroupPoint,
+    pub ak: SpendValidatingKey,
     pub nsk: jubjub::Fr,
 }
 
@@ -143,7 +314,7 @@ impl fmt::Debug for ProofGenerationKey {
 impl ProofGenerationKey {
     pub fn to_viewing_key(&self) -> ViewingKey {
         ViewingKey {
-            ak: self.ak,
+            ak: self.ak.clone(),
             nk: NullifierDerivingKey(constants::PROOF_GENERATION_KEY_GENERATOR * self.nsk),
         }
     }
@@ -155,13 +326,13 @@ pub struct NullifierDerivingKey(pub jubjub::SubgroupPoint);
 
 #[derive(Debug, Clone)]
 pub struct ViewingKey {
-    pub ak: jubjub::SubgroupPoint,
+    pub ak: SpendValidatingKey,
     pub nk: NullifierDerivingKey,
 }
 
 impl ViewingKey {
-    pub fn rk(&self, ar: jubjub::Fr) -> jubjub::SubgroupPoint {
-        self.ak + constants::SPENDING_KEY_GENERATOR * ar
+    pub fn rk(&self, ar: jubjub::Fr) -> redjubjub::VerificationKey<SpendAuth> {
+        self.ak.randomize(&ar)
     }
 
     pub fn ivk(&self) -> SaplingIvk {
@@ -184,7 +355,7 @@ impl Clone for FullViewingKey {
     fn clone(&self) -> Self {
         FullViewingKey {
             vk: ViewingKey {
-                ak: self.vk.ak,
+                ak: self.vk.ak.clone(),
                 nk: self.vk.nk,
             },
             ovk: self.ovk,
@@ -196,7 +367,7 @@ impl FullViewingKey {
     pub fn from_expanded_spending_key(expsk: &ExpandedSpendingKey) -> Self {
         FullViewingKey {
             vk: ViewingKey {
-                ak: SPENDING_KEY_GENERATOR * expsk.ask,
+                ak: (&expsk.ask).into(),
                 nk: NullifierDerivingKey(PROOF_GENERATION_KEY_GENERATOR * expsk.nsk),
             },
             ovk: expsk.ovk,
@@ -207,14 +378,14 @@ impl FullViewingKey {
         let ak = {
             let mut buf = [0u8; 32];
             reader.read_exact(&mut buf)?;
-            jubjub::SubgroupPoint::from_bytes(&buf).and_then(|p| CtOption::new(p, !p.is_identity()))
+            SpendValidatingKey::from_bytes(&buf)
         };
         let nk = {
             let mut buf = [0u8; 32];
             reader.read_exact(&mut buf)?;
             jubjub::SubgroupPoint::from_bytes(&buf)
         };
-        if ak.is_none().into() {
+        if ak.is_none() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "ak not of prime order",
@@ -520,8 +691,8 @@ pub mod testing {
 mod tests {
     use group::{Group, GroupEncoding};
 
-    use super::FullViewingKey;
-    use crate::sapling::constants::SPENDING_KEY_GENERATOR;
+    use super::{FullViewingKey, SpendAuthorizingKey, SpendValidatingKey};
+    use crate::sapling::{constants::SPENDING_KEY_GENERATOR, test_vectors};
 
     #[test]
     fn ak_must_be_prime_order() {
@@ -544,5 +715,32 @@ mod tests {
 
         // nk is allowed to be the identity.
         assert!(FullViewingKey::read(&buf[..]).is_ok());
+    }
+
+    #[test]
+    fn spend_auth_sig_test_vectors() {
+        for tv in test_vectors::signatures::make_test_vectors() {
+            let sk = SpendAuthorizingKey::from_bytes(&tv.sk).unwrap();
+            let vk = SpendValidatingKey::from_bytes(&tv.vk).unwrap();
+            let rvk = redjubjub::VerificationKey::try_from(tv.rvk).unwrap();
+            let sig = redjubjub::Signature::from(tv.sig);
+            let rsig = redjubjub::Signature::from(tv.rsig);
+
+            let alpha = jubjub::Scalar::from_bytes(&tv.alpha).unwrap();
+
+            assert_eq!(<[u8; 32]>::from(sk.randomize(&alpha)), tv.rsk);
+            assert_eq!(vk.randomize(&alpha), rvk);
+
+            // assert_eq!(vk.0.verify(&tv.m, &sig), Ok(()));
+            // assert_eq!(rvk.verify(&tv.m, &rsig), Ok(()));
+            assert_eq!(
+                vk.0.verify(&tv.m, &rsig),
+                Err(redjubjub::Error::InvalidSignature),
+            );
+            assert_eq!(
+                rvk.verify(&tv.m, &sig),
+                Err(redjubjub::Error::InvalidSignature),
+            );
+        }
     }
 }
