@@ -239,6 +239,8 @@ impl TxVersion {
                 TxVersion::Sapling
             }
             BranchId::Nu5 => TxVersion::Zip225,
+            #[cfg(feature = "unstable-nu6")]
+            BranchId::Nu6 => TxVersion::Zip225,
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
@@ -970,6 +972,8 @@ pub mod testing {
                 Just(TxVersion::Sapling).boxed()
             }
             BranchId::Nu5 => Just(TxVersion::Zip225).boxed(),
+            #[cfg(feature = "unstable-nu6")]
+            BranchId::Nu6 => Just(TxVersion::Zip225).boxed(),
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
         }

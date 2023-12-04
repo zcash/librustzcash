@@ -106,6 +106,7 @@ multicore = ["bellman/multicore", "orchard/multicore"]
 transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
 temporary-zcashd = []
 test-dependencies = ["proptest", "orchard/test-dependencies"]
+unstable-nu6 = []
 zfuture = []
 
 [lib]

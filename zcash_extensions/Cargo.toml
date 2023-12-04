@@ -23,6 +23,7 @@ zcash_proofs.workspace = true
 
 [features]
 transparent-inputs = []
+unstable-nu6 = ["zcash_primitives/unstable-nu6"]
 
 [lib]
 bench = false
