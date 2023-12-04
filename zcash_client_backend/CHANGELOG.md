@@ -27,7 +27,8 @@ and this library adheres to Rust's notion of
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
     functionality and move it behind the `transparent-inputs` feature flag.
-- `zcash_client_backend::fees::{standard, sapling}`
+- `zcash_client_backend::fees::{standard, orchard, sapling}`
+- `zcash_client_backend::fees::ChangeValue::{new, orchard}`
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
@@ -141,9 +142,10 @@ and this library adheres to Rust's notion of
     for its `InputSource` associated type.
 
 - `zcash_client_backend::fees`:
-  - `ChangeValue::Sapling` is now a structured variant. In addition to the
-    existing change value, it now also carries an optional memo to be associated
-    with the change output.
+  - `ChangeStrategy::compute_balance` arguments have changed.
+  - `ChangeValue` is now a struct. In addition to the existing change value, it
+    now also provides the output pool to which change should be sent and an
+    optional memo to be associated with the change output.
   - `fixed::SingleOutputChangeStrategy::new` and
     `zip317::SingleOutputChangeStrategy::new` each now accept an additional
     `change_memo` argument.
@@ -157,7 +159,6 @@ and this library adheres to Rust's notion of
     - `error::Error::InsufficientFunds.{available, required}`
     - `wallet::input_selection::InputSelectorError::InsufficientFunds.{available, required}`
   - `zcash_client_backend::fees`:
-    - `ChangeValue::Sapling.value`
     - `ChangeError::InsufficientFunds.{available, required}`
   - `zcash_client_backend::zip321::Payment.amount`
 - The following methods now take `NonNegativeAmount` instead of `Amount`:

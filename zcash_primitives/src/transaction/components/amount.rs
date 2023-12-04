@@ -331,6 +331,20 @@ impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount {
     }
 }
 
+impl From<NonNegativeAmount> for orchard::NoteValue {
+    fn from(n: NonNegativeAmount) -> Self {
+        orchard::NoteValue::from_raw(n.into())
+    }
+}
+
+impl TryFrom<orchard::NoteValue> for NonNegativeAmount {
+    type Error = ();
+
+    fn try_from(value: orchard::NoteValue) -> Result<Self, Self::Error> {
+        Self::from_u64(value.inner())
+    }
+}
+
 impl TryFrom<Amount> for NonNegativeAmount {
     type Error = ();
 

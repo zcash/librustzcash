@@ -341,17 +341,20 @@ impl proposal::Proposal {
                 .balance()
                 .proposed_change()
                 .iter()
-                .map(|change| match change {
-                    ChangeValue::Sapling { value, memo } => proposal::ChangeValue {
+                .map(|change| match change.output_pool() {
+                    ShieldedProtocol::Sapling => proposal::ChangeValue {
                         value: Some(proposal::change_value::Value::SaplingValue(
                             proposal::SaplingChange {
-                                amount: (*value).into(),
-                                memo: memo.as_ref().map(|memo_bytes| proposal::MemoBytes {
+                                amount: change.value().into(),
+                                memo: change.memo().map(|memo_bytes| proposal::MemoBytes {
                                     value: memo_bytes.as_slice().to_vec(),
                                 }),
                             },
                         )),
                     },
+                    ShieldedProtocol::Orchard => {
+                        unimplemented!("FIXME: implement Orchard change outputs!")
+                    }
                 })
                 .collect(),
             fee_required: value.balance().fee_required().into(),

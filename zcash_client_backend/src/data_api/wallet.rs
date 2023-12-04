@@ -24,7 +24,7 @@ use crate::{
         SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
     },
     decrypt_transaction,
-    fees::{self, ChangeValue, DustOutputPolicy},
+    fees::{self, DustOutputPolicy},
     keys::UnifiedSpendingKey,
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
@@ -718,13 +718,15 @@ where
     }
 
     for change_value in proposal.balance().proposed_change() {
-        match change_value {
-            ChangeValue::Sapling { value, memo } => {
-                let memo = memo.as_ref().map_or_else(MemoBytes::empty, |m| m.clone());
+        let memo = change_value
+            .memo()
+            .map_or_else(MemoBytes::empty, |m| m.clone());
+        match change_value.output_pool() {
+            ShieldedProtocol::Sapling => {
                 builder.add_sapling_output(
                     internal_ovk(),
                     dfvk.change_address().1,
-                    *value,
+                    change_value.value(),
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
@@ -732,9 +734,18 @@ where
                         account,
                         PoolType::Shielded(ShieldedProtocol::Sapling),
                     ),
-                    *value,
+                    change_value.value(),
                     Some(memo),
                 ))
+            }
+            ShieldedProtocol::Orchard => {
+                #[cfg(not(feature = "orchard"))]
+                return Err(Error::UnsupportedPoolType(PoolType::Shielded(
+                    ShieldedProtocol::Orchard,
+                )));
+
+                #[cfg(feature = "orchard")]
+                unimplemented!("FIXME: implement Orchard change output creation.")
             }
         }
     }

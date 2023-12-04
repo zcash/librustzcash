@@ -27,10 +27,10 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    std::collections::BTreeSet, std::convert::Infallible,
-    zcash_primitives::transaction::components::OutPoint,
-};
+use {std::collections::BTreeSet, zcash_primitives::transaction::components::OutPoint};
+
+#[cfg(feature = "orchard")]
+use {crate::fees::orchard as orchard_fees, std::convert::Infallible};
 
 /// The type of errors that may be produced in input selection.
 pub enum InputSelectorError<DbErrT, SelectorErrT> {
@@ -447,6 +447,23 @@ impl sapling::OutputView for SaplingPayment {
     }
 }
 
+pub(crate) struct OrchardPayment(NonNegativeAmount);
+
+// TODO: introduce this method when it is needed for testing.
+// #[cfg(test)]
+// impl OrchardPayment {
+//     pub(crate) fn new(amount: NonNegativeAmount) -> Self {
+//         OrchardPayment(amount)
+//     }
+// }
+
+#[cfg(feature = "orchard")]
+impl orchard_fees::OutputView for OrchardPayment {
+    fn value(&self) -> NonNegativeAmount {
+        self.0
+    }
+}
+
 /// An [`InputSelector`] implementation that uses a greedy strategy to select between available
 /// notes.
 ///
@@ -499,6 +516,7 @@ where
     {
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
+        let mut orchard_outputs = vec![];
         for payment in transaction_request.payments() {
             let mut push_transparent = |taddr: TransparentAddress| {
                 transparent_outputs.push(TxOut {
@@ -509,6 +527,9 @@ where
             let mut push_sapling = || {
                 sapling_outputs.push(SaplingPayment(payment.amount));
             };
+            let mut push_orchard = || {
+                orchard_outputs.push(OrchardPayment(payment.amount));
+            };
 
             match &payment.recipient_address {
                 Address::Transparent(addr) => {
@@ -518,7 +539,14 @@ where
                     push_sapling();
                 }
                 Address::Unified(addr) => {
-                    if addr.sapling().is_some() {
+                    #[cfg(feature = "orchard")]
+                    let has_orchard = addr.orchard().is_some();
+                    #[cfg(not(feature = "orchard"))]
+                    let has_orchard = false;
+
+                    if has_orchard {
+                        push_orchard();
+                    } else if addr.sapling().is_some() {
                         push_sapling();
                     } else if let Some(addr) = addr.transparent() {
                         push_transparent(*addr);
@@ -544,8 +572,17 @@ where
                 target_height,
                 &Vec::<WalletTransparentOutput>::new(),
                 &transparent_outputs,
-                &sapling_inputs,
-                &sapling_outputs,
+                &(
+                    ::sapling::builder::BundleType::DEFAULT,
+                    &sapling_inputs[..],
+                    &sapling_outputs[..],
+                ),
+                #[cfg(feature = "orchard")]
+                &(
+                    ::orchard::builder::BundleType::DEFAULT,
+                    &Vec::<Infallible>::new()[..],
+                    &orchard_outputs[..],
+                ),
                 &self.dust_output_policy,
             );
 
@@ -652,8 +689,17 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &Vec::<ReceivedNote<Infallible>>::new(),
-            &Vec::<SaplingPayment>::new(),
+            &(
+                ::sapling::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
             &self.dust_output_policy,
         );
 
@@ -668,8 +714,17 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &Vec::<ReceivedNote<Infallible>>::new(),
-                    &Vec::<SaplingPayment>::new(),
+                    &(
+                        ::sapling::builder::BundleType::DEFAULT,
+                        &Vec::<Infallible>::new()[..],
+                        &Vec::<Infallible>::new()[..],
+                    ),
+                    #[cfg(feature = "orchard")]
+                    &(
+                        orchard::builder::BundleType::DEFAULT,
+                        &Vec::<Infallible>::new()[..],
+                        &Vec::<Infallible>::new()[..],
+                    ),
                     &self.dust_output_policy,
                 )?
             }

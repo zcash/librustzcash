@@ -12,38 +12,69 @@ use zcash_primitives::{
     },
 };
 
+use crate::ShieldedProtocol;
+
 pub(crate) mod common;
 pub mod fixed;
+pub mod orchard;
 pub mod sapling;
 pub mod standard;
 pub mod zip317;
 
 /// A proposed change amount and output pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChangeValue {
-    Sapling {
-        value: NonNegativeAmount,
-        memo: Option<MemoBytes>,
-    },
+pub struct ChangeValue {
+    output_pool: ShieldedProtocol,
+    value: NonNegativeAmount,
+    memo: Option<MemoBytes>,
 }
 
 impl ChangeValue {
+    /// Constructs a new change value from its constituent parts.
+    pub fn new(
+        output_pool: ShieldedProtocol,
+        value: NonNegativeAmount,
+        memo: Option<MemoBytes>,
+    ) -> Self {
+        Self {
+            output_pool,
+            value,
+            memo,
+        }
+    }
+
+    /// Constructs a new change value that will be created as a Sapling output.
     pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
-        Self::Sapling { value, memo }
+        Self {
+            output_pool: ShieldedProtocol::Sapling,
+            value,
+            memo,
+        }
+    }
+
+    /// Constructs a new change value that will be created as an Orchard output.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
+        Self {
+            output_pool: ShieldedProtocol::Orchard,
+            value,
+            memo,
+        }
+    }
+
+    /// Returns the pool to which the change output should be sent.
+    pub fn output_pool(&self) -> ShieldedProtocol {
+        self.output_pool
     }
 
     /// Returns the value of the change output to be created, in zatoshis.
     pub fn value(&self) -> NonNegativeAmount {
-        match self {
-            ChangeValue::Sapling { value, .. } => *value,
-        }
+        self.value
     }
 
     /// Returns the memo to be associated with the change output.
     pub fn memo(&self) -> Option<&MemoBytes> {
-        match self {
-            ChangeValue::Sapling { memo, .. } => memo.as_ref(),
-        }
+        self.memo.as_ref()
     }
 }
 
@@ -120,6 +151,8 @@ pub enum ChangeError<E, NoteRefT> {
     },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
+    /// The proposed bundle structure would violate bundle type construction rules.
+    BundleError(&'static str),
 }
 
 impl<E, NoteRefT> ChangeError<E, NoteRefT> {
@@ -140,6 +173,7 @@ impl<E, NoteRefT> ChangeError<E, NoteRefT> {
                 sapling,
             },
             ChangeError::StrategyError(e) => ChangeError::StrategyError(f(e)),
+            ChangeError::BundleError(e) => ChangeError::BundleError(e),
         }
     }
 }
@@ -166,6 +200,13 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
             }
             ChangeError::StrategyError(err) => {
                 write!(f, "{}", err)
+            }
+            ChangeError::BundleError(err) => {
+                write!(
+                    f,
+                    "The proposed transaction structure violates bundle type constrints: {}",
+                    err
+                )
             }
         }
     }
@@ -252,8 +293,8 @@ pub trait ChangeStrategy {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView<NoteRefT>],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling: &impl sapling::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard: &impl orchard::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>>;
 }

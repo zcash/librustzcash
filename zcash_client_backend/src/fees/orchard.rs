@@ -1,13 +1,15 @@
-//! Types related to computation of fees and change related to the Sapling components
+//! Types related to computation of fees and change related to the Orchard components
 //! of a transaction.
 
 use std::convert::Infallible;
-
-use sapling::builder::{BundleType, OutputInfo, SpendInfo};
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 
-/// A trait that provides a minimized view of Sapling bundle configuration
+#[cfg(feature = "orchard")]
+use orchard::builder::BundleType;
+
+/// A trait that provides a minimized view of Orchard bundle configuration
 /// suitable for use in fee and change calculation.
+#[cfg(feature = "orchard")]
 pub trait BundleView<NoteRef> {
     /// The type of inputs to the bundle.
     type In: InputView<NoteRef>;
@@ -22,6 +24,7 @@ pub trait BundleView<NoteRef> {
     fn outputs(&self) -> &[Self::Out];
 }
 
+#[cfg(feature = "orchard")]
 impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
     for (BundleType, &'a [In], &'a [Out])
 {
@@ -41,8 +44,8 @@ impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
     }
 }
 
-/// A trait that provides a minimized view of a Sapling input suitable for use in
-/// fee and change calculation.
+/// A trait that provides a minimized view of an Orchard input suitable for use in fee and change
+/// calculation.
 pub trait InputView<NoteRef> {
     /// An identifier for the input being spent.
     fn note_id(&self) -> &NoteRef;
@@ -59,31 +62,11 @@ impl<N> InputView<N> for Infallible {
     }
 }
 
-// `SpendDescriptionInfo` does not contain a note identifier, so we can only implement
-// `InputView<()>`
-impl InputView<()> for SpendInfo {
-    fn note_id(&self) -> &() {
-        &()
-    }
-
-    fn value(&self) -> NonNegativeAmount {
-        NonNegativeAmount::try_from(self.value())
-            .expect("An existing note to be spent must have a valid amount value.")
-    }
-}
-
-/// A trait that provides a minimized view of a Sapling output suitable for use in
-/// fee and change calculation.
+/// A trait that provides a minimized view of a Orchard output suitable for use in fee and change
+/// calculation.
 pub trait OutputView {
     /// The value of the output being produced.
     fn value(&self) -> NonNegativeAmount;
-}
-
-impl OutputView for OutputInfo {
-    fn value(&self) -> NonNegativeAmount {
-        NonNegativeAmount::try_from(self.value())
-            .expect("Output values should be checked at construction.")
-    }
 }
 
 impl OutputView for Infallible {
