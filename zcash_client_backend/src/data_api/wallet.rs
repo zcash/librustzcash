@@ -600,6 +600,8 @@ where
                         builder.add_sapling_spend(key, note.clone(), merkle_path)?;
                     }
                     WalletNote::Orchard(_) => {
+                        // FIXME: Implement this once `Proposal` has been refactored to
+                        // include Orchard notes.
                         panic!("Orchard spends are not yet supported");
                     }
                 }

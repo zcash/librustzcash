@@ -55,8 +55,8 @@ impl NoteId {
     }
 }
 
-/// A type that represents the recipient of a transaction output; a recipient address (and, for
-/// unified addresses, the pool to which the payment is sent) in the case of outgoing output, or an
+/// A type that represents the recipient of a transaction output: a recipient address (and, for
+/// unified addresses, the pool to which the payment is sent) in the case of an outgoing output, or an
 /// internal account ID and the pool to which funds were sent in the case of a wallet-internal
 /// output.
 #[derive(Debug, Clone)]
@@ -157,6 +157,15 @@ impl WalletSaplingSpend {
 }
 
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.
+///
+/// The type parameter `<N>` is used to specify the nullifier type, which may vary between
+/// `Sapling` and `Orchard`, and also may vary depending upon the type of key that was used to
+/// decrypt this output; incoming viewing keys do not have the capability to derive the nullifier
+/// for a note, and the `<N>` will be `()` in these cases.
+///
+/// The type parameter `<S>` is used to specify the type of the scope of the key used to recover
+/// this output; this will usually be [`zcash_primitives::zip32::Scope`] for received notes, and
+/// `()` for sent notes.
 ///
 /// [`OutputDescription`]: zcash_primitives::transaction::components::OutputDescription
 pub struct WalletSaplingOutput<N, S> {

@@ -1,4 +1,4 @@
-//! This migration adds support for the Orchard protocol to `zcash_client_sqlite`
+//! This migration adds decryption key scope to persisted information about received notes.
 
 use std::collections::HashSet;
 
@@ -6,20 +6,21 @@ use rusqlite::{self, named_params};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 
-use tracing::debug;
 use uuid::Uuid;
 
-use zcash_client_backend::{keys::UnifiedFullViewingKey, scanning::ScanningKey};
+use zcash_client_backend::keys::UnifiedFullViewingKey;
 use zcash_primitives::{
     consensus::{self, sapling_zip212_enforcement, BlockHeight, BranchId},
-    sapling::note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
+    sapling::note_encryption::{
+        try_sapling_note_decryption, PreparedIncomingViewingKey, Zip212Enforcement,
+    },
     transaction::Transaction,
     zip32::Scope,
 };
 
 use crate::wallet::{
     init::{migrations::shardtree_support, WalletMigrationError},
-    scope_code,
+    scan_queue_extrema, scope_code,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xee89ed2b_c1c2_421e_9e98_c1e3e54a7fc2);
@@ -38,7 +39,7 @@ impl<P> schemer::Migration for Migration<P> {
     }
 
     fn description(&self) -> &'static str {
-        "Add support for receiving storage of note commitment tree data using the `shardtree` crate."
+        "Add decryption key scope to persisted information about received notes."
     }
 }
 
@@ -46,8 +47,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
-        // Add commitment tree sizes to block metadata.
-        debug!("Adding new columns");
         transaction.execute_batch(
             &format!(
                 "ALTER TABLE sapling_received_notes ADD COLUMN recipient_key_scope INTEGER NOT NULL DEFAULT {};",
@@ -55,15 +54,16 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             )
         )?;
 
-        // For all notes marked as change, we have to determine whether they were actually sent to
-        // the internal key or the external key for the account, so we trial-decrypt the original
-        // output with both and pick the scope of whichever worked.
+        // For all notes we have to determine whether they were actually sent to the internal key
+        // or the external key for the account, so we trial-decrypt the original output with the
+        // internal IVK and update the persisted scope value if necessary. We check all notes,
+        // rather than just change notes, because shielding notes may not have been considered
+        // change.
         let mut stmt_select_notes = transaction.prepare(
-            "SELECT id_note, output_index, transactions.raw, transactions.expiry_height, accounts.ufvk
+            "SELECT id_note, output_index, transactions.raw, transactions.block, transactions.expiry_height, accounts.ufvk
              FROM sapling_received_notes
              INNER JOIN accounts on accounts.account = sapling_received_notes.account
-             INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-             WHERE is_change = 1"
+             INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx"
         )?;
 
         let mut rows = stmt_select_notes.query([])?;
@@ -78,26 +78,46 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 .sapling_bundle()
                 .and_then(|b| b.shielded_outputs().get(output_index))
                 .unwrap_or_else(|| panic!("A Sapling output must exist at index {}", output_index));
-            let tx_expiry_height = BlockHeight::from(row.get::<_, u32>(3)?);
-            let zip212_enforcement = sapling_zip212_enforcement(&self.params, tx_expiry_height);
 
-            let ufvk_str: String = row.get(4)?;
+            let tx_height = row.get::<_, Option<u32>>(3)?.map(BlockHeight::from);
+            let tx_expiry = row.get::<_, u32>(4)?;
+            let zip212_height = tx_height.map_or_else(
+                || {
+                    if tx_expiry == 0 {
+                        scan_queue_extrema(transaction).map(|extrema| extrema.map(|r| *r.end()))
+                    } else {
+                        Ok(Some(BlockHeight::from(tx_expiry)))
+                    }
+                },
+                |h| Ok(Some(h)),
+            )?;
+
+            let zip212_enforcement = zip212_height.map_or_else(
+                || {
+                    // If the transaction has not been mined and the expiry height is set to 0 (no
+                    // expiry) an no chain tip information is available, then we assume it can only
+                    // be mined under ZIP 212 enforcement rules, so we default to `On`
+                    Zip212Enforcement::On
+                },
+                |h| sapling_zip212_enforcement(&self.params, h),
+            );
+
+            let ufvk_str: String = row.get(5)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
                 .expect("Stored UFVKs must be valid");
             let dfvk = ufvk
                 .sapling()
                 .expect("UFVK must have a Sapling component to have received Sapling notes");
-            let keys = dfvk.to_sapling_keys();
 
-            for (scope, ivk, _) in keys {
-                let pivk = PreparedIncomingViewingKey::new(&ivk);
-                if try_sapling_note_decryption(&pivk, output, zip212_enforcement).is_some() {
-                    transaction.execute(
-                        "UPDATE sapling_received_notes SET recipient_key_scope = :scope
-                         WHERE id_note = :note_id",
-                        named_params! {":scope": scope_code(scope), ":note_id": note_id},
-                    )?;
-                }
+            // We previously set the default to external scope, so we now verify whether the output
+            // is decryptable using the intenally-scoped IVK and, if so, mark it as such.
+            let pivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
+            if try_sapling_note_decryption(&pivk, output, zip212_enforcement).is_some() {
+                transaction.execute(
+                    "UPDATE sapling_received_notes SET recipient_key_scope = :scope
+                     WHERE id_note = :note_id",
+                    named_params! {":scope": scope_code(Scope::Internal), ":note_id": note_id},
+                )?;
             }
         }
 
