@@ -719,7 +719,7 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 
         let seed = [0xab; 32];
-        let account = AccountId::from(0);
+        let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
 
@@ -890,7 +890,7 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 
         let seed = [0xab; 32];
-        let account = AccountId::from(0);
+        let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
 
@@ -1043,7 +1043,7 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
 
         let seed = [0xab; 32];
-        let account = AccountId::from(0);
+        let account = AccountId::ZERO;
         let secret_key = UnifiedSpendingKey::from_seed(&db_data.params, &seed, account).unwrap();
 
         init_main(
@@ -1076,7 +1076,7 @@ mod tests {
         let (account, _usk) = db_data
             .create_account(&Secret::new(seed.to_vec()), birthday)
             .unwrap();
-        assert_eq!(account, AccountId::from(0u32));
+        assert_eq!(account, AccountId::ZERO);
 
         for tv in &test_vectors::UNIFIED[..3] {
             if let Some(RecipientAddress::Unified(tvua)) =

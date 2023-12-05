@@ -152,11 +152,13 @@ pub(crate) fn get_max_account_id(
     conn: &rusqlite::Connection,
 ) -> Result<Option<AccountId>, SqliteClientError> {
     // This returns the most recently generated address.
-    conn.query_row("SELECT MAX(account) FROM accounts", [], |row| {
+    conn.query_row_and_then("SELECT MAX(account) FROM accounts", [], |row| {
         let account_id: Option<u32> = row.get(0)?;
-        Ok(account_id.map(AccountId::from))
+        account_id
+            .map(AccountId::try_from)
+            .transpose()
+            .map_err(|_| SqliteClientError::AccountIdOutOfRange)
     })
-    .map_err(SqliteClientError::from)
 }
 
 pub(crate) fn add_account<P: consensus::Parameters>(
@@ -283,7 +285,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
                     addr_str,
                 ))),
             })
-            .map(|addr| (addr, DiversifierIndex(di_be)))
+            .map(|addr| (addr, DiversifierIndex::from(di_be)))
     })
     .transpose()
 }
@@ -295,7 +297,7 @@ pub(crate) fn insert_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountId,
-    mut diversifier_index: DiversifierIndex,
+    diversifier_index: DiversifierIndex,
     address: &UnifiedAddress,
 ) -> Result<(), rusqlite::Error> {
     let mut stmt = conn.prepare_cached(
@@ -314,10 +316,11 @@ pub(crate) fn insert_address<P: consensus::Parameters>(
     )?;
 
     // the diversifier index is stored in big-endian order to allow sorting
-    diversifier_index.0.reverse();
+    let mut di_be = *diversifier_index.as_bytes();
+    di_be.reverse();
     stmt.execute(named_params![
         ":account": &u32::from(account),
-        ":diversifier_index_be": &&diversifier_index.0[..],
+        ":diversifier_index_be": &di_be[..],
         ":address": &address.encode(params),
         ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
     ])?;
@@ -363,7 +366,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         if let Some(taddr) = ua.transparent() {
             ret.insert(
                 *taddr,
-                AddressMetadata::new(account, DiversifierIndex(di_be)),
+                AddressMetadata::new(account, DiversifierIndex::from(di_be)),
             );
         }
     }
@@ -422,7 +425,7 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
 
     let rows = stmt_fetch_accounts.query_map([], |row| {
         let acct: u32 = row.get(0)?;
-        let account = AccountId::from(acct);
+        let account = AccountId::try_from(acct).map_err(|_| SqliteClientError::AccountIdOutOfRange);
         let ufvk_str: String = row.get(1)?;
         let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
             .map_err(SqliteClientError::CorruptedData);
@@ -433,7 +436,7 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
     let mut res: HashMap<AccountId, UnifiedFullViewingKey> = HashMap::new();
     for row in rows {
         let (account_id, ufvkr) = row?;
-        res.insert(account_id, ufvkr?);
+        res.insert(account_id?, ufvkr?);
     }
 
     Ok(res)
@@ -451,11 +454,12 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
         [&ufvk.encode(params)],
         |row| {
             let acct: u32 = row.get(0)?;
-            Ok(AccountId::from(acct))
+            Ok(AccountId::try_from(acct).map_err(|_| SqliteClientError::AccountIdOutOfRange))
         },
     )
     .optional()
-    .map_err(SqliteClientError::from)
+    .map_err(SqliteClientError::from)?
+    .transpose()
 }
 
 pub(crate) trait ScanProgress {
@@ -598,9 +602,10 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let mut stmt_accounts = conn.prepare_cached("SELECT account FROM accounts")?;
     let mut account_balances = stmt_accounts
         .query([])?
-        .mapped(|row| {
-            row.get::<_, u32>(0)
-                .map(|a| (AccountId::from(a), AccountBalance::ZERO))
+        .and_then(|row| {
+            AccountId::try_from(row.get::<_, u32>(0)?)
+                .map_err(|_| SqliteClientError::AccountIdOutOfRange)
+                .map(|a| (a, AccountBalance::ZERO))
         })
         .collect::<Result<BTreeMap<AccountId, AccountBalance>, _>>()?;
 
@@ -622,7 +627,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let mut rows =
         stmt_select_notes.query(named_params![":summary_height": u32::from(summary_height)])?;
     while let Some(row) = rows.next()? {
-        let account = row.get::<_, u32>(0).map(AccountId::from)?;
+        let account = AccountId::try_from(row.get::<_, u32>(0)?)
+            .map_err(|_| SqliteClientError::AccountIdOutOfRange)?;
 
         let value_raw = row.get::<_, i64>(1)?;
         let value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|_| {
@@ -699,7 +705,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         ])?;
 
         while let Some(row) = rows.next()? {
-            let account = AccountId::from(row.get::<_, u32>(0)?);
+            let account = AccountId::try_from(row.get::<_, u32>(0)?)
+                .map_err(|_| SqliteClientError::AccountIdOutOfRange)?;
             let raw_value = row.get(1)?;
             let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
@@ -1601,18 +1608,23 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
         .query_row(
             "SELECT account FROM addresses WHERE cached_transparent_receiver_address = :address",
             named_params![":address": &address_str],
-            |row| row.get::<_, u32>(0).map(AccountId::from),
+            |row| row.get::<_, u32>(0),
         )
         .optional()?;
 
     let utxoid = if let Some(account) = account_id {
-        put_legacy_transparent_utxo(conn, params, output, account)?
+        put_legacy_transparent_utxo(
+            conn,
+            params,
+            output,
+            AccountId::try_from(account).map_err(|_| SqliteClientError::AccountIdOutOfRange)?,
+        )?
     } else {
         // If the UTXO is received at the legacy transparent address, there may be no entry in the
         // addresses table that can be used to tie the address to a particular account. In this
         // case, we should look up the legacy address for account 0 and check whether it matches
         // the address for the received UTXO, and if so then insert/update it directly.
-        let account = AccountId::from(0u32);
+        let account = AccountId::ZERO;
         get_legacy_transparent_address(params, conn, account).and_then(|legacy_taddr| {
             if legacy_taddr
                 .iter()
@@ -2003,13 +2015,14 @@ mod tests {
 
         // The default address is set for the test account
         assert_matches!(
-            st.wallet().get_current_address(AccountId::from(0)),
+            st.wallet().get_current_address(AccountId::ZERO),
             Ok(Some(_))
         );
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet().get_current_address(AccountId::from(1)),
+            st.wallet()
+                .get_current_address(AccountId::try_from(1).unwrap()),
             Ok(None)
         );
     }

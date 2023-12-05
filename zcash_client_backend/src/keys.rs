@@ -51,7 +51,7 @@ pub mod sapling {
     ///     keys::sapling,
     /// };
     ///
-    /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
+    /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
     /// ```
     /// [`ExtendedSpendingKey`]: zcash_primitives::sapling::zip32::ExtendedSpendingKey
     pub fn spending_key(seed: &[u8], coin_type: u32, account: AccountId) -> ExtendedSpendingKey {
@@ -72,7 +72,7 @@ pub mod sapling {
 
 #[cfg(feature = "transparent-inputs")]
 fn to_transparent_child_index(j: DiversifierIndex) -> Option<u32> {
-    let (low_4_bytes, rest) = j.0.split_at(4);
+    let (low_4_bytes, rest) = j.as_bytes().split_at(4);
     let transparent_j = u32::from_le_bytes(low_4_bytes.try_into().unwrap());
     if transparent_j > (0x7FFFFFFF) || rest.iter().any(|b| b != &0) {
         None
@@ -588,7 +588,11 @@ pub mod testing {
         prop::array::uniform32(prop::num::u8::ANY).prop_flat_map(move |seed| {
             prop::num::u32::ANY
                 .prop_map(move |account| {
-                    UnifiedSpendingKey::from_seed(&params, &seed, AccountId::from(account))
+                    UnifiedSpendingKey::from_seed(
+                        &params,
+                        &seed,
+                        AccountId::try_from(account & ((1 << 31) - 1)).unwrap(),
+                    )
                 })
                 .prop_filter("seeds must generate valid USKs", |v| v.is_ok())
                 .prop_map(|v| v.unwrap())
@@ -632,14 +636,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn spending_key_panics_on_short_seed() {
-        let _ = sapling::spending_key(&[0; 31][..], 0, AccountId::from(0));
+        let _ = sapling::spending_key(&[0; 31][..], 0, AccountId::ZERO);
     }
 
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
         let taddr =
-            legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::from(0))
+            legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
                 .unwrap()
                 .to_account_pubkey()
                 .derive_external_ivk()
@@ -652,7 +656,7 @@ mod tests {
 
     #[test]
     fn ufvk_round_trip() {
-        let account = 0.into();
+        let account = AccountId::ZERO;
 
         let orchard = {
             let sk = orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, 0).unwrap();
@@ -666,8 +670,7 @@ mod tests {
 
         #[cfg(feature = "transparent-inputs")]
         let transparent = {
-            let privkey =
-                AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], AccountId::from(0)).unwrap();
+            let privkey = AccountPrivKey::from_seed(&MAIN_NETWORK, &[0; 32], account).unwrap();
             Some(privkey.to_account_pubkey())
         };
 
@@ -726,7 +729,7 @@ mod tests {
             let usk = UnifiedSpendingKey::from_seed(
                 &MAIN_NETWORK,
                 &tv.root_seed,
-                AccountId::from(tv.account),
+                AccountId::try_from(tv.account).unwrap(),
             )
             .expect("seed produced a valid unified spending key");
 

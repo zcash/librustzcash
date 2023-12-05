@@ -185,7 +185,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 ///     keys::sapling,
 /// };
 ///
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
 /// let encoded = encode_extended_spending_key(HRP_SAPLING_EXTENDED_SPENDING_KEY, &extsk);
 /// ```
 /// [`ExtendedSpendingKey`]: zcash_primitives::sapling::zip32::ExtendedSpendingKey
@@ -218,7 +218,7 @@ pub fn decode_extended_spending_key(
 ///     keys::sapling,
 /// };
 ///
-/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::from(0));
+/// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);
 /// let extfvk = extsk.to_extended_full_viewing_key();
 /// let encoded = encode_extended_full_viewing_key(HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, &extfvk);
 /// ```

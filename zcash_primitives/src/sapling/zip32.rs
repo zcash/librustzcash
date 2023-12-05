@@ -179,7 +179,7 @@ impl DiversifierKey {
     fn try_diversifier_internal(ff: &FF1<Aes256>, j: DiversifierIndex) -> Option<Diversifier> {
         // Generate d_j
         let enc = ff
-            .encrypt(&[], &BinaryNumeralString::from_bytes_le(&j.0[..]))
+            .encrypt(&[], &BinaryNumeralString::from_bytes_le(j.as_bytes()))
             .unwrap();
         let mut d_j = [0; 11];
         d_j.copy_from_slice(&enc.to_bytes_le());
@@ -206,9 +206,7 @@ impl DiversifierKey {
         let dec = ff
             .decrypt(&[], &BinaryNumeralString::from_bytes_le(&d.0[..]))
             .unwrap();
-        let mut j = DiversifierIndex::new();
-        j.0.copy_from_slice(&dec.to_bytes_le());
-        j
+        DiversifierIndex::from(<[u8; 11]>::try_from(&dec.to_bytes_le()[..]).unwrap())
     }
 
     /// Returns the first index starting from j that generates a valid
@@ -855,9 +853,9 @@ mod tests {
     fn diversifier() {
         let dk = DiversifierKey([0; 32]);
         let j_0 = DiversifierIndex::new();
-        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        let j_2 = DiversifierIndex([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        let j_3 = DiversifierIndex([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_1 = DiversifierIndex::from([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_2 = DiversifierIndex::from([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_3 = DiversifierIndex::from([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         // Computed using this Rust implementation
         let d_0 = [220, 231, 126, 188, 236, 10, 38, 175, 214, 153, 140];
         let d_3 = [60, 253, 170, 8, 171, 147, 220, 31, 3, 144, 34];
@@ -884,12 +882,12 @@ mod tests {
         let di32: u32 = 0xa0b0c0d0;
         assert_eq!(
             DiversifierIndex::from(di32),
-            DiversifierIndex([0xd0, 0xc0, 0xb0, 0xa0, 0, 0, 0, 0, 0, 0, 0])
+            DiversifierIndex::from([0xd0, 0xc0, 0xb0, 0xa0, 0, 0, 0, 0, 0, 0, 0])
         );
         let di64: u64 = 0x0102030405060708;
         assert_eq!(
             DiversifierIndex::from(di64),
-            DiversifierIndex([8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0])
+            DiversifierIndex::from([8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0])
         );
     }
 
@@ -897,9 +895,9 @@ mod tests {
     fn find_diversifier() {
         let dk = DiversifierKey([0; 32]);
         let j_0 = DiversifierIndex::new();
-        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        let j_2 = DiversifierIndex([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        let j_3 = DiversifierIndex([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_1 = DiversifierIndex::from([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_2 = DiversifierIndex::from([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_3 = DiversifierIndex::from([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         // Computed using this Rust implementation
         let d_0 = [220, 231, 126, 188, 236, 10, 38, 175, 214, 153, 140];
         let d_3 = [60, 253, 170, 8, 171, 147, 220, 31, 3, 144, 34];
@@ -959,7 +957,7 @@ mod tests {
             [59, 246, 250, 31, 131, 191, 69, 99, 200, 167, 19]
         );
 
-        let j_1 = DiversifierIndex([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let j_1 = DiversifierIndex::from([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(xfvk_m.address(j_1), None);
     }
 
@@ -968,7 +966,7 @@ mod tests {
         let seed = [0; 32];
         let xsk_m = ExtendedSpendingKey::master(&seed);
         let (j_m, addr_m) = xsk_m.default_address();
-        assert_eq!(j_m.0, [0; 11]);
+        assert_eq!(j_m.as_bytes(), &[0; 11]);
         assert_eq!(
             addr_m.diversifier().0,
             // Computed using this Rust implementation
@@ -1690,7 +1688,7 @@ mod tests {
             }
 
             // dmax
-            let dmax = DiversifierIndex([0xff; 11]);
+            let dmax = DiversifierIndex::from([0xff; 11]);
             match xfvk.dk.find_diversifier(dmax) {
                 Some((l, d)) if l == dmax => assert_eq!(d.0, tv.dmax.unwrap()),
                 Some((_, _)) => panic!(),

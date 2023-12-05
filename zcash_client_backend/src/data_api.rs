@@ -1193,7 +1193,7 @@ pub mod testing {
             seed: &SecretVec<u8>,
             _birthday: AccountBirthday,
         ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
-            let account = AccountId::from(0);
+            let account = AccountId::ZERO;
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
                 .map(|k| (account, k))
                 .map_err(|_| ())

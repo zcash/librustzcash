@@ -784,7 +784,7 @@ mod tests {
             orchard_saks: Vec::new(),
         };
 
-        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::from(0)).unwrap();
+        let tsk = AccountPrivKey::from_seed(&TEST_NETWORK, &[0u8; 32], AccountId::ZERO).unwrap();
         let prev_coin = TxOut {
             value: NonNegativeAmount::const_from_u64(50000),
             script_pubkey: tsk

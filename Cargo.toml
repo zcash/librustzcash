@@ -10,7 +10,6 @@ members = [
     "zcash_history",
     "zcash_primitives",
     "zcash_proofs",
-    "zip32",
 ]
 
 [workspace.package]
@@ -34,7 +33,6 @@ zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.13", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.13", path = "zcash_proofs", default-features = false }
-zip32 = { version = "0.0", path = "zip32" }
 
 # Shielded protocols
 ff = "0.13"
@@ -104,6 +102,7 @@ rand_xorshift = "0.3"
 # ZIP 32
 aes = "0.8"
 fpe = "0.6"
+zip32 = "0.1"
 
 [profile.release]
 lto = true

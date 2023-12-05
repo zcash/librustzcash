@@ -3181,9 +3181,10 @@ dependencies = [
 
 [[package]]
 name = "zip32"
-version = "0.0.0"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d724a63be4dfb50b7f3617e542984e22e4b4a5b8ca5de91f55613152885e6b22"
 dependencies = [
- "assert_matches",
  "blake2b_simd",
  "memuse",
  "subtle",

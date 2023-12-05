@@ -384,12 +384,9 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let account = wallet::get_max_account_id(wdb.conn.0)?
-                .map(|a| AccountId::from(u32::from(a) + 1))
-                .unwrap_or_else(|| AccountId::from(0));
-
-            if u32::from(account) >= 0x7FFFFFFF {
-                return Err(SqliteClientError::AccountIdOutOfRange);
-            }
+                .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
+                .transpose()?
+                .unwrap_or_else(|| AccountId::ZERO);
 
             let usk = UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account)
                 .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
@@ -1130,7 +1127,7 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let account = AccountId::from(0);
+        let account = AccountId::ZERO;
         let current_addr = st.wallet().get_current_address(account).unwrap();
         assert!(current_addr.is_some());
 
@@ -1155,7 +1152,10 @@ mod tests {
         let ufvk = usk.to_unified_full_viewing_key();
         let (taddr, _) = usk.default_transparent_address();
 
-        let receivers = st.wallet().get_transparent_receivers(0.into()).unwrap();
+        let receivers = st
+            .wallet()
+            .get_transparent_receivers(AccountId::ZERO)
+            .unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
@@ -1174,7 +1174,7 @@ mod tests {
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
-        let account = AccountId::from(0);
+        let account = AccountId::ZERO;
         let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
