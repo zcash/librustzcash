@@ -666,17 +666,14 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             }
         };
 
-        account_balances.entry(account).and_modify(|bal| {
-            bal.sapling_balance.spendable_value = (bal.sapling_balance.spendable_value
-                + spendable_value)
-                .expect("Spendable value cannot overflow");
-            bal.sapling_balance.change_pending_confirmation =
-                (bal.sapling_balance.change_pending_confirmation + change_pending_confirmation)
-                    .expect("Pending change value cannot overflow");
-            bal.sapling_balance.value_pending_spendability =
-                (bal.sapling_balance.value_pending_spendability + value_pending_spendability)
-                    .expect("Value pending spendability cannot overflow");
-        });
+        if let Some(balances) = account_balances.get_mut(&account) {
+            balances.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
+                bal.add_spendable_value(spendable_value)?;
+                bal.add_pending_change_value(change_pending_confirmation)?;
+                bal.add_pending_spendable_value(value_pending_spendability)?;
+                Ok(())
+            })?;
+        }
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -705,9 +702,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 SqliteClientError::CorruptedData(format!("Negative UTXO value {:?}", raw_value))
             })?;
 
-            account_balances.entry(account).and_modify(|bal| {
-                bal.unshielded = (bal.unshielded + value).expect("Unshielded value cannot overflow")
-            });
+            if let Some(balances) = account_balances.get_mut(&account) {
+                balances.add_unshielded_value(value)?;
+            }
         }
     }
 
@@ -2138,7 +2135,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let balance = summary.account_balances().get(&account_id).unwrap();
-            assert_eq!(balance.unshielded, expected);
+            assert_eq!(balance.unshielded(), expected);
 
             // Check the older APIs for consistency.
             let max_height = st.wallet().chain_height().unwrap().unwrap() + 1 - min_confirmations;

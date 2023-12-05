@@ -644,6 +644,8 @@ pub(crate) fn scan_block_with_runner<
         wtxs,
         sapling_nullifier_map,
         sapling_note_commitments,
+        vec![], // FIXME: collect the Orchard nullifiers
+        vec![], // FIXME: collect the Orchard note commitments
     ))
 }
 

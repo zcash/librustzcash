@@ -18,7 +18,7 @@ use zcash_primitives::{
     sapling::{self, Node, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
         components::{
-            amount::{Amount, NonNegativeAmount},
+            amount::{Amount, BalanceError, NonNegativeAmount},
             OutPoint,
         },
         Transaction, TxId,
@@ -58,19 +58,9 @@ pub enum NullifierQuery {
 /// Balance information for a value within a single pool in an account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
-    /// The value in the account that may currently be spent; it is possible to compute witnesses
-    /// for all the notes that comprise this value, and all of this value is confirmed to the
-    /// required confirmation depth.
-    pub spendable_value: NonNegativeAmount,
-
-    /// The value in the account of shielded change notes that do not yet have sufficient
-    /// confirmations to be spendable.
-    pub change_pending_confirmation: NonNegativeAmount,
-
-    /// The value in the account of all remaining received notes that either do not have sufficient
-    /// confirmations to be spendable, or for which witnesses cannot yet be constructed without
-    /// additional scanning.
-    pub value_pending_spendability: NonNegativeAmount,
+    spendable_value: NonNegativeAmount,
+    change_pending_confirmation: NonNegativeAmount,
+    value_pending_spendability: NonNegativeAmount,
 }
 
 impl Balance {
@@ -80,6 +70,64 @@ impl Balance {
         change_pending_confirmation: NonNegativeAmount::ZERO,
         value_pending_spendability: NonNegativeAmount::ZERO,
     };
+
+    fn check_total_adding(
+        &self,
+        value: NonNegativeAmount,
+    ) -> Result<NonNegativeAmount, BalanceError> {
+        (self.spendable_value
+            + self.change_pending_confirmation
+            + self.value_pending_spendability
+            + value)
+            .ok_or(BalanceError::Overflow)
+    }
+
+    /// Returns the value in the account that may currently be spent; it is possible to compute
+    /// witnesses for all the notes that comprise this value, and all of this value is confirmed to
+    /// the required confirmation depth.
+    pub fn spendable_value(&self) -> NonNegativeAmount {
+        self.spendable_value
+    }
+
+    /// Adds the specified value to the spendable total, checking for overflow.
+    pub fn add_spendable_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.spendable_value = (self.spendable_value + value).unwrap();
+        Ok(())
+    }
+
+    /// Returns the value in the account of shielded change notes that do not yet have sufficient
+    /// confirmations to be spendable.
+    pub fn change_pending_confirmation(&self) -> NonNegativeAmount {
+        self.change_pending_confirmation
+    }
+
+    /// Adds the specified value to the pending change total, checking for overflow.
+    pub fn add_pending_change_value(
+        &mut self,
+        value: NonNegativeAmount,
+    ) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.change_pending_confirmation = (self.change_pending_confirmation + value).unwrap();
+        Ok(())
+    }
+
+    /// Returns the value in the account of all remaining received notes that either do not have
+    /// sufficient confirmations to be spendable, or for which witnesses cannot yet be constructed
+    /// without additional scanning.
+    pub fn value_pending_spendability(&self) -> NonNegativeAmount {
+        self.value_pending_spendability
+    }
+
+    /// Adds the specified value to the pending spendable total, checking for overflow.
+    pub fn add_pending_spendable_value(
+        &mut self,
+        value: NonNegativeAmount,
+    ) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.value_pending_spendability = (self.value_pending_spendability + value).unwrap();
+        Ok(())
+    }
 
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> NonNegativeAmount {
@@ -93,7 +141,10 @@ impl Balance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountBalance {
     /// The value of unspent Sapling outputs belonging to the account.
-    pub sapling_balance: Balance,
+    sapling_balance: Balance,
+
+    /// The value of unspent Orchard outputs belonging to the account.
+    orchard_balance: Balance,
 
     /// The value of all unspent transparent outputs belonging to the account, irrespective of
     /// confirmation depth.
@@ -102,19 +153,95 @@ pub struct AccountBalance {
     /// possible operation on a transparent balance is to shield it, it is possible to create a
     /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
     /// subject to normal confirmation rules.
-    pub unshielded: NonNegativeAmount,
+    unshielded: NonNegativeAmount,
 }
 
 impl AccountBalance {
     /// The [`Balance`] value having zero values for all its fields.
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
+        orchard_balance: Balance::ZERO,
         unshielded: NonNegativeAmount::ZERO,
     };
 
+    fn check_total(&self) -> Result<NonNegativeAmount, BalanceError> {
+        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
+            .ok_or(BalanceError::Overflow)
+    }
+
+    /// Returns the [`Balance`] of Sapling funds in the account.
+    pub fn sapling_balance(&self) -> &Balance {
+        &self.sapling_balance
+    }
+
+    /// Provides a `mutable reference to the [`Balance`] of Sapling funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_sapling_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.sapling_balance)?;
+        self.check_total()?;
+        Ok(result)
+    }
+
+    /// Returns the [`Balance`] of Orchard funds in the account.
+    pub fn orchard_balance(&self) -> &Balance {
+        &self.orchard_balance
+    }
+
+    /// Provides a `mutable reference to the [`Balance`] of Orchard funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_orchard_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.orchard_balance)?;
+        self.check_total()?;
+        Ok(result)
+    }
+
+    /// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
+    pub fn unshielded(&self) -> NonNegativeAmount {
+        self.unshielded
+    }
+
+    /// Adds the specified value to the unshielded total, checking for overflow of
+    /// the total account balance.
+    pub fn add_unshielded_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
+        self.unshielded = (self.unshielded + value).ok_or(BalanceError::Overflow)?;
+        self.check_total()?;
+        Ok(())
+    }
+
     /// Returns the total value of funds belonging to the account.
     pub fn total(&self) -> NonNegativeAmount {
-        (self.sapling_balance.total() + self.unshielded)
+        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
+    /// spent.
+    pub fn spendable_value(&self) -> NonNegativeAmount {
+        (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of change and/or shielding transaction outputs that are awaiting
+    /// sufficient confirmations for spendability.
+    pub fn change_pending_confirmation(&self) -> NonNegativeAmount {
+        (self.sapling_balance.change_pending_confirmation
+            + self.orchard_balance.change_pending_confirmation)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the value of shielded funds that are not yet spendable because additional scanning
+    /// is required before it will be possible to derive witnesses for the associated notes.
+    pub fn value_pending_spendability(&self) -> NonNegativeAmount {
+        (self.sapling_balance.value_pending_spendability
+            + self.orchard_balance.value_pending_spendability)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 }
@@ -484,6 +611,8 @@ pub struct ScannedBlock<Nf> {
     transactions: Vec<WalletTx<Nf>>,
     sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
     sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+    orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
+    orchard_commitments: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
 }
 
 impl<Nf> ScannedBlock<Nf> {
@@ -498,6 +627,8 @@ impl<Nf> ScannedBlock<Nf> {
         transactions: Vec<WalletTx<Nf>>,
         sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
         sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+        orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
+        orchard_commitments: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
     ) -> Self {
         Self {
             block_height,
@@ -508,6 +639,8 @@ impl<Nf> ScannedBlock<Nf> {
             transactions,
             sapling_nullifier_map,
             sapling_commitments,
+            orchard_nullifier_map,
+            orchard_commitments,
         }
     }
 
@@ -557,10 +690,34 @@ impl<Nf> ScannedBlock<Nf> {
         &self.sapling_commitments
     }
 
-    /// Consumes `self` and returns the list of Sapling note commitments associated with the
-    /// scanned block as an owned value.
-    pub fn into_sapling_commitments(self) -> Vec<(sapling::Node, Retention<BlockHeight>)> {
-        self.sapling_commitments
+    /// Returns the vector of Orchard nullifiers for each transaction in the block.
+    ///
+    /// The returned tuple is keyed by both transaction ID and the index of the transaction within
+    /// the block, so that either the txid or the combination of the block hash available from
+    /// [`Self::block_hash`] and returned transaction index may be used to uniquely identify the
+    /// transaction, depending upon the needs of the caller.
+    pub fn orchard_nullifier_map(&self) -> &[(TxId, u16, Vec<orchard::note::Nullifier>)] {
+        &self.orchard_nullifier_map
+    }
+
+    /// Returns the ordered list of Orchard note commitments to be added to the note commitment
+    /// tree.
+    pub fn orchard_commitments(
+        &self,
+    ) -> &[(orchard::note::NoteCommitment, Retention<BlockHeight>)] {
+        &self.orchard_commitments
+    }
+
+    /// Consumes `self` and returns the lists of Sapling and Orchard note commitments associated
+    /// with the scanned block as an owned value.
+    #[allow(clippy::type_complexity)]
+    pub fn into_commitments(
+        self,
+    ) -> (
+        Vec<(sapling::Node, Retention<BlockHeight>)>,
+        Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
+    ) {
+        (self.sapling_commitments, self.orchard_commitments)
     }
 
     /// Returns the [`BlockMetadata`] corresponding to the scanned block.

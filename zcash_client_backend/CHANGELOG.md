@@ -12,8 +12,16 @@ and this library adheres to Rust's notion of
   - `BlockMetadata::orchard_tree_size`.
   - `TransparentInputSource`
   - `SaplingInputSource`
-  - `ScannedBlock::sapling_tree_size`.
-  - `ScannedBlock::orchard_tree_size`.
+  - `ScannedBlock::{
+      sapling_tree_size, orchard_tree_size, orchard_nullifier_map,
+      orchard_commitments, into_commitments
+    }`
+  - `Balance::{add_spendable_value, add_pending_change_value, add_pending_spendable_value}`
+  - `AccountBalance::{
+      with_sapling_balance_mut, 
+      with_orchard_balance_mut, 
+      add_unshielded_value
+    }`
   - `wallet::propose_standard_transfer_to_address`
   - `wallet::input_selection::Proposal::from_parts`
   - `wallet::input_selection::SaplingInputs`
@@ -52,6 +60,9 @@ and this library adheres to Rust's notion of
   - `ShieldedProtocol` has a new variant for `Orchard`, allowing for better
     reporting to callers trying to perform actions using `Orchard` before it is
     fully supported.
+  - Fields of `Balance` and `AccountBalance` have been made private and the values
+    of these fields have been made available via methods having the same names
+    as the previously-public fields.
   - `chain::scan_cached_blocks` now returns a `ScanSummary` containing metadata
     about the scanned blocks on success.
   - `error::Error` enum changes:
@@ -164,6 +175,9 @@ and this library adheres to Rust's notion of
   removed without replacement as it was unused, and its functionality will be
   fully reproduced by `SaplingInputSource::select_spendable_sapling_notes` in a future
   change.
+- `zcash_client_backend::data_api::ScannedBlock::into_sapling_commitments` has been
+  replaced by `into_commitments` which returns both Sapling and Orchard note commitments
+  and associated note commitment retention information for the block.
 
 ## [0.10.0] - 2023-09-25
 
