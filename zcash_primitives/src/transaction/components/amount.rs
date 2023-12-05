@@ -323,6 +323,14 @@ impl From<NonNegativeAmount> for sapling::value::NoteValue {
     }
 }
 
+impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount {
+    type Error = ();
+
+    fn try_from(value: sapling::value::NoteValue) -> Result<Self, Self::Error> {
+        Self::from_u64(value.inner())
+    }
+}
+
 impl TryFrom<Amount> for NonNegativeAmount {
     type Error = ();
 

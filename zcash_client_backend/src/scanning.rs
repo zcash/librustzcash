@@ -19,11 +19,12 @@ use zcash_primitives::{
     zip32::{AccountId, Scope},
 };
 
-use crate::data_api::{BlockMetadata, ScannedBlock, ShieldedProtocol};
+use crate::data_api::{BlockMetadata, ScannedBlock};
 use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, Tasks},
     wallet::{WalletSaplingOutput, WalletSaplingSpend, WalletTx},
+    ShieldedProtocol,
 };
 
 /// A key that can be used to perform trial decryption and nullifier
@@ -257,7 +258,7 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     vks: &[(&AccountId, &K)],
     sapling_nullifiers: &[(AccountId, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<K::Nf>, ScanError> {
+) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
     scan_block_with_runner::<_, _, ()>(
         params,
         block,
@@ -340,7 +341,7 @@ pub(crate) fn scan_block_with_runner<
     nullifiers: &[(AccountId, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runner: Option<&mut TaggedBatchRunner<K::Scope, T>>,
-) -> Result<ScannedBlock<K::Nf>, ScanError> {
+) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
     }
@@ -440,7 +441,7 @@ pub(crate) fn scan_block_with_runner<
     )?;
 
     let compact_block_tx_count = block.vtx.len();
-    let mut wtxs: Vec<WalletTx<K::Nf>> = vec![];
+    let mut wtxs: Vec<WalletTx<K::Nf, K::Scope>> = vec![];
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
@@ -494,7 +495,7 @@ pub(crate) fn scan_block_with_runner<
             u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
 
         // Check for incoming notes while incrementing tree and witnesses
-        let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf>> = vec![];
+        let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf, K::Scope>> = vec![];
         {
             let decoded = &tx
                 .outputs
@@ -527,7 +528,7 @@ pub(crate) fn scan_block_with_runner<
                                 "The batch runner and scan_block must use the same set of IVKs.",
                             );
 
-                            (d_note.note, a, (*nk).clone())
+                            (d_note.note, a, d_note.ivk_tag.1, (*nk).clone())
                         })
                     })
                     .collect()
@@ -537,13 +538,13 @@ pub(crate) fn scan_block_with_runner<
                     .flat_map(|(a, k)| {
                         k.to_sapling_keys()
                             .into_iter()
-                            .map(move |(_, ivk, nk)| (**a, ivk, nk))
+                            .map(move |(scope, ivk, nk)| (**a, scope, ivk, nk))
                     })
                     .collect::<Vec<_>>();
 
                 let ivks = vks
                     .iter()
-                    .map(|(_, ivk, _)| ivk)
+                    .map(|(_, _, ivk, _)| ivk)
                     .map(PreparedIncomingViewingKey::new)
                     .collect::<Vec<_>>();
 
@@ -551,8 +552,8 @@ pub(crate) fn scan_block_with_runner<
                     .into_iter()
                     .map(|v| {
                         v.map(|((note, _), ivk_idx)| {
-                            let (account, _, nk) = &vks[ivk_idx];
-                            (note, *account, (*nk).clone())
+                            let (account, scope, _, nk) = &vks[ivk_idx];
+                            (note, *account, scope.clone(), (*nk).clone())
                         })
                     })
                     .collect()
@@ -573,7 +574,7 @@ pub(crate) fn scan_block_with_runner<
                     (false, false) => Retention::Ephemeral,
                 };
 
-                if let Some((note, account, nk)) = dec_output {
+                if let Some((note, account, scope, nk)) = dec_output {
                     // A note is marked as "change" if the account that received it
                     // also spent notes in the same transaction. This will catch,
                     // for instance:
@@ -595,6 +596,7 @@ pub(crate) fn scan_block_with_runner<
                         is_change,
                         note_commitment_tree_position,
                         nf,
+                        scope,
                     ));
                 }
 

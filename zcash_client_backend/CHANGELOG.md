@@ -30,8 +30,9 @@ and this library adheres to Rust's notion of
     functionality and move it behind the `transparent-inputs` feature flag.
 - `zcash_client_backend::fees::standard`
 - `zcash_client_backend::wallet`:
-  - `ReceivedSaplingNote::from_parts`
-  - `ReceivedSaplingNote::{txid, output_index, diversifier, rseed, note_commitment_tree_position}`
+  - `WalletNote`
+  - `ReceivedNote`
+  - `WalletSaplingOutput::recipient_key_scope`
 - `zcash_client_backend::zip321::TransactionRequest::total`
 - `zcash_client_backend::zip321::parse::Param::name`
 - `zcash_client_backend::proto::`
@@ -49,11 +50,24 @@ and this library adheres to Rust's notion of
      wallet::input_selection::{Proposal, SaplingInputs},
    }`
 
+### Moved
+- `zcash_client_backend::data_api::{PoolType, ShieldedProtocol}` have
+  been moved into the `zcash_client_backend` root module.
+- `zcash_client_backend::data_api::{NoteId, Recipient}` have
+  been moved into the `zcash_client_backend::wallet` module.
+
 ### Changed
 - `zcash_client_backend::data_api`:
   - Arguments to `BlockMetadata::from_parts` have changed to include Orchard.
   - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
     a `u32` for consistency with Orchard.
+  - `WalletShieldedOutput` has an additional type parameter which is used for
+    key scope. `WalletShieldedOutput::from_parts` now takes an additional
+    argument of this type.
+  - `WalletTx` has an additional type parameter as a consequence of the 
+    `WalletShieldedOutput` change.
+  - `ScannedBlock` has an additional type parameter as a consequence of the 
+    `WalletTx` change.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - `ScannedBlock::metadata` has been renamed to `to_block_metadata` and now
     returns an owned value rather than a reference.
@@ -168,6 +182,8 @@ and this library adheres to Rust's notion of
     - `WalletTransparentOutput::value`
 
 ### Removed
+- `zcash_client_backend::wallet::ReceivedSaplingNote` has been replaced by
+  `zcash_client_backend::ReceivedNote`.
 - `zcash_client_backend::data_api::WalletRead::is_valid_account_extfvk` has been
   removed; it was unused in the ECC mobile wallet SDKs and has been superseded by
   `get_account_for_ufvk`.

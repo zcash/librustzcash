@@ -8,9 +8,7 @@ use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 
 use zcash_client_backend::{
-    address::RecipientAddress,
-    data_api::{PoolType, ShieldedProtocol},
-    keys::UnifiedSpendingKey,
+    address::RecipientAddress, keys::UnifiedSpendingKey, PoolType, ShieldedProtocol,
 };
 use zcash_primitives::{consensus, zip32::AccountId};
 

@@ -75,28 +75,27 @@ use std::ops::RangeInclusive;
 use tracing::debug;
 use zcash_client_backend::data_api::{AccountBalance, Ratio, WalletSummary};
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
-
-use zcash_client_backend::data_api::{
-    scanning::{ScanPriority, ScanRange},
-    AccountBirthday, NoteId, ShieldedProtocol, SAPLING_SHARD_HEIGHT,
-};
-use zcash_primitives::transaction::TransactionData;
+use zcash_primitives::zip32::Scope;
 
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     merkle_tree::read_commitment_tree,
-    transaction::{components::Amount, Transaction, TxId},
+    transaction::{components::Amount, Transaction, TransactionData, TxId},
     zip32::{AccountId, DiversifierIndex},
 };
 
 use zcash_client_backend::{
     address::{RecipientAddress, UnifiedAddress},
-    data_api::{BlockMetadata, PoolType, Recipient, SentTransactionOutput},
+    data_api::{
+        scanning::{ScanPriority, ScanRange},
+        AccountBirthday, BlockMetadata, SentTransactionOutput, SAPLING_SHARD_HEIGHT,
+    },
     encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
-    wallet::WalletTx,
+    wallet::{NoteId, Recipient, WalletTx},
+    PoolType, ShieldedProtocol,
 };
 
 use crate::wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore};
@@ -134,6 +133,21 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
         PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
+    }
+}
+
+pub(crate) fn scope_code(scope: Scope) -> i64 {
+    match scope {
+        Scope::External => 0i64,
+        Scope::Internal => 1i64,
+    }
+}
+
+pub(crate) fn parse_scope(code: i64) -> Option<Scope> {
+    match code {
+        0i64 => Some(Scope::External),
+        1i64 => Some(Scope::Internal),
+        _ => None,
     }
 }
 
@@ -1503,9 +1517,9 @@ pub(crate) fn put_block(
 
 /// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
-pub(crate) fn put_tx_meta<N>(
+pub(crate) fn put_tx_meta<N, S>(
     conn: &rusqlite::Connection,
-    tx: &WalletTx<N>,
+    tx: &WalletTx<N, S>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
@@ -1884,7 +1898,7 @@ pub(crate) fn insert_nullifier_map<N: AsRef<[u8]>>(
 
 /// Returns the row of the `transactions` table corresponding to the transaction in which
 /// this nullifier is revealed, if any.
-pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
+pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
     conn: &rusqlite::Transaction<'_>,
     spend_pool: ShieldedProtocol,
     nf: &N,
@@ -1922,7 +1936,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>>(
     // change or explicit in-wallet recipient.
     put_tx_meta(
         conn,
-        &WalletTx::<N> {
+        &WalletTx::<N, S> {
             txid,
             index,
             sapling_spends: vec![],

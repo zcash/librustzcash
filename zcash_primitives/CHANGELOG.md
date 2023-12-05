@@ -95,6 +95,7 @@ and this library adheres to Rust's notion of
   - `impl From<NonNegativeAmount> for zcash_primitives::sapling::value::NoteValue`
   - `impl Sum<NonNegativeAmount> for Option<NonNegativeAmount>`
   - `impl<'a> Sum<&'a NonNegativeAmount> for Option<NonNegativeAmount>`
+  - `impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
 - `impl {Clone, PartialEq, Eq} for zcash_primitives::memo::Error`
 - `impl {PartialEq, Eq} for zcash_primitives::sapling::note::Rseed`
 - `impl From<TxId> for [u8; 32]`

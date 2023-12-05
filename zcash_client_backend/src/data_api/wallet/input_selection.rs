@@ -22,7 +22,7 @@ use crate::{
     address::{RecipientAddress, UnifiedAddress},
     data_api::SaplingInputSource,
     fees::{ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
-    wallet::{ReceivedSaplingNote, WalletTransparentOutput},
+    wallet::{ReceivedNote, WalletTransparentOutput},
     zip321::TransactionRequest,
 };
 
@@ -263,15 +263,12 @@ impl<FeeRuleT, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct SaplingInputs<NoteRef> {
     anchor_height: BlockHeight,
-    notes: NonEmpty<ReceivedSaplingNote<NoteRef>>,
+    notes: NonEmpty<ReceivedNote<NoteRef>>,
 }
 
 impl<NoteRef> SaplingInputs<NoteRef> {
     /// Constructs a [`SaplingInputs`] from its constituent parts.
-    pub fn from_parts(
-        anchor_height: BlockHeight,
-        notes: NonEmpty<ReceivedSaplingNote<NoteRef>>,
-    ) -> Self {
+    pub fn from_parts(anchor_height: BlockHeight, notes: NonEmpty<ReceivedNote<NoteRef>>) -> Self {
         Self {
             anchor_height,
             notes,
@@ -285,7 +282,7 @@ impl<NoteRef> SaplingInputs<NoteRef> {
     }
 
     /// Returns the list of Sapling notes to be used as inputs to the proposed transaction.
-    pub fn notes(&self) -> &NonEmpty<ReceivedSaplingNote<NoteRef>> {
+    pub fn notes(&self) -> &NonEmpty<ReceivedNote<NoteRef>> {
         &self.notes
     }
 }
@@ -534,7 +531,7 @@ where
             }
         }
 
-        let mut sapling_inputs: Vec<ReceivedSaplingNote<DbT::NoteRef>> = vec![];
+        let mut sapling_inputs: Vec<ReceivedNote<DbT::NoteRef>> = vec![];
         let mut prior_available = NonNegativeAmount::ZERO;
         let mut amount_required = NonNegativeAmount::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
@@ -654,7 +651,7 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &Vec::<ReceivedSaplingNote<Infallible>>::new(),
+            &Vec::<ReceivedNote<Infallible>>::new(),
             &Vec::<SaplingPayment>::new(),
             &self.dust_output_policy,
         );
@@ -670,7 +667,7 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &Vec::<ReceivedSaplingNote<Infallible>>::new(),
+                    &Vec::<ReceivedNote<Infallible>>::new(),
                     &Vec::<SaplingPayment>::new(),
                     &self.dust_output_policy,
                 )?

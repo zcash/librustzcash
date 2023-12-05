@@ -1,16 +1,11 @@
 use std::num::NonZeroU32;
 
-use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-
 use zcash_primitives::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
+    consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     sapling::{
-        self,
         note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
         prover::{OutputProver, SpendProver},
-        zip32::DiversifiableFullViewingKey,
-        Node,
     },
     transaction::{
         builder::Builder,
@@ -24,15 +19,15 @@ use zcash_primitives::{
 use crate::{
     address::RecipientAddress,
     data_api::{
-        error::Error, wallet::input_selection::Proposal, DecryptedTransaction, PoolType, Recipient,
-        SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        error::Error, wallet::input_selection::Proposal, DecryptedTransaction, SentTransaction,
+        SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
     },
     decrypt_transaction,
     fees::{self, ChangeValue, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    wallet::{OvkPolicy, ReceivedSaplingNote},
+    wallet::{OvkPolicy, Recipient, WalletNote},
     zip321::{self, Payment},
+    PoolType, ShieldedProtocol,
 };
 
 pub mod input_selection;
@@ -40,7 +35,7 @@ use input_selection::{
     GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
 };
 
-use super::{NoteId, SaplingInputSource, ShieldedProtocol};
+use super::SaplingInputSource;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -590,26 +585,26 @@ where
     if let Some(sapling_inputs) = proposal.sapling_inputs() {
         wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
             for selected in sapling_inputs.notes() {
-                let (note, scope, merkle_path) = select_key_for_note(
-                    sapling_tree,
-                    selected,
-                    &dfvk,
-                    sapling_inputs.anchor_height(),
-                )?
-                .ok_or_else(|| {
-                    Error::NoteMismatch(NoteId {
-                        txid: *selected.txid(),
-                        protocol: ShieldedProtocol::Sapling,
-                        output_index: selected.output_index(),
-                    })
-                })?;
+                match selected.note() {
+                    WalletNote::Sapling(note) => {
+                        let key = match selected.spending_key_scope() {
+                            Scope::External => usk.sapling().clone(),
+                            Scope::Internal => usk.sapling().derive_internal(),
+                        };
 
-                let key = match scope {
-                    Scope::External => usk.sapling().clone(),
-                    Scope::Internal => usk.sapling().derive_internal(),
-                };
+                        let merkle_path = sapling_tree.witness_at_checkpoint_id_caching(
+                            selected.note_commitment_tree_position(),
+                            &sapling_inputs.anchor_height(),
+                        )?;
 
-                builder.add_sapling_spend(key, note, merkle_path)?;
+                        builder.add_sapling_spend(key, note.clone(), merkle_path)?;
+                    }
+                    WalletNote::Orchard(_) => {
+                        // FIXME: Implement this once `Proposal` has been refactored to
+                        // include Orchard notes.
+                        panic!("Orchard spends are not yet supported");
+                    }
+                }
             }
             Ok(())
         })?;
@@ -879,41 +874,4 @@ where
         OvkPolicy::Sender,
         &proposal,
     )
-}
-
-#[allow(clippy::type_complexity)]
-fn select_key_for_note<N, S: ShardStore<H = Node, CheckpointId = BlockHeight>>(
-    commitment_tree: &mut ShardTree<
-        S,
-        { sapling::NOTE_COMMITMENT_TREE_DEPTH },
-        SAPLING_SHARD_HEIGHT,
-    >,
-    selected: &ReceivedSaplingNote<N>,
-    dfvk: &DiversifiableFullViewingKey,
-    anchor_height: BlockHeight,
-) -> Result<Option<(sapling::Note, Scope, sapling::MerklePath)>, ShardTreeError<S::Error>> {
-    // Attempt to reconstruct the note being spent using both the internal and external dfvks
-    // corresponding to the unified spending key, checking against the witness we are using
-    // to spend the note that we've used the correct key.
-    let external_note = dfvk
-        .diversified_address(selected.diversifier())
-        .map(|addr| addr.create_note(selected.value().try_into().unwrap(), selected.rseed()));
-    let internal_note = dfvk
-        .diversified_change_address(selected.diversifier())
-        .map(|addr| addr.create_note(selected.value().try_into().unwrap(), selected.rseed()));
-
-    let expected_root = commitment_tree.root_at_checkpoint_id(&anchor_height)?;
-    let merkle_path = commitment_tree.witness_at_checkpoint_id_caching(
-        selected.note_commitment_tree_position(),
-        &anchor_height,
-    )?;
-
-    Ok(external_note
-        .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
-        .map(|n| (n, Scope::External, merkle_path.clone()))
-        .or_else(|| {
-            internal_note
-                .filter(|n| expected_root == merkle_path.root(Node::from_cmu(&n.cmu())))
-                .map(|n| (n, Scope::Internal, merkle_path))
-        }))
 }
