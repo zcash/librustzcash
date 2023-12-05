@@ -52,6 +52,7 @@ and this library adheres to Rust's notion of
   - `note_encryption::SaplingDomain::new`
   - `note_encryption::Zip212Enforcement`
   - `prover::{SpendProver, OutputProver}`
+  - `tree::Node::{from_bytes, to_bytes}`
   - `value`:
     - `ValueCommitTrapdoor::from_bytes`
     - `impl Sub<TrapdoorSum> for TrapdoorSum`
