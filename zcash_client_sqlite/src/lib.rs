@@ -387,7 +387,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let account = wallet::get_max_account_id(wdb.conn.0)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
-                .unwrap_or_else(|| AccountId::ZERO);
+                .unwrap_or(AccountId::ZERO);
 
             let usk = UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account)
                 .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
