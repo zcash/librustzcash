@@ -13,7 +13,7 @@ pub const COIN_TYPE: u32 = 1;
 ///
 /// It is defined in [the `zcashd` codebase].
 ///
-/// [`ExtendedSpendingKey`]: crate::zip32::ExtendedSpendingKey
+/// [`ExtendedSpendingKey`]: crate::sapling::zip32::ExtendedSpendingKey
 /// [the `zcashd` codebase]: <https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L496>
 pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-regtest";
 
@@ -21,7 +21,7 @@ pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-regtest
 ///
 /// It is defined in [the `zcashd` codebase].
 ///
-/// [`ExtendedFullViewingKey`]: crate::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: crate::sapling::zip32::ExtendedFullViewingKey
 /// [the `zcashd` codebase]: <https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L494>
 pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewregtestsapling";
 

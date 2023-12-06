@@ -71,10 +71,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 ))
             })?;
 
-            tx_sent_notes
-                .entry((id_tx, txid))
-                .or_default()
-                .insert(AccountId::from(account), ufvk);
+            tx_sent_notes.entry((id_tx, txid)).or_default().insert(
+                AccountId::try_from(account).map_err(|_| {
+                    WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())
+                })?,
+                ufvk,
+            );
         }
 
         let mut stmt_update_sent_memo = transaction.prepare(

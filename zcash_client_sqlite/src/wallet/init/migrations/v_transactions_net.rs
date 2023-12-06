@@ -222,9 +222,8 @@ mod tests {
             .unwrap();
 
         // Create two accounts in the wallet.
-        let usk0 =
-            UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::from(0))
-                .unwrap();
+        let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
+            .unwrap();
         let ufvk0 = usk0.to_unified_full_viewing_key();
         db_data
             .conn
@@ -234,9 +233,12 @@ mod tests {
             )
             .unwrap();
 
-        let usk1 =
-            UnifiedSpendingKey::from_seed(&db_data.params, &[1u8; 32][..], AccountId::from(1))
-                .unwrap();
+        let usk1 = UnifiedSpendingKey::from_seed(
+            &db_data.params,
+            &[1u8; 32][..],
+            AccountId::try_from(1).unwrap(),
+        )
+        .unwrap();
         let ufvk1 = usk1.to_unified_full_viewing_key();
         db_data
             .conn

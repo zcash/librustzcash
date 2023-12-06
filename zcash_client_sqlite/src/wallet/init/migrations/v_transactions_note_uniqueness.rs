@@ -178,9 +178,8 @@ mod tests {
         init_wallet_db_internal(&mut db_data, None, &[v_transactions_net::MIGRATION_ID]).unwrap();
 
         // Create an account in the wallet
-        let usk0 =
-            UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::from(0))
-                .unwrap();
+        let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
+            .unwrap();
         let ufvk0 = usk0.to_unified_full_viewing_key();
         db_data
             .conn

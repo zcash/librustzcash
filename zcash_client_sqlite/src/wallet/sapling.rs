@@ -338,13 +338,12 @@ pub(crate) fn get_sapling_nullifiers(
          WHERE block IS NULL
          AND nf IS NOT NULL",
     )?;
-    let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
+    let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
         let account: u32 = row.get(1)?;
         let nf_bytes: Vec<u8> = row.get(2)?;
-        Ok((
-            AccountId::from(account),
-            sapling::Nullifier::from_slice(&nf_bytes).unwrap(),
-        ))
+        AccountId::try_from(account)
+            .map_err(|_| SqliteClientError::AccountIdOutOfRange)
+            .map(|a| (a, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
@@ -361,13 +360,12 @@ pub(crate) fn get_all_sapling_nullifiers(
          FROM sapling_received_notes rn
          WHERE nf IS NOT NULL",
     )?;
-    let nullifiers = stmt_fetch_nullifiers.query_map([], |row| {
+    let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
         let account: u32 = row.get(1)?;
         let nf_bytes: Vec<u8> = row.get(2)?;
-        Ok((
-            AccountId::from(account),
-            sapling::Nullifier::from_slice(&nf_bytes).unwrap(),
-        ))
+        AccountId::try_from(account)
+            .map_err(|_| SqliteClientError::AccountIdOutOfRange)
+            .map(|a| (a, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
@@ -688,7 +686,7 @@ pub(crate) mod tests {
         let to = dfvk.default_address().1.into();
 
         // Create a USK that doesn't exist in the wallet
-        let acct1 = AccountId::from(1);
+        let acct1 = AccountId::try_from(1).unwrap();
         let usk1 = UnifiedSpendingKey::from_seed(&st.network(), &[1u8; 32], acct1).unwrap();
 
         // Attempting to spend with a USK that is not in the wallet results in an error
@@ -1263,11 +1261,11 @@ pub(crate) mod tests {
         st.scan_cached_blocks(h, 1);
 
         // Spendable balance matches total balance
-        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
-        assert_eq!(st.get_spendable_balance(AccountId::from(0), 1), value);
+        assert_eq!(st.get_total_balance(AccountId::ZERO), value);
+        assert_eq!(st.get_spendable_balance(AccountId::ZERO, 1), value);
         assert_eq!(
-            st.get_total_balance(AccountId::from(1)),
-            NonNegativeAmount::ZERO
+            st.get_total_balance(AccountId::try_from(1).unwrap()),
+            NonNegativeAmount::ZERO,
         );
 
         let amount_sent = NonNegativeAmount::from_u64(20000).unwrap();
@@ -1317,15 +1315,18 @@ pub(crate) mod tests {
         let pending_change = (amount_left - amount_legacy_change).unwrap();
 
         // The "legacy change" is not counted by get_pending_change().
-        assert_eq!(st.get_pending_change(AccountId::from(0), 1), pending_change);
+        assert_eq!(st.get_pending_change(AccountId::ZERO, 1), pending_change);
         // We spent the only note so we only have pending change.
-        assert_eq!(st.get_total_balance(AccountId::from(0)), pending_change);
+        assert_eq!(st.get_total_balance(AccountId::ZERO), pending_change);
 
         let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);
 
-        assert_eq!(st.get_total_balance(AccountId::from(1)), amount_sent);
-        assert_eq!(st.get_total_balance(AccountId::from(0)), amount_left);
+        assert_eq!(
+            st.get_total_balance(AccountId::try_from(1).unwrap()),
+            amount_sent,
+        );
+        assert_eq!(st.get_total_balance(AccountId::ZERO), amount_left);
 
         st.reset();
 
@@ -1353,8 +1354,11 @@ pub(crate) mod tests {
 
         st.scan_cached_blocks(st.sapling_activation_height(), 2);
 
-        assert_eq!(st.get_total_balance(AccountId::from(1)), amount_sent);
-        assert_eq!(st.get_total_balance(AccountId::from(0)), amount_left);
+        assert_eq!(
+            st.get_total_balance(AccountId::try_from(1).unwrap()),
+            amount_sent,
+        );
+        assert_eq!(st.get_total_balance(AccountId::ZERO), amount_left);
     }
 
     #[test]
@@ -1575,7 +1579,7 @@ pub(crate) mod tests {
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
             &st.wallet().params,
-            AccountId::from(0),
+            AccountId::ZERO,
             Amount::const_from_i64(300000),
             received_tx_height + 10,
             &[],
@@ -1591,7 +1595,7 @@ pub(crate) mod tests {
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
             &st.wallet().params,
-            AccountId::from(0),
+            AccountId::ZERO,
             Amount::const_from_i64(300000),
             received_tx_height + 10,
             &[],

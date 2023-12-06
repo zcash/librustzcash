@@ -71,7 +71,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             // migration is being used to initialize an empty database.
             if let Some(seed) = &self.seed {
                 let account: u32 = row.get(0)?;
-                let account = AccountId::from(account);
+                let account = AccountId::try_from(account).map_err(|_| {
+                    WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())
+                })?;
                 let usk =
                     UnifiedSpendingKey::from_seed(&self.params, seed.expose_secret(), account)
                         .unwrap();

@@ -61,7 +61,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             let account: u32 = row.get(0)?;
-            let account = AccountId::from(account);
+            let account = AccountId::try_from(account).map_err(|_| {
+                WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())
+            })?;
 
             let ufvk_str: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)

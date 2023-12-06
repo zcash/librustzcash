@@ -3114,6 +3114,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",
+ "zip32",
 ]
 
 [[package]]
@@ -3176,4 +3177,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.39",
+]
+
+[[package]]
+name = "zip32"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d724a63be4dfb50b7f3617e542984e22e4b4a5b8ca5de91f55613152885e6b22"
+dependencies = [
+ "blake2b_simd",
+ "memuse",
+ "subtle",
 ]

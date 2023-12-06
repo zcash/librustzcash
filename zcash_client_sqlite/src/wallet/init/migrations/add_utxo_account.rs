@@ -59,18 +59,21 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             let mut rows = stmt_fetch_accounts.query([])?;
             while let Some(row) = rows.next()? {
                 let account: u32 = row.get(0)?;
-                let taddrs =
-                    get_transparent_receivers(transaction, &self._params, AccountId::from(account))
-                        .map_err(|e| match e {
-                            SqliteClientError::DbError(e) => WalletMigrationError::DbError(e),
-                            SqliteClientError::CorruptedData(s) => {
-                                WalletMigrationError::CorruptedData(s)
-                            }
-                            other => WalletMigrationError::CorruptedData(format!(
-                                "Unexpected error in migration: {}",
-                                other
-                            )),
-                        })?;
+                let taddrs = get_transparent_receivers(
+                    transaction,
+                    &self._params,
+                    AccountId::try_from(account).map_err(|_| {
+                        WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())
+                    })?,
+                )
+                .map_err(|e| match e {
+                    SqliteClientError::DbError(e) => WalletMigrationError::DbError(e),
+                    SqliteClientError::CorruptedData(s) => WalletMigrationError::CorruptedData(s),
+                    other => WalletMigrationError::CorruptedData(format!(
+                        "Unexpected error in migration: {}",
+                        other
+                    )),
+                })?;
 
                 for (taddr, _) in taddrs {
                     stmt_update_utxo_account.execute(named_params![

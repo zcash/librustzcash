@@ -455,7 +455,7 @@ mod tests {
 
         // Account balance should reflect both received notes
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             (value + value2).unwrap()
         );
 
@@ -466,7 +466,7 @@ mod tests {
 
         // Account balance should be unaltered
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             (value + value2).unwrap()
         );
 
@@ -476,14 +476,14 @@ mod tests {
             .unwrap();
 
         // Account balance should only contain the first received note
-        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
+        assert_eq!(st.get_total_balance(AccountId::ZERO), value);
 
         // Scan the cache again
         st.scan_cached_blocks(h, 2);
 
         // Account balance should again reflect both received notes
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             (value + value2).unwrap()
         );
     }
@@ -502,7 +502,7 @@ mod tests {
         let value = NonNegativeAmount::const_from_u64(50000);
         let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
         st.scan_cached_blocks(h1, 1);
-        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
+        assert_eq!(st.get_total_balance(AccountId::ZERO), value);
 
         // Create blocks to reach SAPLING_ACTIVATION_HEIGHT + 2
         let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
@@ -514,7 +514,7 @@ mod tests {
         // Now scan the block of height SAPLING_ACTIVATION_HEIGHT + 1
         st.scan_cached_blocks(h2, 1);
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             NonNegativeAmount::const_from_u64(150_000)
         );
 
@@ -567,7 +567,7 @@ mod tests {
         assert_eq!(summary.received_sapling_note_count(), 1);
 
         // Account balance should reflect the received note
-        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
+        assert_eq!(st.get_total_balance(AccountId::ZERO), value);
 
         // Create a second fake CompactBlock sending more value to the address
         let value2 = NonNegativeAmount::const_from_u64(7);
@@ -581,7 +581,7 @@ mod tests {
 
         // Account balance should reflect both received notes
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             (value + value2).unwrap()
         );
     }
@@ -606,7 +606,7 @@ mod tests {
         st.scan_cached_blocks(received_height, 1);
 
         // Account balance should reflect the received note
-        assert_eq!(st.get_total_balance(AccountId::from(0)), value);
+        assert_eq!(st.get_total_balance(AccountId::ZERO), value);
 
         // Create a second fake CompactBlock spending value from the address
         let extsk2 = ExtendedSpendingKey::master(&[0]);
@@ -619,7 +619,7 @@ mod tests {
 
         // Account balance should equal the change
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             (value - value2).unwrap()
         );
     }
@@ -652,7 +652,7 @@ mod tests {
 
         // Account balance should equal the change
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             (value - value2).unwrap()
         );
 
@@ -661,7 +661,7 @@ mod tests {
 
         // Account balance should be the same.
         assert_eq!(
-            st.get_total_balance(AccountId::from(0)),
+            st.get_total_balance(AccountId::ZERO),
             (value - value2).unwrap()
         );
     }

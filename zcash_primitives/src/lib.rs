@@ -18,7 +18,7 @@ pub mod memo;
 pub mod merkle_tree;
 pub mod sapling;
 pub mod transaction;
-pub mod zip32;
+pub use zip32;
 pub mod zip339;
 
 #[cfg(feature = "zfuture")]

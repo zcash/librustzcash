@@ -21,6 +21,7 @@ all-features = true
 equihash.workspace = true
 zcash_address.workspace = true
 zcash_encoding.workspace = true
+zip32.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)

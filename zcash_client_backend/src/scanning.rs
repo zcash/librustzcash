@@ -244,7 +244,7 @@ impl fmt::Display for ScanError {
 /// [`WalletSaplingOutput`]s, whereas the implementation for [`SaplingIvk`] cannot
 /// do so and will return the unit value in those outputs instead.
 ///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: zcash_primitives::sapling::zip32::ExtendedFullViewingKey
 /// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`ScanningKey`]: crate::scanning::ScanningKey
@@ -465,10 +465,9 @@ pub(crate) fn scan_block_with_runner<
             let spend = nullifiers
                 .iter()
                 .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
-                .fold(
-                    CtOption::new(AccountId::from(0), 0.into()),
-                    |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
-                )
+                .fold(CtOption::new(AccountId::ZERO, 0.into()), |first, next| {
+                    CtOption::conditional_select(&next, &first, first.is_some())
+                })
                 .map(|account| WalletSaplingSpend::from_parts(index, spend_nf, account));
 
             if spend.is_some().into() {
@@ -808,7 +807,7 @@ mod tests {
     #[test]
     fn scan_block_with_my_tx() {
         fn go(scan_multithreaded: bool) {
-            let account = AccountId::from(0);
+            let account = AccountId::ZERO;
             let extsk = ExtendedSpendingKey::master(&[]);
             let dfvk = extsk.to_diversifiable_full_viewing_key();
 
@@ -893,7 +892,7 @@ mod tests {
     #[test]
     fn scan_block_with_txs_after_my_tx() {
         fn go(scan_multithreaded: bool) {
-            let account = AccountId::from(0);
+            let account = AccountId::ZERO;
             let extsk = ExtendedSpendingKey::master(&[]);
             let dfvk = extsk.to_diversifiable_full_viewing_key();
 
@@ -928,7 +927,7 @@ mod tests {
             let scanned_block = scan_block_with_runner(
                 &Network::TestNetwork,
                 cb,
-                &[(&AccountId::from(0), &dfvk)],
+                &[(&AccountId::ZERO, &dfvk)],
                 &[],
                 None,
                 batch_runner.as_mut(),
@@ -942,7 +941,7 @@ mod tests {
             assert_eq!(tx.sapling_spends.len(), 0);
             assert_eq!(tx.sapling_outputs.len(), 1);
             assert_eq!(tx.sapling_outputs[0].index(), 0);
-            assert_eq!(tx.sapling_outputs[0].account(), AccountId::from(0));
+            assert_eq!(tx.sapling_outputs[0].account(), AccountId::ZERO);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
 
             assert_eq!(
@@ -971,7 +970,7 @@ mod tests {
         let extsk = ExtendedSpendingKey::master(&[]);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let nf = Nullifier([7; 32]);
-        let account = AccountId::from(12);
+        let account = AccountId::try_from(12).unwrap();
 
         let cb = fake_compact_block(
             1u32.into(),

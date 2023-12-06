@@ -308,8 +308,7 @@ mod tests {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
         init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID]).unwrap();
-        let usk =
-            UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::from(0)).unwrap();
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
 
         db_data
@@ -436,8 +435,7 @@ mod tests {
         let mut tx_bytes = vec![];
         tx.write(&mut tx_bytes).unwrap();
 
-        let usk =
-            UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::from(0)).unwrap();
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk.default_address();
         let taddr = ufvk
