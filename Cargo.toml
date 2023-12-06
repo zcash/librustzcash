@@ -4,6 +4,7 @@ members = [
     "components/f4jumble",
     "components/zcash_address",
     "components/zcash_encoding",
+    "sapling-crypto",
     "zcash_client_backend",
     "zcash_client_sqlite",
     "zcash_extensions",

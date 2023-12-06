@@ -1,0 +1,27 @@
+[package]
+authors = ["Sean Bowe <sean@z.cash>"]
+description = "Cryptographic library for Zcash Sapling"
+documentation = "https://github.com/zcash-hackworks/sapling"
+homepage = "https://github.com/zcash-hackworks/sapling"
+license = "MIT/Apache-2.0"
+name = "sapling-crypto"
+repository = "https://github.com/zcash-hackworks/sapling"
+version = "0.0.1"
+
+[dependencies.pairing]
+path = "../pairing"
+features = ["expose-arith"]
+
+[dependencies]
+bellman = { path = "../bellman" }
+blake2b_simd = "0.5"
+blake2s_simd = "0.5"
+ff = { path = "../ff" }
+rand_core = "0.5"
+digest = "0.8"
+byteorder = "1"
+
+[dev-dependencies]
+hex-literal = "0.1"
+rand_xorshift = "0.2"
+sha2 = "0.8"
