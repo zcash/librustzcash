@@ -2,7 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt::{self, Debug},
+    fmt::Debug,
     io,
     num::{NonZeroU32, TryFromIntError},
 };
@@ -18,12 +18,12 @@ use zcash_primitives::{
     sapling::{self, Node, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
         components::{
-            amount::{Amount, NonNegativeAmount},
+            amount::{Amount, BalanceError, NonNegativeAmount},
             OutPoint,
         },
         Transaction, TxId,
     },
-    zip32::AccountId,
+    zip32::{AccountId, Scope},
 };
 
 use crate::{
@@ -31,7 +31,7 @@ use crate::{
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
-    wallet::{ReceivedSaplingNote, WalletTransparentOutput, WalletTx},
+    wallet::{NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
 };
 
 use self::chain::CommitmentTreeRoot;
@@ -58,19 +58,9 @@ pub enum NullifierQuery {
 /// Balance information for a value within a single pool in an account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
-    /// The value in the account that may currently be spent; it is possible to compute witnesses
-    /// for all the notes that comprise this value, and all of this value is confirmed to the
-    /// required confirmation depth.
-    pub spendable_value: NonNegativeAmount,
-
-    /// The value in the account of shielded change notes that do not yet have sufficient
-    /// confirmations to be spendable.
-    pub change_pending_confirmation: NonNegativeAmount,
-
-    /// The value in the account of all remaining received notes that either do not have sufficient
-    /// confirmations to be spendable, or for which witnesses cannot yet be constructed without
-    /// additional scanning.
-    pub value_pending_spendability: NonNegativeAmount,
+    spendable_value: NonNegativeAmount,
+    change_pending_confirmation: NonNegativeAmount,
+    value_pending_spendability: NonNegativeAmount,
 }
 
 impl Balance {
@@ -80,6 +70,64 @@ impl Balance {
         change_pending_confirmation: NonNegativeAmount::ZERO,
         value_pending_spendability: NonNegativeAmount::ZERO,
     };
+
+    fn check_total_adding(
+        &self,
+        value: NonNegativeAmount,
+    ) -> Result<NonNegativeAmount, BalanceError> {
+        (self.spendable_value
+            + self.change_pending_confirmation
+            + self.value_pending_spendability
+            + value)
+            .ok_or(BalanceError::Overflow)
+    }
+
+    /// Returns the value in the account that may currently be spent; it is possible to compute
+    /// witnesses for all the notes that comprise this value, and all of this value is confirmed to
+    /// the required confirmation depth.
+    pub fn spendable_value(&self) -> NonNegativeAmount {
+        self.spendable_value
+    }
+
+    /// Adds the specified value to the spendable total, checking for overflow.
+    pub fn add_spendable_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.spendable_value = (self.spendable_value + value).unwrap();
+        Ok(())
+    }
+
+    /// Returns the value in the account of shielded change notes that do not yet have sufficient
+    /// confirmations to be spendable.
+    pub fn change_pending_confirmation(&self) -> NonNegativeAmount {
+        self.change_pending_confirmation
+    }
+
+    /// Adds the specified value to the pending change total, checking for overflow.
+    pub fn add_pending_change_value(
+        &mut self,
+        value: NonNegativeAmount,
+    ) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.change_pending_confirmation = (self.change_pending_confirmation + value).unwrap();
+        Ok(())
+    }
+
+    /// Returns the value in the account of all remaining received notes that either do not have
+    /// sufficient confirmations to be spendable, or for which witnesses cannot yet be constructed
+    /// without additional scanning.
+    pub fn value_pending_spendability(&self) -> NonNegativeAmount {
+        self.value_pending_spendability
+    }
+
+    /// Adds the specified value to the pending spendable total, checking for overflow.
+    pub fn add_pending_spendable_value(
+        &mut self,
+        value: NonNegativeAmount,
+    ) -> Result<(), BalanceError> {
+        self.check_total_adding(value)?;
+        self.value_pending_spendability = (self.value_pending_spendability + value).unwrap();
+        Ok(())
+    }
 
     /// Returns the total value of funds represented by this [`Balance`].
     pub fn total(&self) -> NonNegativeAmount {
@@ -93,7 +141,10 @@ impl Balance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccountBalance {
     /// The value of unspent Sapling outputs belonging to the account.
-    pub sapling_balance: Balance,
+    sapling_balance: Balance,
+
+    /// The value of unspent Orchard outputs belonging to the account.
+    orchard_balance: Balance,
 
     /// The value of all unspent transparent outputs belonging to the account, irrespective of
     /// confirmation depth.
@@ -102,19 +153,95 @@ pub struct AccountBalance {
     /// possible operation on a transparent balance is to shield it, it is possible to create a
     /// zero-conf transaction to perform that shielding, and the resulting shielded notes will be
     /// subject to normal confirmation rules.
-    pub unshielded: NonNegativeAmount,
+    unshielded: NonNegativeAmount,
 }
 
 impl AccountBalance {
     /// The [`Balance`] value having zero values for all its fields.
     pub const ZERO: Self = Self {
         sapling_balance: Balance::ZERO,
+        orchard_balance: Balance::ZERO,
         unshielded: NonNegativeAmount::ZERO,
     };
 
+    fn check_total(&self) -> Result<NonNegativeAmount, BalanceError> {
+        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
+            .ok_or(BalanceError::Overflow)
+    }
+
+    /// Returns the [`Balance`] of Sapling funds in the account.
+    pub fn sapling_balance(&self) -> &Balance {
+        &self.sapling_balance
+    }
+
+    /// Provides a `mutable reference to the [`Balance`] of Sapling funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_sapling_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.sapling_balance)?;
+        self.check_total()?;
+        Ok(result)
+    }
+
+    /// Returns the [`Balance`] of Orchard funds in the account.
+    pub fn orchard_balance(&self) -> &Balance {
+        &self.orchard_balance
+    }
+
+    /// Provides a `mutable reference to the [`Balance`] of Orchard funds in the account
+    /// to the specified callback, checking invariants after the callback's action has been
+    /// evaluated.
+    pub fn with_orchard_balance_mut<A, E: From<BalanceError>>(
+        &mut self,
+        f: impl FnOnce(&mut Balance) -> Result<A, E>,
+    ) -> Result<A, E> {
+        let result = f(&mut self.orchard_balance)?;
+        self.check_total()?;
+        Ok(result)
+    }
+
+    /// Returns the total value of unspent transparent transaction outputs belonging to the wallet.
+    pub fn unshielded(&self) -> NonNegativeAmount {
+        self.unshielded
+    }
+
+    /// Adds the specified value to the unshielded total, checking for overflow of
+    /// the total account balance.
+    pub fn add_unshielded_value(&mut self, value: NonNegativeAmount) -> Result<(), BalanceError> {
+        self.unshielded = (self.unshielded + value).ok_or(BalanceError::Overflow)?;
+        self.check_total()?;
+        Ok(())
+    }
+
     /// Returns the total value of funds belonging to the account.
     pub fn total(&self) -> NonNegativeAmount {
-        (self.sapling_balance.total() + self.unshielded)
+        (self.sapling_balance.total() + self.orchard_balance.total() + self.unshielded)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of shielded (Sapling and Orchard) funds that may immediately be
+    /// spent.
+    pub fn spendable_value(&self) -> NonNegativeAmount {
+        (self.sapling_balance.spendable_value + self.orchard_balance.spendable_value)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the total value of change and/or shielding transaction outputs that are awaiting
+    /// sufficient confirmations for spendability.
+    pub fn change_pending_confirmation(&self) -> NonNegativeAmount {
+        (self.sapling_balance.change_pending_confirmation
+            + self.orchard_balance.change_pending_confirmation)
+            .expect("Account balance cannot overflow MAX_MONEY")
+    }
+
+    /// Returns the value of shielded funds that are not yet spendable because additional scanning
+    /// is required before it will be possible to derive witnesses for the associated notes.
+    pub fn value_pending_spendability(&self) -> NonNegativeAmount {
+        (self.sapling_balance.value_pending_spendability
+            + self.orchard_balance.value_pending_spendability)
             .expect("Account balance cannot overflow MAX_MONEY")
     }
 }
@@ -231,7 +358,7 @@ pub trait SaplingInputSource {
         &self,
         txid: &TxId,
         index: u32,
-    ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error>;
 
     /// Returns a list of spendable Sapling notes sufficient to cover the specified target value,
     /// if possible.
@@ -241,7 +368,7 @@ pub trait SaplingInputSource {
         target_value: Amount,
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error>;
 }
 
 /// A trait representing the capability to query a data store for unspent transparent UTXOs
@@ -475,18 +602,20 @@ impl BlockMetadata {
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct ScannedBlock<Nf> {
+pub struct ScannedBlock<Nf, S> {
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
     sapling_tree_size: u32,
     orchard_tree_size: u32,
-    transactions: Vec<WalletTx<Nf>>,
+    transactions: Vec<WalletTx<Nf, S>>,
     sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
     sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+    orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
+    orchard_commitments: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
 }
 
-impl<Nf> ScannedBlock<Nf> {
+impl<Nf, S> ScannedBlock<Nf, S> {
     /// Constructs a new `ScannedBlock`
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -495,9 +624,11 @@ impl<Nf> ScannedBlock<Nf> {
         block_time: u32,
         sapling_tree_size: u32,
         orchard_tree_size: u32,
-        transactions: Vec<WalletTx<Nf>>,
+        transactions: Vec<WalletTx<Nf, S>>,
         sapling_nullifier_map: Vec<(TxId, u16, Vec<sapling::Nullifier>)>,
         sapling_commitments: Vec<(sapling::Node, Retention<BlockHeight>)>,
+        orchard_nullifier_map: Vec<(TxId, u16, Vec<orchard::note::Nullifier>)>,
+        orchard_commitments: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
     ) -> Self {
         Self {
             block_height,
@@ -508,6 +639,8 @@ impl<Nf> ScannedBlock<Nf> {
             transactions,
             sapling_nullifier_map,
             sapling_commitments,
+            orchard_nullifier_map,
+            orchard_commitments,
         }
     }
 
@@ -537,7 +670,7 @@ impl<Nf> ScannedBlock<Nf> {
     }
 
     /// Returns the list of transactions from the block that are relevant to the wallet.
-    pub fn transactions(&self) -> &[WalletTx<Nf>] {
+    pub fn transactions(&self) -> &[WalletTx<Nf, S>] {
         &self.transactions
     }
 
@@ -557,10 +690,34 @@ impl<Nf> ScannedBlock<Nf> {
         &self.sapling_commitments
     }
 
-    /// Consumes `self` and returns the list of Sapling note commitments associated with the
-    /// scanned block as an owned value.
-    pub fn into_sapling_commitments(self) -> Vec<(sapling::Node, Retention<BlockHeight>)> {
-        self.sapling_commitments
+    /// Returns the vector of Orchard nullifiers for each transaction in the block.
+    ///
+    /// The returned tuple is keyed by both transaction ID and the index of the transaction within
+    /// the block, so that either the txid or the combination of the block hash available from
+    /// [`Self::block_hash`] and returned transaction index may be used to uniquely identify the
+    /// transaction, depending upon the needs of the caller.
+    pub fn orchard_nullifier_map(&self) -> &[(TxId, u16, Vec<orchard::note::Nullifier>)] {
+        &self.orchard_nullifier_map
+    }
+
+    /// Returns the ordered list of Orchard note commitments to be added to the note commitment
+    /// tree.
+    pub fn orchard_commitments(
+        &self,
+    ) -> &[(orchard::note::NoteCommitment, Retention<BlockHeight>)] {
+        &self.orchard_commitments
+    }
+
+    /// Consumes `self` and returns the lists of Sapling and Orchard note commitments associated
+    /// with the scanned block as an owned value.
+    #[allow(clippy::type_complexity)]
+    pub fn into_commitments(
+        self,
+    ) -> (
+        Vec<(sapling::Node, Retention<BlockHeight>)>,
+        Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
+    ) {
+        (self.sapling_commitments, self.orchard_commitments)
     }
 
     /// Returns the [`BlockMetadata`] corresponding to the scanned block.
@@ -597,81 +754,6 @@ pub struct SentTransaction<'a> {
     pub fee_amount: Amount,
     #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
-}
-
-/// A shielded transfer protocol supported by the wallet.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ShieldedProtocol {
-    /// The Sapling protocol
-    Sapling,
-    /// The Orchard protocol
-    Orchard,
-}
-
-/// A unique identifier for a shielded transaction output
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NoteId {
-    txid: TxId,
-    protocol: ShieldedProtocol,
-    output_index: u16,
-}
-
-impl NoteId {
-    /// Constructs a new `NoteId` from its parts.
-    pub fn new(txid: TxId, protocol: ShieldedProtocol, output_index: u16) -> Self {
-        Self {
-            txid,
-            protocol,
-            output_index,
-        }
-    }
-
-    /// Returns the ID of the transaction containing this note.
-    pub fn txid(&self) -> &TxId {
-        &self.txid
-    }
-
-    /// Returns the shielded protocol used by this note.
-    pub fn protocol(&self) -> ShieldedProtocol {
-        self.protocol
-    }
-
-    /// Returns the index of this note within its transaction's corresponding list of
-    /// shielded outputs.
-    pub fn output_index(&self) -> u16 {
-        self.output_index
-    }
-}
-
-/// A value pool to which the wallet supports sending transaction outputs.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PoolType {
-    /// The transparent value pool
-    Transparent,
-    /// A shielded value pool.
-    Shielded(ShieldedProtocol),
-}
-
-impl fmt::Display for PoolType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PoolType::Transparent => f.write_str("Transparent"),
-            PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
-            PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
-        }
-    }
-}
-
-/// A type that represents the recipient of a transaction output; a recipient address (and, for
-/// unified addresses, the pool to which the payment is sent) in the case of outgoing output, or an
-/// internal account ID and the pool to which funds were sent in the case of a wallet-internal
-/// output.
-#[derive(Debug, Clone)]
-pub enum Recipient {
-    Transparent(TransparentAddress),
-    Sapling(sapling::PaymentAddress),
-    Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, PoolType),
 }
 
 /// A type that represents an output (either Sapling or transparent) that was sent by the wallet.
@@ -899,7 +981,7 @@ pub trait WalletWrite: WalletRead {
     /// `blocks` must be sequential, in order of increasing block height
     fn put_blocks(
         &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier>>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
     ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
@@ -986,20 +1068,19 @@ pub mod testing {
         memo::Memo,
         sapling,
         transaction::{components::Amount, Transaction, TxId},
-        zip32::AccountId,
+        zip32::{AccountId, Scope},
     };
 
     use crate::{
         address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-        wallet::{ReceivedSaplingNote, WalletTransparentOutput},
+        wallet::{NoteId, ReceivedNote, WalletTransparentOutput},
     };
 
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, NoteId, NullifierQuery, SaplingInputSource, ScannedBlock,
-        SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        DecryptedTransaction, NullifierQuery, SaplingInputSource, ScannedBlock, SentTransaction,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -1031,7 +1112,7 @@ pub mod testing {
             &self,
             _txid: &TxId,
             _index: u32,
-        ) -> Result<Option<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error> {
             Ok(None)
         }
 
@@ -1041,7 +1122,7 @@ pub mod testing {
             _target_value: Amount,
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedSaplingNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error> {
             Ok(Vec::new())
         }
     }
@@ -1209,7 +1290,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
-            _blocks: Vec<ScannedBlock<sapling::Nullifier>>,
+            _blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }

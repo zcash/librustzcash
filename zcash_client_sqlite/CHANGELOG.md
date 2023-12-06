@@ -8,8 +8,9 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Changed
-- `zcash_client_sqlite::error::SqliteClientError` has new error variant:
+- `zcash_client_sqlite::error::SqliteClientError` has new error variants:
   - `SqliteClientError::UnsupportedPoolType`
+  - `SqliteClientError::BalanceError`
 
 ## [0.8.1] - 2023-10-18
 

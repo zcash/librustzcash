@@ -6,24 +6,25 @@ use rusqlite::{named_params, params, types::Value, Connection, Row};
 use std::rc::Rc;
 
 use zcash_primitives::{
-    consensus::BlockHeight,
+    consensus::{self, BlockHeight},
     memo::MemoBytes,
     sapling::{self, Diversifier, Note, Nullifier, Rseed},
     transaction::{
         components::{amount::NonNegativeAmount, Amount},
         TxId,
     },
-    zip32::AccountId,
+    zip32::{AccountId, Scope},
 };
 
 use zcash_client_backend::{
-    wallet::{ReceivedSaplingNote, WalletSaplingOutput},
+    keys::UnifiedFullViewingKey,
+    wallet::{ReceivedNote, WalletNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
 
 use crate::{error::SqliteClientError, ReceivedNoteId};
 
-use super::{memo_repr, wallet_birthday};
+use super::{memo_repr, parse_scope, scope_code, wallet_birthday};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
@@ -34,9 +35,10 @@ pub(crate) trait ReceivedSaplingOutput {
     fn is_change(&self) -> bool;
     fn nullifier(&self) -> Option<&sapling::Nullifier>;
     fn note_commitment_tree_position(&self) -> Option<Position>;
+    fn recipient_key_scope(&self) -> Scope;
 }
 
-impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier> {
+impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope> {
     fn index(&self) -> usize {
         self.index()
     }
@@ -57,6 +59,10 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier> {
     }
     fn note_commitment_tree_position(&self) -> Option<Position> {
         Some(WalletSaplingOutput::note_commitment_tree_position(self))
+    }
+
+    fn recipient_key_scope(&self) -> Scope {
+        *self.recipient_key_scope()
     }
 }
 
@@ -82,9 +88,19 @@ impl ReceivedSaplingOutput for DecryptedOutput<Note> {
     fn note_commitment_tree_position(&self) -> Option<Position> {
         None
     }
+    fn recipient_key_scope(&self) -> Scope {
+        if self.transfer_type == TransferType::WalletInternal {
+            Scope::Internal
+        } else {
+            Scope::External
+        }
+    }
 }
 
-fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, SqliteClientError> {
+fn to_spendable_note<P: consensus::Parameters>(
+    params: &P,
+    row: &Row,
+) -> Result<ReceivedNote<ReceivedNoteId>, SqliteClientError> {
     let note_id = ReceivedNoteId(row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
@@ -124,13 +140,35 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
         })?);
 
-    Ok(ReceivedSaplingNote::from_parts(
+    let ufvk_str: String = row.get(7)?;
+    let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+        .map_err(SqliteClientError::CorruptedData)?;
+
+    let scope_code: i64 = row.get(8)?;
+    let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
+        SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
+    })?;
+
+    let recipient = match spending_key_scope {
+        Scope::Internal => ufvk
+            .sapling()
+            .and_then(|dfvk| dfvk.diversified_change_address(diversifier)),
+        Scope::External => ufvk
+            .sapling()
+            .and_then(|dfvk| dfvk.diversified_address(diversifier)),
+    }
+    .ok_or_else(|| SqliteClientError::CorruptedData("Diversifier invalid.".to_owned()))?;
+
+    Ok(ReceivedNote::from_parts(
         note_id,
         txid,
         output_index,
-        diversifier,
-        note_value,
-        rseed,
+        WalletNote::Sapling(sapling::Note::from_parts(
+            recipient,
+            note_value.into(),
+            rseed,
+        )),
+        spending_key_scope,
         note_commitment_tree_position,
     ))
 }
@@ -139,14 +177,17 @@ fn to_spendable_note(row: &Row) -> Result<ReceivedSaplingNote<ReceivedNoteId>, S
 // (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.
 #[allow(clippy::let_and_return)]
-pub(crate) fn get_spendable_sapling_note(
+pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     conn: &Connection,
+    params: &P,
     txid: &TxId,
     index: u32,
-) -> Result<Option<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId>>, SqliteClientError> {
     let mut stmt_select_note = conn.prepare_cached(
-        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
+        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+                accounts.ufvk, recipient_key_scope
          FROM sapling_received_notes
+         INNER JOIN accounts on accounts.account = sapling_received_notes.account
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
          WHERE txid = :txid
          AND output_index = :output_index
@@ -159,7 +200,7 @@ pub(crate) fn get_spendable_sapling_note(
                ":txid": txid.as_ref(),
                ":output_index": index,
             ],
-            to_spendable_note,
+            |r| to_spendable_note(params, r),
         )?
         .next()
         .transpose();
@@ -182,8 +223,8 @@ fn unscanned_tip_exists(
         "SELECT EXISTS (
              SELECT 1 FROM v_sapling_shard_unscanned_ranges range
              WHERE range.block_range_start <= :anchor_height
-             AND :anchor_height BETWEEN 
-                range.subtree_start_height 
+             AND :anchor_height BETWEEN
+                range.subtree_start_height
                 AND IFNULL(range.subtree_end_height, :anchor_height)
          )",
         named_params![":anchor_height": u32::from(anchor_height),],
@@ -191,13 +232,14 @@ fn unscanned_tip_exists(
     )
 }
 
-pub(crate) fn select_spendable_sapling_notes(
+pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
+    params: &P,
     account: AccountId,
     target_value: Amount,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
-) -> Result<Vec<ReceivedSaplingNote<ReceivedNoteId>>, SqliteClientError> {
+) -> Result<Vec<ReceivedNote<ReceivedNoteId>>, SqliteClientError> {
     let birthday_height = match wallet_birthday(conn)? {
         Some(birthday) => birthday,
         None => {
@@ -229,13 +271,16 @@ pub(crate) fn select_spendable_sapling_notes(
     // 4) Match the selected notes against the witnesses at the desired height.
     let mut stmt_select_notes = conn.prepare_cached(
         "WITH eligible AS (
-             SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+             SELECT
+                 id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
-                    OVER (PARTITION BY account, spent ORDER BY id_note) AS so_far
+                    OVER (PARTITION BY sapling_received_notes.account, spent ORDER BY id_note) AS so_far,
+                 accounts.ufvk as ufvk, recipient_key_scope
              FROM sapling_received_notes
+             INNER JOIN accounts on accounts.account = sapling_received_notes.account
              INNER JOIN transactions
                 ON transactions.id_tx = sapling_received_notes.tx
-             WHERE account = :account
+             WHERE sapling_received_notes.account = :account
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
@@ -251,10 +296,10 @@ pub(crate) fn select_spendable_sapling_notes(
                 AND unscanned.block_range_end > :wallet_birthday
              )
          )
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
          FROM eligible WHERE so_far < :target_value
          UNION
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position
+         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
@@ -269,7 +314,7 @@ pub(crate) fn select_spendable_sapling_notes(
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
         ],
-        to_spendable_note,
+        |r| to_spendable_note(params, r),
     )?;
 
     notes.collect::<Result<_, _>>()
@@ -360,7 +405,9 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
-        (tx, output_index, account, diversifier, value, rcm, memo, nf, is_change, spent, commitment_tree_position)
+        (tx, output_index, account, diversifier, value, rcm, memo, nf,
+         is_change, spent, commitment_tree_position,
+         recipient_key_scope)
         VALUES (
             :tx,
             :output_index,
@@ -372,7 +419,8 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             :nf,
             :is_change,
             :spent,
-            :commitment_tree_position
+            :commitment_tree_position,
+            :recipient_key_scope
         )
         ON CONFLICT (tx, output_index) DO UPDATE
         SET account = :account,
@@ -383,7 +431,8 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             memo = IFNULL(:memo, memo),
             is_change = IFNULL(:is_change, is_change),
             spent = IFNULL(:spent, spent),
-            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position)",
+            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
+            recipient_key_scope = :recipient_key_scope",
     )?;
 
     let rcm = output.note().rcm().to_repr();
@@ -402,6 +451,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":is_change": output.is_change(),
         ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
+        ":recipient_key_scope": scope_code(output.recipient_key_scope()),
     ];
 
     stmt_upsert_received_note
@@ -416,6 +466,7 @@ pub(crate) mod tests {
     use std::{convert::Infallible, num::NonZeroU32};
 
     use incrementalmerkletree::Hashable;
+    use rusqlite::params;
     use secrecy::Secret;
     use zcash_proofs::prover::LocalTxProver;
 
@@ -447,22 +498,22 @@ pub(crate) mod tests {
             chain::CommitmentTreeRoot,
             error::Error,
             wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-            AccountBirthday, Ratio, ShieldedProtocol, WalletCommitmentTrees, WalletRead,
-            WalletWrite,
+            AccountBirthday, Ratio, WalletCommitmentTrees, WalletRead, WalletWrite,
         },
         decrypt_transaction,
         fees::{fixed, standard, DustOutputPolicy},
         keys::UnifiedSpendingKey,
         wallet::OvkPolicy,
         zip321::{self, Payment, TransactionRequest},
+        ShieldedProtocol,
     };
 
     use crate::{
         error::SqliteClientError,
         testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
         wallet::{
-            block_max_scanned, commitment_tree, sapling::select_spendable_sapling_notes,
-            scanning::tests::test_with_canopy_birthday,
+            block_max_scanned, commitment_tree, parse_scope,
+            sapling::select_spendable_sapling_notes, scanning::tests::test_with_canopy_birthday,
         },
         AccountId, NoteId, ReceivedNoteId,
     };
@@ -1149,6 +1200,15 @@ pub(crate) mod tests {
             NonNegativeAmount::ZERO
         );
 
+        let change_note_scope = st.wallet().conn.query_row(
+            "SELECT recipient_key_scope
+             FROM sapling_received_notes
+             WHERE value = ?",
+            params![u64::from(value)],
+            |row| Ok(parse_scope(row.get(0)?)),
+        );
+        assert_matches!(change_note_scope, Ok(Some(Scope::Internal)));
+
         // TODO: This test was originally written to use the pre-zip-313 fee rule
         // and has not yet been updated.
         #[allow(deprecated)]
@@ -1518,6 +1578,7 @@ pub(crate) mod tests {
         // Verify that the received note is not considered spendable
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
+            &st.wallet().params,
             AccountId::ZERO,
             Amount::const_from_i64(300000),
             received_tx_height + 10,
@@ -1533,6 +1594,7 @@ pub(crate) mod tests {
         // Verify that the received note is now considered spendable
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
+            &st.wallet().params,
             AccountId::ZERO,
             Amount::const_from_i64(300000),
             received_tx_height + 10,
@@ -1586,6 +1648,7 @@ pub(crate) mod tests {
         // Verify that our note is considered spendable
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
+            &st.wallet().params,
             account,
             Amount::const_from_i64(300000),
             birthday.height() + 5,

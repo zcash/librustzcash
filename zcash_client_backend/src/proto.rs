@@ -27,10 +27,11 @@ use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 use crate::{
     data_api::{
         wallet::input_selection::{Proposal, ProposalError, SaplingInputs},
-        PoolType, SaplingInputSource, ShieldedProtocol, TransparentInputSource,
+        SaplingInputSource, TransparentInputSource,
     },
     fees::{ChangeValue, TransactionBalance},
     zip321::{TransactionRequest, Zip321Error},
+    PoolType, ShieldedProtocol,
 };
 
 #[rustfmt::skip]

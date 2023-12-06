@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::error;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
@@ -322,6 +323,14 @@ impl From<NonNegativeAmount> for sapling::value::NoteValue {
     }
 }
 
+impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount {
+    type Error = ();
+
+    fn try_from(value: sapling::value::NoteValue) -> Result<Self, Self::Error> {
+        Self::from_u64(value.inner())
+    }
+}
+
 impl TryFrom<Amount> for NonNegativeAmount {
     type Error = ();
 
@@ -393,6 +402,8 @@ pub enum BalanceError {
     Overflow,
     Underflow,
 }
+
+impl error::Error for BalanceError {}
 
 impl std::fmt::Display for BalanceError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
