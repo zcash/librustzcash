@@ -634,7 +634,7 @@ pub struct PreparedOutputVerifyingKey(pub(crate) groth16::PreparedVerifyingKey<B
 
 #[test]
 fn test_input_circuit_with_bls12_381() {
-    use crate::sapling::{
+    use crate::{
         keys::SpendValidatingKey, pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed,
     };
 
@@ -783,7 +783,7 @@ fn test_input_circuit_with_bls12_381() {
 
 #[test]
 fn test_input_circuit_with_bls12_381_external_test_vectors() {
-    use crate::sapling::{
+    use crate::{
         keys::SpendValidatingKey, pedersen_hash, Diversifier, Note, ProofGenerationKey, Rseed,
     };
 
@@ -966,7 +966,7 @@ fn test_input_circuit_with_bls12_381_external_test_vectors() {
 
 #[test]
 fn test_output_circuit_with_bls12_381() {
-    use crate::sapling::{keys::SpendValidatingKey, Diversifier, ProofGenerationKey, Rseed};
+    use crate::{keys::SpendValidatingKey, Diversifier, ProofGenerationKey, Rseed};
 
     use bellman::gadgets::test::*;
     use group::ff::Field;

@@ -4,7 +4,7 @@ use group::GroupEncoding;
 use rand_core::{CryptoRng, RngCore};
 
 use super::SaplingVerificationContextInner;
-use crate::sapling::{
+use crate::{
     bundle::{Authorized, Bundle},
     circuit::{OutputVerifyingKey, SpendVerifyingKey},
 };

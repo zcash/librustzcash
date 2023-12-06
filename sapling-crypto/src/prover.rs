@@ -4,10 +4,9 @@ use bellman::groth16::{create_random_proof, Proof};
 use bls12_381::Bls12;
 use rand_core::RngCore;
 
-use crate::sapling::{
-    self,
+use crate::{
     bundle::GrothProofBytes,
-    circuit::GROTH_PROOF_SIZE,
+    circuit::{self, GROTH_PROOF_SIZE},
     value::{NoteValue, ValueCommitTrapdoor},
     MerklePath,
 };
@@ -35,16 +34,12 @@ pub trait SpendProver {
         rcv: ValueCommitTrapdoor,
         anchor: bls12_381::Scalar,
         merkle_path: MerklePath,
-    ) -> Option<sapling::circuit::Spend>;
+    ) -> Option<circuit::Spend>;
 
     /// Create the proof for a Sapling [`SpendDescription`].
     ///
     /// [`SpendDescription`]: crate::transaction::components::SpendDescription
-    fn create_proof<R: RngCore>(
-        &self,
-        circuit: sapling::circuit::Spend,
-        rng: &mut R,
-    ) -> Self::Proof;
+    fn create_proof<R: RngCore>(&self, circuit: circuit::Spend, rng: &mut R) -> Self::Proof;
 
     /// Encodes the given Sapling [`SpendDescription`] proof, erasing its type.
     ///
@@ -66,16 +61,12 @@ pub trait OutputProver {
         rcm: jubjub::Fr,
         value: NoteValue,
         rcv: ValueCommitTrapdoor,
-    ) -> sapling::circuit::Output;
+    ) -> circuit::Output;
 
     /// Create the proof for a Sapling [`OutputDescription`].
     ///
     /// [`OutputDescription`]: crate::transaction::components::OutputDescription
-    fn create_proof<R: RngCore>(
-        &self,
-        circuit: sapling::circuit::Output,
-        rng: &mut R,
-    ) -> Self::Proof;
+    fn create_proof<R: RngCore>(&self, circuit: circuit::Output, rng: &mut R) -> Self::Proof;
 
     /// Encodes the given Sapling [`OutputDescription`] proof, erasing its type.
     ///
@@ -185,14 +176,10 @@ pub mod mock {
 
     use super::{OutputProver, SpendProver};
     use crate::{
-        sapling::{
-            self,
-            bundle::GrothProofBytes,
-            circuit::ValueCommitmentOpening,
-            value::{NoteValue, ValueCommitTrapdoor},
-            Diversifier, PaymentAddress, ProofGenerationKey, Rseed,
-        },
-        transaction::components::GROTH_PROOF_SIZE,
+        bundle::GrothProofBytes,
+        circuit::{self, ValueCommitmentOpening, GROTH_PROOF_SIZE},
+        value::{NoteValue, ValueCommitTrapdoor},
+        Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
     };
 
     pub struct MockSpendProver;
@@ -208,13 +195,13 @@ pub mod mock {
             alpha: jubjub::Fr,
             rcv: ValueCommitTrapdoor,
             anchor: bls12_381::Scalar,
-            _merkle_path: sapling::MerklePath,
-        ) -> Option<sapling::circuit::Spend> {
+            _merkle_path: MerklePath,
+        ) -> Option<circuit::Spend> {
             let payment_address = proof_generation_key
                 .to_viewing_key()
                 .ivk()
                 .to_payment_address(diversifier);
-            Some(sapling::circuit::Spend {
+            Some(circuit::Spend {
                 value_commitment_opening: Some(ValueCommitmentOpening {
                     value,
                     randomness: rcv.inner(),
@@ -230,7 +217,7 @@ pub mod mock {
 
         fn create_proof<R: rand_core::RngCore>(
             &self,
-            _circuit: sapling::circuit::Spend,
+            _circuit: circuit::Spend,
             _rng: &mut R,
         ) -> Self::Proof {
             [0u8; GROTH_PROOF_SIZE]
@@ -252,8 +239,8 @@ pub mod mock {
             rcm: jubjub::Fr,
             value: NoteValue,
             rcv: ValueCommitTrapdoor,
-        ) -> sapling::circuit::Output {
-            sapling::circuit::Output {
+        ) -> circuit::Output {
+            circuit::Output {
                 value_commitment_opening: Some(ValueCommitmentOpening {
                     value,
                     randomness: rcv.inner(),
@@ -266,7 +253,7 @@ pub mod mock {
 
         fn create_proof<R: rand_core::RngCore>(
             &self,
-            _circuit: sapling::circuit::Output,
+            _circuit: circuit::Output,
             _rng: &mut R,
         ) -> Self::Proof {
             [0u8; GROTH_PROOF_SIZE]

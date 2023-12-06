@@ -6,7 +6,7 @@ use group::GroupEncoding;
 use redjubjub::Binding;
 
 use super::{NoteValue, ValueCommitTrapdoor, ValueCommitment};
-use crate::sapling::constants::VALUE_COMMITMENT_VALUE_GENERATOR;
+use crate::constants::VALUE_COMMITMENT_VALUE_GENERATOR;
 
 /// A value operation overflowed.
 #[derive(Debug)]

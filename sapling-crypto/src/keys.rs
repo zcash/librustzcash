@@ -692,7 +692,7 @@ mod tests {
     use group::{Group, GroupEncoding};
 
     use super::{FullViewingKey, SpendAuthorizingKey, SpendValidatingKey};
-    use crate::sapling::{constants::SPENDING_KEY_GENERATOR, test_vectors};
+    use crate::{constants::SPENDING_KEY_GENERATOR, test_vectors};
 
     #[test]
     fn ak_must_be_prime_order() {

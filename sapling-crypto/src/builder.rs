@@ -8,12 +8,12 @@ use rand::{seq::SliceRandom, RngCore};
 use rand_core::CryptoRng;
 use redjubjub::{Binding, SpendAuth};
 
-use crate::sapling::{
-    self,
+use crate::{
     bundle::{
         Authorization, Authorized, Bundle, GrothProofBytes, MapAuth, OutputDescription,
         SpendDescription,
     },
+    circuit,
     keys::{OutgoingViewingKey, SpendAuthorizingKey, SpendValidatingKey},
     note_encryption::{sapling_note_encryption, Zip212Enforcement},
     prover::{OutputProver, SpendProver},
@@ -195,7 +195,7 @@ impl SaplingOutputInfo {
     fn build<Pr: OutputProver, R: RngCore>(
         self,
         rng: &mut R,
-    ) -> OutputDescription<sapling::circuit::Output> {
+    ) -> OutputDescription<circuit::Output> {
         let encryptor = sapling_note_encryption::<R>(
             self.ovk,
             self.note.clone(),
@@ -318,7 +318,7 @@ impl SaplingBuilder {
     ///
     /// This may be larger than the number of outputs that have been added to the builder,
     /// depending on whether padding is going to be applied.
-    pub(crate) fn bundle_output_count(&self) -> usize {
+    pub fn bundle_output_count(&self) -> usize {
         // This matches the padding behaviour in `Self::build`.
         match self.spends.len() {
             0 => self.outputs.len(),
@@ -493,24 +493,16 @@ impl SaplingBuilder {
         };
         assert_eq!(redjubjub::VerificationKey::from(&bsk), bvk);
 
-        let bundle = if shielded_spends.is_empty() && shielded_outputs.is_empty() {
-            None
-        } else {
-            Some((
-                Bundle::from_parts(
-                    shielded_spends,
-                    shielded_outputs,
-                    value_balance,
-                    InProgress {
-                        sigs: Unsigned { bsk },
-                        _proof_state: PhantomData::default(),
-                    },
-                ),
-                tx_metadata,
-            ))
-        };
-
-        Ok(bundle)
+        Ok(Bundle::from_parts(
+            shielded_spends,
+            shielded_outputs,
+            value_balance,
+            InProgress {
+                sigs: Unsigned { bsk },
+                _proof_state: PhantomData::default(),
+            },
+        )
+        .map(|b| (b, tx_metadata)))
     }
 }
 
@@ -555,8 +547,8 @@ impl<P: InProgressProofs, S: InProgressSignatures> Authorization for InProgress<
 pub struct Unproven;
 
 impl InProgressProofs for Unproven {
-    type SpendProof = sapling::circuit::Spend;
-    type OutputProof = sapling::circuit::Output;
+    type SpendProof = circuit::Spend;
+    type OutputProof = circuit::Output;
 }
 
 /// Marker for a [`Bundle`] with proofs.
@@ -639,13 +631,13 @@ impl<
         U: ProverProgress,
     > MapAuth<InProgress<Unproven, S>, InProgress<Proven, S>> for CreateProofs<'a, SP, OP, R, U>
 {
-    fn map_spend_proof(&mut self, spend: sapling::circuit::Spend) -> GrothProofBytes {
+    fn map_spend_proof(&mut self, spend: circuit::Spend) -> GrothProofBytes {
         let proof = self.spend_prover.create_proof(spend, &mut self.rng);
         self.update_progress();
         SP::encode_proof(proof)
     }
 
-    fn map_output_proof(&mut self, output: sapling::circuit::Output) -> GrothProofBytes {
+    fn map_output_proof(&mut self, output: circuit::Output) -> GrothProofBytes {
         let proof = self.output_prover.create_proof(output, &mut self.rng);
         self.update_progress();
         OP::encode_proof(proof)
@@ -872,7 +864,7 @@ pub mod testing {
     use proptest::prelude::*;
     use rand::{rngs::StdRng, SeedableRng};
 
-    use crate::sapling::{
+    use crate::{
         bundle::{Authorized, Bundle},
         note_encryption::Zip212Enforcement,
         prover::mock::{MockOutputProver, MockSpendProver},

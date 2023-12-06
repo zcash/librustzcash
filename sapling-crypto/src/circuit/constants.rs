@@ -1,6 +1,7 @@
 //! Various constants used for the Zcash proofs.
 
-use crate::sapling::constants::{PEDERSEN_HASH_CHUNKS_PER_GENERATOR, PEDERSEN_HASH_GENERATORS};
+use crate::constants::{PEDERSEN_HASH_CHUNKS_PER_GENERATOR, PEDERSEN_HASH_GENERATORS};
+
 use bls12_381::Scalar;
 use group::{ff::Field, Curve, Group};
 use jubjub::ExtendedPoint;
@@ -42,22 +43,22 @@ pub type FixedGeneratorOwned = Vec<Vec<(Scalar, Scalar)>>;
 
 lazy_static! {
     pub static ref PROOF_GENERATION_KEY_GENERATOR: FixedGeneratorOwned =
-        generate_circuit_generator(crate::sapling::constants::PROOF_GENERATION_KEY_GENERATOR);
+        generate_circuit_generator(crate::constants::PROOF_GENERATION_KEY_GENERATOR);
 
     pub static ref NOTE_COMMITMENT_RANDOMNESS_GENERATOR: FixedGeneratorOwned =
-        generate_circuit_generator(crate::sapling::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR);
+        generate_circuit_generator(crate::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR);
 
     pub static ref NULLIFIER_POSITION_GENERATOR: FixedGeneratorOwned =
-        generate_circuit_generator(crate::sapling::constants::NULLIFIER_POSITION_GENERATOR);
+        generate_circuit_generator(crate::constants::NULLIFIER_POSITION_GENERATOR);
 
     pub static ref VALUE_COMMITMENT_VALUE_GENERATOR: FixedGeneratorOwned =
-        generate_circuit_generator(crate::sapling::constants::VALUE_COMMITMENT_VALUE_GENERATOR);
+        generate_circuit_generator(crate::constants::VALUE_COMMITMENT_VALUE_GENERATOR);
 
     pub static ref VALUE_COMMITMENT_RANDOMNESS_GENERATOR: FixedGeneratorOwned =
-        generate_circuit_generator(crate::sapling::constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR);
+        generate_circuit_generator(crate::constants::VALUE_COMMITMENT_RANDOMNESS_GENERATOR);
 
     pub static ref SPENDING_KEY_GENERATOR: FixedGeneratorOwned =
-        generate_circuit_generator(crate::sapling::constants::SPENDING_KEY_GENERATOR);
+        generate_circuit_generator(crate::constants::SPENDING_KEY_GENERATOR);
 
     /// The pre-computed window tables `[-4, 3, 2, 1, 1, 2, 3, 4]` of different magnitudes
     /// of the Pedersen hash segment generators.

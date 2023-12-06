@@ -3,7 +3,7 @@ use bls12_381::Bls12;
 use group::{ff::PrimeField, Curve};
 use redjubjub::{Binding, SpendAuth};
 
-use crate::sapling::{
+use crate::{
     note::ExtractedNoteCommitment,
     value::{CommitmentSum, ValueCommitment},
 };

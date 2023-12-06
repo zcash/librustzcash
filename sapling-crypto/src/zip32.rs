@@ -9,21 +9,18 @@ use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
 use zcash_spec::PrfExpand;
+use zip32::{ChainCode, ChildIndex, DiversifierIndex, Scope};
 
 use std::io::{self, Read, Write};
 use std::ops::AddAssign;
 
 use super::{Diversifier, NullifierDerivingKey, PaymentAddress, ViewingKey};
 use crate::{
-    sapling::{
-        constants::PROOF_GENERATION_KEY_GENERATOR,
-        keys::{
-            DecodingError, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey,
-            SpendAuthorizingKey,
-        },
-        SaplingIvk,
+    constants::PROOF_GENERATION_KEY_GENERATOR,
+    keys::{
+        DecodingError, ExpandedSpendingKey, FullViewingKey, OutgoingViewingKey, SpendAuthorizingKey,
     },
-    zip32::{ChainCode, ChildIndex, DiversifierIndex, Scope},
+    SaplingIvk,
 };
 
 pub const ZIP32_SAPLING_MASTER_PERSONALIZATION: &[u8; 16] = b"ZcashIP32Sapling";

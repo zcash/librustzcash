@@ -7,7 +7,7 @@ use zcash_note_encryption::{
     EphemeralKeyBytes, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTEXT_SIZE,
 };
 
-use crate::sapling::{
+use crate::{
     circuit::GROTH_PROOF_SIZE,
     note::ExtractedNoteCommitment,
     note_encryption::{CompactOutputDescription, SaplingDomain},
@@ -158,33 +158,21 @@ pub struct Bundle<A: Authorization, V> {
 
 impl<A: Authorization, V> Bundle<A, V> {
     /// Constructs a `Bundle` from its constituent parts.
-    #[cfg(feature = "temporary-zcashd")]
-    pub fn temporary_zcashd_from_parts(
+    pub fn from_parts(
         shielded_spends: Vec<SpendDescription<A>>,
         shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
         value_balance: V,
         authorization: A,
-    ) -> Self {
-        Self::from_parts(
-            shielded_spends,
-            shielded_outputs,
-            value_balance,
-            authorization,
-        )
-    }
-
-    /// Constructs a `Bundle` from its constituent parts.
-    pub(crate) fn from_parts(
-        shielded_spends: Vec<SpendDescription<A>>,
-        shielded_outputs: Vec<OutputDescription<A::OutputProof>>,
-        value_balance: V,
-        authorization: A,
-    ) -> Self {
-        Bundle {
-            shielded_spends,
-            shielded_outputs,
-            value_balance,
-            authorization,
+    ) -> Option<Self> {
+        if shielded_spends.is_empty() && shielded_outputs.is_empty() {
+            None
+        } else {
+            Some(Bundle {
+                shielded_spends,
+                shielded_outputs,
+                value_balance,
+                authorization,
+            })
         }
     }
 
@@ -331,19 +319,8 @@ impl<A: Authorization> std::fmt::Debug for SpendDescription<A> {
 }
 
 impl<A: Authorization> SpendDescription<A> {
-    #[cfg(feature = "temporary-zcashd")]
-    pub fn temporary_zcashd_from_parts(
-        cv: ValueCommitment,
-        anchor: bls12_381::Scalar,
-        nullifier: Nullifier,
-        rk: redjubjub::VerificationKey<SpendAuth>,
-        zkproof: A::SpendProof,
-        spend_auth_sig: A::AuthSig,
-    ) -> Self {
-        Self::from_parts(cv, anchor, nullifier, rk, zkproof, spend_auth_sig)
-    }
-
-    pub(crate) fn from_parts(
+    /// Constructs a v4 `SpendDescription` from its constituent parts.
+    pub fn from_parts(
         cv: ValueCommitment,
         anchor: bls12_381::Scalar,
         nullifier: Nullifier,
@@ -410,7 +387,8 @@ pub struct SpendDescriptionV5 {
 }
 
 impl SpendDescriptionV5 {
-    pub(crate) fn from_parts(
+    /// Constructs a v5 `SpendDescription` from its constituent parts.
+    pub fn from_parts(
         cv: ValueCommitment,
         nullifier: Nullifier,
         rk: redjubjub::VerificationKey<SpendAuth>,
@@ -475,26 +453,8 @@ impl<Proof> OutputDescription<Proof> {
         &self.zkproof
     }
 
-    #[cfg(feature = "temporary-zcashd")]
-    pub fn temporary_zcashd_from_parts(
-        cv: ValueCommitment,
-        cmu: ExtractedNoteCommitment,
-        ephemeral_key: EphemeralKeyBytes,
-        enc_ciphertext: [u8; ENC_CIPHERTEXT_SIZE],
-        out_ciphertext: [u8; OUT_CIPHERTEXT_SIZE],
-        zkproof: Proof,
-    ) -> Self {
-        Self::from_parts(
-            cv,
-            cmu,
-            ephemeral_key,
-            enc_ciphertext,
-            out_ciphertext,
-            zkproof,
-        )
-    }
-
-    pub(crate) fn from_parts(
+    /// Constructs a v4 `OutputDescription` from its constituent parts.
+    pub fn from_parts(
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
@@ -578,7 +538,8 @@ pub struct OutputDescriptionV5 {
 memuse::impl_no_dynamic_usage!(OutputDescriptionV5);
 
 impl OutputDescriptionV5 {
-    pub(crate) fn from_parts(
+    /// Constructs a v5 `OutputDescription` from its constituent parts.
+    pub fn from_parts(
         cv: ValueCommitment,
         cmu: ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
@@ -630,15 +591,13 @@ pub mod testing {
     use rand::{rngs::StdRng, SeedableRng};
 
     use crate::{
-        sapling::{
-            note::testing::arb_cmu,
-            value::{
-                testing::{arb_note_value_bounded, arb_trapdoor},
-                ValueCommitment, MAX_NOTE_VALUE,
-            },
-            Nullifier,
+        circuit::GROTH_PROOF_SIZE,
+        note::testing::arb_cmu,
+        value::{
+            testing::{arb_note_value_bounded, arb_trapdoor},
+            ValueCommitment, MAX_NOTE_VALUE,
         },
-        transaction::components::GROTH_PROOF_SIZE,
+        Nullifier,
     };
 
     use super::{

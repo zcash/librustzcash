@@ -28,6 +28,7 @@ categories = ["cryptography::cryptocurrencies"]
 [workspace.dependencies]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
+sapling = { package = "sapling-crypto", version = "0.0", path = "sapling-crypto" }
 zcash_address = { version = "0.3", path = "components/zcash_address" }
 zcash_client_backend = { version = "0.10", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }

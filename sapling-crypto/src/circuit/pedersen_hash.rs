@@ -1,7 +1,8 @@
 //! Gadget for Zcash's Pedersen hash.
 
 use super::ecc::{EdwardsPoint, MontgomeryPoint};
-pub use crate::sapling::pedersen_hash::Personalization;
+pub use crate::pedersen_hash::Personalization;
+
 use bellman::gadgets::boolean::Boolean;
 use bellman::gadgets::lookup::*;
 use bellman::{ConstraintSystem, SynthesisError};
@@ -105,7 +106,8 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::sapling::pedersen_hash;
+    use crate::pedersen_hash;
+
     use bellman::gadgets::boolean::{AllocatedBit, Boolean};
     use bellman::gadgets::test::*;
     use group::{ff::PrimeField, Curve};

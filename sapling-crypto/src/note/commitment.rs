@@ -4,7 +4,7 @@ use bitvec::{array::BitArray, order::Lsb0};
 use group::ff::PrimeField;
 use subtle::{ConstantTimeEq, CtOption};
 
-use crate::sapling::{
+use crate::{
     pedersen_hash::Personalization,
     spec::{extract_p, windowed_pedersen_commit},
     value::NoteValue,

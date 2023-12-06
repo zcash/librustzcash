@@ -631,9 +631,7 @@ mod test {
     use bellman::gadgets::test::*;
 
     use super::{fixed_base_multiplication, AllocatedNum, EdwardsPoint, MontgomeryPoint};
-    use crate::sapling::circuit::constants::{
-        to_montgomery_coords, NOTE_COMMITMENT_RANDOMNESS_GENERATOR,
-    };
+    use crate::circuit::constants::{to_montgomery_coords, NOTE_COMMITMENT_RANDOMNESS_GENERATOR};
     use bellman::gadgets::boolean::{AllocatedBit, Boolean};
 
     #[test]
@@ -735,7 +733,7 @@ mod test {
         for _ in 0..100 {
             let mut cs = TestConstraintSystem::<bls12_381::Scalar>::new();
 
-            let p = crate::sapling::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR;
+            let p = crate::constants::NOTE_COMMITMENT_RANDOMNESS_GENERATOR;
             let s = jubjub::Fr::random(&mut rng);
             let q = jubjub::ExtendedPoint::from(p * s).to_affine();
             let (u1, v1) = (q.get_u(), q.get_v());

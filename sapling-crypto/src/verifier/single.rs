@@ -3,7 +3,7 @@ use bls12_381::Bls12;
 use redjubjub::{Binding, SpendAuth};
 
 use super::SaplingVerificationContextInner;
-use crate::sapling::{
+use crate::{
     circuit::{PreparedOutputVerifyingKey, PreparedSpendVerifyingKey},
     note::ExtractedNoteCommitment,
     value::ValueCommitment,

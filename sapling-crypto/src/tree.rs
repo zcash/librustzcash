@@ -132,7 +132,7 @@ pub(super) mod testing {
     use proptest::prelude::*;
 
     use super::Node;
-    use crate::sapling::note::testing::arb_cmu;
+    use crate::note::testing::arb_cmu;
 
     prop_compose! {
         pub fn arb_node()(cmu in arb_cmu()) -> Node {

@@ -4,7 +4,7 @@ use std::fmt;
 use subtle::{Choice, ConstantTimeEq};
 
 use super::NoteCommitment;
-use crate::sapling::{
+use crate::{
     keys::NullifierDerivingKey,
     spec::{mixing_pedersen_hash, prf_nf},
 };

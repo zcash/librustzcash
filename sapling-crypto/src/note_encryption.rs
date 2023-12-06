@@ -15,7 +15,7 @@ use zcash_note_encryption::{
     ENC_CIPHERTEXT_SIZE, NOTE_PLAINTEXT_SIZE, OUT_PLAINTEXT_SIZE,
 };
 
-use crate::sapling::{
+use crate::{
     bundle::{GrothProofBytes, OutputDescription},
     keys::{
         DiversifiedTransmissionKey, EphemeralPublicKey, EphemeralSecretKey, OutgoingViewingKey,
@@ -27,7 +27,7 @@ use crate::sapling::{
 
 use super::note::ExtractedNoteCommitment;
 
-pub use crate::sapling::keys::{PreparedEphemeralPublicKey, PreparedIncomingViewingKey};
+pub use crate::keys::{PreparedEphemeralPublicKey, PreparedIncomingViewingKey};
 
 pub const KDF_SAPLING_PERSONALIZATION: &[u8; 16] = b"Zcash_SaplingKDF";
 pub const PRF_OCK_PERSONALIZATION: &[u8; 16] = b"Zcash_Derive_ock";
@@ -357,15 +357,12 @@ impl ShieldedOutput<SaplingDomain, COMPACT_NOTE_SIZE> for CompactOutputDescripti
 /// ```
 /// use ff::Field;
 /// use rand_core::OsRng;
-/// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, NetworkUpgrade, Parameters},
-///     sapling::{
-///         keys::OutgoingViewingKey,
-///         note_encryption::{sapling_note_encryption, Zip212Enforcement},
-///         util::generate_random_rseed,
-///         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
-///         Diversifier, PaymentAddress, Rseed, SaplingIvk,
-///     },
+/// use sapling_crypto::{
+///     keys::OutgoingViewingKey,
+///     note_encryption::{sapling_note_encryption, Zip212Enforcement},
+///     util::generate_random_rseed,
+///     value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},
+///     Diversifier, PaymentAddress, Rseed, SaplingIvk,
 /// };
 ///
 /// let mut rng = OsRng;
@@ -378,7 +375,6 @@ impl ShieldedOutput<SaplingDomain, COMPACT_NOTE_SIZE> for CompactOutputDescripti
 /// let value = NoteValue::from_raw(1000);
 /// let rcv = ValueCommitTrapdoor::random(&mut rng);
 /// let cv = ValueCommitment::derive(value, rcv);
-/// let height = TEST_NETWORK.activation_height(NetworkUpgrade::Canopy).unwrap();
 /// let rseed = generate_random_rseed(
 ///     Zip212Enforcement::GracePeriod,
 ///     &mut rng,
@@ -488,7 +484,7 @@ mod tests {
         Zip212Enforcement,
     };
 
-    use crate::sapling::{
+    use crate::{
         bundle::{GrothProofBytes, OutputDescription},
         circuit::GROTH_PROOF_SIZE,
         keys::{DiversifiedTransmissionKey, EphemeralSecretKey, OutgoingViewingKey},

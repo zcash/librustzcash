@@ -47,10 +47,10 @@ fn read_cmu<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 
 /// Consensus rules (§7.3) & (§7.4):
 /// - Canonical encoding is enforced here
-pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<bls12_381::Scalar> {
+pub fn read_base<R: Read>(mut reader: R, field: &str) -> io::Result<jubjub::Base> {
     let mut f = [0u8; 32];
     reader.read_exact(&mut f)?;
-    Option::from(bls12_381::Scalar::from_repr(f)).ok_or_else(|| {
+    Option::from(jubjub::Base::from_repr(f)).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{} not in field", field),
@@ -379,7 +379,7 @@ pub(crate) fn read_v5_bundle<R: Read>(
         .map(|(od_5, zkproof)| od_5.into_output_description(zkproof))
         .collect();
 
-    Ok(binding_sig.map(|binding_sig| {
+    Ok(binding_sig.and_then(|binding_sig| {
         Bundle::from_parts(
             shielded_spends,
             shielded_outputs,

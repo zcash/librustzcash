@@ -1,18 +1,39 @@
-extern crate pairing;
-extern crate bellman;
-extern crate blake2b_simd;
-extern crate blake2s_simd;
-extern crate digest;
-extern crate ff;
-extern crate rand_core;
-extern crate byteorder;
+//! Structs and constants specific to the Sapling shielded pool.
+
+mod address;
+pub mod builder;
+pub mod bundle;
+pub mod circuit;
+pub mod constants;
+pub mod group_hash;
+pub mod keys;
+pub mod note;
+pub mod note_encryption;
+pub mod pedersen_hash;
+pub mod prover;
+mod spec;
+mod tree;
+pub mod util;
+pub mod value;
+mod verifier;
+pub mod zip32;
+
+pub use address::PaymentAddress;
+pub use bundle::Bundle;
+pub use keys::{Diversifier, NullifierDerivingKey, ProofGenerationKey, SaplingIvk, ViewingKey};
+pub use note::{nullifier::Nullifier, Note, Rseed};
+pub use tree::{
+    merkle_hash, CommitmentTree, IncrementalWitness, MerklePath, Node, NOTE_COMMITMENT_TREE_DEPTH,
+};
+pub use verifier::{BatchValidator, SaplingVerificationContext};
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    pub use super::{
+        address::testing::arb_payment_address, keys::testing::arb_incoming_viewing_key,
+        note::testing::arb_note, tree::testing::arb_node,
+    };
+}
 
 #[cfg(test)]
-#[macro_use]
-extern crate hex_literal;
-
-#[cfg(test)]
-extern crate rand_xorshift;
-
-#[cfg(test)]
-extern crate sha2;
+mod test_vectors;
