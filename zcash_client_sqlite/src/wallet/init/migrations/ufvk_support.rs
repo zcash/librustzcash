@@ -88,7 +88,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         ))
                     })?;
                 match decoded {
-                    RecipientAddress::Shielded(decoded_address) => {
+                    RecipientAddress::Sapling(decoded_address) => {
                         let dfvk = ufvk.sapling().expect(
                             "Derivation should have produced a UFVK containing a Sapling component.",
                         );
@@ -97,7 +97,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             return Err(WalletMigrationError::CorruptedData(
                                 format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
                                     address,
-                                    RecipientAddress::Shielded(expected_address).encode(&self.params),
+                                    RecipientAddress::Sapling(expected_address).encode(&self.params),
                                     idx)));
                         }
                     }
@@ -226,7 +226,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         ))
                     })?;
                 let output_pool = match decoded_address {
-                    RecipientAddress::Shielded(_) => {
+                    RecipientAddress::Sapling(_) => {
                         Ok(pool_code(PoolType::Shielded(ShieldedProtocol::Sapling)))
                     }
                     RecipientAddress::Transparent(_) => Ok(pool_code(PoolType::Transparent)),

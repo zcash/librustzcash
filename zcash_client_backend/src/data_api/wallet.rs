@@ -679,7 +679,7 @@ where
                     )));
                 }
             }
-            RecipientAddress::Shielded(addr) => {
+            RecipientAddress::Sapling(addr) => {
                 let memo = payment
                     .memo
                     .as_ref()

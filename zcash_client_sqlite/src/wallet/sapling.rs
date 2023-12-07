@@ -1275,7 +1275,7 @@ pub(crate) mod tests {
         let req = TransactionRequest::new(vec![
             // payment to an external recipient
             Payment {
-                recipient_address: RecipientAddress::Shielded(addr2),
+                recipient_address: RecipientAddress::Sapling(addr2),
                 amount: amount_sent,
                 memo: None,
                 label: None,
@@ -1284,7 +1284,7 @@ pub(crate) mod tests {
             },
             // payment back to the originating wallet, simulating legacy change
             Payment {
-                recipient_address: RecipientAddress::Shielded(addr),
+                recipient_address: RecipientAddress::Sapling(addr),
                 amount: amount_legacy_change,
                 memo: None,
                 label: None,
@@ -1398,7 +1398,7 @@ pub(crate) mod tests {
 
         // This first request will fail due to insufficient non-dust funds
         let req = TransactionRequest::new(vec![Payment {
-            recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
+            recipient_address: RecipientAddress::Sapling(dfvk.default_address().1),
             amount: NonNegativeAmount::const_from_u64(50000),
             memo: None,
             label: None,
@@ -1423,7 +1423,7 @@ pub(crate) mod tests {
         // This request will succeed, spending a single dust input to pay the 10000
         // ZAT fee in addition to the 41000 ZAT output to the recipient
         let req = TransactionRequest::new(vec![Payment {
-            recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
+            recipient_address: RecipientAddress::Sapling(dfvk.default_address().1),
             amount: NonNegativeAmount::const_from_u64(41000),
             memo: None,
             label: None,

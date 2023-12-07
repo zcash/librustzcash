@@ -554,7 +554,7 @@ mod parse {
             match v {
                 Param::Amount(a) => payment.amount = a,
                 Param::Memo(m) => match payment.recipient_address {
-                    RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) => {
+                    RecipientAddress::Sapling(_) | RecipientAddress::Unified(_) => {
                         payment.memo = Some(m)
                     }
                     RecipientAddress::Transparent(_) => {
@@ -770,7 +770,7 @@ pub mod testing {
 
     pub fn arb_addr() -> impl Strategy<Value = RecipientAddress> {
         prop_oneof![
-            arb_payment_address().prop_map(RecipientAddress::Shielded),
+            arb_payment_address().prop_map(RecipientAddress::Sapling),
             arb_transparent_addr().prop_map(RecipientAddress::Transparent),
             arb_unified_addr().prop_map(RecipientAddress::Unified),
         ]
@@ -797,7 +797,7 @@ pub mod testing {
 
             let is_shielded = match recipient_address {
                 RecipientAddress::Transparent(_) => false,
-                RecipientAddress::Shielded(_) | RecipientAddress::Unified(_) => true,
+                RecipientAddress::Sapling(_) | RecipientAddress::Unified(_) => true,
             };
 
             Payment {
@@ -899,7 +899,7 @@ mod tests {
         let expected = TransactionRequest {
             payments: vec![
                 Payment {
-                    recipient_address: RecipientAddress::Shielded(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: RecipientAddress::Sapling(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::const_from_u64(376876902796286),
                     memo: None,
                     label: None,
@@ -920,7 +920,7 @@ mod tests {
         let expected = TransactionRequest {
             payments: vec![
                 Payment {
-                    recipient_address: RecipientAddress::Shielded(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: RecipientAddress::Sapling(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::ZERO,
                     memo: None,
                     label: None,
@@ -938,7 +938,7 @@ mod tests {
         let req = TransactionRequest {
             payments: vec![
                 Payment {
-                    recipient_address: RecipientAddress::Shielded(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: RecipientAddress::Sapling(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::ZERO,
                     memo: None,
                     label: None,

@@ -176,14 +176,14 @@ impl UnifiedAddress {
 // TODO: rename to ParsedAddress
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RecipientAddress {
-    Shielded(PaymentAddress),
+    Sapling(PaymentAddress),
     Transparent(TransparentAddress),
     Unified(UnifiedAddress),
 }
 
 impl From<PaymentAddress> for RecipientAddress {
     fn from(addr: PaymentAddress) -> Self {
-        RecipientAddress::Shielded(addr)
+        RecipientAddress::Sapling(addr)
     }
 }
 
@@ -237,7 +237,7 @@ impl RecipientAddress {
         let net = params.address_network().expect("Unrecognized network");
 
         match self {
-            RecipientAddress::Shielded(pa) => ZcashAddress::from_sapling(net, pa.to_bytes()),
+            RecipientAddress::Sapling(pa) => ZcashAddress::from_sapling(net, pa.to_bytes()),
             RecipientAddress::Transparent(addr) => match addr {
                 TransparentAddress::PublicKey(data) => {
                     ZcashAddress::from_transparent_p2pkh(net, *data)

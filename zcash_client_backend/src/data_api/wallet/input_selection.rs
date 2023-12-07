@@ -513,7 +513,7 @@ where
                 RecipientAddress::Transparent(addr) => {
                     push_transparent(*addr);
                 }
-                RecipientAddress::Shielded(_) => {
+                RecipientAddress::Sapling(_) => {
                     push_sapling();
                 }
                 RecipientAddress::Unified(addr) => {
