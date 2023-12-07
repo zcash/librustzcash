@@ -8,13 +8,13 @@ use aes::Aes256;
 use blake2b_simd::Params as Blake2bParams;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use fpe::ff1::{BinaryNumeralString, FF1};
+use zcash_spec::PrfExpand;
 
 use std::io::{self, Read, Write};
 use std::ops::AddAssign;
 
 use super::{Diversifier, NullifierDerivingKey, PaymentAddress, ViewingKey};
 use crate::{
-    keys::{prf_expand, prf_expand_vec},
     sapling::{
         constants::PROOF_GENERATION_KEY_GENERATOR,
         keys::{
@@ -69,7 +69,7 @@ pub fn sapling_default_address(
 /// Convenience function for child OVK derivation
 fn derive_child_ovk(parent: &OutgoingViewingKey, i_l: &[u8]) -> OutgoingViewingKey {
     let mut ovk = [0u8; 32];
-    ovk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x15], &parent.0]).as_bytes()[..32]);
+    ovk.copy_from_slice(&PrfExpand::SAPLING_ZIP32_CHILD_OVK.with(i_l, &parent.0)[..32]);
     OutgoingViewingKey(ovk)
 }
 
@@ -91,9 +91,9 @@ pub fn sapling_derive_internal_fvk(
         h.update(&dk.0);
         h.finalize()
     };
-    let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i.as_bytes(), &[0x17]).as_array());
-    let r = prf_expand(i.as_bytes(), &[0x18]);
-    let r = r.as_bytes();
+    let i_nsk =
+        jubjub::Fr::from_bytes_wide(&PrfExpand::SAPLING_ZIP32_INTERNAL_NSK.with(i.as_bytes()));
+    let r = PrfExpand::SAPLING_ZIP32_INTERNAL_DK_OVK.with(i.as_bytes());
     // PROOF_GENERATION_KEY_GENERATOR = \mathcal{H}^Sapling
     let nk_internal = NullifierDerivingKey(PROOF_GENERATION_KEY_GENERATOR * i_nsk + fvk.vk.nk.0);
     let dk_internal = DiversifierKey(r[..32].try_into().unwrap());
@@ -156,7 +156,7 @@ pub struct DiversifierKey([u8; 32]);
 impl DiversifierKey {
     pub fn master(sk_m: &[u8]) -> Self {
         let mut dk_m = [0u8; 32];
-        dk_m.copy_from_slice(&prf_expand(sk_m, &[0x10]).as_bytes()[..32]);
+        dk_m.copy_from_slice(&PrfExpand::SAPLING_ZIP32_MASTER_DK.with(sk_m)[..32]);
         DiversifierKey(dk_m)
     }
 
@@ -172,7 +172,7 @@ impl DiversifierKey {
 
     fn derive_child(&self, i_l: &[u8]) -> Self {
         let mut dk = [0u8; 32];
-        dk.copy_from_slice(&prf_expand_vec(i_l, &[&[0x16], &self.0]).as_bytes()[..32]);
+        dk.copy_from_slice(&PrfExpand::SAPLING_ZIP32_CHILD_DK.with(i_l, &self.0)[..32]);
         DiversifierKey(dk)
     }
 
@@ -422,14 +422,16 @@ impl ExtendedSpendingKey {
         let tmp = {
             let mut le_i = [0; 4];
             LittleEndian::write_u32(&mut le_i, i.index());
-            prf_expand_vec(
+            PrfExpand::SAPLING_ZIP32_CHILD_HARDENED.with(
                 self.chain_code.as_bytes(),
-                &[&[0x11], &self.expsk.to_bytes(), &self.dk.0, &le_i],
+                &self.expsk.to_bytes(),
+                &self.dk.0,
+                &le_i,
             )
         };
-        let i_l = &tmp.as_bytes()[..32];
+        let i_l = &tmp[..32];
         let mut c_i = [0u8; 32];
-        c_i.copy_from_slice(&tmp.as_bytes()[32..]);
+        c_i.copy_from_slice(&tmp[32..]);
 
         ExtendedSpendingKey {
             depth: self.depth + 1,
@@ -437,8 +439,10 @@ impl ExtendedSpendingKey {
             child_index: KeyIndex::Child(i),
             chain_code: ChainCode::new(c_i),
             expsk: {
-                let mut ask = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x13]).as_array());
-                let mut nsk = jubjub::Fr::from_bytes_wide(prf_expand(i_l, &[0x14]).as_array());
+                let mut ask =
+                    jubjub::Fr::from_bytes_wide(&PrfExpand::SAPLING_ZIP32_CHILD_I_ASK.with(i_l));
+                let mut nsk =
+                    jubjub::Fr::from_bytes_wide(&PrfExpand::SAPLING_ZIP32_CHILD_I_NSK.with(i_l));
                 ask.add_assign(self.expsk.ask.to_scalar());
                 nsk.add_assign(&self.expsk.nsk);
                 let ovk = derive_child_ovk(&self.expsk.ovk, i_l);
@@ -474,9 +478,9 @@ impl ExtendedSpendingKey {
             h.update(&self.dk.0);
             h.finalize()
         };
-        let i_nsk = jubjub::Fr::from_bytes_wide(prf_expand(i.as_bytes(), &[0x17]).as_array());
-        let r = prf_expand(i.as_bytes(), &[0x18]);
-        let r = r.as_bytes();
+        let i_nsk =
+            jubjub::Fr::from_bytes_wide(&PrfExpand::SAPLING_ZIP32_INTERNAL_NSK.with(i.as_bytes()));
+        let r = PrfExpand::SAPLING_ZIP32_INTERNAL_DK_OVK.with(i.as_bytes());
         let nsk_internal = i_nsk + self.expsk.nsk;
         let dk_internal = DiversifierKey(r[..32].try_into().unwrap());
         let ovk_internal = OutgoingViewingKey(r[32..].try_into().unwrap());

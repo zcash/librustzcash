@@ -358,9 +358,9 @@ impl ShieldedOutput<SaplingDomain, COMPACT_NOTE_SIZE> for CompactOutputDescripti
 /// use ff::Field;
 /// use rand_core::OsRng;
 /// use zcash_primitives::{
-///     keys::{OutgoingViewingKey, prf_expand},
 ///     consensus::{TEST_NETWORK, NetworkUpgrade, Parameters},
 ///     sapling::{
+///         keys::OutgoingViewingKey,
 ///         note_encryption::{sapling_note_encryption, Zip212Enforcement},
 ///         util::generate_random_rseed,
 ///         value::{NoteValue, ValueCommitTrapdoor, ValueCommitment},

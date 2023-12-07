@@ -215,6 +215,9 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `zcash_primitives::sapling::constants`).
+- `zcash_primitives::keys`:
+  - `PRF_EXPAND_PERSONALIZATION`
+  - `prf_expand, prf_expand_vec` (use `zcash_spec::PrfExpand` instead).
 - `zcash_primitives::sapling`:
   - `bundle`:
     - `SpendDescription::{read, read_nullifier, read_rk, read_spend_auth_sig}`

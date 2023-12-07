@@ -39,6 +39,7 @@ ff = "0.13"
 group = "0.13"
 incrementalmerkletree = "0.5"
 shardtree = "0.2"
+zcash_spec = "0.1"
 
 # Payment protocols
 # - Sapling
