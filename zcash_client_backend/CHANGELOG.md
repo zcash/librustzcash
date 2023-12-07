@@ -28,7 +28,7 @@ and this library adheres to Rust's notion of
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
     functionality and move it behind the `transparent-inputs` feature flag.
-- `zcash_client_backend::fees::standard`
+- `zcash_client_backend::fees::{standard, sapling}`
 - `zcash_client_backend::wallet`:
   - `WalletNote`
   - `ReceivedNote`

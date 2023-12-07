@@ -4,18 +4,19 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::{
-            amount::NonNegativeAmount, sapling::fees as sapling, transparent::fees as transparent,
-        },
+        components::amount::NonNegativeAmount,
         fees::{
             fixed::FeeRule as FixedFeeRule,
+            transparent,
             zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
             StandardFeeRule,
         },
     },
 };
 
-use super::{fixed, zip317, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance};
+use super::{
+    fixed, sapling, zip317, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance,
+};
 
 /// A change strategy that proposes change as a single output to the most current supported
 /// shielded pool and delegates fee calculation to the provided fee rule.

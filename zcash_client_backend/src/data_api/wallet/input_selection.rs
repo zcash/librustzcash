@@ -10,7 +10,6 @@ use zcash_primitives::{
     transaction::{
         components::{
             amount::{BalanceError, NonNegativeAmount},
-            sapling::fees as sapling,
             TxOut,
         },
         fees::FeeRule,
@@ -21,7 +20,7 @@ use zcash_primitives::{
 use crate::{
     address::{RecipientAddress, UnifiedAddress},
     data_api::SaplingInputSource,
-    fees::{ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
+    fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
     wallet::{ReceivedNote, WalletTransparentOutput},
     zip321::TransactionRequest,
 };

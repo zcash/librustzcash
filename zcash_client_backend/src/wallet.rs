@@ -10,15 +10,15 @@ use zcash_primitives::{
     transaction::{
         components::{
             amount::NonNegativeAmount,
-            sapling::fees as sapling_fees,
-            transparent::{self, OutPoint, TxOut},
+            transparent::{OutPoint, TxOut},
         },
+        fees::transparent as transparent_fees,
         TxId,
     },
     zip32::{AccountId, Scope},
 };
 
-use crate::{address::UnifiedAddress, PoolType, ShieldedProtocol};
+use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
 
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -122,7 +122,7 @@ impl WalletTransparentOutput {
     }
 }
 
-impl transparent::fees::InputView for WalletTransparentOutput {
+impl transparent_fees::InputView for WalletTransparentOutput {
     fn outpoint(&self) -> &OutPoint {
         &self.outpoint
     }

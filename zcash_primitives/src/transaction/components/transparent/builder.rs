@@ -7,10 +7,9 @@ use crate::{
     transaction::{
         components::{
             amount::{Amount, BalanceError, NonNegativeAmount},
-            transparent::{self, fees, Authorization, Authorized, Bundle, TxIn, TxOut},
+            transparent::{self, Authorization, Authorized, Bundle, TxIn, TxOut},
         },
         sighash::TransparentAuthorizingContext,
-        OutPoint,
     },
 };
 
@@ -18,6 +17,7 @@ use crate::{
 use {
     crate::transaction::{
         self as tx,
+        components::transparent::OutPoint,
         sighash::{signature_hash, SignableInput, SIGHASH_ALL},
         TransactionData, TxDigests,
     },
@@ -40,25 +40,9 @@ impl fmt::Display for Error {
     }
 }
 
-/// An uninhabited type that allows the type of [`TransparentBuilder::inputs`]
-/// to resolve when the transparent-inputs feature is not turned on.
-#[cfg(not(feature = "transparent-inputs"))]
-#[derive(Debug)]
-enum InvalidTransparentInput {}
-
-#[cfg(not(feature = "transparent-inputs"))]
-impl fees::InputView for InvalidTransparentInput {
-    fn outpoint(&self) -> &OutPoint {
-        panic!("transparent-inputs feature flag is not enabled.");
-    }
-    fn coin(&self) -> &TxOut {
-        panic!("transparent-inputs feature flag is not enabled.");
-    }
-}
-
 #[cfg(feature = "transparent-inputs")]
 #[derive(Debug, Clone)]
-struct TransparentInputInfo {
+pub struct TransparentInputInfo {
     sk: secp256k1::SecretKey,
     pubkey: [u8; secp256k1::constants::PUBLIC_KEY_SIZE],
     utxo: OutPoint,
@@ -66,12 +50,12 @@ struct TransparentInputInfo {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl fees::InputView for TransparentInputInfo {
-    fn outpoint(&self) -> &OutPoint {
+impl TransparentInputInfo {
+    pub fn outpoint(&self) -> &OutPoint {
         &self.utxo
     }
 
-    fn coin(&self) -> &TxOut {
+    pub fn coin(&self) -> &TxOut {
         &self.coin
     }
 }
@@ -110,19 +94,13 @@ impl TransparentBuilder {
 
     /// Returns the list of transparent inputs that will be consumed by the transaction being
     /// constructed.
-    pub fn inputs(&self) -> &[impl fees::InputView] {
-        #[cfg(feature = "transparent-inputs")]
-        return &self.inputs;
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        {
-            let invalid: &[InvalidTransparentInput] = &[];
-            invalid
-        }
+    #[cfg(feature = "transparent-inputs")]
+    pub fn inputs(&self) -> &[TransparentInputInfo] {
+        &self.inputs
     }
 
     /// Returns the transparent outputs that will be produced by the transaction being constructed.
-    pub fn outputs(&self) -> &[impl fees::OutputView] {
+    pub fn outputs(&self) -> &[TxOut] {
         &self.vout
     }
 

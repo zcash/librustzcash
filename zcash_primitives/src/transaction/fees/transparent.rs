@@ -1,11 +1,15 @@
 //! Types related to computation of fees and change related to the transparent components
 //! of a transaction.
 
-use super::TxOut;
+use std::convert::Infallible;
+
 use crate::{
     legacy::Script,
-    transaction::{components::amount::NonNegativeAmount, OutPoint},
+    transaction::components::{amount::NonNegativeAmount, transparent::TxOut, OutPoint},
 };
+
+#[cfg(feature = "transparent-inputs")]
+use crate::transaction::components::transparent::builder::TransparentInputInfo;
 
 /// This trait provides a minimized view of a transparent input suitable for use in
 /// fee and change computation.
@@ -14,6 +18,26 @@ pub trait InputView: std::fmt::Debug {
     fn outpoint(&self) -> &OutPoint;
     /// The previous output being spent.
     fn coin(&self) -> &TxOut;
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl InputView for TransparentInputInfo {
+    fn outpoint(&self) -> &OutPoint {
+        self.outpoint()
+    }
+
+    fn coin(&self) -> &TxOut {
+        self.coin()
+    }
+}
+
+impl InputView for Infallible {
+    fn outpoint(&self) -> &OutPoint {
+        unreachable!()
+    }
+    fn coin(&self) -> &TxOut {
+        unreachable!()
+    }
 }
 
 /// This trait provides a minimized view of a transparent output suitable for use in

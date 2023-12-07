@@ -2,14 +2,15 @@
 
 use crate::{
     consensus::{self, BlockHeight},
-    transaction::components::{amount::NonNegativeAmount, transparent::fees as transparent},
+    transaction::components::amount::NonNegativeAmount,
 };
 
-#[cfg(feature = "zfuture")]
-use crate::transaction::components::tze::fees as tze;
-
 pub mod fixed;
+pub mod transparent;
 pub mod zip317;
+
+#[cfg(feature = "zfuture")]
+pub mod tze;
 
 /// A trait that represents the ability to compute the fees that must be paid
 /// by a transaction having a specified set of inputs and outputs.
@@ -52,6 +53,7 @@ pub trait FutureFeeRule: FeeRule {
         transparent_outputs: &[impl transparent::OutputView],
         sapling_input_count: usize,
         sapling_output_count: usize,
+        orchard_action_count: usize,
         tze_inputs: &[impl tze::InputView],
         tze_outputs: &[impl tze::OutputView],
     ) -> Result<NonNegativeAmount, Self::Error>;

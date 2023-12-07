@@ -21,8 +21,6 @@ use crate::{
 
 use super::{Amount, GROTH_PROOF_SIZE};
 
-pub mod fees;
-
 /// Consensus rules (§4.4) & (§4.5):
 /// - Canonical encoding is enforced here.
 /// - "Not small order" is enforced here.

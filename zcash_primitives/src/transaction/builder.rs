@@ -20,8 +20,7 @@ use crate::{
     transaction::{
         components::{
             amount::{Amount, BalanceError},
-            sapling::fees as sapling_fees,
-            transparent::{self, builder::TransparentBuilder},
+            transparent::{self, builder::TransparentBuilder, TxOut},
         },
         fees::FeeRule,
         sighash::{signature_hash, SignableInput},
@@ -31,7 +30,10 @@ use crate::{
 };
 
 #[cfg(feature = "transparent-inputs")]
-use crate::transaction::components::transparent::TxOut;
+use crate::transaction::components::transparent::builder::TransparentInputInfo;
+
+#[cfg(not(feature = "transparent-inputs"))]
+use std::convert::Infallible;
 
 #[cfg(feature = "zfuture")]
 use crate::{
@@ -184,25 +186,26 @@ impl<'a, P, R> Builder<'a, P, R> {
 
     /// Returns the set of transparent inputs currently committed to be consumed
     /// by the transaction.
-    pub fn transparent_inputs(&self) -> &[impl transparent::fees::InputView] {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn transparent_inputs(&self) -> &[TransparentInputInfo] {
         self.transparent_builder.inputs()
     }
 
     /// Returns the set of transparent outputs currently set to be produced by
     /// the transaction.
-    pub fn transparent_outputs(&self) -> &[impl transparent::fees::OutputView] {
+    pub fn transparent_outputs(&self) -> &[TxOut] {
         self.transparent_builder.outputs()
     }
 
     /// Returns the set of Sapling inputs currently committed to be consumed
     /// by the transaction.
-    pub fn sapling_inputs(&self) -> &[impl sapling_fees::InputView<()>] {
+    pub fn sapling_inputs(&self) -> &[sapling::builder::SpendDescriptionInfo] {
         self.sapling_builder.inputs()
     }
 
     /// Returns the set of Sapling outputs currently set to be produced by
     /// the transaction.
-    pub fn sapling_outputs(&self) -> &[impl sapling_fees::OutputView] {
+    pub fn sapling_outputs(&self) -> &[sapling::builder::SaplingOutputInfo] {
         self.sapling_builder.outputs()
     }
 }
@@ -414,10 +417,16 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
     pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<NonNegativeAmount, FR::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_inputs = self.transparent_builder.inputs();
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let transparent_inputs: &[Infallible] = &[];
+
         fee_rule.fee_required(
             &self.params,
             self.target_height,
-            self.transparent_builder.inputs(),
+            transparent_inputs,
             self.transparent_builder.outputs(),
             self.sapling_builder.inputs().len(),
             self.sapling_builder.bundle_output_count(),
@@ -460,14 +469,28 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_inputs = self.transparent_builder.inputs();
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let transparent_inputs: &[Infallible] = &[];
+
         let fee = fee_rule
             .fee_required_zfuture(
                 &self.params,
                 self.target_height,
-                self.transparent_builder.inputs(),
+                transparent_inputs,
                 self.transparent_builder.outputs(),
                 self.sapling_builder.inputs().len(),
                 self.sapling_builder.bundle_output_count(),
+                std::cmp::max(
+                    self.orchard_builder
+                        .as_ref()
+                        .map_or(0, |builder| builder.outputs().len()),
+                    self.orchard_builder
+                        .as_ref()
+                        .map_or(0, |builder| builder.spends().len()),
+                ),
                 self.tze_builder.inputs(),
                 self.tze_builder.outputs(),
             )

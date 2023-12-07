@@ -4,17 +4,14 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::{
-        components::{
-            amount::{BalanceError, NonNegativeAmount},
-            sapling::fees as sapling,
-            transparent::fees as transparent,
-        },
-        fees::{fixed::FeeRule as FixedFeeRule, FeeRule},
+        components::amount::{BalanceError, NonNegativeAmount},
+        fees::{fixed::FeeRule as FixedFeeRule, transparent, FeeRule},
     },
 };
 
 use super::{
-    ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy, TransactionBalance,
+    sapling, ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
+    TransactionBalance,
 };
 
 /// A change strategy that and proposes change as a single output to the most current supported
