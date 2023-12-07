@@ -173,33 +173,32 @@ impl UnifiedAddress {
 }
 
 /// An address that funds can be sent to.
-// TODO: rename to ParsedAddress
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum RecipientAddress {
+pub enum Address {
     Sapling(PaymentAddress),
     Transparent(TransparentAddress),
     Unified(UnifiedAddress),
 }
 
-impl From<PaymentAddress> for RecipientAddress {
+impl From<PaymentAddress> for Address {
     fn from(addr: PaymentAddress) -> Self {
-        RecipientAddress::Sapling(addr)
+        Address::Sapling(addr)
     }
 }
 
-impl From<TransparentAddress> for RecipientAddress {
+impl From<TransparentAddress> for Address {
     fn from(addr: TransparentAddress) -> Self {
-        RecipientAddress::Transparent(addr)
+        Address::Transparent(addr)
     }
 }
 
-impl From<UnifiedAddress> for RecipientAddress {
+impl From<UnifiedAddress> for Address {
     fn from(addr: UnifiedAddress) -> Self {
-        RecipientAddress::Unified(addr)
+        Address::Unified(addr)
     }
 }
 
-impl TryFromRawAddress for RecipientAddress {
+impl TryFromRawAddress for Address {
     type Error = &'static str;
 
     fn try_from_raw_sapling(data: [u8; 43]) -> Result<Self, ConversionError<Self::Error>> {
@@ -212,7 +211,7 @@ impl TryFromRawAddress for RecipientAddress {
     ) -> Result<Self, ConversionError<Self::Error>> {
         UnifiedAddress::try_from(ua)
             .map_err(ConversionError::User)
-            .map(RecipientAddress::from)
+            .map(Address::from)
     }
 
     fn try_from_raw_transparent_p2pkh(
@@ -226,7 +225,7 @@ impl TryFromRawAddress for RecipientAddress {
     }
 }
 
-impl RecipientAddress {
+impl Address {
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
         let addr = ZcashAddress::try_from_encoded(s).ok()?;
         addr.convert_if_network(params.address_network().expect("Unrecognized network"))
@@ -237,14 +236,14 @@ impl RecipientAddress {
         let net = params.address_network().expect("Unrecognized network");
 
         match self {
-            RecipientAddress::Sapling(pa) => ZcashAddress::from_sapling(net, pa.to_bytes()),
-            RecipientAddress::Transparent(addr) => match addr {
+            Address::Sapling(pa) => ZcashAddress::from_sapling(net, pa.to_bytes()),
+            Address::Transparent(addr) => match addr {
                 TransparentAddress::PublicKey(data) => {
                     ZcashAddress::from_transparent_p2pkh(net, *data)
                 }
                 TransparentAddress::Script(data) => ZcashAddress::from_transparent_p2sh(net, *data),
             },
-            RecipientAddress::Unified(ua) => ua.to_address(net),
+            Address::Unified(ua) => ua.to_address(net),
         }
         .to_string()
     }
@@ -255,7 +254,7 @@ mod tests {
     use zcash_address::test_vectors;
     use zcash_primitives::{consensus::MAIN_NETWORK, zip32::AccountId};
 
-    use super::{RecipientAddress, UnifiedAddress};
+    use super::{Address, UnifiedAddress};
     use crate::keys::sapling;
 
     #[test]
@@ -276,19 +275,16 @@ mod tests {
 
         let ua = UnifiedAddress::from_receivers(orchard, sapling, transparent).unwrap();
 
-        let addr = RecipientAddress::Unified(ua);
+        let addr = Address::Unified(ua);
         let addr_str = addr.encode(&MAIN_NETWORK);
-        assert_eq!(
-            RecipientAddress::decode(&MAIN_NETWORK, &addr_str),
-            Some(addr)
-        );
+        assert_eq!(Address::decode(&MAIN_NETWORK, &addr_str), Some(addr));
     }
 
     #[test]
     fn ua_parsing() {
         for tv in test_vectors::UNIFIED {
-            match RecipientAddress::decode(&MAIN_NETWORK, tv.unified_addr) {
-                Some(RecipientAddress::Unified(ua)) => {
+            match Address::decode(&MAIN_NETWORK, tv.unified_addr) {
+                Some(Address::Unified(ua)) => {
                     assert_eq!(
                         ua.transparent().is_some(),
                         tv.p2pkh_bytes.is_some() || tv.p2sh_bytes.is_some()

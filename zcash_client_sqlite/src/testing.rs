@@ -17,7 +17,7 @@ use tempfile::TempDir;
 use zcash_client_backend::fees::{standard, DustOutputPolicy};
 #[allow(deprecated)]
 use zcash_client_backend::{
-    address::RecipientAddress,
+    address::Address,
     data_api::{
         self,
         chain::{scan_cached_blocks, BlockSource, ScanSummary},
@@ -438,7 +438,7 @@ impl<Cache> TestState<Cache> {
     pub(crate) fn create_spend_to_address(
         &mut self,
         usk: &UnifiedSpendingKey,
-        to: &RecipientAddress,
+        to: &Address,
         amount: NonNegativeAmount,
         memo: Option<MemoBytes>,
         ovk_policy: OvkPolicy,
@@ -545,7 +545,7 @@ impl<Cache> TestState<Cache> {
         spend_from_account: AccountId,
         fee_rule: StandardFeeRule,
         min_confirmations: NonZeroU32,
-        to: &RecipientAddress,
+        to: &Address,
         amount: NonNegativeAmount,
         memo: Option<MemoBytes>,
         change_memo: Option<MemoBytes>,

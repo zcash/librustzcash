@@ -8,7 +8,7 @@ use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 
 use zcash_client_backend::{
-    address::RecipientAddress, keys::UnifiedSpendingKey, PoolType, ShieldedProtocol,
+    address::Address, keys::UnifiedSpendingKey, PoolType, ShieldedProtocol,
 };
 use zcash_primitives::{consensus, zip32::AccountId};
 
@@ -80,15 +80,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let ufvk = usk.to_unified_full_viewing_key();
 
                 let address: String = row.get(1)?;
-                let decoded =
-                    RecipientAddress::decode(&self.params, &address).ok_or_else(|| {
-                        WalletMigrationError::CorruptedData(format!(
-                            "Could not decode {} as a valid Zcash address.",
-                            address
-                        ))
-                    })?;
+                let decoded = Address::decode(&self.params, &address).ok_or_else(|| {
+                    WalletMigrationError::CorruptedData(format!(
+                        "Could not decode {} as a valid Zcash address.",
+                        address
+                    ))
+                })?;
                 match decoded {
-                    RecipientAddress::Sapling(decoded_address) => {
+                    Address::Sapling(decoded_address) => {
                         let dfvk = ufvk.sapling().expect(
                             "Derivation should have produced a UFVK containing a Sapling component.",
                         );
@@ -97,21 +96,21 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             return Err(WalletMigrationError::CorruptedData(
                                 format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
                                     address,
-                                    RecipientAddress::Sapling(expected_address).encode(&self.params),
+                                    Address::Sapling(expected_address).encode(&self.params),
                                     idx)));
                         }
                     }
-                    RecipientAddress::Transparent(_) => {
+                    Address::Transparent(_) => {
                         return Err(WalletMigrationError::CorruptedData(
                             "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
                     }
-                    RecipientAddress::Unified(decoded_address) => {
+                    Address::Unified(decoded_address) => {
                         let (expected_address, idx) = ufvk.default_address();
                         if decoded_address != expected_address {
                             return Err(WalletMigrationError::CorruptedData(
                                 format!("Decoded unified address {} does not match the ufvk's default address {} at {:?}.",
                                     address,
-                                    RecipientAddress::Unified(expected_address).encode(&self.params),
+                                    Address::Unified(expected_address).encode(&self.params),
                                     idx)));
                         }
                     }
@@ -218,19 +217,18 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let value: i64 = row.get(5)?;
                 let memo: Option<Vec<u8>> = row.get(6)?;
 
-                let decoded_address =
-                    RecipientAddress::decode(&self.params, &address).ok_or_else(|| {
-                        WalletMigrationError::CorruptedData(format!(
-                            "Could not decode {} as a valid Zcash address.",
-                            address
-                        ))
-                    })?;
+                let decoded_address = Address::decode(&self.params, &address).ok_or_else(|| {
+                    WalletMigrationError::CorruptedData(format!(
+                        "Could not decode {} as a valid Zcash address.",
+                        address
+                    ))
+                })?;
                 let output_pool = match decoded_address {
-                    RecipientAddress::Sapling(_) => {
+                    Address::Sapling(_) => {
                         Ok(pool_code(PoolType::Shielded(ShieldedProtocol::Sapling)))
                     }
-                    RecipientAddress::Transparent(_) => Ok(pool_code(PoolType::Transparent)),
-                    RecipientAddress::Unified(_) => Err(WalletMigrationError::CorruptedData(
+                    Address::Transparent(_) => Ok(pool_code(PoolType::Transparent)),
+                    Address::Unified(_) => Err(WalletMigrationError::CorruptedData(
                         "Unified addresses should not yet appear in the sent_notes table."
                             .to_string(),
                     )),

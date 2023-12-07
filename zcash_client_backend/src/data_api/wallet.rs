@@ -17,7 +17,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::RecipientAddress,
+    address::Address,
     data_api::{
         error::Error, wallet::input_selection::Proposal, DecryptedTransaction, SentTransaction,
         SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
@@ -200,7 +200,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     spend_prover: &impl SpendProver,
     output_prover: &impl OutputProver,
     usk: &UnifiedSpendingKey,
-    to: &RecipientAddress,
+    to: &Address,
     amount: NonNegativeAmount,
     memo: Option<MemoBytes>,
     ovk_policy: OvkPolicy,
@@ -430,7 +430,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     fee_rule: StandardFeeRule,
     spend_from_account: AccountId,
     min_confirmations: NonZeroU32,
-    to: &RecipientAddress,
+    to: &Address,
     amount: NonNegativeAmount,
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
@@ -646,7 +646,7 @@ where
     let mut transparent_output_meta = vec![];
     for payment in proposal.transaction_request().payments() {
         match &payment.recipient_address {
-            RecipientAddress::Unified(ua) => {
+            Address::Unified(ua) => {
                 let memo = payment
                     .memo
                     .as_ref()
@@ -679,7 +679,7 @@ where
                     )));
                 }
             }
-            RecipientAddress::Sapling(addr) => {
+            Address::Sapling(addr) => {
                 let memo = payment
                     .memo
                     .as_ref()
@@ -687,7 +687,7 @@ where
                 builder.add_sapling_output(external_ovk, *addr, payment.amount, memo.clone())?;
                 sapling_output_meta.push((Recipient::Sapling(*addr), payment.amount, Some(memo)));
             }
-            RecipientAddress::Transparent(to) => {
+            Address::Transparent(to) => {
                 if payment.memo.is_some() {
                     return Err(Error::MemoForbidden);
                 } else {
