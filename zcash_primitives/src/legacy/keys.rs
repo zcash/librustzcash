@@ -4,8 +4,9 @@ use hdwallet::{
 };
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
+use zcash_spec::PrfExpand;
 
-use crate::{consensus, keys::prf_expand_vec, zip32::AccountId};
+use crate::{consensus, zip32::AccountId};
 
 use super::TransparentAddress;
 
@@ -111,11 +112,8 @@ impl AccountPubKey {
     ///
     /// [transparent-ovk]: https://zips.z.cash/zip-0316#deriving-internal-keys
     pub fn ovks_for_shielding(&self) -> (InternalOvk, ExternalOvk) {
-        let i_ovk = prf_expand_vec(
-            &self.0.chain_code,
-            &[&[0xd0], &self.0.public_key.serialize()],
-        );
-        let i_ovk = i_ovk.as_bytes();
+        let i_ovk = PrfExpand::TRANSPARENT_ZIP316_OVK
+            .with(&self.0.chain_code, &self.0.public_key.serialize());
         let ovk_external = ExternalOvk(i_ovk[..32].try_into().unwrap());
         let ovk_internal = InternalOvk(i_ovk[32..].try_into().unwrap());
 

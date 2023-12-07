@@ -17,7 +17,6 @@ use super::{
         PreparedBaseSubgroup, PreparedScalar,
     },
 };
-use crate::keys::prf_expand;
 
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::{Field, PrimeField};
@@ -25,6 +24,7 @@ use group::{Curve, Group, GroupEncoding};
 use redjubjub::SpendAuth;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::EphemeralKeyBytes;
+use zcash_spec::PrfExpand;
 
 #[cfg(test)]
 use rand_core::RngCore;
@@ -69,7 +69,7 @@ impl From<&SpendValidatingKey> for jubjub::ExtendedPoint {
 impl SpendAuthorizingKey {
     /// Derives ask from sk. Internal use only, does not enforce all constraints.
     fn derive_inner(sk: &[u8]) -> jubjub::Scalar {
-        jubjub::Scalar::from_bytes_wide(prf_expand(sk, &[0x00]).as_array())
+        jubjub::Scalar::from_bytes_wide(&PrfExpand::SAPLING_ASK.with(sk))
     }
 
     /// Constructs a `SpendAuthorizingKey` from a raw scalar.
@@ -232,10 +232,10 @@ impl ExpandedSpendingKey {
     pub fn from_spending_key(sk: &[u8]) -> Self {
         let ask =
             SpendAuthorizingKey::from_spending_key(sk).expect("negligible chance of ask == 0");
-        let nsk = jubjub::Fr::from_bytes_wide(prf_expand(sk, &[0x01]).as_array());
+        let nsk = jubjub::Fr::from_bytes_wide(&PrfExpand::SAPLING_NSK.with(sk));
         let mut ovk = OutgoingViewingKey([0u8; 32]);
         ovk.0
-            .copy_from_slice(&prf_expand(sk, &[0x02]).as_bytes()[..32]);
+            .copy_from_slice(&PrfExpand::SAPLING_OVK.with(sk)[..32]);
         ExpandedSpendingKey { ask, nsk, ovk }
     }
 

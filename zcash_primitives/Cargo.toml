@@ -48,6 +48,7 @@ group = { workspace = true, features = ["wnaf-memuse"] }
 jubjub.workspace = true
 nonempty.workspace = true
 orchard.workspace = true
+zcash_spec.workspace = true
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }

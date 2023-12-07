@@ -3114,6 +3114,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",
+ "zcash_spec",
  "zip32",
 ]
 
@@ -3137,6 +3138,15 @@ dependencies = [
  "wagyu-zcash-parameters",
  "xdg",
  "zcash_primitives",
+]
+
+[[package]]
+name = "zcash_spec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7a3bf58b673cb3dacd8ae09ba345998923a197ab0da70d6239d8e8838949e9b"
+dependencies = [
+ "blake2b_simd",
 ]
 
 [[package]]
