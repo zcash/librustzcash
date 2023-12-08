@@ -19,8 +19,9 @@ and this library adheres to Rust's notion of
   - `builder::{InProgressProofs, Unproven, Proven}`
   - `builder::{InProgressSignatures, Unsigned, PartiallyAuthorized}`
   - `builder::{MaybeSigned, SigningParts}`
-  - `builder::{SpendDescriptionInfo::value}`
-  - `builder::{SaplingOutputInfo}`
+  - `builder::SpendDescriptionInfo::value`
+  - `builder::SaplingOutputInfo`
+  - `builder::ProverProgress`
   - `bundle` module, containing the following types moved from
     `zcash_primitives::transaction::components::sapling`:
     - `Bundle`
@@ -180,10 +181,15 @@ and this library adheres to Rust's notion of
     `redjubjub::VerificationKey<Binding>` instead of
     `zcash_primitives::sapling::redjubjub::PublicKey`.
 - `zcash_primitives::transaction`:
+  - `builder::Builder` now has a generic parameter for the type of progress
+    notifier, which needs to implement `sapling::builder::ProverProgress` in
+    order to build transactions.
   - `builder::Builder::{build, build_zfuture}` now take
     `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
   - `builder::Builder::add_sapling_spend` no longer takes a `diversifier`
     argument as the diversifier may be obtained from the note.
+  - `builder::Builder::with_progress_notifier` now consumes `self` and returns a
+    `Builder` typed on the provided channel.
   - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
     instead of `Amount`.
   - `components::transparent::fees` has been moved to 

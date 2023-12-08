@@ -130,11 +130,16 @@ pub struct Progress {
     end: Option<u32>,
 }
 
-impl Progress {
-    pub fn new(cur: u32, end: Option<u32>) -> Self {
-        Self { cur, end }
+impl From<(u32, u32)> for Progress {
+    fn from((cur, end): (u32, u32)) -> Self {
+        Self {
+            cur,
+            end: Some(end),
+        }
     }
+}
 
+impl Progress {
     /// Returns the number of steps completed so far while building the transaction.
     ///
     /// Note that each step may not be of the same complexity/duration.
@@ -152,7 +157,7 @@ impl Progress {
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
-pub struct Builder<'a, P, R> {
+pub struct Builder<'a, P, R, U: sapling::builder::ProverProgress> {
     params: P,
     rng: R,
     target_height: BlockHeight,
@@ -170,10 +175,10 @@ pub struct Builder<'a, P, R> {
     tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
     #[cfg(not(feature = "zfuture"))]
     tze_builder: std::marker::PhantomData<&'a ()>,
-    progress_notifier: Option<Sender<Progress>>,
+    progress_notifier: U,
 }
 
-impl<'a, P, R> Builder<'a, P, R> {
+impl<'a, P, R, U: sapling::builder::ProverProgress> Builder<'a, P, R, U> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -210,7 +215,7 @@ impl<'a, P, R> Builder<'a, P, R> {
     }
 }
 
-impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
+impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng, ()> {
     /// Creates a new `Builder` targeted for inclusion in the block with the given height,
     /// using default values for general transaction fields and the default OS random.
     ///
@@ -227,7 +232,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng> {
     }
 }
 
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, ()> {
     /// Creates a new `Builder` targeted for inclusion in the block with the given height
     /// and randomness source, using default values for general transaction fields.
     ///
@@ -240,7 +245,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         target_height: BlockHeight,
         orchard_anchor: Option<orchard::tree::Anchor>,
         rng: R,
-    ) -> Builder<'a, P, R> {
+    ) -> Self {
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
             orchard_anchor.map(|anchor| {
                 orchard::builder::Builder::new(
@@ -278,10 +283,39 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
             tze_builder: std::marker::PhantomData,
-            progress_notifier: None,
+            progress_notifier: (),
         }
     }
 
+    /// Sets the notifier channel, where progress of building the transaction is sent.
+    ///
+    /// An update is sent after every Sapling Spend or Output is computed, and the `u32`
+    /// sent represents the total steps completed so far. It will eventually send number
+    /// of spends + outputs. If there's an error building the transaction, the channel is
+    /// closed.
+    pub fn with_progress_notifier(
+        self,
+        progress_notifier: Sender<Progress>,
+    ) -> Builder<'a, P, R, Sender<Progress>> {
+        Builder {
+            params: self.params,
+            rng: self.rng,
+            target_height: self.target_height,
+            expiry_height: self.expiry_height,
+            transparent_builder: self.transparent_builder,
+            sapling_builder: self.sapling_builder,
+            orchard_builder: self.orchard_builder,
+            sapling_asks: self.sapling_asks,
+            orchard_saks: self.orchard_saks,
+            tze_builder: self.tze_builder,
+            progress_notifier,
+        }
+    }
+}
+
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::ProverProgress>
+    Builder<'a, P, R, U>
+{
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -378,16 +412,6 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         value: NonNegativeAmount,
     ) -> Result<(), transparent::builder::Error> {
         self.transparent_builder.add_output(to, value)
-    }
-
-    /// Sets the notifier channel, where progress of building the transaction is sent.
-    ///
-    /// An update is sent after every Spend or Output is computed, and the `u32` sent
-    /// represents the total steps completed so far. It will eventually send number of
-    /// spends + outputs. If there's an error building the transaction, the channel is
-    /// closed.
-    pub fn with_progress_notifier(&mut self, progress_notifier: Sender<Progress>) {
-        self.progress_notifier = Some(progress_notifier);
     }
 
     /// Returns the sum of the transparent, Sapling, Orchard, and TZE value balances.
@@ -543,7 +567,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                         spend_prover,
                         output_prover,
                         &mut rng,
-                        self.progress_notifier.as_ref(),
+                        self.progress_notifier,
                     ),
                     tx_metadata,
                 )
@@ -650,8 +674,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
 }
 
 #[cfg(feature = "zfuture")]
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> ExtensionTxBuilder<'a>
-    for Builder<'a, P, R>
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::ProverProgress>
+    ExtensionTxBuilder<'a> for Builder<'a, P, R, U>
 {
     type BuildCtx = TransactionData<Unauthorized>;
     type BuildError = tze::builder::Error;
@@ -691,12 +715,15 @@ mod testing {
     use super::{Builder, Error, SaplingMetadata};
     use crate::{
         consensus::{self, BlockHeight},
-        sapling::prover::mock::{MockOutputProver, MockSpendProver},
+        sapling::{
+            self,
+            prover::mock::{MockOutputProver, MockSpendProver},
+        },
         transaction::fees::fixed,
         transaction::Transaction,
     };
 
-    impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R> {
+    impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R, ()> {
         /// Creates a new `Builder` targeted for inclusion in the block with the given height
         /// and randomness source, using default values for general transaction fields.
         ///
@@ -710,7 +737,7 @@ mod testing {
             params: P,
             height: BlockHeight,
             rng: R,
-        ) -> Builder<'a, P, impl RngCore + CryptoRng> {
+        ) -> Builder<'a, P, impl RngCore + CryptoRng, ()> {
             struct FakeCryptoRng<R: RngCore>(R);
             impl<R: RngCore> CryptoRng for FakeCryptoRng<R> {}
             impl<R: RngCore> RngCore for FakeCryptoRng<R> {
@@ -733,7 +760,13 @@ mod testing {
             Builder::new_internal(params, FakeCryptoRng(rng), height, None)
         }
     }
-    impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
+    impl<
+            'a,
+            P: consensus::Parameters,
+            R: RngCore + CryptoRng,
+            U: sapling::builder::ProverProgress,
+        > Builder<'a, P, R, U>
+    {
         pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
             #[allow(deprecated)]
             self.build(
@@ -801,7 +834,7 @@ mod tests {
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
             tze_builder: std::marker::PhantomData,
-            progress_notifier: None,
+            progress_notifier: (),
             orchard_builder: None,
             sapling_asks: vec![],
             orchard_saks: Vec::new(),

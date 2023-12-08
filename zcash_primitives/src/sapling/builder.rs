@@ -1,31 +1,28 @@
 //! Types and functions for building Sapling transaction components.
 
 use core::fmt;
-use std::{marker::PhantomData, sync::mpsc::Sender};
+use std::marker::PhantomData;
 
 use group::ff::Field;
 use rand::{seq::SliceRandom, RngCore};
 use rand_core::CryptoRng;
 use redjubjub::{Binding, SpendAuth};
 
-use crate::{
-    sapling::{
-        self,
-        bundle::{
-            Authorization, Authorized, Bundle, GrothProofBytes, MapAuth, OutputDescription,
-            SpendDescription,
-        },
-        keys::{OutgoingViewingKey, SpendAuthorizingKey, SpendValidatingKey},
-        note_encryption::{sapling_note_encryption, Zip212Enforcement},
-        prover::{OutputProver, SpendProver},
-        util::generate_random_rseed_internal,
-        value::{
-            CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment, ValueSum,
-        },
-        zip32::ExtendedSpendingKey,
-        Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey, SaplingIvk,
+use crate::sapling::{
+    self,
+    bundle::{
+        Authorization, Authorized, Bundle, GrothProofBytes, MapAuth, OutputDescription,
+        SpendDescription,
     },
-    transaction::builder::Progress,
+    keys::{OutgoingViewingKey, SpendAuthorizingKey, SpendValidatingKey},
+    note_encryption::{sapling_note_encryption, Zip212Enforcement},
+    prover::{OutputProver, SpendProver},
+    util::generate_random_rseed_internal,
+    value::{
+        CommitmentSum, NoteValue, TrapdoorSum, ValueCommitTrapdoor, ValueCommitment, ValueSum,
+    },
+    zip32::ExtendedSpendingKey,
+    Diversifier, MerklePath, Node, Note, PaymentAddress, ProofGenerationKey, SaplingIvk,
 };
 
 /// If there are any shielded inputs, always have at least two shielded outputs, padding
@@ -571,21 +568,47 @@ impl InProgressProofs for Proven {
     type OutputProof = GrothProofBytes;
 }
 
-struct CreateProofs<'a, SP: SpendProver, OP: OutputProver, R: RngCore> {
+/// Reports on the progress made towards creating proofs for a bundle.
+pub trait ProverProgress {
+    /// Updates the progress instance with the number of steps completed and the total
+    /// number of steps.
+    fn update(&mut self, cur: u32, end: u32);
+}
+
+impl ProverProgress for () {
+    fn update(&mut self, _: u32, _: u32) {}
+}
+
+impl<U: From<(u32, u32)>> ProverProgress for std::sync::mpsc::Sender<U> {
+    fn update(&mut self, cur: u32, end: u32) {
+        // If the send fails, we should ignore the error, not crash.
+        self.send(U::from((cur, end))).unwrap_or(());
+    }
+}
+
+impl<U: ProverProgress> ProverProgress for &mut U {
+    fn update(&mut self, cur: u32, end: u32) {
+        (*self).update(cur, end);
+    }
+}
+
+struct CreateProofs<'a, SP: SpendProver, OP: OutputProver, R: RngCore, U: ProverProgress> {
     spend_prover: &'a SP,
     output_prover: &'a OP,
     rng: R,
-    progress_notifier: Option<&'a Sender<Progress>>,
+    progress_notifier: U,
     total_progress: u32,
     progress: u32,
 }
 
-impl<'a, SP: SpendProver, OP: OutputProver, R: RngCore> CreateProofs<'a, SP, OP, R> {
+impl<'a, SP: SpendProver, OP: OutputProver, R: RngCore, U: ProverProgress>
+    CreateProofs<'a, SP, OP, R, U>
+{
     fn new(
         spend_prover: &'a SP,
         output_prover: &'a OP,
         rng: R,
-        progress_notifier: Option<&'a Sender<Progress>>,
+        progress_notifier: U,
         total_progress: u32,
     ) -> Self {
         // Keep track of the total number of steps computed
@@ -602,17 +625,19 @@ impl<'a, SP: SpendProver, OP: OutputProver, R: RngCore> CreateProofs<'a, SP, OP,
     fn update_progress(&mut self) {
         // Update progress and send a notification on the channel
         self.progress += 1;
-        if let Some(sender) = self.progress_notifier {
-            // If the send fails, we should ignore the error, not crash.
-            sender
-                .send(Progress::new(self.progress, Some(self.total_progress)))
-                .unwrap_or(());
-        }
+        self.progress_notifier
+            .update(self.progress, self.total_progress);
     }
 }
 
-impl<'a, S: InProgressSignatures, SP: SpendProver, OP: OutputProver, R: RngCore>
-    MapAuth<InProgress<Unproven, S>, InProgress<Proven, S>> for CreateProofs<'a, SP, OP, R>
+impl<
+        'a,
+        S: InProgressSignatures,
+        SP: SpendProver,
+        OP: OutputProver,
+        R: RngCore,
+        U: ProverProgress,
+    > MapAuth<InProgress<Unproven, S>, InProgress<Proven, S>> for CreateProofs<'a, SP, OP, R, U>
 {
     fn map_spend_proof(&mut self, spend: sapling::circuit::Spend) -> GrothProofBytes {
         let proof = self.spend_prover.create_proof(spend, &mut self.rng);
@@ -645,7 +670,7 @@ impl<S: InProgressSignatures, V> Bundle<InProgress<Unproven, S>, V> {
         spend_prover: &SP,
         output_prover: &OP,
         rng: impl RngCore,
-        progress_notifier: Option<&Sender<Progress>>,
+        progress_notifier: impl ProverProgress,
     ) -> Bundle<InProgress<Proven, S>, V> {
         let total_progress =
             self.shielded_spends().len() as u32 + self.shielded_outputs().len() as u32;
@@ -901,7 +926,7 @@ pub mod testing {
                         .unwrap();
 
                     let bundle =
-                        bundle.create_proofs(&MockSpendProver, &MockOutputProver, &mut rng, None);
+                        bundle.create_proofs(&MockSpendProver, &MockOutputProver, &mut rng, ());
 
                     bundle
                         .apply_signatures(&mut rng, fake_sighash_bytes, &[extsk.expsk.ask])
