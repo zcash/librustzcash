@@ -147,10 +147,7 @@ use std::ops::Range;
 
 use sapling::note_encryption::PreparedIncomingViewingKey;
 use subtle::ConditionallySelectable;
-use zcash_primitives::{
-    consensus::{self, BlockHeight},
-    zip32::Scope,
-};
+use zcash_primitives::consensus::{self, BlockHeight};
 
 use crate::{
     data_api::{NullifierQuery, WalletWrite},
@@ -288,18 +285,10 @@ where
         .map_err(Error::Wallet)?;
     // TODO: Change `scan_block` to also scan Orchard.
     // https://github.com/zcash/librustzcash/issues/403
-    let dfvks: Vec<_> = ufvks
+    let sapling_ivks: Vec<_> = ufvks
         .iter()
         .filter_map(|(account, ufvk)| ufvk.sapling().map(move |k| (account, k)))
-        .collect();
-    // Precompute the IVKs instead of doing so per block.
-    let ivks = dfvks
-        .iter()
-        .flat_map(|(account, dfvk)| {
-            dfvk.to_sapling_keys()
-                .into_iter()
-                .map(|key| (*account, key))
-        })
+        .flat_map(|(account, dfvk)| dfvk.to_ivks().into_iter().map(move |key| (account, key)))
         .collect::<Vec<_>>();
 
     // Get the nullifiers for the unspent notes we are tracking
@@ -307,18 +296,24 @@ where
         .get_sapling_nullifiers(NullifierQuery::Unspent)
         .map_err(Error::Wallet)?;
 
-    let mut batch_runner = BatchRunner::<_, _, _, _, ()>::new(
+    let mut sapling_runner = BatchRunner::<_, _, _, _, ()>::new(
         100,
-        dfvks
-            .iter()
-            .flat_map(|(account, dfvk)| {
-                [
-                    ((**account, Scope::External), dfvk.to_ivk(Scope::External)),
-                    ((**account, Scope::Internal), dfvk.to_ivk(Scope::Internal)),
-                ]
-            })
-            .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(&ivk))),
+        sapling_ivks.iter().map(|(account, (scope, ivk, _))| {
+            ((**account, *scope), PreparedIncomingViewingKey::new(ivk))
+        }),
     );
+
+    block_source.with_blocks::<_, DbT::Error>(
+        Some(from_height),
+        Some(limit),
+        |block: CompactBlock| {
+            add_block_to_runner(params, block, &mut sapling_runner);
+
+            Ok(())
+        },
+    )?;
+
+    sapling_runner.flush();
 
     let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
         data_db
@@ -327,18 +322,6 @@ where
     } else {
         None
     };
-
-    block_source.with_blocks::<_, DbT::Error>(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
-            add_block_to_runner(params, block, &mut batch_runner);
-
-            Ok(())
-        },
-    )?;
-
-    batch_runner.flush();
 
     let mut scanned_blocks = vec![];
     let mut scan_end_height = from_height;
@@ -352,10 +335,10 @@ where
             let scanned_block = scan_block_with_runner(
                 params,
                 block,
-                &ivks,
+                &sapling_ivks,
                 &sapling_nullifiers,
                 prior_block_metadata.as_ref(),
-                Some(&mut batch_runner),
+                Some(&mut sapling_runner),
             )
             .map_err(Error::Scan)?;
 

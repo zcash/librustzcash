@@ -13,8 +13,8 @@ use sapling::{
 };
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
-use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade};
-use zcash_primitives::{consensus, zip32::Scope};
+use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
+use zip32::Scope;
 
 use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBundles};
 use crate::{
@@ -41,50 +41,73 @@ pub trait ScanningKey {
     /// The type representing the scope of the scanning key.
     type Scope: Clone + Eq + std::hash::Hash + Send + 'static;
 
-    /// The type of key that is used to decrypt Sapling outputs;
-    type SaplingNk: Clone;
+    /// The type of key that is used to decrypt outputs belonging to the wallet.
+    type IncomingViewingKey: Clone;
 
-    type SaplingKeys: IntoIterator<Item = (Self::Scope, SaplingIvk, Self::SaplingNk)>;
+    /// The type of key that is used to derive nullifiers.
+    type NullifierDerivingKey: Clone;
 
-    /// The type of nullifier extracted when a note is successfully
-    /// obtained by trial decryption.
+    /// The type of nullifier extracted when a note is successfully obtained by trial decryption.
     type Nf;
 
-    /// Obtain the underlying Sapling incoming viewing key(s) for this scanning key.
-    fn to_sapling_keys(&self) -> Self::SaplingKeys;
+    /// The type of notes obtained by trial decryption.
+    type Note;
+
+    /// Obtain the underlying incoming viewing key(s) for this scanning key.
+    fn to_ivks(
+        &self,
+    ) -> Vec<(
+        Self::Scope,
+        Self::IncomingViewingKey,
+        Self::NullifierDerivingKey,
+    )>;
 
     /// Produces the nullifier for the specified note and witness, if possible.
     ///
     /// IVK-based implementations of this trait cannot successfully derive
     /// nullifiers, in which case `Self::Nf` should be set to the unit type
     /// and this function is a no-op.
-    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, note_position: Position)
+    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, note_position: Position)
         -> Self::Nf;
 }
 
 impl<K: ScanningKey> ScanningKey for &K {
     type Scope = K::Scope;
-    type SaplingNk = K::SaplingNk;
-    type SaplingKeys = K::SaplingKeys;
+    type IncomingViewingKey = K::IncomingViewingKey;
+    type NullifierDerivingKey = K::NullifierDerivingKey;
     type Nf = K::Nf;
+    type Note = K::Note;
 
-    fn to_sapling_keys(&self) -> Self::SaplingKeys {
-        (*self).to_sapling_keys()
+    fn to_ivks(
+        &self,
+    ) -> Vec<(
+        Self::Scope,
+        Self::IncomingViewingKey,
+        Self::NullifierDerivingKey,
+    )> {
+        (*self).to_ivks()
     }
 
-    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
-        K::sapling_nf(key, note, position)
+    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, position: Position) -> Self::Nf {
+        K::nf(key, note, position)
     }
 }
 
 impl ScanningKey for DiversifiableFullViewingKey {
     type Scope = Scope;
-    type SaplingNk = sapling::NullifierDerivingKey;
-    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 2];
+    type IncomingViewingKey = SaplingIvk;
+    type NullifierDerivingKey = sapling::NullifierDerivingKey;
     type Nf = sapling::Nullifier;
+    type Note = sapling::Note;
 
-    fn to_sapling_keys(&self) -> Self::SaplingKeys {
-        [
+    fn to_ivks(
+        &self,
+    ) -> Vec<(
+        Self::Scope,
+        Self::IncomingViewingKey,
+        Self::NullifierDerivingKey,
+    )> {
+        vec![
             (
                 Scope::External,
                 self.to_ivk(Scope::External),
@@ -98,22 +121,29 @@ impl ScanningKey for DiversifiableFullViewingKey {
         ]
     }
 
-    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
+    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, position: Position) -> Self::Nf {
         note.nf(key, position.into())
     }
 }
 
 impl ScanningKey for (Scope, SaplingIvk, sapling::NullifierDerivingKey) {
     type Scope = Scope;
-    type SaplingNk = sapling::NullifierDerivingKey;
-    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 1];
+    type IncomingViewingKey = SaplingIvk;
+    type NullifierDerivingKey = sapling::NullifierDerivingKey;
     type Nf = sapling::Nullifier;
+    type Note = sapling::Note;
 
-    fn to_sapling_keys(&self) -> Self::SaplingKeys {
-        [self.clone()]
+    fn to_ivks(
+        &self,
+    ) -> Vec<(
+        Self::Scope,
+        Self::IncomingViewingKey,
+        Self::NullifierDerivingKey,
+    )> {
+        vec![self.clone()]
     }
 
-    fn sapling_nf(key: &Self::SaplingNk, note: &sapling::Note, position: Position) -> Self::Nf {
+    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, position: Position) -> Self::Nf {
         note.nf(key, position.into())
     }
 }
@@ -124,15 +154,22 @@ impl ScanningKey for (Scope, SaplingIvk, sapling::NullifierDerivingKey) {
 /// [`SaplingIvk`]: sapling::SaplingIvk
 impl ScanningKey for SaplingIvk {
     type Scope = ();
-    type SaplingNk = ();
-    type SaplingKeys = [(Self::Scope, SaplingIvk, Self::SaplingNk); 1];
+    type IncomingViewingKey = SaplingIvk;
+    type NullifierDerivingKey = ();
     type Nf = ();
+    type Note = sapling::Note;
 
-    fn to_sapling_keys(&self) -> Self::SaplingKeys {
-        [((), self.clone(), ())]
+    fn to_ivks(
+        &self,
+    ) -> Vec<(
+        Self::Scope,
+        Self::IncomingViewingKey,
+        Self::NullifierDerivingKey,
+    )> {
+        vec![((), self.clone(), ())]
     }
 
-    fn sapling_nf(_key: &Self::SaplingNk, _note: &sapling::Note, _position: Position) {}
+    fn nf(_key: &Self::NullifierDerivingKey, _note: &Self::Note, _position: Position) -> Self::Nf {}
 }
 
 /// Errors that may occur in chain scanning
@@ -249,21 +286,22 @@ impl fmt::Display for ScanError {
 /// [`IncrementalWitness`]: sapling::IncrementalWitness
 /// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<
-    P: consensus::Parameters + Send + 'static,
-    K: ScanningKey,
-    A: Default + Eq + Hash + Send + ConditionallySelectable + 'static,
->(
+pub fn scan_block<P, A, SK>(
     params: &P,
     block: CompactBlock,
-    vks: &[(&A, &K)],
+    sapling_keys: &[(&A, &SK)],
     sapling_nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<K::Nf, K::Scope, A>, ScanError> {
-    scan_block_with_runner::<_, _, (), A>(
+) -> Result<ScannedBlock<SK::Nf, SK::Scope, A>, ScanError>
+where
+    P: consensus::Parameters + Send + 'static,
+    A: Default + Eq + Hash + Send + ConditionallySelectable + 'static,
+    SK: ScanningKey<IncomingViewingKey = SaplingIvk, Note = sapling::Note>,
+{
+    scan_block_with_runner::<_, A, _, ()>(
         params,
         block,
-        vks,
+        sapling_keys,
         sapling_nullifiers,
         prior_block_metadata,
         None,
@@ -332,19 +370,20 @@ fn check_hash_continuity(
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn scan_block_with_runner<
-    P: consensus::Parameters + Send + 'static,
-    K: ScanningKey,
-    T: Tasks<TaggedBatch<A, K::Scope>> + Sync,
-    A: Send + Default + Eq + Hash + ConditionallySelectable + 'static,
->(
+pub(crate) fn scan_block_with_runner<P, A, SK, T>(
     params: &P,
     block: CompactBlock,
-    vks: &[(&A, K)],
-    nullifiers: &[(A, sapling::Nullifier)],
+    sapling_keys: &[(&A, SK)],
+    sapling_nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-    mut batch_runner: Option<&mut TaggedBatchRunner<A, K::Scope, T>>,
-) -> Result<ScannedBlock<K::Nf, K::Scope, A>, ScanError> {
+    mut batch_runner: Option<&mut TaggedBatchRunner<A, SK::Scope, T>>,
+) -> Result<ScannedBlock<SK::Nf, SK::Scope, A>, ScanError>
+where
+    P: consensus::Parameters + Send + 'static,
+    SK: ScanningKey<IncomingViewingKey = SaplingIvk, Note = sapling::Note>,
+    T: Tasks<TaggedBatch<A, SK::Scope>> + Sync,
+    A: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
+{
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
     }
@@ -447,7 +486,7 @@ pub(crate) fn scan_block_with_runner<
         )?;
 
     let compact_block_tx_count = block.vtx.len();
-    let mut wtxs: Vec<WalletTx<K::Nf, K::Scope, A>> = vec![];
+    let mut wtxs: Vec<WalletTx<SK::Nf, SK::Scope, A>> = vec![];
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
@@ -468,7 +507,7 @@ pub(crate) fn scan_block_with_runner<
 
             // Find the first tracked nullifier that matches this spend, and produce
             // a WalletShieldedSpend if there is a match, in constant time.
-            let spend = nullifiers
+            let spend = sapling_nullifiers
                 .iter()
                 .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
                 .fold(CtOption::new(A::default(), 0.into()), |first, next| {
@@ -501,7 +540,7 @@ pub(crate) fn scan_block_with_runner<
             u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
 
         // Check for incoming notes while incrementing tree and witnesses
-        let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf, K::Scope, A>> = vec![];
+        let mut shielded_outputs: Vec<WalletSaplingOutput<SK::Nf, SK::Scope, A>> = vec![];
         {
             let decoded = &tx
                 .outputs
@@ -516,10 +555,10 @@ pub(crate) fn scan_block_with_runner<
                 .collect::<Vec<_>>();
 
             let decrypted: Vec<_> = if let Some(runner) = batch_runner.as_mut() {
-                let vks = vks
+                let sapling_keys = sapling_keys
                     .iter()
                     .flat_map(|(a, k)| {
-                        k.to_sapling_keys()
+                        k.to_ivks()
                             .into_iter()
                             .map(move |(scope, _, nk)| ((**a, scope), nk))
                     })
@@ -530,7 +569,7 @@ pub(crate) fn scan_block_with_runner<
                     .map(|i| {
                         decrypted.remove(&(txid, i)).map(|d_out| {
                             let a = d_out.ivk_tag.0;
-                            let nk = vks.get(&d_out.ivk_tag).expect(
+                            let nk = sapling_keys.get(&d_out.ivk_tag).expect(
                                 "The batch runner and scan_block must use the same set of IVKs.",
                             );
 
@@ -539,26 +578,25 @@ pub(crate) fn scan_block_with_runner<
                     })
                     .collect()
             } else {
-                let vks = vks
+                let sapling_keys = sapling_keys
                     .iter()
                     .flat_map(|(a, k)| {
-                        k.to_sapling_keys()
+                        k.to_ivks()
                             .into_iter()
                             .map(move |(scope, ivk, nk)| (**a, scope, ivk, nk))
                     })
                     .collect::<Vec<_>>();
 
-                let ivks = vks
+                let ivks = sapling_keys
                     .iter()
-                    .map(|(_, _, ivk, _)| ivk)
-                    .map(PreparedIncomingViewingKey::new)
+                    .map(|(_, _, ivk, _)| PreparedIncomingViewingKey::new(ivk))
                     .collect::<Vec<_>>();
 
                 batch::try_compact_note_decryption(&ivks, &decoded[..])
                     .into_iter()
                     .map(|v| {
                         v.map(|((note, _), ivk_idx)| {
-                            let (account, scope, _, nk) = &vks[ivk_idx];
+                            let (account, scope, _, nk) = &sapling_keys[ivk_idx];
                             (note, *account, scope.clone(), (*nk).clone())
                         })
                     })
@@ -591,7 +629,7 @@ pub(crate) fn scan_block_with_runner<
                     let note_commitment_tree_position = Position::from(u64::from(
                         sapling_commitment_tree_size + u32::try_from(output_idx).unwrap(),
                     ));
-                    let nf = K::sapling_nf(&nk, &note, note_commitment_tree_position);
+                    let nf = SK::nf(&nk, &note, note_commitment_tree_position);
 
                     shielded_outputs.push(WalletSaplingOutput::from_parts(
                         output_idx,
@@ -840,7 +878,7 @@ mod tests {
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
-                    dfvk.to_sapling_keys()
+                    dfvk.to_ivks()
                         .iter()
                         .map(|(scope, ivk, _)| ((account, *scope), ivk))
                         .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
@@ -927,7 +965,7 @@ mod tests {
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
-                    dfvk.to_sapling_keys()
+                    dfvk.to_ivks()
                         .iter()
                         .map(|(scope, ivk, _)| ((account, *scope), ivk))
                         .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
@@ -1000,10 +1038,16 @@ mod tests {
             Some((0, 0)),
         );
         assert_eq!(cb.vtx.len(), 2);
-        let vks: Vec<(&AccountId, &SaplingIvk)> = vec![];
+        let sapling_keys: Vec<(&AccountId, &SaplingIvk)> = vec![];
 
-        let scanned_block =
-            scan_block(&Network::TestNetwork, cb, &vks[..], &[(account, nf)], None).unwrap();
+        let scanned_block = scan_block(
+            &Network::TestNetwork,
+            cb,
+            &sapling_keys[..],
+            &[(account, nf)],
+            None,
+        )
+        .unwrap();
         let txs = scanned_block.transactions();
         assert_eq!(txs.len(), 1);
 
