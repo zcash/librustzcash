@@ -91,6 +91,7 @@ incrementalmerkletree = { workspace = true, features = ["legacy-api", "test-depe
 proptest.workspace = true
 assert_matches.workspace = true
 rand_xorshift.workspace = true
+sapling = { workspace = true, features = ["test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
 
 [target.'cfg(unix)'.dev-dependencies]

@@ -4,7 +4,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use ff::Field;
 use rand_core::OsRng;
 use sapling::{
-    builder::SaplingBuilder,
+    self,
     note_encryption::{
         try_sapling_compact_note_decryption, try_sapling_note_decryption, CompactOutputDescription,
         PreparedIncomingViewingKey, SaplingDomain,
@@ -35,9 +35,15 @@ fn bench_note_decryption(c: &mut Criterion) {
         let diversifier = Diversifier([0; 11]);
         let pa = valid_ivk.to_payment_address(diversifier).unwrap();
 
-        let mut builder = SaplingBuilder::new(zip212_enforcement);
+        let mut builder = sapling::builder::Builder::new(
+            zip212_enforcement,
+            // We use the Coinbase bundle type because we don't need to use
+            // any inputs for this benchmark.
+            sapling::builder::BundleType::Coinbase,
+            sapling::Anchor::empty_tree(),
+        );
         builder
-            .add_output(&mut rng, None, pa, NoteValue::from_raw(100), None)
+            .add_output(None, pa, NoteValue::from_raw(100), None)
             .unwrap();
         let (bundle, _) = builder
             .build::<MockSpendProver, MockOutputProver, _, Amount>(&mut rng)

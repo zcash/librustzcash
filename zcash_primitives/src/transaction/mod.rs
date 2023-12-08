@@ -488,7 +488,7 @@ impl<A: Authorization> TransactionData<A> {
     pub fn map_authorization<B: Authorization>(
         self,
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
-        f_sapling: impl sapling::bundle::MapAuth<A::SaplingAuth, B::SaplingAuth>,
+        mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, B::SaplingAuth>,
         mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
         #[cfg(feature = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
     ) -> TransactionData<B> {
@@ -501,7 +501,15 @@ impl<A: Authorization> TransactionData<A> {
                 .transparent_bundle
                 .map(|b| b.map_authorization(f_transparent)),
             sprout_bundle: self.sprout_bundle,
-            sapling_bundle: self.sapling_bundle.map(|b| b.map_authorization(f_sapling)),
+            sapling_bundle: self.sapling_bundle.map(|b| {
+                b.map_authorization(
+                    &mut f_sapling,
+                    |f, p| f.map_spend_proof(p),
+                    |f, p| f.map_output_proof(p),
+                    |f, s| f.map_auth_sig(s),
+                    |f, a| f.map_authorization(a),
+                )
+            }),
             orchard_bundle: self.orchard_bundle.map(|b| {
                 b.map_authorization(
                     &mut f_orchard,

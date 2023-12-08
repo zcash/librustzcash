@@ -9,8 +9,8 @@ use zcash_note_encryption::{EphemeralKeyBytes, ENC_CIPHERTEXT_SIZE, OUT_CIPHERTE
 use crate::{
     sapling::{
         bundle::{
-            Authorized, Bundle, GrothProofBytes, OutputDescription, OutputDescriptionV5,
-            SpendDescription, SpendDescriptionV5,
+            Authorization, Authorized, Bundle, GrothProofBytes, OutputDescription,
+            OutputDescriptionV5, SpendDescription, SpendDescriptionV5,
         },
         note::ExtractedNoteCommitment,
         value::ValueCommitment,
@@ -20,6 +20,51 @@ use crate::{
 };
 
 use super::{Amount, GROTH_PROOF_SIZE};
+
+/// A map from one bundle authorization to another.
+///
+/// For use with [`TransactionData::map_authorization`].
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+pub trait MapAuth<A: Authorization, B: Authorization> {
+    fn map_spend_proof(&mut self, p: A::SpendProof) -> B::SpendProof;
+    fn map_output_proof(&mut self, p: A::OutputProof) -> B::OutputProof;
+    fn map_auth_sig(&mut self, s: A::AuthSig) -> B::AuthSig;
+    fn map_authorization(&mut self, a: A) -> B;
+}
+
+/// The identity map.
+///
+/// This can be used with [`TransactionData::map_authorization`] when you want to map the
+/// authorization of a subset of a transaction's bundles.
+///
+/// [`TransactionData::map_authorization`]: crate::transaction::TransactionData::map_authorization
+impl MapAuth<Authorized, Authorized> for () {
+    fn map_spend_proof(
+        &mut self,
+        p: <Authorized as Authorization>::SpendProof,
+    ) -> <Authorized as Authorization>::SpendProof {
+        p
+    }
+
+    fn map_output_proof(
+        &mut self,
+        p: <Authorized as Authorization>::OutputProof,
+    ) -> <Authorized as Authorization>::OutputProof {
+        p
+    }
+
+    fn map_auth_sig(
+        &mut self,
+        s: <Authorized as Authorization>::AuthSig,
+    ) -> <Authorized as Authorization>::AuthSig {
+        s
+    }
+
+    fn map_authorization(&mut self, a: Authorized) -> Authorized {
+        a
+    }
+}
 
 /// Consensus rules (§4.4) & (§4.5):
 /// - Canonical encoding is enforced here.

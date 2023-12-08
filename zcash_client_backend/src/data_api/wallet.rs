@@ -1,5 +1,6 @@
 use std::num::NonZeroU32;
 
+use rand_core::OsRng;
 use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
@@ -8,7 +9,7 @@ use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
     transaction::{
-        builder::Builder,
+        builder::{BuildConfig, Builder},
         components::amount::{Amount, NonNegativeAmount},
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
@@ -576,36 +577,59 @@ where
         Some(dfvk.to_ovk(Scope::Internal))
     };
 
+    let (sapling_anchor, sapling_inputs) = proposal.sapling_inputs().map_or_else(
+        || Ok((sapling::Anchor::empty_tree(), vec![])),
+        |inputs| {
+            wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
+                let anchor = sapling_tree
+                    .root_at_checkpoint_id(&inputs.anchor_height())?
+                    .into();
+
+                let sapling_inputs = inputs
+                    .notes()
+                    .iter()
+                    .map(|selected| {
+                        match selected.note() {
+                            WalletNote::Sapling(note) => {
+                                let key = match selected.spending_key_scope() {
+                                    Scope::External => usk.sapling().clone(),
+                                    Scope::Internal => usk.sapling().derive_internal(),
+                                };
+
+                                let merkle_path = sapling_tree.witness_at_checkpoint_id_caching(
+                                    selected.note_commitment_tree_position(),
+                                    &inputs.anchor_height(),
+                                )?;
+
+                                Ok((key, note, merkle_path))
+                            }
+                            WalletNote::Orchard(_) => {
+                                // FIXME: Implement this once `Proposal` has been refactored to
+                                // include Orchard notes.
+                                panic!("Orchard spends are not yet supported");
+                            }
+                        }
+                    })
+                    .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
+
+                Ok((anchor, sapling_inputs))
+            })
+        },
+    )?;
+
     // Create the transaction. The type of the proposal ensures that there
     // are no possible transparent inputs, so we ignore those
-    let mut builder = Builder::new(params.clone(), proposal.min_target_height(), None);
+    let mut builder = Builder::new(
+        params.clone(),
+        proposal.min_target_height(),
+        BuildConfig::Standard {
+            sapling_anchor,
+            orchard_anchor: orchard::Anchor::empty_tree(),
+        },
+    );
 
-    if let Some(sapling_inputs) = proposal.sapling_inputs() {
-        wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
-            for selected in sapling_inputs.notes() {
-                match selected.note() {
-                    WalletNote::Sapling(note) => {
-                        let key = match selected.spending_key_scope() {
-                            Scope::External => usk.sapling().clone(),
-                            Scope::Internal => usk.sapling().derive_internal(),
-                        };
-
-                        let merkle_path = sapling_tree.witness_at_checkpoint_id_caching(
-                            selected.note_commitment_tree_position(),
-                            &sapling_inputs.anchor_height(),
-                        )?;
-
-                        builder.add_sapling_spend(key, note.clone(), merkle_path)?;
-                    }
-                    WalletNote::Orchard(_) => {
-                        // FIXME: Implement this once `Proposal` has been refactored to
-                        // include Orchard notes.
-                        panic!("Orchard spends are not yet supported");
-                    }
-                }
-            }
-            Ok(())
-        })?;
+    for (key, note, merkle_path) in sapling_inputs.into_iter() {
+        builder.add_sapling_spend(&key, note.clone(), merkle_path)?;
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -720,7 +744,7 @@ where
 
     // Build the transaction with the specified fee rule
     let (tx, sapling_build_meta) =
-        builder.build(spend_prover, output_prover, proposal.fee_rule())?;
+        builder.build(OsRng, spend_prover, output_prover, proposal.fee_rule())?;
 
     let internal_ivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
     let sapling_outputs =

@@ -10,7 +10,8 @@ and this library adheres to Rust's notion of
 - Dependency on `bellman 0.14`.
 - `zcash_primitives::consensus::sapling_zip212_enforcement`
 - `zcash_primitives::transaction`:
-  - `builder::get_fee`
+  - `builder::{BuildConfig, FeeError, get_fee}`
+  - `builder::Error::SaplingBuilderNotAvailable`
   - `components::sapling`:
     - Sapling bundle component parsers, behind the `temporary-zcashd` feature
       flag:
@@ -55,15 +56,32 @@ and this library adheres to Rust's notion of
   - `builder::Builder` now has a generic parameter for the type of progress
     notifier, which needs to implement `sapling::builder::ProverProgress` in
     order to build transactions.
+  - `builder::Builder::new` now takes a `BuildConfig` argument instead of an
+    optional Orchard anchor. Anchors for both Sapling and Orchard are now
+    required at the time of builder construction.
   - `builder::Builder::{build, build_zfuture}` now take
     `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
   - `builder::Builder::add_sapling_spend` no longer takes a `diversifier`
     argument as the diversifier may be obtained from the note.
+  - `builder::Builder::add_sapling_spend` now takes its `ExtendedSpendingKey`
+    argument by reference.
+  - `builder::Builder::{add_sapling_spend, add_sapling_output}` now return
+    `builder::Error`s instead of the underlying `sapling_crypto::builder::Error`s
+    when returning `Err`.
+  - `builder::Builder::add_orchard_spend` now takes its `SpendingKey` argument
+     by reference.
   - `builder::Builder::with_progress_notifier` now consumes `self` and returns a
     `Builder` typed on the provided channel.
+  - `builder::Builder::get_fee` now returns a `builder::FeeError` instead of the
+    bare `FeeRule::Error` when returning `Err`.
+  - `builder::Error::OrchardAnchorNotAvailable` has been renamed to
+    `OrchardBuilderNotAvailable`.
+  - `builder::{build, build_zfuture}` each now take an additional `rng` argument.
   - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
     instead of `Amount`.
-  - `components::transparent::fees` has been moved to 
+  - `components::sapling::MapAuth` trait methods now take `&mut self` instead
+    of `&self`.
+  - `components::transparent::fees` has been moved to
     `zcash_primitives::transaction::fees::transparent`
   - `components::transparent::builder::TransparentBuilder::{inputs, outputs}`
     have changed to return `&[TransparentInputInfo]` and `&[TxOut]` respectively,
@@ -102,7 +120,7 @@ and this library adheres to Rust's notion of
     - `Bundle`
     - `SpendDescription, SpendDescriptionV5`
     - `OutputDescription, OutputDescriptionV5`
-    - `Authorization, Authorized, MapAuth`
+    - `Authorization, Authorized`
     - `GrothProofBytes`
   - `CompactOutputDescription` (moved to `sapling_crypto::note_encryption`).
   - `Unproven`
