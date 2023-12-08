@@ -12,6 +12,7 @@ use zcash_primitives::{
     },
 };
 
+pub mod common;
 pub mod fixed;
 pub mod sapling;
 pub mod standard;

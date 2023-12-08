@@ -7,18 +7,14 @@
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::amount::{BalanceError, NonNegativeAmount},
-        fees::{
-            transparent,
-            zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
-            FeeRule,
-        },
+    transaction::fees::{
+        transparent,
+        zip317::{FeeError as Zip317FeeError, FeeRule as Zip317FeeRule},
     },
 };
 
 use super::{
-    sapling, ChangeError, ChangeStrategy, ChangeValue, DustAction, DustOutputPolicy,
+    common::single_change_output_balance, sapling, ChangeError, ChangeStrategy, DustOutputPolicy,
     TransactionBalance,
 };
 
@@ -133,101 +129,18 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             }
         }
 
-        let overflow = || ChangeError::StrategyError(Zip317FeeError::from(BalanceError::Overflow));
-        let underflow =
-            || ChangeError::StrategyError(Zip317FeeError::from(BalanceError::Underflow));
-
-        let t_in = transparent_inputs
-            .iter()
-            .map(|t_in| t_in.coin().value)
-            .sum::<Option<_>>()
-            .ok_or_else(overflow)?;
-        let t_out = transparent_outputs
-            .iter()
-            .map(|t_out| t_out.value())
-            .sum::<Option<_>>()
-            .ok_or_else(overflow)?;
-        let sapling_in = sapling_inputs
-            .iter()
-            .map(|s_in| s_in.value())
-            .sum::<Option<_>>()
-            .ok_or_else(overflow)?;
-        let sapling_out = sapling_outputs
-            .iter()
-            .map(|s_out| s_out.value())
-            .sum::<Option<_>>()
-            .ok_or_else(overflow)?;
-
-        let fee_amount = self
-            .fee_rule
-            .fee_required(
-                params,
-                target_height,
-                transparent_inputs,
-                transparent_outputs,
-                sapling_inputs.len(),
-                // add one for Sapling change, then account for Sapling output padding performed by
-                // the transaction builder
-                std::cmp::max(sapling_outputs.len() + 1, 2),
-                //Orchard is not yet supported in zcash_client_backend
-                0,
-            )
-            .map_err(ChangeError::StrategyError)?;
-
-        let total_in = (t_in + sapling_in).ok_or_else(overflow)?;
-
-        let total_out = [t_out, sapling_out, fee_amount]
-            .iter()
-            .sum::<Option<NonNegativeAmount>>()
-            .ok_or_else(overflow)?;
-
-        let proposed_change = (total_in - total_out).ok_or(ChangeError::InsufficientFunds {
-            available: total_in,
-            required: total_out,
-        })?;
-
-        if proposed_change == NonNegativeAmount::ZERO {
-            TransactionBalance::new(vec![], fee_amount).map_err(|_| overflow())
-        } else {
-            let dust_threshold = dust_output_policy
-                .dust_threshold()
-                .unwrap_or_else(|| self.fee_rule.marginal_fee());
-
-            if dust_threshold > proposed_change {
-                match dust_output_policy.action() {
-                    DustAction::Reject => {
-                        let shortfall = (dust_threshold - proposed_change).ok_or_else(underflow)?;
-
-                        Err(ChangeError::InsufficientFunds {
-                            available: total_in,
-                            required: (total_in + shortfall).ok_or_else(overflow)?,
-                        })
-                    }
-                    DustAction::AllowDustChange => TransactionBalance::new(
-                        vec![ChangeValue::sapling(
-                            proposed_change,
-                            self.change_memo.clone(),
-                        )],
-                        fee_amount,
-                    )
-                    .map_err(|_| overflow()),
-                    DustAction::AddDustToFee => TransactionBalance::new(
-                        vec![],
-                        (fee_amount + proposed_change).ok_or_else(overflow)?,
-                    )
-                    .map_err(|_| overflow()),
-                }
-            } else {
-                TransactionBalance::new(
-                    vec![ChangeValue::sapling(
-                        proposed_change,
-                        self.change_memo.clone(),
-                    )],
-                    fee_amount,
-                )
-                .map_err(|_| overflow())
-            }
-        }
+        single_change_output_balance(
+            params,
+            &self.fee_rule,
+            target_height,
+            transparent_inputs,
+            transparent_outputs,
+            sapling_inputs,
+            sapling_outputs,
+            dust_output_policy,
+            self.fee_rule.marginal_fee(),
+            self.change_memo.clone(),
+        )
     }
 }
 
