@@ -16,13 +16,10 @@ pub mod keys;
 pub mod legacy;
 pub mod memo;
 pub mod merkle_tree;
-pub mod sapling;
+pub use sapling;
 pub mod transaction;
 pub use zip32;
 pub mod zip339;
 
 #[cfg(feature = "zfuture")]
 pub mod extensions;
-
-#[cfg(test)]
-mod test_vectors;

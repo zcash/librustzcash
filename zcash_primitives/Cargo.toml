@@ -41,20 +41,16 @@ tracing.workspace = true
 subtle.workspace = true
 
 # - Shielded protocols
-bellman = { version = "0.14", default-features = false, features = ["groth16"] }
-bls12_381.workspace = true
 ff.workspace = true
 group = { workspace = true, features = ["wnaf-memuse"] }
 jubjub.workspace = true
 nonempty.workspace = true
 orchard.workspace = true
+sapling.workspace = true
 zcash_spec.workspace = true
 
 # - Note Commitment Trees
 incrementalmerkletree = { workspace = true, features = ["legacy-api"] }
-
-# - Static constants
-lazy_static.workspace = true
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
@@ -75,8 +71,6 @@ byteorder.workspace = true
 hex.workspace = true
 
 # - Shielded protocols
-bitvec.workspace = true
-blake2s_simd.workspace = true
 redjubjub = "0.7"
 
 # - Transparent inputs
@@ -104,10 +98,14 @@ pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
 
 [features]
 default = ["multicore"]
-multicore = ["bellman/multicore", "orchard/multicore"]
+multicore = ["orchard/multicore", "sapling/multicore"]
 transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
 temporary-zcashd = []
-test-dependencies = ["proptest", "orchard/test-dependencies"]
+test-dependencies = [
+    "proptest",
+    "orchard/test-dependencies",
+    "sapling/test-dependencies",
+]
 unstable-nu6 = []
 zfuture = []
 

@@ -2086,6 +2086,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "sapling-crypto"
+version = "0.0.1"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=df6681c1046bd28073befd7d42224e4a4c70032a#df6681c1046bd28073befd7d42224e4a4c70032a"
+dependencies = [
+ "aes",
+ "bellman",
+ "bitvec",
+ "blake2b_simd",
+ "blake2s_simd",
+ "bls12_381",
+ "byteorder",
+ "ff",
+ "fpe",
+ "group",
+ "hex",
+ "incrementalmerkletree",
+ "jubjub",
+ "lazy_static",
+ "memuse",
+ "proptest",
+ "rand",
+ "rand_core",
+ "redjubjub",
+ "subtle",
+ "tracing",
+ "zcash_note_encryption",
+ "zcash_spec",
+ "zip32",
+]
+
+[[package]]
 name = "schemer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3079,12 +3110,8 @@ version = "0.13.0"
 dependencies = [
  "aes",
  "assert_matches",
- "bellman",
  "bip0039",
- "bitvec",
  "blake2b_simd",
- "blake2s_simd",
- "bls12_381",
  "byteorder",
  "chacha20poly1305",
  "criterion",
@@ -3096,7 +3123,6 @@ dependencies = [
  "hex",
  "incrementalmerkletree",
  "jubjub",
- "lazy_static",
  "memuse",
  "nonempty",
  "orchard",
@@ -3107,6 +3133,7 @@ dependencies = [
  "rand_xorshift",
  "redjubjub",
  "ripemd",
+ "sapling-crypto",
  "secp256k1",
  "sha2",
  "subtle",

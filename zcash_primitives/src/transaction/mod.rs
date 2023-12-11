@@ -646,7 +646,7 @@ impl Transaction {
                 expiry_height,
                 transparent_bundle,
                 sprout_bundle,
-                sapling_bundle: binding_sig.map(|binding_sig| {
+                sapling_bundle: binding_sig.and_then(|binding_sig| {
                     sapling::Bundle::from_parts(
                         shielded_spends,
                         shielded_outputs,
