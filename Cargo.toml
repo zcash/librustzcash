@@ -4,7 +4,6 @@ members = [
     "components/f4jumble",
     "components/zcash_address",
     "components/zcash_encoding",
-    "sapling-crypto",
     "zcash_client_backend",
     "zcash_client_sqlite",
     "zcash_extensions",
@@ -28,7 +27,6 @@ categories = ["cryptography::cryptocurrencies"]
 [workspace.dependencies]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
-sapling = { package = "sapling-crypto", version = "0.0", path = "sapling-crypto" }
 zcash_address = { version = "0.3", path = "components/zcash_address" }
 zcash_client_backend = { version = "0.10", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
@@ -49,6 +47,7 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
+sapling = { package = "sapling-crypto", version = "0.0" }
 
 # - Orchard
 nonempty = "0.7"
@@ -111,3 +110,6 @@ zip32 = "0.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "df6681c1046bd28073befd7d42224e4a4c70032a" }

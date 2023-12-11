@@ -2088,6 +2088,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.0.1"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=df6681c1046bd28073befd7d42224e4a4c70032a#df6681c1046bd28073befd7d42224e4a4c70032a"
 dependencies = [
  "aes",
  "bellman",
@@ -2096,7 +2097,6 @@ dependencies = [
  "blake2s_simd",
  "bls12_381",
  "byteorder",
- "chacha20poly1305",
  "ff",
  "fpe",
  "group",
@@ -2108,7 +2108,6 @@ dependencies = [
  "proptest",
  "rand",
  "rand_core",
- "rand_xorshift",
  "redjubjub",
  "subtle",
  "tracing",
