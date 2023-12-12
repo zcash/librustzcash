@@ -116,14 +116,5 @@ bench = false
 name = "note_decryption"
 harness = false
 
-[[bench]]
-name = "pedersen_hash"
-harness = false
-
-[[bench]]
-name = "sapling_circuit"
-harness = false
-required-features = ["local-prover"]
-
 [badges]
 maintenance = { status = "actively-developed" }
