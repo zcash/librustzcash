@@ -8,12 +8,12 @@ use schemer_rusqlite::RusqliteMigration;
 
 use uuid::Uuid;
 
+use sapling::note_encryption::{
+    try_sapling_note_decryption, PreparedIncomingViewingKey, Zip212Enforcement,
+};
 use zcash_client_backend::keys::UnifiedFullViewingKey;
 use zcash_primitives::{
     consensus::{self, sapling_zip212_enforcement, BlockHeight, BranchId},
-    sapling::note_encryption::{
-        try_sapling_note_decryption, PreparedIncomingViewingKey, Zip212Enforcement,
-    },
     transaction::Transaction,
     zip32::Scope,
 };

@@ -1,12 +1,12 @@
 use std::num::NonZeroU32;
 
+use sapling::{
+    note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
+    prover::{OutputProver, SpendProver},
+};
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
-    sapling::{
-        note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
-        prover::{OutputProver, SpendProver},
-    },
     transaction::{
         builder::Builder,
         components::amount::{Amount, NonNegativeAmount},
@@ -39,11 +39,9 @@ use super::SaplingInputSource;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::TransparentInputSource,
-    crate::wallet::WalletTransparentOutput,
-    input_selection::ShieldingSelector,
-    std::convert::Infallible,
-    zcash_primitives::{legacy::TransparentAddress, sapling::keys::OutgoingViewingKey},
+    super::TransparentInputSource, crate::wallet::WalletTransparentOutput,
+    input_selection::ShieldingSelector, sapling::keys::OutgoingViewingKey,
+    std::convert::Infallible, zcash_primitives::legacy::TransparentAddress,
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -187,8 +185,8 @@ where
 /// # }
 /// ```
 ///
-/// [`sapling::SpendProver`]: zcash_primitives::sapling::prover::SpendProver
-/// [`sapling::OutputProver`]: zcash_primitives::sapling::prover::OutputProver
+/// [`sapling::SpendProver`]: sapling::prover::SpendProver
+/// [`sapling::OutputProver`]: sapling::prover::OutputProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[deprecated(
@@ -303,8 +301,8 @@ where
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
 ///
-/// [`sapling::SpendProver`]: zcash_primitives::sapling::prover::SpendProver
-/// [`sapling::OutputProver`]: zcash_primitives::sapling::prover::OutputProver
+/// [`sapling::SpendProver`]: sapling::prover::SpendProver
+/// [`sapling::OutputProver`]: sapling::prover::OutputProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn spend<DbT, ParamsT, InputsT>(
@@ -825,8 +823,8 @@ where
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
 ///   not supported.
 ///
-/// [`sapling::SpendProver`]: zcash_primitives::sapling::prover::SpendProver
-/// [`sapling::OutputProver`]: zcash_primitives::sapling::prover::OutputProver
+/// [`sapling::SpendProver`]: sapling::prover::SpendProver
+/// [`sapling::OutputProver`]: sapling::prover::OutputProver
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]

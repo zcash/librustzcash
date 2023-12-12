@@ -480,12 +480,12 @@ mod tests {
     use ff::Field;
     use rand_core::OsRng;
 
+    use sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
     use zcash_primitives::{
         consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
         constants,
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
-        sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed},
         transaction::{
             builder::Builder,
             components::{

@@ -9,59 +9,6 @@ and this library adheres to Rust's notion of
 ### Added
 - Dependency on `bellman 0.14`.
 - `zcash_primitives::consensus::sapling_zip212_enforcement`
-- `zcash_primitives::sapling`:
-  - `BatchValidator` (moved from `zcash_proofs::sapling`).
-  - `SaplingVerificationContext` (moved from `zcash_proofs::sapling`).
-  - `builder` (moved from
-    `zcash_primitives::transaction::components::sapling::builder`).
-  - `builder::UnauthorizedBundle`
-  - `builder::InProgress`
-  - `builder::{InProgressProofs, Unproven, Proven}`
-  - `builder::{InProgressSignatures, Unsigned, PartiallyAuthorized}`
-  - `builder::{MaybeSigned, SigningParts}`
-  - `builder::SpendDescriptionInfo::value`
-  - `builder::SaplingOutputInfo`
-  - `builder::ProverProgress`
-  - `bundle` module, containing the following types moved from
-    `zcash_primitives::transaction::components::sapling`:
-    - `Bundle`
-    - `SpendDescription, SpendDescriptionV5`
-    - `OutputDescription, OutputDescriptionV5`
-    - `Authorization, Authorized, MapAuth`
-    - `GrothProofBytes`
-  - `bundle::Bundle::<InProgress<Unproven, _>>::create_proofs`
-  - `bundle::Bundle::<InProgress<_, Unsigned>>::prepare`
-  - `bundle::Bundle::<InProgress<_, PartiallyAuthorized>>::{sign, append_signatures}`
-  - `bundle::Bundle::<InProgress<Proven, PartiallyAuthorized>>::finalize`
-  - `bundle::Bundle::<InProgress<Proven, Unsigned>>::apply_signatures`
-  - `bundle::Bundle::try_map_authorization`
-  - `bundle::TryMapAuth`
-  - `impl bundle::{MapAuth, TryMapAuth} for (FnMut, FnMut, FnMut, FnMut)`
-    helpers to enable calling `Bundle::{map_authorization, try_map_authorization}`
-    with a set of closures.
-  - `bundle::testing` module, containing the following functions moved from
-    `zcash_primitives::transaction::components::sapling::testing`:
-    - `arb_output_description`
-    - `arb_bundle`
-  - `circuit` module (moved from `zcash_proofs::circuit::sapling`).
-  - `circuit::{SpendParameters, OutputParameters}`
-  - `circuit::{SpendVerifyingKey, PreparedSpendVerifyingKey}`
-  - `circuit::{OutputVerifyingKey, PreparedOutputVerifyingKey}`
-  - `constants` module.
-  - `keys::SpendAuthorizingKey`
-  - `keys::SpendValidatingKey`
-  - `note_encryption::CompactOutputDescription` (moved from
-    `zcash_primitives::transaction::components::sapling`).
-  - `note_encryption::SaplingDomain::new`
-  - `note_encryption::Zip212Enforcement`
-  - `prover::{SpendProver, OutputProver}`
-  - `tree::Node::{from_bytes, to_bytes}`
-  - `value`:
-    - `ValueCommitTrapdoor::from_bytes`
-    - `impl Sub<TrapdoorSum> for TrapdoorSum`
-    - `impl Sub<CommitmentSum> for CommitmentSum`
-  - `zip32` module (moved from `zcash_primitives::zip32::sapling`).
-  - `impl Debug for keys::{ExpandedSpendingKey, ProofGenerationKey}`
 - `zcash_primitives::transaction`:
   - `builder::get_fee`
   - `components::sapling`:
@@ -86,8 +33,6 @@ and this library adheres to Rust's notion of
   - `ChainCode::new`
   - `ChainCode::as_bytes`
   - `impl From<AccountId> for ChildIndex`
-- Test helpers, behind the `test-dependencies` feature flag:
-  - `zcash_primitives::sapling::prover::mock::{MockSpendProver, MockOutputProver}`
 - Additions related to `zcash_primitive::components::amount::Amount`
   and `zcash_primitive::components::amount::NonNegativeAmount`:
   - `impl TryFrom<Amount> for u64`
@@ -106,80 +51,6 @@ and this library adheres to Rust's notion of
 - `impl From<TxId> for [u8; 32]`
 
 ### Changed
-- `zcash_primitives::sapling`:
-  - `BatchValidator::validate` now takes the `SpendVerifyingKey` and
-    `OutputVerifyingKey` newtypes.
-  - `SaplingVerificationContext::new` now always creates a context with ZIP 216
-    rules enforced, and no longer has a boolean for configuring this.
-  - `SaplingVerificationContext::{check_spend, final_check}` now use the
-    `redjubjub` crate types for `rk`, `spend_auth_sig`, and `binding_sig`.
-  - `SaplingVerificationContext::{check_spend, check_output}` now take
-    the `PreparedSpendVerifyingKey` and `PreparedOutputVerifyingKey`
-    newtypes.
-  - `SaplingVerificationContext::final_check` now takes its `value_balance`
-    argument as `V: Into<i64>` instead of `Amount`.
-  - `address::PaymentAddress::create_note` now takes its `value` argument as a
-    `NoteValue` instead of as a bare `u64`.
-  - `builder::SaplingBuilder` no longer has a `P: consensus::Parameters` type
-    parameter.
-  - `builder::SaplingBuilder::new` now takes a `Zip212Enforcement` argument
-    instead of a `P: consensus::Parameters` argument and a target height.
-  - `builder::SaplingBuilder::add_spend` now takes `extsk` by reference. Also,
-    it no longer takes a `diversifier` argument as the diversifier may be obtained
-    from the note.
-  - `builder::SaplingBuilder::add_output` now takes an `Option<[u8; 512]>` memo
-    instead of a `MemoBytes`.
-  - `builder::SaplingBuilder::build` no longer takes a prover, proving context,
-    progress notifier, or target height. Instead, it has `SpendProver, OutputProver`
-    generic parameters and returns `(UnauthorizedBundle, SaplingMetadata)`. The
-    caller can then use `Bundle::<InProgress<Unproven, _>>::create_proofs` to
-    create spend and output proofs for the bundle.
-  - `builder::Error` has new error variants:
-    - `Error::DuplicateSignature`
-    - `Error::InvalidExternalSignature`
-    - `Error::MissingSignatures`
-  - `bundle::Bundle` now has a second generic parameter `V`.
-  - `bundle::Bundle::value_balance` now returns `&V` instead of `&Amount`.
-  - `bundle::Authorized::binding_sig` now has type `redjubjub::Signature<Binding>`.
-  - `bundle::Authorized::AuthSig` now has type `redjubjub::Signature<SpendAuth>`.
-  - `bundle::SpendDescription::temporary_zcashd_from_parts` now takes `rk` as
-    `redjubjub::VerificationKey<SpendAuth>` instead of
-    `zcash_primitives::sapling::redjubjub::PublicKey`.
-  - `bundle::SpendDescription::rk` now returns `&redjubjub::VerificationKey<SpendAuth>`.
-  - `bundle::SpendDescriptionV5::into_spend_description` now takes
-    `spend_auth_sig` as `redjubjub::Signature<SpendAuth>` instead of
-    `zcash_primitives::sapling::redjubjub::Signature`.
-  - `bundle::testing::arb_bundle` now takes a `value_balance: V` argument.
-  - `bundle::MapAuth` trait methods now take `&mut self` instead of `&self`.
-  - `circuit::ValueCommitmentOpening::value` is now represented as a `NoteValue`
-    instead of as a bare `u64`.
-  - `keys::DecodingError` has a new variant `UnsupportedChildIndex`.
-  - `keys::ExpandedSpendingKey.ask` now has type `SpendAuthorizingKey`.
-  - `keys::ProofGenerationKey.ak` now has type `SpendValidatingKey`.
-  - `keys::ViewingKey.ak` now has type `SpendValidatingKey`.
-  - `note_encryption`:
-    - `SaplingDomain` no longer has a `P: consensus::Parameters` type parameter.
-    - The following methods now take a `Zip212Enforcement` argument instead of a
-      `P: consensus::Parameters` argument:
-      - `plaintext_version_is_valid`
-      - `try_sapling_note_decryption`
-      - `try_sapling_compact_note_decryption`
-      - `try_sapling_output_recovery_with_ock`
-      - `try_sapling_output_recovery`
-    - `SaplingDomain::Memo` now has type `[u8; 512]` instead of `MemoBytes`.
-    - `sapling_note_encryption` now takes `memo` as a `[u8; 512]` instead of
-      `MemoBytes`.
-    - The following methods now return `[u8; 512]` instead of `MemoBytes`:
-      - `try_sapling_note_decryption`
-      - `try_sapling_output_recovery_with_ock`
-      - `try_sapling_output_recovery`
-  - `util::generate_random_rseed` now takes a `Zip212Enforcement` argument
-    instead of a `P: consensus::Parameters` argument and a height.
-  - `value::TrapdoorSum::into_bsk` now returns `redjubjub::SigningKey<Binding>`
-    instead of `zcash_primitives::sapling::redjubjub::PrivateKey`.
-  - `value::CommitmentSum::into_bvk` now returns
-    `redjubjub::VerificationKey<Binding>` instead of
-    `zcash_primitives::sapling::redjubjub::PublicKey`.
 - `zcash_primitives::transaction`:
   - `builder::Builder` now has a generic parameter for the type of progress
     notifier, which needs to implement `sapling::builder::ProverProgress` in
@@ -220,37 +91,25 @@ and this library adheres to Rust's notion of
 
 ### Removed
 - `zcash_primitives::constants`:
-  - All `const` values (moved to `zcash_primitives::sapling::constants`).
+  - All `const` values (moved to `sapling_crypto::constants`).
 - `zcash_primitives::keys`:
   - `PRF_EXPAND_PERSONALIZATION`
   - `prf_expand, prf_expand_vec` (use `zcash_spec::PrfExpand` instead).
-- `zcash_primitives::sapling`:
-  - `bundle`:
-    - `SpendDescription::{read, read_nullifier, read_rk, read_spend_auth_sig}`
-    - `SpendDescription::{write_v4, write_v5_without_witness_data}`
-    - `SpendDescriptionV5::read`
-    - `OutputDescription::read`
-    - `OutputDescription::{write_v4, write_v5_without_proof}`
-    - `OutputDescriptionV5::read`
-  - `note_encryption::SaplingDomain::for_height` (use `SaplingDomain::new`
-    instead).
-  - `redjubjub` module (use the `redjubjub` crate instead).
-  - `spend_sig` (use `redjubjub::SigningKey::{randomize, sign}` instead).
+- `zcash_primitives::sapling` module (use the `sapling-crypto` crate instead).
 - `zcash_primitives::transaction::components::sapling`:
   - The following types were removed from this module (moved into
-    `zcash_primitives::sapling::bundle`):
+    `sapling_crypto::bundle`):
     - `Bundle`
     - `SpendDescription, SpendDescriptionV5`
     - `OutputDescription, OutputDescriptionV5`
     - `Authorization, Authorized, MapAuth`
     - `GrothProofBytes`
-  - `CompactOutputDescription` (moved to
-    `zcash_primitives::sapling::note_encryption`).
+  - `CompactOutputDescription` (moved to `sapling_crypto::note_encryption`).
   - `Unproven`
-  - `builder` (moved to `zcash_primitives::sapling::builder`).
+  - `builder` (moved to `sapling_crypto::builder`).
   - `builder::Unauthorized` (use `builder::InProgress` instead).
   - `testing::{arb_bundle, arb_output_description}` (moved into
-    `zcash_primitives::sapling::bundle::testing`).
+    `sapling_crypto::bundle::testing`).
   - `SpendDescription::<Unauthorized>::apply_signature`
   - `Bundle::<Unauthorized>::apply_signatures` (use
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
@@ -258,7 +117,7 @@ and this library adheres to Rust's notion of
     are now instead made available by `zcash_client_backend::fees::sapling`.
 - `impl From<zcash_primitive::components::transaction::Amount> for u64`
 - `zcash_primitives::zip32`:
-  - `sapling` module (moved from `zcash_primitives::sapling::zip32`).
+  - `sapling` module (moved to `sapling_crypto::zip32`).
   - `ChildIndex::Hardened` (use `ChildIndex::hardened` instead).
   - `ChildIndex::NonHardened`
   - `sapling::ExtendedFullViewingKey::derive_child`

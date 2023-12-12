@@ -8,6 +8,7 @@ use std::{
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
+use sapling::{Node, NOTE_COMMITMENT_TREE_DEPTH};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
@@ -15,7 +16,6 @@ use zcash_primitives::{
     consensus::BlockHeight,
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    sapling::{self, Node, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
         components::{
             amount::{Amount, BalanceError, NonNegativeAmount},
@@ -1066,7 +1066,6 @@ pub mod testing {
         consensus::{BlockHeight, Network},
         legacy::TransparentAddress,
         memo::Memo,
-        sapling,
         transaction::{components::Amount, Transaction, TxId},
         zip32::{AccountId, Scope},
     };

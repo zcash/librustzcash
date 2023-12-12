@@ -1,14 +1,11 @@
 use std::collections::HashMap;
 
+use sapling::note_encryption::{
+    try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
+};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    sapling::{
-        self,
-        note_encryption::{
-            try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
-        },
-    },
     transaction::Transaction,
     zip32::{AccountId, Scope},
 };

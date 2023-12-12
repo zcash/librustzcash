@@ -749,9 +749,9 @@ pub mod testing {
     use proptest::option;
     use proptest::prelude::{any, prop_compose, prop_oneof};
     use proptest::strategy::Strategy;
+    use sapling::testing::arb_payment_address;
     use zcash_primitives::{
         consensus::TEST_NETWORK, legacy::testing::arb_transparent_addr,
-        sapling::testing::arb_payment_address,
         transaction::components::amount::testing::arb_nonnegative_amount,
     };
 

@@ -450,7 +450,7 @@ impl sapling::OutputView for SaplingPayment {
 /// notes.
 ///
 /// This implementation performs input selection using methods available via the
-/// [`SaplingInputSource`] and [`TransparentInputSource`] interfaces.
+/// [`SaplingInputSource`] and `TransparentInputSource` interfaces.
 pub struct GreedyInputSelector<DbT, ChangeT> {
     change_strategy: ChangeT,
     dust_output_policy: DustOutputPolicy,

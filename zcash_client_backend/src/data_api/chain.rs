@@ -8,7 +8,6 @@
 //! # {
 //! use zcash_primitives::{
 //!     consensus::{BlockHeight, Network, Parameters},
-//!     sapling
 //! };
 //!
 //! use zcash_client_backend::{
@@ -146,9 +145,9 @@
 
 use std::ops::Range;
 
+use sapling::note_encryption::PreparedIncomingViewingKey;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
-    sapling::{self, note_encryption::PreparedIncomingViewingKey},
     zip32::Scope,
 };
 

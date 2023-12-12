@@ -3,16 +3,14 @@
 use bellman::groth16::Proof;
 use bls12_381::Bls12;
 use std::path::Path;
-use zcash_primitives::{
-    sapling::{
-        self,
-        bundle::GrothProofBytes,
-        prover::{OutputProver, SpendProver},
-        value::{NoteValue, ValueCommitTrapdoor},
-        Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
-    },
-    transaction::components::GROTH_PROOF_SIZE,
+
+use sapling::{
+    bundle::GrothProofBytes,
+    prover::{OutputProver, SpendProver},
+    value::{NoteValue, ValueCommitTrapdoor},
+    Diversifier, MerklePath, PaymentAddress, ProofGenerationKey, Rseed,
 };
+use zcash_primitives::transaction::components::GROTH_PROOF_SIZE;
 
 use crate::{load_parameters, parse_parameters, OutputParameters, SpendParameters};
 

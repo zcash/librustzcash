@@ -8,6 +8,9 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
+// Present to reduce refactoring noise from changing all the imports inside this crate for
+// the `sapling` crate extraction.
+#![allow(clippy::single_component_path_imports)]
 
 pub mod block;
 pub mod consensus;
@@ -16,7 +19,7 @@ pub mod keys;
 pub mod legacy;
 pub mod memo;
 pub mod merkle_tree;
-pub use sapling;
+use sapling;
 pub mod transaction;
 pub use zip32;
 pub mod zip339;

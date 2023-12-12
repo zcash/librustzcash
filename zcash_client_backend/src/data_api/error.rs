@@ -6,7 +6,6 @@ use std::fmt::{self, Debug, Display};
 use shardtree::error::ShardTreeError;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 use zcash_primitives::{
-    sapling,
     transaction::{
         builder,
         components::{amount::BalanceError, transparent},

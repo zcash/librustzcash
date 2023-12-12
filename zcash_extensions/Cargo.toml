@@ -18,6 +18,7 @@ zcash_primitives = { workspace = true, features = ["zfuture" ] }
 ff.workspace = true
 jubjub.workspace = true
 rand_core.workspace = true
+sapling.workspace = true
 zcash_address.workspace = true
 zcash_proofs.workspace = true
 

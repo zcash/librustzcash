@@ -19,7 +19,6 @@ use zcash_client_backend::data_api::{
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     merkle_tree::{read_commitment_tree, read_incremental_witness},
-    sapling,
 };
 
 use crate::{

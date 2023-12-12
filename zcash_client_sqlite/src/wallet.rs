@@ -197,14 +197,14 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // birthday frontier is the empty frontier, we don't need to do anything.
     if let Some(frontier) = birthday.sapling_frontier().value() {
         debug!("Inserting frontier into ShardTree: {:?}", frontier);
-        let shard_store = SqliteShardStore::<
-            _,
-            zcash_primitives::sapling::Node,
-            SAPLING_SHARD_HEIGHT,
-        >::from_connection(conn, SAPLING_TABLES_PREFIX)?;
+        let shard_store =
+            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+                conn,
+                SAPLING_TABLES_PREFIX,
+            )?;
         let mut shard_tree: ShardTree<
             _,
-            { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
+            { ::sapling::NOTE_COMMITMENT_TREE_DEPTH },
             SAPLING_SHARD_HEIGHT,
         > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
         shard_tree.insert_frontier_nodes(
@@ -977,9 +977,9 @@ fn parse_block_metadata<P: consensus::Parameters>(
         } else {
             // parse the legacy commitment tree data
             read_commitment_tree::<
-                zcash_primitives::sapling::Node,
+                ::sapling::Node,
                 _,
-                { zcash_primitives::sapling::NOTE_COMMITMENT_TREE_DEPTH },
+                { ::sapling::NOTE_COMMITMENT_TREE_DEPTH },
             >(Cursor::new(sapling_tree))
             .map(|tree| tree.size().try_into().unwrap())
             .map_err(SqliteClientError::from)
@@ -1989,6 +1989,7 @@ mod tests {
             testing::{AddressType, TestState},
             PRUNING_DEPTH,
         },
+        sapling::zip32::ExtendedSpendingKey,
         zcash_client_backend::{
             data_api::{
                 wallet::input_selection::GreedyInputSelector, TransparentInputSource, WalletWrite,
@@ -1999,7 +2000,6 @@ mod tests {
         },
         zcash_primitives::{
             consensus::BlockHeight,
-            sapling::zip32::ExtendedSpendingKey,
             transaction::{
                 components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
                 fees::fixed::FeeRule as FixedFeeRule,

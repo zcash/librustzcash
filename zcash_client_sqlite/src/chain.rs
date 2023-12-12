@@ -324,9 +324,9 @@ where
 mod tests {
     use std::num::NonZeroU32;
 
+    use sapling::zip32::ExtendedSpendingKey;
     use zcash_primitives::{
         block::BlockHash,
-        sapling::zip32::ExtendedSpendingKey,
         transaction::{components::amount::NonNegativeAmount, fees::zip317::FeeRule},
     };
 

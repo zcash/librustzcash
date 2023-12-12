@@ -5,10 +5,10 @@ use incrementalmerkletree::Position;
 use rusqlite::{named_params, params, types::Value, Connection, Row};
 use std::rc::Rc;
 
+use sapling::{Diversifier, Note, Nullifier, Rseed};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    sapling::{self, Diversifier, Note, Nullifier, Rseed},
     transaction::{
         components::{amount::NonNegativeAmount, Amount},
         TxId,
@@ -470,17 +470,17 @@ pub(crate) mod tests {
     use secrecy::Secret;
     use zcash_proofs::prover::LocalTxProver;
 
+    use sapling::{
+        note_encryption::try_sapling_output_recovery,
+        prover::{OutputProver, SpendProver},
+        zip32::ExtendedSpendingKey,
+        Node, Note, PaymentAddress,
+    };
     use zcash_primitives::{
         block::BlockHash,
         consensus::{sapling_zip212_enforcement, BranchId},
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
-        sapling::{
-            note_encryption::try_sapling_output_recovery,
-            prover::{OutputProver, SpendProver},
-            zip32::ExtendedSpendingKey,
-            Node, Note, PaymentAddress,
-        },
         transaction::{
             components::{amount::NonNegativeAmount, Amount},
             fees::{
