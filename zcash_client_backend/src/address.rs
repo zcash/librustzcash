@@ -2,6 +2,7 @@
 
 use std::convert::TryFrom;
 
+use sapling::PaymentAddress;
 use zcash_address::{
     unified::{self, Container, Encoding},
     ConversionError, Network, ToAddress, TryFromRawAddress, ZcashAddress,
@@ -9,7 +10,6 @@ use zcash_address::{
 use zcash_primitives::{
     consensus,
     legacy::TransparentAddress,
-    sapling::PaymentAddress,
     zip32::{AccountId, DiversifierIndex},
 };
 

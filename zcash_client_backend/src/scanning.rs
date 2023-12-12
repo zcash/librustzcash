@@ -5,17 +5,16 @@ use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 
 use incrementalmerkletree::{Position, Retention};
+use sapling::{
+    note_encryption::{CompactOutputDescription, PreparedIncomingViewingKey, SaplingDomain},
+    zip32::DiversifiableFullViewingKey,
+    SaplingIvk,
+};
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
 use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade};
 use zcash_primitives::{
     consensus,
-    sapling::{
-        self,
-        note_encryption::{CompactOutputDescription, PreparedIncomingViewingKey, SaplingDomain},
-        zip32::DiversifiableFullViewingKey,
-        SaplingIvk,
-    },
     zip32::{AccountId, Scope},
 };
 
@@ -124,7 +123,7 @@ impl ScanningKey for (Scope, SaplingIvk, sapling::NullifierDerivingKey) {
 /// The [`ScanningKey`] implementation for [`SaplingIvk`]s.
 /// Nullifiers cannot be derived when scanning with these keys.
 ///
-/// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
+/// [`SaplingIvk`]: sapling::SaplingIvk
 impl ScanningKey for SaplingIvk {
     type Scope = ();
     type SaplingNk = ();
@@ -244,12 +243,12 @@ impl fmt::Display for ScanError {
 /// [`WalletSaplingOutput`]s, whereas the implementation for [`SaplingIvk`] cannot
 /// do so and will return the unit value in those outputs instead.
 ///
-/// [`ExtendedFullViewingKey`]: zcash_primitives::sapling::zip32::ExtendedFullViewingKey
-/// [`SaplingIvk`]: zcash_primitives::sapling::SaplingIvk
+/// [`ExtendedFullViewingKey`]: sapling::zip32::ExtendedFullViewingKey
+/// [`SaplingIvk`]: sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
 /// [`ScanningKey`]: crate::scanning::ScanningKey
-/// [`CommitmentTree`]: zcash_primitives::sapling::CommitmentTree
-/// [`IncrementalWitness`]: zcash_primitives::sapling::IncrementalWitness
+/// [`CommitmentTree`]: sapling::CommitmentTree
+/// [`IncrementalWitness`]: sapling::IncrementalWitness
 /// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
 pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
@@ -658,20 +657,19 @@ mod tests {
     };
     use incrementalmerkletree::{Position, Retention};
     use rand_core::{OsRng, RngCore};
+    use sapling::{
+        constants::SPENDING_KEY_GENERATOR,
+        note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
+        util::generate_random_rseed,
+        value::NoteValue,
+        zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
+        Nullifier, SaplingIvk,
+    };
     use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash,
         consensus::{sapling_zip212_enforcement, BlockHeight, Network},
         memo::MemoBytes,
-        sapling::{
-            self,
-            constants::SPENDING_KEY_GENERATOR,
-            note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
-            util::generate_random_rseed,
-            value::NoteValue,
-            zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
-            Nullifier, SaplingIvk,
-        },
         transaction::components::amount::NonNegativeAmount,
         zip32::AccountId,
     };

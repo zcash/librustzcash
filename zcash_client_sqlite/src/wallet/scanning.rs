@@ -501,6 +501,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 pub(crate) mod tests {
     use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
 
+    use sapling::{zip32::DiversifiableFullViewingKey, Node};
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
@@ -511,7 +512,6 @@ pub(crate) mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
-        sapling::{zip32::DiversifiableFullViewingKey, Node},
         transaction::components::amount::NonNegativeAmount,
     };
 

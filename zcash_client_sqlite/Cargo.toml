@@ -37,6 +37,9 @@ jubjub.workspace = true
 # - Secret management
 secrecy.workspace = true
 
+# - Shielded protocols
+sapling.workspace = true
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }

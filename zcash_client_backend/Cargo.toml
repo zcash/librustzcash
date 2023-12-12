@@ -57,6 +57,7 @@ subtle.workspace = true
 bls12_381.workspace = true
 group.workspace = true
 orchard.workspace = true
+sapling.workspace = true
 
 # - Note commitment trees
 incrementalmerkletree.workspace = true

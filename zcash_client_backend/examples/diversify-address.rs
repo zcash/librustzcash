@@ -1,8 +1,8 @@
 use gumdrop::Options;
+use sapling::zip32::ExtendedFullViewingKey;
 use zcash_client_backend::encoding::{decode_extended_full_viewing_key, encode_payment_address};
 use zcash_primitives::{
     constants::{mainnet, testnet},
-    sapling::zip32::ExtendedFullViewingKey,
     zip32::DiversifierIndex,
 };
 

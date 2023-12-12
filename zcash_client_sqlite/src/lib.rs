@@ -50,7 +50,6 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
-    sapling,
     transaction::{
         components::amount::{Amount, NonNegativeAmount},
         Transaction, TxId,

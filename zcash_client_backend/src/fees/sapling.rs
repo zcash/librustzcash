@@ -3,10 +3,8 @@
 
 use std::convert::Infallible;
 
-use zcash_primitives::{
-    sapling::builder::{SaplingOutputInfo, SpendDescriptionInfo},
-    transaction::components::amount::NonNegativeAmount,
-};
+use sapling::builder::{SaplingOutputInfo, SpendDescriptionInfo};
+use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 
 /// A trait that provides a minimized view of a Sapling input suitable for use in
 /// fee and change calculation.

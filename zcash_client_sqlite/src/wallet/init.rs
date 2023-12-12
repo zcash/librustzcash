@@ -174,9 +174,9 @@ mod tests {
         keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
 
+    use ::sapling::zip32::ExtendedFullViewingKey;
     use zcash_primitives::{
         consensus::{self, BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
-        sapling::zip32::ExtendedFullViewingKey,
         transaction::{TransactionData, TxVersion},
         zip32::AccountId,
     };

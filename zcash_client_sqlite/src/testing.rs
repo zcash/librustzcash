@@ -14,6 +14,13 @@ use tempfile::NamedTempFile;
 #[cfg(feature = "unstable")]
 use tempfile::TempDir;
 
+use sapling::{
+    note_encryption::{sapling_note_encryption, SaplingDomain},
+    util::generate_random_rseed,
+    value::NoteValue,
+    zip32::DiversifiableFullViewingKey,
+    Note, Nullifier, PaymentAddress,
+};
 use zcash_client_backend::fees::{standard, DustOutputPolicy};
 #[allow(deprecated)]
 use zcash_client_backend::{
@@ -42,13 +49,6 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
-    sapling::{
-        note_encryption::{sapling_note_encryption, SaplingDomain},
-        util::generate_random_rseed,
-        value::NoteValue,
-        zip32::DiversifiableFullViewingKey,
-        Note, Nullifier, PaymentAddress,
-    },
     transaction::{
         components::amount::NonNegativeAmount,
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},

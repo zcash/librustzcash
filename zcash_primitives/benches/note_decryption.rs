@@ -3,19 +3,19 @@ use std::iter;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use ff::Field;
 use rand_core::OsRng;
+use sapling::{
+    builder::SaplingBuilder,
+    note_encryption::{
+        try_sapling_compact_note_decryption, try_sapling_note_decryption, CompactOutputDescription,
+        PreparedIncomingViewingKey, SaplingDomain,
+    },
+    prover::mock::{MockOutputProver, MockSpendProver},
+    value::NoteValue,
+    Diversifier, SaplingIvk,
+};
 use zcash_note_encryption::batch;
 use zcash_primitives::{
     consensus::{sapling_zip212_enforcement, NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
-    sapling::{
-        builder::SaplingBuilder,
-        note_encryption::{
-            try_sapling_compact_note_decryption, try_sapling_note_decryption,
-            CompactOutputDescription, PreparedIncomingViewingKey, SaplingDomain,
-        },
-        prover::mock::{MockOutputProver, MockSpendProver},
-        value::NoteValue,
-        Diversifier, SaplingIvk,
-    },
     transaction::components::Amount,
 };
 

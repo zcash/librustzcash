@@ -9,12 +9,12 @@ use std::{
 use incrementalmerkletree::frontier::CommitmentTree;
 
 use nonempty::NonEmpty;
+use sapling::{note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::{self, BlockHeight, Parameters},
     memo::{self, MemoBytes},
     merkle_tree::read_commitment_tree,
-    sapling::{self, note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH},
     transaction::{
         components::{amount::NonNegativeAmount, OutPoint},
         fees::StandardFeeRule,

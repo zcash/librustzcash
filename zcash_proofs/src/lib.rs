@@ -11,7 +11,7 @@
 
 use bellman::groth16::{prepare_verifying_key, PreparedVerifyingKey, VerifyingKey};
 use bls12_381::Bls12;
-use zcash_primitives::sapling::circuit::{
+use sapling::circuit::{
     OutputParameters, PreparedOutputVerifyingKey, PreparedSpendVerifyingKey, SpendParameters,
 };
 

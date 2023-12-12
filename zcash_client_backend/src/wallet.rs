@@ -6,7 +6,6 @@ use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
     legacy::TransparentAddress,
-    sapling,
     transaction::{
         components::{
             amount::NonNegativeAmount,
@@ -333,7 +332,7 @@ pub enum OvkPolicy {
     /// Transaction outputs will be decryptable by the sender, in addition to the
     /// recipients.
     ///
-    /// [`ExtendedFullViewingKey`]: zcash_primitives::sapling::zip32::ExtendedFullViewingKey
+    /// [`ExtendedFullViewingKey`]: sapling::zip32::ExtendedFullViewingKey
     Sender,
 
     /// Use a custom outgoing viewing key. This might for instance be derived from a
