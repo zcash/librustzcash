@@ -15,7 +15,6 @@
 pub mod block;
 pub mod consensus;
 pub mod constants;
-pub mod keys;
 pub mod legacy;
 pub mod memo;
 pub mod merkle_tree;

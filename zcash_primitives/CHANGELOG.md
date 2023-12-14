@@ -110,8 +110,10 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_primitives::constants`:
   - All `const` values (moved to `sapling_crypto::constants`).
-- `zcash_primitives::keys`:
+- `zcash_primitives::keys` module, as it was empty after the removal of:
   - `PRF_EXPAND_PERSONALIZATION`
+  - `OutgoingViewingKey` (use `sapling_crypto::keys::OutgoingViewingKey`
+    instead).
   - `prf_expand, prf_expand_vec` (use `zcash_spec::PrfExpand` instead).
 - `zcash_primitives::sapling` module (use the `sapling-crypto` crate instead).
 - `zcash_primitives::transaction::components::sapling`:
