@@ -331,7 +331,7 @@ mod tests {
     };
 
     use zcash_client_backend::{
-        address::RecipientAddress,
+        address::Address,
         data_api::{
             chain::error::Error, wallet::input_selection::GreedyInputSelector, AccountBirthday,
             WalletRead,
@@ -520,7 +520,7 @@ mod tests {
 
         // We can spend the received notes
         let req = TransactionRequest::new(vec![Payment {
-            recipient_address: RecipientAddress::Shielded(dfvk.default_address().1),
+            recipient_address: Address::Sapling(dfvk.default_address().1),
             amount: NonNegativeAmount::const_from_u64(110_000),
             memo: None,
             label: None,

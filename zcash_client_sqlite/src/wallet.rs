@@ -87,7 +87,7 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::{RecipientAddress, UnifiedAddress},
+    address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, SentTransactionOutput, SAPLING_SHARD_HEIGHT,
@@ -288,12 +288,12 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
         })?;
         di_be.reverse();
 
-        RecipientAddress::decode(params, &addr_str)
+        Address::decode(params, &addr_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
             })
             .and_then(|addr| match addr {
-                RecipientAddress::Unified(ua) => Ok(ua),
+                Address::Unified(ua) => Ok(ua),
                 _ => Err(SqliteClientError::CorruptedData(format!(
                     "Addresses table contains {} which is not a unified address",
                     addr_str,
@@ -365,12 +365,12 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         })?;
         di_be.reverse();
 
-        let ua = RecipientAddress::decode(params, &ua_str)
+        let ua = Address::decode(params, &ua_str)
             .ok_or_else(|| {
                 SqliteClientError::CorruptedData("Not a valid Zcash recipient address".to_owned())
             })
             .and_then(|addr| match addr {
-                RecipientAddress::Unified(ua) => Ok(ua),
+                Address::Unified(ua) => Ok(ua),
                 _ => Err(SqliteClientError::CorruptedData(format!(
                     "Addresses table contains {} which is not a unified address",
                     ua_str,

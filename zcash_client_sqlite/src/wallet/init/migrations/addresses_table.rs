@@ -4,7 +4,7 @@ use rusqlite::{named_params, Transaction};
 use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
-use zcash_client_backend::{address::RecipientAddress, keys::UnifiedFullViewingKey};
+use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
 use zcash_primitives::{consensus, zip32::AccountId};
 
 use crate::wallet::{init::WalletMigrationError, insert_address};
@@ -71,13 +71,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             // Verify that the address column contains the expected value.
             let address: String = row.get(2)?;
-            let decoded = RecipientAddress::decode(&self.params, &address).ok_or_else(|| {
+            let decoded = Address::decode(&self.params, &address).ok_or_else(|| {
                 WalletMigrationError::CorruptedData(format!(
                     "Could not decode {} as a valid Zcash address.",
                     address
                 ))
             })?;
-            let decoded_address = if let RecipientAddress::Unified(ua) = decoded {
+            let decoded_address = if let Address::Unified(ua) = decoded {
                 ua
             } else {
                 return Err(WalletMigrationError::CorruptedData(
@@ -89,7 +89,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 return Err(WalletMigrationError::CorruptedData(format!(
                     "Decoded UA {} does not match the UFVK's default address {} at {:?}.",
                     address,
-                    RecipientAddress::Unified(expected_address).encode(&self.params),
+                    Address::Unified(expected_address).encode(&self.params),
                     idx,
                 )));
             }
@@ -97,16 +97,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             // The transparent_address column might not be filled, depending on how this
             // crate was compiled.
             if let Some(transparent_address) = row.get::<_, Option<String>>(3)? {
-                let decoded_transparent =
-                    RecipientAddress::decode(&self.params, &transparent_address).ok_or_else(
-                        || {
-                            WalletMigrationError::CorruptedData(format!(
-                                "Could not decode {} as a valid Zcash address.",
-                                address
-                            ))
-                        },
-                    )?;
-                let decoded_transparent_address = if let RecipientAddress::Transparent(addr) =
+                let decoded_transparent = Address::decode(&self.params, &transparent_address)
+                    .ok_or_else(|| {
+                        WalletMigrationError::CorruptedData(format!(
+                            "Could not decode {} as a valid Zcash address.",
+                            address
+                        ))
+                    })?;
+                let decoded_transparent_address = if let Address::Transparent(addr) =
                     decoded_transparent
                 {
                     addr

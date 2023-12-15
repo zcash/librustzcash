@@ -18,7 +18,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::{RecipientAddress, UnifiedAddress},
+    address::{Address, UnifiedAddress},
     data_api::SaplingInputSource,
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
     wallet::{ReceivedNote, WalletTransparentOutput},
@@ -510,13 +510,13 @@ where
             };
 
             match &payment.recipient_address {
-                RecipientAddress::Transparent(addr) => {
+                Address::Transparent(addr) => {
                     push_transparent(*addr);
                 }
-                RecipientAddress::Shielded(_) => {
+                Address::Sapling(_) => {
                     push_sapling();
                 }
-                RecipientAddress::Unified(addr) => {
+                Address::Unified(addr) => {
                     if addr.sapling().is_some() {
                         push_sapling();
                     } else if let Some(addr) = addr.transparent() {

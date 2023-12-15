@@ -181,6 +181,10 @@ and this library adheres to Rust's notion of
     - `ReceivedSaplingNote::value`
     - `WalletTransparentOutput::value`
 
+- `zcash_client_backend::address`:
+  - `RecipientAddress` has been renamed to `Address`
+  - `Address::Shielded` has been renamed to `Address::Sapling`
+
 ### Removed
 - `zcash_client_backend::wallet::ReceivedSaplingNote` has been replaced by
   `zcash_client_backend::ReceivedNote`.

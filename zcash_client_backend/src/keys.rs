@@ -609,7 +609,7 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{address::RecipientAddress, encoding::AddressCodec},
+        crate::{address::Address, encoding::AddressCodec},
         zcash_address::test_vectors,
         zcash_primitives::{
             legacy::{
@@ -745,8 +745,8 @@ mod tests {
             let ua = ufvk.address(d_idx).unwrap_or_else(|| panic!("diversifier index {} should have produced a valid unified address for account {}",
                 tv.diversifier_index, tv.account));
 
-            match RecipientAddress::decode(&MAIN_NETWORK, tv.unified_addr) {
-                Some(RecipientAddress::Unified(tvua)) => {
+            match Address::decode(&MAIN_NETWORK, tv.unified_addr) {
+                Some(Address::Unified(tvua)) => {
                     // We always derive transparent and Sapling receivers, but not
                     // every value in the test vectors has these present.
                     if tvua.transparent().is_some() {

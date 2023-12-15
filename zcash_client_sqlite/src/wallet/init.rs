@@ -168,7 +168,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use zcash_client_backend::{
-        address::RecipientAddress,
+        address::Address,
         data_api::scanning::ScanPriority,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedFullViewingKey, UnifiedSpendingKey},
@@ -1005,8 +1005,7 @@ mod tests {
             )?;
 
             let ufvk_str = ufvk.encode(&wdb.params);
-            let address_str =
-                RecipientAddress::Unified(ufvk.default_address().0).encode(&wdb.params);
+            let address_str = Address::Unified(ufvk.default_address().0).encode(&wdb.params);
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1020,9 +1019,8 @@ mod tests {
             // add a transparent "sent note"
             #[cfg(feature = "transparent-inputs")]
             {
-                let taddr =
-                    RecipientAddress::Transparent(*ufvk.default_address().0.transparent().unwrap())
-                        .encode(&wdb.params);
+                let taddr = Address::Transparent(*ufvk.default_address().0.transparent().unwrap())
+                    .encode(&wdb.params);
                 wdb.conn.execute(
                     "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
                     [],
@@ -1080,8 +1078,8 @@ mod tests {
         assert_eq!(account, AccountId::ZERO);
 
         for tv in &test_vectors::UNIFIED[..3] {
-            if let Some(RecipientAddress::Unified(tvua)) =
-                RecipientAddress::decode(&Network::MainNetwork, tv.unified_addr)
+            if let Some(Address::Unified(tvua)) =
+                Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
                 let (ua, di) = wallet::get_current_address(&db_data.conn, &db_data.params, account)
                     .unwrap()
