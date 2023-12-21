@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::convert::{Infallible, TryFrom};
 use std::error;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
@@ -419,6 +419,12 @@ impl std::fmt::Display for BalanceError {
                 "Amount subtraction resulted in a value outside the valid range."
             ),
         }
+    }
+}
+
+impl From<Infallible> for BalanceError {
+    fn from(_value: Infallible) -> Self {
+        unreachable!()
     }
 }
 
