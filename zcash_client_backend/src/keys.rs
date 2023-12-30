@@ -118,6 +118,30 @@ pub enum DecodingError {
 }
 
 #[cfg(feature = "unstable")]
+impl std::fmt::Display for DecodingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DecodingError::ReadError(s) => write!(f, "Read error: {}", s),
+            DecodingError::EraInvalid => write!(f, "Invalid era"),
+            DecodingError::EraMismatch(e) => write!(f, "Era mismatch: actual {:?}", e),
+            DecodingError::TypecodeInvalid => write!(f, "Invalid typecode"),
+            DecodingError::LengthInvalid => write!(f, "Invalid length"),
+            DecodingError::LengthMismatch(t, l) => {
+                write!(
+                    f,
+                    "Length mismatch: received {} bytes for typecode {:?}",
+                    l, t
+                )
+            }
+            DecodingError::InsufficientData(t) => {
+                write!(f, "Insufficient data for typecode {:?}", t)
+            }
+            DecodingError::KeyDataInvalid(t) => write!(f, "Invalid key data for typecode {:?}", t),
+        }
+    }
+}
+
+#[cfg(feature = "unstable")]
 impl Era {
     /// Returns the unique identifier for the era.
     fn id(&self) -> u32 {
