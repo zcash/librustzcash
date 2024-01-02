@@ -112,4 +112,5 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "df6681c1046bd28073befd7d42224e4a4c70032a" }
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "71711b9e4b775a625318070e0f56b7b652f12306" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "189257391a5726d7f3f2568d547a5ef8603c7156" }

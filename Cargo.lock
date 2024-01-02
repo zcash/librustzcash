@@ -1461,8 +1461,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "orchard"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d31e68534df32024dcc89a8390ec6d7bef65edd87d91b45cfb481a2eb2d77c5"
+source = "git+https://github.com/zcash/orchard.git?rev=189257391a5726d7f3f2568d547a5ef8603c7156#189257391a5726d7f3f2568d547a5ef8603c7156"
 dependencies = [
  "aes",
  "bitvec",
@@ -2088,7 +2087,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.0.1"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=df6681c1046bd28073befd7d42224e4a4c70032a#df6681c1046bd28073befd7d42224e4a4c70032a"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=71711b9e4b775a625318070e0f56b7b652f12306#71711b9e4b775a625318070e0f56b7b652f12306"
 dependencies = [
  "aes",
  "bellman",
@@ -3076,6 +3075,7 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "jubjub",
+ "orchard",
  "rand_core",
  "sapling-crypto",
  "zcash_address",

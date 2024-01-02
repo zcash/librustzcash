@@ -5,7 +5,7 @@ use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
 
-use rand::{rngs::OsRng, CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
 
 use crate::{
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade},
@@ -13,7 +13,7 @@ use crate::{
     memo::MemoBytes,
     sapling::{
         self,
-        builder::{self as sapling_builder, SaplingBuilder, SaplingMetadata},
+        builder::SaplingMetadata,
         prover::{OutputProver, SpendProver},
         Note, PaymentAddress,
     },
@@ -53,9 +53,25 @@ use super::components::amount::NonNegativeAmount;
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
 const DEFAULT_TX_EXPIRY_DELTA: u32 = 40;
 
+/// Errors that can occur during fee calculation.
+#[derive(Debug)]
+pub enum FeeError<FE> {
+    FeeRule(FE),
+    Bundle(&'static str),
+}
+
+impl<FE: fmt::Display> fmt::Display for FeeError<FE> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            FeeError::FeeRule(e) => write!(f, "An error occurred in fee calculation: {}", e),
+            FeeError::Bundle(b) => write!(f, "Bundle structure invalid in fee calculation: {}", b),
+        }
+    }
+}
+
 /// Errors that can occur during transaction construction.
 #[derive(Debug)]
-pub enum Error<FeeError> {
+pub enum Error<FE> {
     /// Insufficient funds were provided to the transaction builder; the given
     /// additional amount is required in order to construct the transaction.
     InsufficientFunds(Amount),
@@ -63,22 +79,25 @@ pub enum Error<FeeError> {
     /// add a change output.
     ChangeRequired(Amount),
     /// An error occurred in computing the fees for a transaction.
-    Fee(FeeError),
+    Fee(FeeError<FE>),
     /// An overflow or underflow occurred when computing value balances
     Balance(BalanceError),
     /// An error occurred in constructing the transparent parts of a transaction.
     TransparentBuild(transparent::builder::Error),
     /// An error occurred in constructing the Sapling parts of a transaction.
-    SaplingBuild(sapling_builder::Error),
+    SaplingBuild(sapling::builder::Error),
     /// An error occurred in constructing the Orchard parts of a transaction.
     OrchardBuild(orchard::builder::BuildError),
     /// An error occurred in adding an Orchard Spend to a transaction.
     OrchardSpend(orchard::builder::SpendError),
     /// An error occurred in adding an Orchard Output to a transaction.
     OrchardRecipient(orchard::builder::OutputError),
-    /// The builder was constructed either without an Orchard anchor or before NU5
-    /// activation, but an Orchard spend or recipient was added.
-    OrchardAnchorNotAvailable,
+    /// The builder was constructed without support for the Sapling pool, but a Sapling
+    /// spend or output was added.
+    SaplingBuilderNotAvailable,
+    /// The builder was constructed with a target height before NU5 activation, but an Orchard
+    /// spend or output was added.
+    OrchardBuilderNotAvailable,
     /// An error occurred in constructing the TZE parts of a transaction.
     #[cfg(feature = "zfuture")]
     TzeBuild(tze::builder::Error),
@@ -104,7 +123,11 @@ impl<FE: fmt::Display> fmt::Display for Error<FE> {
             Error::OrchardBuild(err) => write!(f, "{:?}", err),
             Error::OrchardSpend(err) => write!(f, "Could not add Orchard spend: {}", err),
             Error::OrchardRecipient(err) => write!(f, "Could not add Orchard recipient: {}", err),
-            Error::OrchardAnchorNotAvailable => write!(
+            Error::SaplingBuilderNotAvailable => write!(
+                f,
+                "Cannot create Sapling transactions without a Sapling anchor"
+            ),
+            Error::OrchardBuilderNotAvailable => write!(
                 f,
                 "Cannot create Orchard transactions without an Orchard anchor, or before NU5 activation"
             ),
@@ -119,6 +142,24 @@ impl<FE: fmt::Debug + fmt::Display> error::Error for Error<FE> {}
 impl<FE> From<BalanceError> for Error<FE> {
     fn from(e: BalanceError) -> Self {
         Error::Balance(e)
+    }
+}
+
+impl<FE> From<FeeError<FE>> for Error<FE> {
+    fn from(e: FeeError<FE>) -> Self {
+        Error::Fee(e)
+    }
+}
+
+impl<FE> From<sapling::builder::Error> for Error<FE> {
+    fn from(e: sapling::builder::Error) -> Self {
+        Error::SaplingBuild(e)
+    }
+}
+
+impl<FE> From<orchard::builder::SpendError> for Error<FE> {
+    fn from(e: orchard::builder::SpendError) -> Self {
+        Error::OrchardSpend(e)
     }
 }
 
@@ -156,14 +197,52 @@ impl Progress {
     }
 }
 
+/// Rules for how the builder should be configured for each shielded pool.
+#[derive(Clone, Copy)]
+pub enum BuildConfig {
+    Standard {
+        sapling_anchor: sapling::Anchor,
+        orchard_anchor: orchard::Anchor,
+    },
+    Coinbase,
+}
+
+impl BuildConfig {
+    /// Returns the Sapling bundle type and anchor for this configuration.
+    pub fn sapling_builder_config(&self) -> (sapling::builder::BundleType, sapling::Anchor) {
+        match self {
+            BuildConfig::Standard { sapling_anchor, .. } => {
+                (sapling::builder::BundleType::DEFAULT, *sapling_anchor)
+            }
+            BuildConfig::Coinbase => (
+                sapling::builder::BundleType::Coinbase,
+                sapling::Anchor::empty_tree(),
+            ),
+        }
+    }
+
+    /// Returns the Orchard bundle type and anchor for this configuration.
+    pub fn orchard_builder_config(&self) -> (orchard::builder::BundleType, orchard::Anchor) {
+        match self {
+            BuildConfig::Standard { orchard_anchor, .. } => {
+                (orchard::builder::BundleType::DEFAULT, *orchard_anchor)
+            }
+            BuildConfig::Coinbase => (
+                orchard::builder::BundleType::Coinbase,
+                orchard::Anchor::empty_tree(),
+            ),
+        }
+    }
+}
+
 /// Generates a [`Transaction`] from its inputs and outputs.
-pub struct Builder<'a, P, R, U: sapling::builder::ProverProgress> {
+pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     params: P,
-    rng: R,
+    build_config: BuildConfig,
     target_height: BlockHeight,
     expiry_height: BlockHeight,
     transparent_builder: TransparentBuilder,
-    sapling_builder: SaplingBuilder,
+    sapling_builder: Option<sapling::builder::Builder>,
     orchard_builder: Option<orchard::builder::Builder>,
     // TODO: In the future, instead of taking the spending keys as arguments when calling
     // `add_sapling_spend` or `add_orchard_spend`, we will build an unauthorized, unproven
@@ -178,7 +257,7 @@ pub struct Builder<'a, P, R, U: sapling::builder::ProverProgress> {
     progress_notifier: U,
 }
 
-impl<'a, P, R, U: sapling::builder::ProverProgress> Builder<'a, P, R, U> {
+impl<'a, P, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
     /// Returns the network parameters that the builder has been configured for.
     pub fn params(&self) -> &P {
         &self.params
@@ -204,78 +283,53 @@ impl<'a, P, R, U: sapling::builder::ProverProgress> Builder<'a, P, R, U> {
 
     /// Returns the set of Sapling inputs currently committed to be consumed
     /// by the transaction.
-    pub fn sapling_inputs(&self) -> &[sapling::builder::SpendDescriptionInfo] {
-        self.sapling_builder.inputs()
+    pub fn sapling_inputs(&self) -> &[sapling::builder::SpendInfo] {
+        self.sapling_builder
+            .as_ref()
+            .map_or_else(|| &[][..], |b| b.inputs())
     }
 
     /// Returns the set of Sapling outputs currently set to be produced by
     /// the transaction.
-    pub fn sapling_outputs(&self) -> &[sapling::builder::SaplingOutputInfo] {
-        self.sapling_builder.outputs()
+    pub fn sapling_outputs(&self) -> &[sapling::builder::OutputInfo] {
+        self.sapling_builder
+            .as_ref()
+            .map_or_else(|| &[][..], |b| b.outputs())
     }
 }
 
-impl<'a, P: consensus::Parameters> Builder<'a, P, OsRng, ()> {
+impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// Creates a new `Builder` targeted for inclusion in the block with the given height,
-    /// using default values for general transaction fields and the default OS random.
+    /// using default values for general transaction fields.
     ///
     /// # Default values
     ///
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
-    pub fn new(
-        params: P,
-        target_height: BlockHeight,
-        orchard_anchor: Option<orchard::tree::Anchor>,
-    ) -> Self {
-        Builder::new_with_rng(params, target_height, orchard_anchor, OsRng)
-    }
-}
-
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, ()> {
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height
-    /// and randomness source, using default values for general transaction fields.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    pub fn new_with_rng(
-        params: P,
-        target_height: BlockHeight,
-        orchard_anchor: Option<orchard::tree::Anchor>,
-        rng: R,
-    ) -> Self {
+    pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
-            orchard_anchor.map(|anchor| {
-                orchard::builder::Builder::new(
-                    orchard::bundle::Flags::from_parts(true, true),
-                    anchor,
-                )
-            })
+            let (bundle_type, anchor) = build_config.orchard_builder_config();
+            Some(orchard::builder::Builder::new(bundle_type, anchor))
         } else {
             None
         };
 
-        Self::new_internal(params, rng, target_height, orchard_builder)
-    }
-
-    /// Common utility function for builder construction.
-    fn new_internal(
-        params: P,
-        rng: R,
-        target_height: BlockHeight,
-        orchard_builder: Option<orchard::builder::Builder>,
-    ) -> Self {
-        let zip212_enforcement = consensus::sapling_zip212_enforcement(&params, target_height);
+        let sapling_builder = Some({
+            let (bundle_type, anchor) = build_config.sapling_builder_config();
+            sapling::builder::Builder::new(
+                consensus::sapling_zip212_enforcement(&params, target_height),
+                bundle_type,
+                anchor,
+            )
+        });
 
         Builder {
             params,
-            rng,
+            build_config,
             target_height,
             expiry_height: target_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::new(zip212_enforcement),
+            sapling_builder,
             orchard_builder,
             sapling_asks: vec![],
             orchard_saks: Vec::new(),
@@ -296,10 +350,10 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, ()>
     pub fn with_progress_notifier(
         self,
         progress_notifier: Sender<Progress>,
-    ) -> Builder<'a, P, R, Sender<Progress>> {
+    ) -> Builder<'a, P, Sender<Progress>> {
         Builder {
             params: self.params,
-            rng: self.rng,
+            build_config: self.build_config,
             target_height: self.target_height,
             expiry_height: self.expiry_height,
             transparent_builder: self.transparent_builder,
@@ -313,43 +367,41 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R, ()>
     }
 }
 
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::ProverProgress>
-    Builder<'a, P, R, U>
-{
+impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
     /// the given note.
-    pub fn add_orchard_spend<FeeError>(
+    pub fn add_orchard_spend<FE>(
         &mut self,
-        sk: orchard::keys::SpendingKey,
+        sk: &orchard::keys::SpendingKey,
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
-    ) -> Result<(), Error<FeeError>> {
-        self.orchard_builder
-            .as_mut()
-            .ok_or(Error::OrchardAnchorNotAvailable)?
-            .add_spend(orchard::keys::FullViewingKey::from(&sk), note, merkle_path)
-            .map_err(Error::OrchardSpend)?;
+    ) -> Result<(), Error<FE>> {
+        if let Some(builder) = self.orchard_builder.as_mut() {
+            builder.add_spend(orchard::keys::FullViewingKey::from(sk), note, merkle_path)?;
 
-        self.orchard_saks
-            .push(orchard::keys::SpendAuthorizingKey::from(&sk));
+            self.orchard_saks
+                .push(orchard::keys::SpendAuthorizingKey::from(sk));
 
-        Ok(())
+            Ok(())
+        } else {
+            Err(Error::OrchardBuilderNotAvailable)
+        }
     }
 
     /// Adds an Orchard recipient to the transaction.
-    pub fn add_orchard_output<FeeError>(
+    pub fn add_orchard_output<FE>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
         recipient: orchard::Address,
         value: u64,
         memo: MemoBytes,
-    ) -> Result<(), Error<FeeError>> {
+    ) -> Result<(), Error<FE>> {
         self.orchard_builder
             .as_mut()
-            .ok_or(Error::OrchardAnchorNotAvailable)?
-            .add_recipient(
+            .ok_or(Error::OrchardBuilderNotAvailable)?
+            .add_output(
                 ovk,
                 recipient,
                 orchard::value::NoteValue::from_raw(value),
@@ -362,35 +414,40 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::
     ///
     /// Returns an error if the given Merkle path does not have the same anchor as the
     /// paths for previous Sapling notes.
-    pub fn add_sapling_spend(
+    pub fn add_sapling_spend<FE>(
         &mut self,
-        extsk: sapling::zip32::ExtendedSpendingKey,
+        extsk: &sapling::zip32::ExtendedSpendingKey,
         note: Note,
         merkle_path: sapling::MerklePath,
-    ) -> Result<(), sapling_builder::Error> {
-        self.sapling_builder
-            .add_spend(&mut self.rng, &extsk, note, merkle_path)?;
+    ) -> Result<(), Error<FE>> {
+        if let Some(builder) = self.sapling_builder.as_mut() {
+            builder.add_spend(extsk, note, merkle_path)?;
 
-        self.sapling_asks.push(extsk.expsk.ask);
-
-        Ok(())
+            self.sapling_asks.push(extsk.expsk.ask.clone());
+            Ok(())
+        } else {
+            Err(Error::SaplingBuilderNotAvailable)
+        }
     }
 
     /// Adds a Sapling address to send funds to.
-    pub fn add_sapling_output(
+    pub fn add_sapling_output<FE>(
         &mut self,
         ovk: Option<sapling::keys::OutgoingViewingKey>,
         to: PaymentAddress,
         value: NonNegativeAmount,
         memo: MemoBytes,
-    ) -> Result<(), sapling_builder::Error> {
-        self.sapling_builder.add_output(
-            &mut self.rng,
-            ovk,
-            to,
-            sapling::value::NoteValue::from_raw(value.into()),
-            Some(*memo.as_array()),
-        )
+    ) -> Result<(), Error<FE>> {
+        self.sapling_builder
+            .as_mut()
+            .ok_or(Error::SaplingBuilderNotAvailable)?
+            .add_output(
+                ovk,
+                to,
+                sapling::value::NoteValue::from_raw(value.into()),
+                Some(*memo.as_array()),
+            )
+            .map_err(Error::SaplingBuild)
     }
 
     /// Adds a transparent coin to be spent in this transaction.
@@ -418,14 +475,17 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::
     fn value_balance(&self) -> Result<Amount, BalanceError> {
         let value_balances = [
             self.transparent_builder.value_balance()?,
-            self.sapling_builder.value_balance(),
-            if let Some(builder) = &self.orchard_builder {
-                builder
-                    .value_balance()
-                    .map_err(|_| BalanceError::Overflow)?
-            } else {
-                Amount::zero()
-            },
+            self.sapling_builder
+                .as_ref()
+                .map_or_else(Amount::zero, |builder| builder.value_balance::<Amount>()),
+            self.orchard_builder.as_ref().map_or_else(
+                || Ok(Amount::zero()),
+                |builder| {
+                    builder
+                        .value_balance::<Amount>()
+                        .map_err(|_| BalanceError::Overflow)
+                },
+            )?,
             #[cfg(feature = "zfuture")]
             self.tze_builder.value_balance()?,
         ];
@@ -440,46 +500,102 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::
     ///
     /// This fee is a function of the spends and outputs that have been added to the builder,
     /// pursuant to the specified [`FeeRule`].
-    pub fn get_fee<FR: FeeRule>(&self, fee_rule: &FR) -> Result<NonNegativeAmount, FR::Error> {
+    pub fn get_fee<FR: FeeRule>(
+        &self,
+        fee_rule: &FR,
+    ) -> Result<NonNegativeAmount, FeeError<FR::Error>> {
         #[cfg(feature = "transparent-inputs")]
         let transparent_inputs = self.transparent_builder.inputs();
 
         #[cfg(not(feature = "transparent-inputs"))]
         let transparent_inputs: &[Infallible] = &[];
 
-        fee_rule.fee_required(
-            &self.params,
-            self.target_height,
-            transparent_inputs,
-            self.transparent_builder.outputs(),
-            self.sapling_builder.inputs().len(),
-            self.sapling_builder.bundle_output_count(),
-            match std::cmp::max(
-                self.orchard_builder
-                    .as_ref()
-                    .map_or(0, |builder| builder.outputs().len()),
-                self.orchard_builder
-                    .as_ref()
-                    .map_or(0, |builder| builder.spends().len()),
-            ) {
-                1 => 2,
-                n => n,
-            },
-        )
+        let sapling_spends = self
+            .sapling_builder
+            .as_ref()
+            .map_or(0, |builder| builder.inputs().len());
+
+        fee_rule
+            .fee_required(
+                &self.params,
+                self.target_height,
+                transparent_inputs,
+                self.transparent_builder.outputs(),
+                sapling_spends,
+                self.sapling_builder.as_ref().map_or(Ok(0), |builder| {
+                    self.build_config
+                        .sapling_builder_config()
+                        .0
+                        .num_outputs(sapling_spends, builder.outputs().len())
+                        .map_err(FeeError::Bundle)
+                })?,
+                self.orchard_builder.as_ref().map_or(Ok(0), |builder| {
+                    self.build_config
+                        .orchard_builder_config()
+                        .0
+                        .num_actions(builder.spends().len(), builder.outputs().len())
+                        .map_err(FeeError::Bundle)
+                })?,
+            )
+            .map_err(FeeError::FeeRule)
+    }
+
+    #[cfg(feature = "zfuture")]
+    pub fn get_fee_zfuture<FR: FeeRule + FutureFeeRule>(
+        &self,
+        fee_rule: &FR,
+    ) -> Result<NonNegativeAmount, FeeError<FR::Error>> {
+        #[cfg(feature = "transparent-inputs")]
+        let transparent_inputs = self.transparent_builder.inputs();
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        let transparent_inputs: &[Infallible] = &[];
+
+        let sapling_spends = self
+            .sapling_builder
+            .as_ref()
+            .map_or(0, |builder| builder.inputs().len());
+
+        fee_rule
+            .fee_required_zfuture(
+                &self.params,
+                self.target_height,
+                transparent_inputs,
+                self.transparent_builder.outputs(),
+                sapling_spends,
+                self.sapling_builder.as_ref().map_or(Ok(0), |builder| {
+                    self.build_config
+                        .sapling_builder_config()
+                        .0
+                        .num_outputs(sapling_spends, builder.outputs().len())
+                        .map_err(FeeError::Bundle)
+                })?,
+                self.orchard_builder.as_ref().map_or(Ok(0), |builder| {
+                    self.build_config
+                        .orchard_builder_config()
+                        .0
+                        .num_actions(builder.spends().len(), builder.outputs().len())
+                        .map_err(FeeError::Bundle)
+                })?,
+                self.tze_builder.inputs(),
+                self.tze_builder.outputs(),
+            )
+            .map_err(FeeError::FeeRule)
     }
 
     /// Builds a transaction from the configured spends and outputs.
     ///
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
-    pub fn build<SP: SpendProver, OP: OutputProver, FR: FeeRule>(
+    pub fn build<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FR: FeeRule>(
         self,
+        rng: R,
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
-        self.build_internal(spend_prover, output_prover, fee.into())
+        self.build_internal(rng, spend_prover, output_prover, fee)
     }
 
     /// Builds a transaction from the configured spends and outputs.
@@ -487,47 +603,28 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::
     /// Upon success, returns a tuple containing the final transaction, and the
     /// [`SaplingMetadata`] generated during the build process.
     #[cfg(feature = "zfuture")]
-    pub fn build_zfuture<SP: SpendProver, OP: OutputProver, FR: FutureFeeRule>(
+    pub fn build_zfuture<
+        R: RngCore + CryptoRng,
+        SP: SpendProver,
+        OP: OutputProver,
+        FR: FutureFeeRule,
+    >(
         self,
+        rng: R,
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
     ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
-        #[cfg(feature = "transparent-inputs")]
-        let transparent_inputs = self.transparent_builder.inputs();
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        let transparent_inputs: &[Infallible] = &[];
-
-        let fee = fee_rule
-            .fee_required_zfuture(
-                &self.params,
-                self.target_height,
-                transparent_inputs,
-                self.transparent_builder.outputs(),
-                self.sapling_builder.inputs().len(),
-                self.sapling_builder.bundle_output_count(),
-                std::cmp::max(
-                    self.orchard_builder
-                        .as_ref()
-                        .map_or(0, |builder| builder.outputs().len()),
-                    self.orchard_builder
-                        .as_ref()
-                        .map_or(0, |builder| builder.spends().len()),
-                ),
-                self.tze_builder.inputs(),
-                self.tze_builder.outputs(),
-            )
-            .map_err(Error::Fee)?;
-
-        self.build_internal(spend_prover, output_prover, fee.into())
+        let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
+        self.build_internal(rng, spend_prover, output_prover, fee)
     }
 
-    fn build_internal<SP: SpendProver, OP: OutputProver, FE>(
+    fn build_internal<R: RngCore + CryptoRng, SP: SpendProver, OP: OutputProver, FE>(
         self,
+        mut rng: R,
         spend_prover: &SP,
         output_prover: &OP,
-        fee: Amount,
+        fee: NonNegativeAmount,
     ) -> Result<(Transaction, SaplingMetadata), Error<FE>> {
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
 
@@ -539,7 +636,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::
         //
 
         // After fees are accounted for, the value balance of the transaction must be zero.
-        let balance_after_fees = (self.value_balance()? - fee).ok_or(BalanceError::Underflow)?;
+        let balance_after_fees =
+            (self.value_balance()? - fee.into()).ok_or(BalanceError::Underflow)?;
 
         match balance_after_fees.cmp(&Amount::zero()) {
             Ordering::Less => {
@@ -553,35 +651,45 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::
 
         let transparent_bundle = self.transparent_builder.build();
 
-        let mut rng = self.rng;
         let (sapling_bundle, tx_metadata) = match self
             .sapling_builder
-            .build::<SP, OP, _, _>(&mut rng)
-            .map_err(Error::SaplingBuild)?
-            .map(|(bundle, tx_metadata)| {
-                // We need to create proofs before signatures, because we still support
-                // creating V4 transactions, which commit to the Sapling proofs in the
-                // transaction digest.
-                (
-                    bundle.create_proofs(
-                        spend_prover,
-                        output_prover,
-                        &mut rng,
-                        self.progress_notifier,
-                    ),
-                    tx_metadata,
-                )
-            }) {
+            .and_then(|builder| {
+                builder
+                    .build::<SP, OP, _, _>(&mut rng)
+                    .map_err(Error::SaplingBuild)
+                    .transpose()
+                    .map(|res| {
+                        res.map(|(bundle, tx_metadata)| {
+                            // We need to create proofs before signatures, because we still support
+                            // creating V4 transactions, which commit to the Sapling proofs in the
+                            // transaction digest.
+                            (
+                                bundle.create_proofs(
+                                    spend_prover,
+                                    output_prover,
+                                    &mut rng,
+                                    self.progress_notifier,
+                                ),
+                                tx_metadata,
+                            )
+                        })
+                    })
+            })
+            .transpose()?
+        {
             Some((bundle, meta)) => (Some(bundle), meta),
             None => (None, SaplingMetadata::empty()),
         };
 
-        let orchard_bundle: Option<orchard::Bundle<_, Amount>> =
-            if let Some(builder) = self.orchard_builder {
-                Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?)
-            } else {
-                None
-            };
+        let orchard_bundle: Option<orchard::Bundle<_, Amount>> = self
+            .orchard_builder
+            .and_then(|builder| {
+                builder
+                    .build(&mut rng)
+                    .map_err(Error::OrchardBuild)
+                    .transpose()
+            })
+            .transpose()?;
 
         #[cfg(feature = "zfuture")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
@@ -674,8 +782,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::
 }
 
 #[cfg(feature = "zfuture")]
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng, U: sapling::builder::ProverProgress>
-    ExtensionTxBuilder<'a> for Builder<'a, P, R, U>
+impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> ExtensionTxBuilder<'a>
+    for Builder<'a, P, U>
 {
     type BuildCtx = TransactionData<Unauthorized>;
     type BuildError = tze::builder::Error;
@@ -714,7 +822,7 @@ mod testing {
 
     use super::{Builder, Error, SaplingMetadata};
     use crate::{
-        consensus::{self, BlockHeight},
+        consensus,
         sapling::{
             self,
             prover::mock::{MockOutputProver, MockSpendProver},
@@ -723,21 +831,13 @@ mod testing {
         transaction::Transaction,
     };
 
-    impl<'a, P: consensus::Parameters, R: RngCore> Builder<'a, P, R, ()> {
-        /// Creates a new `Builder` targeted for inclusion in the block with the given height
-        /// and randomness source, using default values for general transaction fields.
-        ///
-        /// # Default values
-        ///
-        /// The expiry height will be set to the given height plus the default transaction
-        /// expiry delta.
-        ///
-        /// WARNING: DO NOT USE IN PRODUCTION
-        pub fn test_only_new_with_rng(
-            params: P,
-            height: BlockHeight,
+    impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+        /// Build the transaction using mocked randomness and proving capabilities.
+        /// DO NOT USE EXCEPT FOR UNIT TESTING.
+        pub fn mock_build<R: RngCore>(
+            self,
             rng: R,
-        ) -> Builder<'a, P, impl RngCore + CryptoRng, ()> {
+        ) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
             struct FakeCryptoRng<R: RngCore>(R);
             impl<R: RngCore> CryptoRng for FakeCryptoRng<R> {}
             impl<R: RngCore> RngCore for FakeCryptoRng<R> {
@@ -757,19 +857,10 @@ mod testing {
                     self.0.try_fill_bytes(dest)
                 }
             }
-            Builder::new_internal(params, FakeCryptoRng(rng), height, None)
-        }
-    }
-    impl<
-            'a,
-            P: consensus::Parameters,
-            R: RngCore + CryptoRng,
-            U: sapling::builder::ProverProgress,
-        > Builder<'a, P, R, U>
-    {
-        pub fn mock_build(self) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
+
             #[allow(deprecated)]
             self.build(
+                FakeCryptoRng(rng),
                 &MockSpendProver,
                 &MockOutputProver,
                 &fixed::FeeRule::standard(),
@@ -780,6 +871,8 @@ mod testing {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
     use assert_matches::assert_matches;
     use ff::Field;
     use incrementalmerkletree::{frontier::CommitmentTree, witness::IncrementalWitness};
@@ -790,7 +883,10 @@ mod tests {
         legacy::TransparentAddress,
         memo::MemoBytes,
         sapling::{self, zip32::ExtendedSpendingKey, Node, Rseed},
-        transaction::components::amount::{Amount, BalanceError, NonNegativeAmount},
+        transaction::{
+            builder::BuildConfig,
+            components::amount::{Amount, BalanceError, NonNegativeAmount},
+        },
     };
 
     use super::{Builder, Error};
@@ -802,11 +898,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use crate::{
         legacy::keys::{AccountPrivKey, IncomingViewingKey},
-        sapling::note_encryption::Zip212Enforcement,
-        transaction::{
-            builder::{SaplingBuilder, DEFAULT_TX_EXPIRY_DELTA},
-            OutPoint, TxOut,
-        },
+        transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
         zip32::AccountId,
     };
 
@@ -825,11 +917,14 @@ mod tests {
         // Create a builder with 0 fee, so we can construct t outputs
         let mut builder = builder::Builder {
             params: TEST_NETWORK,
-            rng: OsRng,
+            build_config: BuildConfig::Standard {
+                sapling_anchor: sapling::Anchor::empty_tree(),
+                orchard_anchor: orchard::Anchor::empty_tree(),
+            },
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
             transparent_builder: TransparentBuilder::empty(),
-            sapling_builder: SaplingBuilder::new(Zip212Enforcement::Off),
+            sapling_builder: None,
             #[cfg(feature = "zfuture")]
             tze_builder: TzeBuilder::empty(),
             #[cfg(not(feature = "zfuture"))]
@@ -867,7 +962,7 @@ mod tests {
             )
             .unwrap();
 
-        let (tx, _) = builder.mock_build().unwrap();
+        let (tx, _) = builder.mock_build(OsRng).unwrap();
         // No binding signature, because only t input and outputs
         assert!(tx.sapling_bundle.is_none());
     }
@@ -892,11 +987,16 @@ mod tests {
         let tx_height = TEST_NETWORK
             .activation_height(NetworkUpgrade::Sapling)
             .unwrap();
-        let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
+
+        let build_config = BuildConfig::Standard {
+            sapling_anchor: witness1.root().into(),
+            orchard_anchor: orchard::Anchor::empty_tree(),
+        };
+        let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
 
         // Create a tx with a sapling spend. binding_sig should be present
         builder
-            .add_sapling_spend(extsk, note1, witness1.path().unwrap())
+            .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
             .unwrap();
 
         builder
@@ -907,7 +1007,7 @@ mod tests {
             .unwrap();
 
         // A binding signature (and bundle) is present because there is a Sapling spend.
-        let (tx, _) = builder.mock_build().unwrap();
+        let (tx, _) = builder.mock_build(OsRng).unwrap();
         assert!(tx.sapling_bundle().is_some());
     }
 
@@ -926,9 +1026,13 @@ mod tests {
         // Fails with no inputs or outputs
         // 0.0001 t-ZEC fee
         {
-            let builder = Builder::new(TEST_NETWORK, tx_height, None);
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: sapling::Anchor::empty_tree(),
+                orchard_anchor: orchard::Anchor::empty_tree(),
+            };
+            let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             assert_matches!(
-                builder.mock_build(),
+                builder.mock_build(OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == MINIMUM_FEE.into()
             );
         }
@@ -940,9 +1044,13 @@ mod tests {
         // Fail if there is only a Sapling output
         // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: sapling::Anchor::empty_tree(),
+                orchard_anchor: orchard::Anchor::empty_tree(),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
-                .add_sapling_output(
+                .add_sapling_output::<Infallible>(
                     ovk,
                     to,
                     NonNegativeAmount::const_from_u64(50000),
@@ -950,7 +1058,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(),
+                builder.mock_build(OsRng),
                 Err(Error::InsufficientFunds(expected)) if
                     expected == (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -959,7 +1067,11 @@ mod tests {
         // Fail if there is only a transparent output
         // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: sapling::Anchor::empty_tree(),
+                orchard_anchor: orchard::Anchor::empty_tree(),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
                 .add_transparent_output(
                     &TransparentAddress::PublicKey([0; 20]),
@@ -967,7 +1079,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(),
+                builder.mock_build(OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected ==
                     (NonNegativeAmount::const_from_u64(50000) + MINIMUM_FEE).unwrap().into()
             );
@@ -985,12 +1097,16 @@ mod tests {
         // Fail if there is insufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: witness1.root().into(),
+                orchard_anchor: orchard::Anchor::empty_tree(),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
-                .add_sapling_spend(extsk.clone(), note1.clone(), witness1.path().unwrap())
+                .add_sapling_spend::<Infallible>(&extsk, note1.clone(), witness1.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_output(
+                .add_sapling_output::<Infallible>(
                     ovk,
                     to,
                     NonNegativeAmount::const_from_u64(30000),
@@ -1004,7 +1120,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(),
+                builder.mock_build(OsRng),
                 Err(Error::InsufficientFunds(expected)) if expected == Amount::const_from_i64(1)
             );
         }
@@ -1021,15 +1137,19 @@ mod tests {
         // Succeeds if there is sufficient input
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
         {
-            let mut builder = Builder::new(TEST_NETWORK, tx_height, None);
+            let build_config = BuildConfig::Standard {
+                sapling_anchor: witness1.root().into(),
+                orchard_anchor: orchard::Anchor::empty_tree(),
+            };
+            let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
-                .add_sapling_spend(extsk.clone(), note1, witness1.path().unwrap())
+                .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_spend(extsk, note2, witness2.path().unwrap())
+                .add_sapling_spend::<Infallible>(&extsk, note2, witness2.path().unwrap())
                 .unwrap();
             builder
-                .add_sapling_output(
+                .add_sapling_output::<Infallible>(
                     ovk,
                     to,
                     NonNegativeAmount::const_from_u64(30000),
@@ -1043,7 +1163,7 @@ mod tests {
                 )
                 .unwrap();
             assert_matches!(
-                builder.mock_build(),
+                builder.mock_build(OsRng),
                 Ok((tx, _)) if tx.fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
             );
         }

@@ -32,6 +32,9 @@ zcash_primitives.workspace = true
 time = "0.3.22"
 nonempty.workspace = true
 
+# - CSPRNG
+rand_core.workspace = true
+
 # - Encodings
 base64.workspace = true
 bech32.workspace = true

@@ -476,6 +476,8 @@ impl<'a, B: ExtensionTxBuilder<'a>> DemoBuilder<B> {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
     use blake2b_simd::Params;
     use ff::Field;
     use rand_core::OsRng;
@@ -487,7 +489,7 @@ mod tests {
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         transaction::{
-            builder::Builder,
+            builder::{BuildConfig, Builder},
             components::{
                 amount::{Amount, NonNegativeAmount},
                 tze::{Authorized, Bundle, OutPoint, TzeIn, TzeOut},
@@ -637,9 +639,19 @@ mod tests {
         }
     }
 
-    fn demo_builder<'a>(height: BlockHeight) -> DemoBuilder<Builder<'a, FutureNetwork, OsRng, ()>> {
+    fn demo_builder<'a>(
+        height: BlockHeight,
+        sapling_anchor: sapling::Anchor,
+    ) -> DemoBuilder<Builder<'a, FutureNetwork, ()>> {
         DemoBuilder {
-            txn_builder: Builder::new(FutureNetwork, height, None),
+            txn_builder: Builder::new(
+                FutureNetwork,
+                height,
+                BuildConfig::Standard {
+                    sapling_anchor,
+                    orchard_anchor: orchard::Anchor::empty_tree(),
+                },
+            ),
             extension_id: 0,
         }
     }
@@ -823,9 +835,9 @@ mod tests {
         tree.append(cm1).unwrap();
         let witness1 = sapling::IncrementalWitness::from_tree(tree);
 
-        let mut builder_a = demo_builder(tx_height);
+        let mut builder_a = demo_builder(tx_height, witness1.root().into());
         builder_a
-            .add_sapling_spend(extsk, note1, witness1.path().unwrap())
+            .add_sapling_spend::<Infallible>(&extsk, note1, witness1.path().unwrap())
             .unwrap();
 
         let value = NonNegativeAmount::const_from_u64(100000);
@@ -836,7 +848,7 @@ mod tests {
             .unwrap();
         let (tx_a, _) = builder_a
             .txn_builder
-            .build_zfuture(&prover, &prover, &fee_rule)
+            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_a = tx_a.tze_bundle().unwrap();
@@ -845,7 +857,7 @@ mod tests {
         // Transfer
         //
 
-        let mut builder_b = demo_builder(tx_height + 1);
+        let mut builder_b = demo_builder(tx_height + 1, sapling::Anchor::empty_tree());
         let prevout_a = (OutPoint::new(tx_a.txid(), 0), tze_a.vout[0].clone());
         let value_xfr = (value - fee_rule.fixed_fee()).unwrap();
         builder_b
@@ -854,7 +866,7 @@ mod tests {
             .unwrap();
         let (tx_b, _) = builder_b
             .txn_builder
-            .build_zfuture(&prover, &prover, &fee_rule)
+            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_b = tx_b.tze_bundle().unwrap();
@@ -863,7 +875,7 @@ mod tests {
         // Closing transaction
         //
 
-        let mut builder_c = demo_builder(tx_height + 2);
+        let mut builder_c = demo_builder(tx_height + 2, sapling::Anchor::empty_tree());
         let prevout_b = (OutPoint::new(tx_a.txid(), 0), tze_b.vout[0].clone());
         builder_c
             .demo_close(prevout_b, preimage_2)
@@ -879,7 +891,7 @@ mod tests {
 
         let (tx_c, _) = builder_c
             .txn_builder
-            .build_zfuture(&prover, &prover, &fee_rule)
+            .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
         let tze_c = tx_c.tze_bundle().unwrap();

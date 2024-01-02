@@ -3,7 +3,7 @@
 
 use std::convert::Infallible;
 
-use sapling::builder::{SaplingOutputInfo, SpendDescriptionInfo};
+use sapling::builder::{OutputInfo, SpendInfo};
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 
 /// A trait that provides a minimized view of a Sapling input suitable for use in
@@ -26,7 +26,7 @@ impl<N> InputView<N> for Infallible {
 
 // `SpendDescriptionInfo` does not contain a note identifier, so we can only implement
 // `InputView<()>`
-impl InputView<()> for SpendDescriptionInfo {
+impl InputView<()> for SpendInfo {
     fn note_id(&self) -> &() {
         &()
     }
@@ -44,7 +44,7 @@ pub trait OutputView {
     fn value(&self) -> NonNegativeAmount;
 }
 
-impl OutputView for SaplingOutputInfo {
+impl OutputView for OutputInfo {
     fn value(&self) -> NonNegativeAmount {
         NonNegativeAmount::try_from(self.value())
             .expect("Output values should be checked at construction.")
