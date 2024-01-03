@@ -1,4 +1,4 @@
-//! Implementation of a Merkle tree of commitments used to prove the existence of notes.
+//! Parsers and serializers for Zcash Merkle trees.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use incrementalmerkletree::{

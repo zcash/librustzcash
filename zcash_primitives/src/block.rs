@@ -10,6 +10,9 @@ use zcash_encoding::Vector;
 
 pub use equihash;
 
+/// The identifier for a Zcash block.
+///
+/// Derived from a [`BlockHeader`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
 
@@ -70,6 +73,7 @@ impl Deref for BlockHeader {
     }
 }
 
+/// The information contained in a Zcash block header.
 pub struct BlockHeaderData {
     pub version: i32,
     pub prev_block: BlockHash,
