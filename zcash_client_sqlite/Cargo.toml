@@ -80,6 +80,10 @@ multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
 ## client is configured for use with the Zcash testnet.
 mainnet = []
 
+## Enables support for storing data related to the sending and receiving of 
+## Orchard funds.
+orchard = ["zcash_client_backend/orchard"]
+
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "incrementalmerkletree/test-dependencies",

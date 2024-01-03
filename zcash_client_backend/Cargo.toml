@@ -59,7 +59,7 @@ subtle.workspace = true
 # - Shielded protocols
 bls12_381.workspace = true
 group.workspace = true
-orchard.workspace = true
+orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
 # - Note commitment trees
@@ -109,10 +109,13 @@ lightwalletd-tonic = ["dep:tonic"]
 ## Enables receiving transparent funds and shielding them.
 transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
 
+## Enables receiving and spending Orchard funds.
+orchard = ["dep:orchard"]
+
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
-    "orchard/test-dependencies",
+    "orchard?/test-dependencies",
     "zcash_primitives/test-dependencies",
     "incrementalmerkletree/test-dependencies",
 ]

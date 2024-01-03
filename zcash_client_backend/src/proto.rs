@@ -186,6 +186,7 @@ impl<A: sapling::bundle::Authorization> From<&sapling::bundle::SpendDescription<
     }
 }
 
+#[cfg(feature = "orchard")]
 impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOrchardAction {
     fn from(action: &orchard::Action<SpendAuth>) -> compact_formats::CompactOrchardAction {
         compact_formats::CompactOrchardAction {

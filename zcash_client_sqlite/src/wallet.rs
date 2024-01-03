@@ -967,10 +967,11 @@ pub(crate) fn get_target_and_anchor_heights(
 }
 
 fn parse_block_metadata<P: consensus::Parameters>(
-    params: &P,
+    _params: &P,
     row: (BlockHeight, Vec<u8>, Option<u32>, Vec<u8>, Option<u32>),
 ) -> Result<BlockMetadata, SqliteClientError> {
-    let (block_height, hash_data, sapling_tree_size_opt, sapling_tree, orchard_tree_size_opt) = row;
+    let (block_height, hash_data, sapling_tree_size_opt, sapling_tree, _orchard_tree_size_opt) =
+        row;
     let sapling_tree_size = sapling_tree_size_opt.map_or_else(|| {
         if sapling_tree == BLOCK_SAPLING_FRONTIER_ABSENT {
             Err(SqliteClientError::CorruptedData("One of either the Sapling tree size or the legacy Sapling commitment tree must be present.".to_owned()))
@@ -997,12 +998,13 @@ fn parse_block_metadata<P: consensus::Parameters>(
         block_height,
         block_hash,
         Some(sapling_tree_size),
-        if params
+        #[cfg(feature = "orchard")]
+        if _params
             .activation_height(NetworkUpgrade::Nu5)
             .iter()
             .any(|nu5_activation| &block_height >= nu5_activation)
         {
-            orchard_tree_size_opt
+            _orchard_tree_size_opt
         } else {
             Some(0)
         },

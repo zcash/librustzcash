@@ -603,6 +603,7 @@ where
 
                                 Ok((key, note, merkle_path))
                             }
+                            #[cfg(feature = "orchard")]
                             WalletNote::Orchard(_) => {
                                 // FIXME: Implement this once `Proposal` has been refactored to
                                 // include Orchard notes.
@@ -623,8 +624,8 @@ where
         params.clone(),
         proposal.min_target_height(),
         BuildConfig::Standard {
-            sapling_anchor,
-            orchard_anchor: orchard::Anchor::empty_tree(),
+            sapling_anchor: Some(sapling_anchor),
+            orchard_anchor: None,
         },
     );
 

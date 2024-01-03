@@ -648,8 +648,8 @@ mod tests {
                 FutureNetwork,
                 height,
                 BuildConfig::Standard {
-                    sapling_anchor,
-                    orchard_anchor: orchard::Anchor::empty_tree(),
+                    sapling_anchor: Some(sapling_anchor),
+                    orchard_anchor: Some(orchard::Anchor::empty_tree()),
                 },
             ),
             extension_id: 0,
