@@ -100,10 +100,10 @@ pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
 [features]
 default = ["multicore"]
 multicore = ["orchard/multicore", "sapling/multicore"]
-transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
+transparent-inputs = ["dep:hdwallet", "dep:ripemd", "dep:secp256k1"]
 temporary-zcashd = []
 test-dependencies = [
-    "proptest",
+    "dep:proptest",
     "orchard/test-dependencies",
     "sapling/test-dependencies",
 ]

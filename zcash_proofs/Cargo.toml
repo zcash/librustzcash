@@ -45,9 +45,9 @@ byteorder.workspace = true
 
 [features]
 default = ["local-prover", "multicore"]
-bundled-prover = ["wagyu-zcash-parameters"]
+bundled-prover = ["dep:wagyu-zcash-parameters"]
 directories = ["dep:home", "dep:known-folders", "dep:xdg"]
-download-params = ["minreq", "directories"]
+download-params = ["dep:minreq", "directories"]
 local-prover = ["directories"]
 multicore = ["bellman/multicore", "zcash_primitives/multicore"]
 

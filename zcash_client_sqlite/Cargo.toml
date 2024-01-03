@@ -79,7 +79,7 @@ test-dependencies = [
     "zcash_client_backend/test-dependencies",
     "incrementalmerkletree/test-dependencies",
 ]
-transparent-inputs = ["hdwallet", "zcash_client_backend/transparent-inputs"]
+transparent-inputs = ["dep:hdwallet", "zcash_client_backend/transparent-inputs"]
 unstable = ["zcash_client_backend/unstable"]
 
 [lib]

@@ -100,16 +100,16 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 
 [features]
-lightwalletd-tonic = ["tonic"]
-transparent-inputs = ["hdwallet", "zcash_primitives/transparent-inputs"]
+lightwalletd-tonic = ["dep:tonic"]
+transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
 test-dependencies = [
-    "proptest",
+    "dep:proptest",
     "orchard/test-dependencies",
     "zcash_primitives/test-dependencies",
     "incrementalmerkletree/test-dependencies"
 ]
-unstable = ["byteorder"]
-unstable-serialization = ["byteorder"]
+unstable = ["dep:byteorder"]
+unstable-serialization = ["dep:byteorder"]
 unstable-spanning-tree = []
 
 [lib]
