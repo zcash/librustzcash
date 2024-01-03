@@ -74,6 +74,9 @@ nom = "7"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features.workspace = true
+
 # - Encodings
 byteorder = { workspace = true, optional = true }
 percent-encoding.workspace = true
@@ -100,16 +103,29 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 
 [features]
+## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic"]
+
+## Enables receiving transparent funds and shielding them.
 transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
     "orchard/test-dependencies",
     "zcash_primitives/test-dependencies",
-    "incrementalmerkletree/test-dependencies"
+    "incrementalmerkletree/test-dependencies",
 ]
+
+#! ### Experimental features
+
+## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["dep:byteorder"]
+
+## Exposes APIs for unstable serialization formats. These may change at any time.
 unstable-serialization = ["dep:byteorder"]
+
+## Exposes the [`data_api::scanning::spanning_tree`] module.
 unstable-spanning-tree = []
 
 [lib]

@@ -2,6 +2,10 @@
 //!
 //! `zcash_proofs` contains the zk-SNARK circuits used by Zcash, and the APIs for creating
 //! and verifying proofs.
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
+//!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Catch documentation errors caused by code changes.
