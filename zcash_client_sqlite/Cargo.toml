@@ -53,6 +53,7 @@ uuid = "1.1"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+document-features.workspace = true
 maybe-rayon.workspace = true
 
 [dev-dependencies]
@@ -71,15 +72,28 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 default = ["multicore"]
+
+## Enables multithreading support for creating proofs and building subtrees.
 multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
+
+## Configures the light client for use with the Zcash mainnet. By default, the light
+## client is configured for use with the Zcash testnet.
 mainnet = []
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "incrementalmerkletree/test-dependencies",
     "zcash_primitives/test-dependencies",
     "zcash_client_backend/test-dependencies",
     "incrementalmerkletree/test-dependencies",
 ]
-transparent-inputs = ["hdwallet", "zcash_client_backend/transparent-inputs"]
+
+## Enables receiving transparent funds and shielding them.
+transparent-inputs = ["dep:hdwallet", "zcash_client_backend/transparent-inputs"]
+
+#! ### Experimental features
+
+## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["zcash_client_backend/unstable"]
 
 [lib]

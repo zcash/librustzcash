@@ -66,6 +66,9 @@ rand_core = "0.6"
 blake2b_simd = "1"
 sha2 = "0.10"
 
+# Documentation
+document-features = "0.2"
+
 # Encodings
 base64 = "0.21"
 bech32 = "0.9"
@@ -112,5 +115,5 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "71711b9e4b775a625318070e0f56b7b652f12306" }
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "4ec6a48daab0af1fe6cb930f6a150030ce91d0e9" }
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "189257391a5726d7f3f2568d547a5ef8603c7156" }

@@ -2,6 +2,10 @@
 //!
 //! `zcash_primitives` is a library that provides the core structs and functions necessary
 //! for working with Zcash.
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
+//!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Catch documentation errors caused by code changes.
@@ -15,7 +19,6 @@
 pub mod block;
 pub mod consensus;
 pub mod constants;
-pub mod keys;
 pub mod legacy;
 pub mod memo;
 pub mod merkle_tree;

@@ -2,6 +2,10 @@
 //!
 //! `zcash_client_backend` contains Rust structs and traits for creating shielded Zcash
 //! light clients.
+//!
+//! ## Feature flags
+#![doc = document_features::document_features!()]
+//!
 
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]

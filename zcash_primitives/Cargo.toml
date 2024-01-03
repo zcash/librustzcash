@@ -66,6 +66,9 @@ bip0039 = { version = "0.10", features = ["std", "all-languages"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features.workspace = true
+
 # - Encodings
 byteorder.workspace = true
 hex.workspace = true
@@ -99,15 +102,33 @@ pprof = { version = "0.11", features = ["criterion", "flamegraph"] } # MSRV 1.56
 
 [features]
 default = ["multicore"]
+
+## Enables multithreading support for creating proofs.
 multicore = ["orchard/multicore", "sapling/multicore"]
-transparent-inputs = ["hdwallet", "ripemd", "secp256k1"]
+
+## Enables spending transparent notes with the transaction builder.
+transparent-inputs = ["dep:hdwallet", "dep:ripemd", "dep:secp256k1"]
+
+### A temporary feature flag that exposes granular APIs needed by `zcashd`. These APIs
+### should not be relied upon and will be removed in a future release.
 temporary-zcashd = []
+
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
-    "proptest",
+    "dep:proptest",
     "orchard/test-dependencies",
     "sapling/test-dependencies",
 ]
+
+#! ### Experimental features
+#!
+#! ⚠️ Enabling these features will likely make your code incompatible with current Zcash
+#! consensus rules!
+
+## Exposes the in-development NU6 features.
 unstable-nu6 = []
+
+## Exposes early in-development features that are not yet planned for any network upgrade.
 zfuture = []
 
 [lib]

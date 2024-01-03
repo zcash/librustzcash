@@ -20,7 +20,7 @@ blake2b_simd.workspace = true
 proptest = { workspace = true, optional = true }
 
 [features]
-test-dependencies = ["proptest"]
+test-dependencies = ["dep:proptest"]
 
 [lib]
 bench = false

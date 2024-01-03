@@ -18,10 +18,8 @@
 //!   **MUST NOT** write to the database without using these APIs. Callers **MAY** read
 //!   the database directly in order to extract information for display to users.
 //!
-//! # Features
-//!
-//! The `mainnet` feature configures the light client for use with the Zcash mainnet. By
-//! default, the light client is configured for use with the Zcash testnet.
+//! ## Feature flags
+#![doc = document_features::document_features!()]
 //!
 //! [`WalletRead`]: zcash_client_backend::data_api::WalletRead
 //! [`WalletWrite`]: zcash_client_backend::data_api::WalletWrite

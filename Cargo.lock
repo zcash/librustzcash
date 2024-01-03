@@ -639,6 +639,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "document-features"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef5282ad69563b5fc40319526ba27e0e7363d552a896f0297d54f767717f9b95"
+dependencies = [
+ "litrs",
+]
+
+[[package]]
 name = "either"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1236,6 +1245,12 @@ name = "linux-raw-sys"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "969488b55f8ac402214f3f5fd243ebb7206cf82de60d3172994707a4bcc2b829"
+
+[[package]]
+name = "litrs"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "lock_api"
@@ -2087,7 +2102,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.0.1"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=71711b9e4b775a625318070e0f56b7b652f12306#71711b9e4b775a625318070e0f56b7b652f12306"
+source = "git+https://github.com/zcash/sapling-crypto.git?rev=4ec6a48daab0af1fe6cb930f6a150030ce91d0e9#4ec6a48daab0af1fe6cb930f6a150030ce91d0e9"
 dependencies = [
  "aes",
  "bellman",
@@ -2096,6 +2111,7 @@ dependencies = [
  "blake2s_simd",
  "bls12_381",
  "byteorder",
+ "document-features",
  "ff",
  "fpe",
  "group",
@@ -2995,6 +3011,7 @@ dependencies = [
  "bs58",
  "byteorder",
  "crossbeam-channel",
+ "document-features",
  "group",
  "gumdrop",
  "hdwallet",
@@ -3033,6 +3050,7 @@ dependencies = [
  "assert_matches",
  "bs58",
  "byteorder",
+ "document-features",
  "group",
  "hdwallet",
  "incrementalmerkletree",
@@ -3118,6 +3136,7 @@ dependencies = [
  "byteorder",
  "chacha20poly1305",
  "criterion",
+ "document-features",
  "equihash",
  "ff",
  "fpe",
@@ -3156,6 +3175,7 @@ dependencies = [
  "blake2b_simd",
  "bls12_381",
  "byteorder",
+ "document-features",
  "group",
  "home",
  "jubjub",
