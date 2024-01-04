@@ -13,5 +13,8 @@ rust-version = "1.56.1"
 blake2b_simd = "1"
 byteorder = "1"
 
+[build-dependencies]
+cc = "1"
+
 [lib]
 bench = false

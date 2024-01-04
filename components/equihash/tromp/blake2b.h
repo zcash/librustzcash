@@ -7,10 +7,6 @@
 
 #include <stddef.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 struct BLAKE2bState;
 typedef struct BLAKE2bState BLAKE2bState;
 #define BLAKE2bPersonalBytes 16U
@@ -51,9 +47,5 @@ void blake2b_finalize(
     BLAKE2bState* state,
     unsigned char* output,
     size_t output_len);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // ZCASH_RUST_INCLUDE_RUST_BLAKE2B_H
