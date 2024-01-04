@@ -285,6 +285,9 @@ typedef struct equi equi;
     memset(eq->nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     eq->nsols = 0;
   }
+  void equi_clearslots(equi *eq) {
+    eq->xfull = eq->bfull = eq->hfull = 0;
+  }
   u32 getslot(equi *eq, const u32 r, const u32 bucketi) {
 #ifdef EQUIHASH_TROMP_ATOMIC
     return std::atomic_fetch_add_explicit(&eq->nslots[r&1][bucketi], 1U, std::memory_order_relaxed);
@@ -655,6 +658,13 @@ nc++,       candidate(eq, tree_from_bid(bucketid, s0, s1));
       }
     }
 //printf(" %d candidates ", nc);
+  }
+
+  size_t equi_nsols(const equi *eq) {
+    return eq->nsols;
+  }
+  proof *equi_sols(const equi *eq) {
+    return eq->sols;
   }
 
 typedef struct {

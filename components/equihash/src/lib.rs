@@ -28,3 +28,6 @@ mod verify;
 mod test_vectors;
 
 pub use verify::{is_valid_solution, Error};
+
+mod blake2b;
+pub mod tromp;
