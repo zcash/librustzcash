@@ -18,16 +18,13 @@ use zcash_primitives::{
     zip32::{AccountId, Scope},
 };
 
-use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBlockSapling};
+use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBundles};
 use crate::{
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, Tasks},
     wallet::{WalletSaplingOutput, WalletSaplingSpend, WalletTx},
     ShieldedProtocol,
 };
-
-#[cfg(feature = "orchard")]
-use crate::data_api::ScannedBlockOrchard;
 
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a Sapling [`CompactSaplingOutput`]
@@ -651,13 +648,13 @@ pub(crate) fn scan_block_with_runner<
         cur_hash,
         block.time,
         wtxs,
-        ScannedBlockSapling::new(
+        ScannedBundles::new(
             sapling_commitment_tree_size,
             sapling_note_commitments,
             sapling_nullifier_map,
         ),
         #[cfg(feature = "orchard")]
-        ScannedBlockOrchard::new(
+        ScannedBundles::new(
             orchard_commitment_tree_size,
             vec![], // FIXME: collect the Orchard nullifiers
             vec![], // FIXME: collect the Orchard note commitments

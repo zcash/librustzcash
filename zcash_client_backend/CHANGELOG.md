@@ -14,8 +14,7 @@ and this library adheres to Rust's notion of
   - `SaplingInputSource`
   - `ScannedBlock::{into_commitments, sapling}`
   - `ScannedBlock::orchard` (when the `orchard` feature is enabled.)
-  - `ScannedBlockSapling`
-  - `ScannedBlockOrchard` (when the `orchard` feature is enabled.)
+  - `ScannedBundles`
   - `ScannedBlockCommitments`
   - `Balance::{add_spendable_value, add_pending_change_value, add_pending_spendable_value}`
   - `AccountBalance::{
