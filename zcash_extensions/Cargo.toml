@@ -10,6 +10,10 @@ edition.workspace = true
 rust-version.workspace = true
 categories.workspace = true
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 blake2b_simd.workspace = true
 zcash_primitives = { workspace = true, features = ["zfuture" ] }
