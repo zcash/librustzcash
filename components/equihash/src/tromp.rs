@@ -98,25 +98,109 @@ pub fn solve_200_9<const N: usize>(
     }
 }
 
+/// Performs multiple equihash solver runs with equihash parameters `200, 9`, initialising the hash with
+/// the supplied partial `input`. Between each run, generates a new nonce of length `N` using the
+/// `next_nonce` function.
+///
+/// Returns zero or more compressed solutions.
+pub fn solve_200_9_compressed<const N: usize>(
+    input: &[u8],
+    next_nonce: impl FnMut() -> Option<[u8; N]>,
+) -> Vec<Vec<u8>> {
+    // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/pow/tromp/equi.h#L34
+    const DIGIT_BITS: usize = 200 / (9 + 1);
+    let solutions = solve_200_9(input, next_nonce);
+
+    solutions
+        .iter()
+        .map(|solution| get_minimal_from_indices(solution, DIGIT_BITS))
+        .collect()
+}
+
+// Rough translation of GetMinimalFromIndices() from:
+// https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L130-L145
+fn get_minimal_from_indices(indices: &[u32], digit_bits: usize) -> Vec<u8> {
+    let index_bytes = (u32::BITS / 8) as usize;
+    let digit_bytes = ((digit_bits + 1) + 7) / 8;
+    assert!(digit_bytes <= index_bytes);
+
+    let len_indices = indices.len() * index_bytes;
+    let min_len = (digit_bits + 1) * len_indices / (8 * index_bytes);
+    let byte_pad = index_bytes - digit_bytes;
+
+    // Rough translation of EhIndexToArray(index, array_pointer) from:
+    // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L123-L128
+    //
+    // Big-endian so that lexicographic array comparison is equivalent to integer comparison.
+    let array: Vec<u8> = indices
+        .iter()
+        .flat_map(|index| index.to_be_bytes())
+        .collect();
+    assert_eq!(array.len(), len_indices);
+
+    compress_array(array, min_len, digit_bits + 1, byte_pad)
+}
+
+// Rough translation of CompressArray() from:
+// https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/crypto/equihash.cpp#L39-L76
+fn compress_array(array: Vec<u8>, out_len: usize, bit_len: usize, byte_pad: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(out_len);
+
+    let index_bytes = (u32::BITS / 8) as usize;
+    assert!(bit_len >= 8);
+    assert!(8 * index_bytes >= 7 + bit_len);
+
+    let in_width: usize = (bit_len + 7) / 8 + byte_pad;
+    assert!(out_len == bit_len * array.len() / (8 * in_width));
+
+    let bit_len_mask: u32 = (1 << (bit_len as u32)) - 1;
+
+    // The acc_bits least-significant bits of acc_value represent a bit sequence
+    // in big-endian order.
+    let mut acc_bits: usize = 0;
+    let mut acc_value: u32 = 0;
+
+    let mut j: usize = 0;
+    for _i in 0..out_len {
+        // When we have fewer than 8 bits left in the accumulator, read the next
+        // input element.
+        if acc_bits < 8 {
+            acc_value <<= bit_len;
+            for x in byte_pad..in_width {
+                acc_value = acc_value
+                    | ((
+                        // Apply bit_len_mask across byte boundaries
+                        array[j + x] & (bit_len_mask >> (8 * (in_width - x - 1))) as u8
+                    ) << (8 * (in_width - x - 1))) as u32; // Big-endian
+            }
+            j += in_width;
+            acc_bits += bit_len;
+        }
+
+        acc_bits -= 8;
+        out.push((acc_value >> acc_bits) as u8);
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::solve_200_9;
+    use super::solve_200_9_compressed;
 
     #[test]
     fn run_solver() {
         let input = b"Equihash is an asymmetric PoW based on the Generalised Birthday problem.";
-        let mut nonce = [
+        let mut nonce: [u8; 32] = [
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0,
         ];
+        let mut nonces = 0..=u8::MAX;
 
-        let solutions = solve_200_9(input, || {
-            nonce[0] += 1;
-            if nonce[0] == 0 {
-                None
-            } else {
-                Some(nonce)
-            }
+        let solutions = solve_200_9_compressed(input, || {
+            nonce[0] = nonces.next()?;
+            println!("Using nonce[0] of {}", nonce[0]);
+            Some(nonce)
         });
 
         if solutions.is_empty() {
@@ -125,6 +209,17 @@ mod tests {
             println!("Found {} solutions:", solutions.len());
             for solution in solutions {
                 println!("- {:?}", solution);
+                crate::is_valid_solution(200, 9, input, &nonce, &solution).unwrap_or_else(
+                    |error| {
+                        panic!(
+                            "unexpected invalid equihash 200, 9 solution:\n\
+                             error: {error:?}\n\
+                             input: {input:?}\n\
+                             nonce: {nonce:?}\n\
+                             solution: {solution:?}"
+                        )
+                    },
+                );
             }
         }
     }
