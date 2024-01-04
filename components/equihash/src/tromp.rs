@@ -5,7 +5,7 @@ use std::slice;
 
 use blake2b_simd::State;
 
-use crate::{blake2b, params::Params, verify};
+use crate::{blake2b, minimal::minimal_from_indices, params::Params, verify};
 
 #[repr(C)]
 struct CEqui {
@@ -138,6 +138,24 @@ pub fn solve_200_9<const N: usize>(
             break solutions;
         }
     }
+}
+
+/// Performs multiple equihash solver runs with equihash parameters `200, 9`, initialising the hash with
+/// the supplied partial `input`. Between each run, generates a new nonce of length `N` using the
+/// `next_nonce` function.
+///
+/// Returns zero or more unique compressed solutions.
+pub fn solve_200_9_compressed<const N: usize>(
+    input: &[u8],
+    next_nonce: impl FnMut() -> Option<[u8; N]>,
+) -> Vec<Vec<u8>> {
+    let p = Params::new(200, 9).expect("should be valid");
+    let solutions = solve_200_9(input, next_nonce);
+
+    solutions
+        .iter()
+        .map(|solution| minimal_from_indices(p, solution))
+        .collect()
 }
 
 #[cfg(test)]
