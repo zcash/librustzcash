@@ -160,32 +160,50 @@ pub fn solve_200_9_compressed<const N: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::solve_200_9;
+    use super::solve_200_9_compressed;
 
     #[test]
     #[allow(clippy::print_stdout)]
     fn run_solver() {
         let input = b"Equihash is an asymmetric PoW based on the Generalised Birthday problem.";
-        let mut nonce = [
+        let mut nonce: [u8; 32] = [
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0,
         ];
+        let mut nonces = 0..=32_u32;
+        let nonce_count = nonces.clone().count();
 
-        let solutions = solve_200_9(input, || {
-            nonce[0] += 1;
-            if nonce[0] == 0 {
-                None
-            } else {
-                Some(nonce)
-            }
+        let solutions = solve_200_9_compressed(input, || {
+            let variable_nonce = nonces.next()?;
+            println!("Using variable nonce [0..4] of {}", variable_nonce);
+
+            let variable_nonce = variable_nonce.to_le_bytes();
+            nonce[0] = variable_nonce[0];
+            nonce[1] = variable_nonce[1];
+            nonce[2] = variable_nonce[2];
+            nonce[3] = variable_nonce[3];
+
+            Some(nonce)
         });
 
         if solutions.is_empty() {
-            println!("Found no solutions");
+            // Expected solution rate is documented at:
+            // https://github.com/tromp/equihash/blob/master/README.md
+            panic!("Found no solutions after {nonce_count} runs, expected 1.88 solutions per run",);
         } else {
             println!("Found {} solutions:", solutions.len());
-            for solution in solutions {
-                println!("- {:?}", solution);
+            for (sol_num, solution) in solutions.iter().enumerate() {
+                println!("Validating solution {sol_num}:-\n{}", hex::encode(solution));
+                crate::is_valid_solution(200, 9, input, &nonce, solution).unwrap_or_else(|error| {
+                    panic!(
+                        "unexpected invalid equihash 200, 9 solution:\n\
+                             error: {error:?}\n\
+                             input: {input:?}\n\
+                             nonce: {nonce:?}\n\
+                             solution: {solution:?}"
+                    )
+                });
+                println!("Solution {sol_num} is valid!\n");
             }
         }
     }
