@@ -1,3 +1,5 @@
+//! Rust interface to the tromp equihash solver.
+
 use std::marker::{PhantomData, PhantomPinned};
 use std::slice;
 
@@ -33,6 +35,15 @@ extern "C" {
     fn equi_sols(eq: *const CEqui) -> *const *const u32;
 }
 
+/// Performs a single equihash solver run with equihash parameters `p` and hash state `curr_state`.
+/// Returns zero or more solutions.
+///
+/// # SAFETY
+///
+/// The parameters to this function must match the hard-coded parameters in the C++ code.
+///
+/// This function uses unsafe code for FFI into the tromp solver.
+#[allow(unsafe_code)]
 unsafe fn worker(p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
     // Create solver and initialize it.
     let eq = equi_new(
@@ -74,6 +85,11 @@ unsafe fn worker(p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
     solutions
 }
 
+/// Performs multiple equihash solver runs with equihash parameters `200, 9`, initialising the hash with
+/// the supplied partial `input`. Between each run, generates a new nonce of length `N` using the
+/// `next_nonce` function.
+///
+/// Returns zero or more solutions.
 pub fn solve_200_9<const N: usize>(
     input: &[u8],
     mut next_nonce: impl FnMut() -> Option<[u8; N]>,
@@ -91,6 +107,8 @@ pub fn solve_200_9<const N: usize>(
         let mut curr_state = state.clone();
         curr_state.update(&nonce);
 
+        // SAFETY: the parameters 200,9 match the hard-coded parameters in the C++ code.
+        #[allow(unsafe_code)]
         let solutions = unsafe { worker(p, &curr_state) };
         if !solutions.is_empty() {
             break solutions;
@@ -189,6 +207,7 @@ mod tests {
     use super::solve_200_9_compressed;
 
     #[test]
+    #[allow(clippy::print_stdout)]
     fn run_solver() {
         let input = b"Equihash is an asymmetric PoW based on the Generalised Birthday problem.";
         let mut nonce: [u8; 32] = [
