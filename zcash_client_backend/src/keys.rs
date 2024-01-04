@@ -26,9 +26,6 @@ use {
     zcash_primitives::consensus::BranchId,
 };
 
-#[cfg(feature = "orchard")]
-use orchard;
-
 pub mod sapling {
     pub use sapling::zip32::{
         DiversifiableFullViewingKey, ExtendedFullViewingKey, ExtendedSpendingKey,

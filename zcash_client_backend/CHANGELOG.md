@@ -189,7 +189,7 @@ and this library adheres to Rust's notion of
   - `RecipientAddress` has been renamed to `Address`
   - `Address::Shielded` has been renamed to `Address::Sapling`
   - `UnifiedAddress::from_receivers` no longer takes an Orchard receiver 
-    argument uless the `orchard` feature is enabled.
+    argument unless the `orchard` feature is enabled.
   - `UnifiedAddress::orchard` is now only available when the `orchard` feature
     is enabled.
 
@@ -199,7 +199,7 @@ and this library adheres to Rust's notion of
   - `UnifiedSpendingKey::orchard` is now only available when the `orchard`
     feature is enabled.
   - `UnifiedFullViewingKey::new` no longer takes an Orchard full viewing key
-    argument uless the `orchard` feature is enabled.
+    argument unless the `orchard` feature is enabled.
 
 ### Removed
 - `zcash_client_backend::wallet::ReceivedSaplingNote` has been replaced by

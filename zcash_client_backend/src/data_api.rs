@@ -634,8 +634,8 @@ impl<NoteCommitment, NF> ScannedBundles<NoteCommitment, NF> {
     ///
     /// The returned tuple is keyed by both transaction ID and the index of the transaction within
     /// the block, so that either the txid or the combination of the block hash available from
-    /// [`Self::block_hash`] and returned transaction index may be used to uniquely identify the
-    /// transaction, depending upon the needs of the caller.
+    /// [`ScannedBlock::block_hash`] and returned transaction index may be used to uniquely
+    /// identify the transaction, depending upon the needs of the caller.
     pub fn nullifier_map(&self) -> &[(TxId, u16, Vec<NF>)] {
         &self.nullifier_map
     }
