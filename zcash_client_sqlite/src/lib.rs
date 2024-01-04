@@ -444,8 +444,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 (
                     block.height(),
                     Position::from(
-                        u64::from(block.sapling_tree_size())
-                            - u64::try_from(block.sapling_commitments().len()).unwrap(),
+                        u64::from(block.sapling().final_tree_size())
+                            - u64::try_from(block.sapling().commitments().len()).unwrap(),
                     ),
                 )
             });
@@ -466,8 +466,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     block.height(),
                     block.block_hash(),
                     block.block_time(),
-                    block.sapling_tree_size(),
-                    block.sapling_commitments().len().try_into().unwrap(),
+                    block.sapling().final_tree_size(),
+                    block.sapling().commitments().len().try_into().unwrap(),
                 )?;
 
                 for tx in block.transactions() {
@@ -496,7 +496,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     wdb.conn.0,
                     block.height(),
                     ShieldedProtocol::Sapling,
-                    block.sapling_nullifier_map(),
+                    block.sapling().nullifier_map(),
                 )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
@@ -506,8 +506,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }));
 
                 last_scanned_height = Some(block.height());
-                let (block_sapling_commitments, _) = block.into_commitments();
-                sapling_commitments.extend(block_sapling_commitments.into_iter().map(Some));
+                let block_commitments = block.into_commitments();
+                sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
             }
 
             // Prune the nullifier map of entries we no longer need.

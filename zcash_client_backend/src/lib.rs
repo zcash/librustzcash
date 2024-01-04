@@ -35,7 +35,7 @@ pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
 #[macro_use]
 extern crate assert_matches;
 
-/// A shielded transfer protocol supported by the wallet.
+/// A shielded transfer protocol known to the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShieldedProtocol {
     /// The Sapling protocol

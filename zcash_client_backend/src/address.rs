@@ -38,6 +38,7 @@ impl AddressMetadata {
 /// A Unified Address.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnifiedAddress {
+    #[cfg(feature = "orchard")]
     orchard: Option<orchard::Address>,
     sapling: Option<PaymentAddress>,
     transparent: Option<TransparentAddress>,
@@ -48,6 +49,7 @@ impl TryFrom<unified::Address> for UnifiedAddress {
     type Error = &'static str;
 
     fn try_from(ua: unified::Address) -> Result<Self, Self::Error> {
+        #[cfg(feature = "orchard")]
         let mut orchard = None;
         let mut sapling = None;
         let mut transparent = None;
@@ -58,6 +60,7 @@ impl TryFrom<unified::Address> for UnifiedAddress {
             .items_as_parsed()
             .iter()
             .filter_map(|receiver| match receiver {
+                #[cfg(feature = "orchard")]
                 unified::Receiver::Orchard(data) => {
                     Option::from(orchard::Address::from_raw_address_bytes(data))
                         .ok_or("Invalid Orchard receiver in Unified Address")
@@ -66,6 +69,10 @@ impl TryFrom<unified::Address> for UnifiedAddress {
                             None
                         })
                         .transpose()
+                }
+                #[cfg(not(feature = "orchard"))]
+                unified::Receiver::Orchard(data) => {
+                    Some(Ok((unified::Typecode::Orchard.into(), data.to_vec())))
                 }
                 unified::Receiver::Sapling(data) => PaymentAddress::from_bytes(data)
                     .ok_or("Invalid Sapling receiver in Unified Address")
@@ -89,6 +96,7 @@ impl TryFrom<unified::Address> for UnifiedAddress {
             .collect::<Result<_, _>>()?;
 
         Ok(Self {
+            #[cfg(feature = "orchard")]
             orchard,
             sapling,
             transparent,
@@ -103,12 +111,18 @@ impl UnifiedAddress {
     /// Returns `None` if the receivers would produce an invalid Unified Address (namely,
     /// if no shielded receiver is provided).
     pub fn from_receivers(
-        orchard: Option<orchard::Address>,
+        #[cfg(feature = "orchard")] orchard: Option<orchard::Address>,
         sapling: Option<PaymentAddress>,
         transparent: Option<TransparentAddress>,
     ) -> Option<Self> {
-        if orchard.is_some() || sapling.is_some() {
+        #[cfg(feature = "orchard")]
+        let has_orchard = orchard.is_some();
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        if has_orchard || sapling.is_some() {
             Some(Self {
+                #[cfg(feature = "orchard")]
                 orchard,
                 sapling,
                 transparent,
@@ -121,6 +135,7 @@ impl UnifiedAddress {
     }
 
     /// Returns the Orchard receiver within this Unified Address, if any.
+    #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> Option<&orchard::Address> {
         self.orchard.as_ref()
     }
@@ -136,6 +151,15 @@ impl UnifiedAddress {
     }
 
     fn to_address(&self, net: Network) -> ZcashAddress {
+        #[cfg(feature = "orchard")]
+        let orchard_receiver = self
+            .orchard
+            .as_ref()
+            .map(|addr| addr.to_raw_address_bytes())
+            .map(unified::Receiver::Orchard);
+        #[cfg(not(feature = "orchard"))]
+        let orchard_receiver = None;
+
         let ua = unified::Address::try_from_items(
             self.unknown
                 .iter()
@@ -153,12 +177,7 @@ impl UnifiedAddress {
                         .map(|pa| pa.to_bytes())
                         .map(unified::Receiver::Sapling),
                 )
-                .chain(
-                    self.orchard
-                        .as_ref()
-                        .map(|addr| addr.to_raw_address_bytes())
-                        .map(unified::Receiver::Orchard),
-                )
+                .chain(orchard_receiver)
                 .collect(),
         )
         .expect("UnifiedAddress should only be constructed safely");
@@ -259,6 +278,7 @@ mod tests {
 
     #[test]
     fn ua_round_trip() {
+        #[cfg(feature = "orchard")]
         let orchard = {
             let sk = orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, 0).unwrap();
             let fvk = orchard::keys::FullViewingKey::from(&sk);
@@ -273,7 +293,11 @@ mod tests {
 
         let transparent = { None };
 
+        #[cfg(feature = "orchard")]
         let ua = UnifiedAddress::from_receivers(orchard, sapling, transparent).unwrap();
+
+        #[cfg(not(feature = "orchard"))]
+        let ua = UnifiedAddress::from_receivers(sapling, transparent).unwrap();
 
         let addr = Address::Unified(ua);
         let addr_str = addr.encode(&MAIN_NETWORK);
@@ -290,6 +314,7 @@ mod tests {
                         tv.p2pkh_bytes.is_some() || tv.p2sh_bytes.is_some()
                     );
                     assert_eq!(ua.sapling().is_some(), tv.sapling_raw_addr.is_some());
+                    #[cfg(feature = "orchard")]
                     assert_eq!(ua.orchard().is_some(), tv.orchard_raw_addr.is_some());
                 }
                 Some(_) => {

@@ -201,36 +201,40 @@ impl Progress {
 #[derive(Clone, Copy)]
 pub enum BuildConfig {
     Standard {
-        sapling_anchor: sapling::Anchor,
-        orchard_anchor: orchard::Anchor,
+        sapling_anchor: Option<sapling::Anchor>,
+        orchard_anchor: Option<orchard::Anchor>,
     },
     Coinbase,
 }
 
 impl BuildConfig {
     /// Returns the Sapling bundle type and anchor for this configuration.
-    pub fn sapling_builder_config(&self) -> (sapling::builder::BundleType, sapling::Anchor) {
+    pub fn sapling_builder_config(
+        &self,
+    ) -> Option<(sapling::builder::BundleType, sapling::Anchor)> {
         match self {
-            BuildConfig::Standard { sapling_anchor, .. } => {
-                (sapling::builder::BundleType::DEFAULT, *sapling_anchor)
-            }
-            BuildConfig::Coinbase => (
+            BuildConfig::Standard { sapling_anchor, .. } => sapling_anchor
+                .as_ref()
+                .map(|a| (sapling::builder::BundleType::DEFAULT, *a)),
+            BuildConfig::Coinbase => Some((
                 sapling::builder::BundleType::Coinbase,
                 sapling::Anchor::empty_tree(),
-            ),
+            )),
         }
     }
 
     /// Returns the Orchard bundle type and anchor for this configuration.
-    pub fn orchard_builder_config(&self) -> (orchard::builder::BundleType, orchard::Anchor) {
+    pub fn orchard_builder_config(
+        &self,
+    ) -> Option<(orchard::builder::BundleType, orchard::Anchor)> {
         match self {
-            BuildConfig::Standard { orchard_anchor, .. } => {
-                (orchard::builder::BundleType::DEFAULT, *orchard_anchor)
-            }
-            BuildConfig::Coinbase => (
+            BuildConfig::Standard { orchard_anchor, .. } => orchard_anchor
+                .as_ref()
+                .map(|a| (orchard::builder::BundleType::DEFAULT, *a)),
+            BuildConfig::Coinbase => Some((
                 orchard::builder::BundleType::Coinbase,
                 orchard::Anchor::empty_tree(),
-            ),
+            )),
         }
     }
 }
@@ -308,20 +312,22 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     /// expiry delta (20 blocks).
     pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
         let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
-            let (bundle_type, anchor) = build_config.orchard_builder_config();
-            Some(orchard::builder::Builder::new(bundle_type, anchor))
+            build_config
+                .orchard_builder_config()
+                .map(|(bundle_type, anchor)| orchard::builder::Builder::new(bundle_type, anchor))
         } else {
             None
         };
 
-        let sapling_builder = Some({
-            let (bundle_type, anchor) = build_config.sapling_builder_config();
-            sapling::builder::Builder::new(
-                consensus::sapling_zip212_enforcement(&params, target_height),
-                bundle_type,
-                anchor,
-            )
-        });
+        let sapling_builder = build_config
+            .sapling_builder_config()
+            .map(|(bundle_type, anchor)| {
+                sapling::builder::Builder::new(
+                    consensus::sapling_zip212_enforcement(&params, target_height),
+                    bundle_type,
+                    anchor,
+                )
+            });
 
         Builder {
             params,
@@ -522,20 +528,22 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                 transparent_inputs,
                 self.transparent_builder.outputs(),
                 sapling_spends,
-                self.sapling_builder.as_ref().map_or(Ok(0), |builder| {
-                    self.build_config
-                        .sapling_builder_config()
-                        .0
-                        .num_outputs(sapling_spends, builder.outputs().len())
-                        .map_err(FeeError::Bundle)
-                })?,
-                self.orchard_builder.as_ref().map_or(Ok(0), |builder| {
-                    self.build_config
-                        .orchard_builder_config()
-                        .0
-                        .num_actions(builder.spends().len(), builder.outputs().len())
-                        .map_err(FeeError::Bundle)
-                })?,
+                self.sapling_builder
+                    .as_ref()
+                    .zip(self.build_config.sapling_builder_config())
+                    .map_or(Ok(0), |(builder, (bundle_type, _))| {
+                        bundle_type
+                            .num_outputs(sapling_spends, builder.outputs().len())
+                            .map_err(FeeError::Bundle)
+                    })?,
+                self.orchard_builder
+                    .as_ref()
+                    .zip(self.build_config.orchard_builder_config())
+                    .map_or(Ok(0), |(builder, (bundle_type, _))| {
+                        bundle_type
+                            .num_actions(builder.spends().len(), builder.outputs().len())
+                            .map_err(FeeError::Bundle)
+                    })?,
             )
             .map_err(FeeError::FeeRule)
     }
@@ -563,20 +571,22 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                 transparent_inputs,
                 self.transparent_builder.outputs(),
                 sapling_spends,
-                self.sapling_builder.as_ref().map_or(Ok(0), |builder| {
-                    self.build_config
-                        .sapling_builder_config()
-                        .0
-                        .num_outputs(sapling_spends, builder.outputs().len())
-                        .map_err(FeeError::Bundle)
-                })?,
-                self.orchard_builder.as_ref().map_or(Ok(0), |builder| {
-                    self.build_config
-                        .orchard_builder_config()
-                        .0
-                        .num_actions(builder.spends().len(), builder.outputs().len())
-                        .map_err(FeeError::Bundle)
-                })?,
+                self.sapling_builder
+                    .as_ref()
+                    .zip(self.build_config.sapling_builder_config())
+                    .map_or(Ok(0), |(builder, (bundle_type, _))| {
+                        bundle_type
+                            .num_outputs(sapling_spends, builder.outputs().len())
+                            .map_err(FeeError::Bundle)
+                    })?,
+                self.orchard_builder
+                    .as_ref()
+                    .zip(self.build_config.orchard_builder_config())
+                    .map_or(Ok(0), |(builder, (bundle_type, _))| {
+                        bundle_type
+                            .num_actions(builder.spends().len(), builder.outputs().len())
+                            .map_err(FeeError::Bundle)
+                    })?,
                 self.tze_builder.inputs(),
                 self.tze_builder.outputs(),
             )
@@ -918,8 +928,8 @@ mod tests {
         let mut builder = builder::Builder {
             params: TEST_NETWORK,
             build_config: BuildConfig::Standard {
-                sapling_anchor: sapling::Anchor::empty_tree(),
-                orchard_anchor: orchard::Anchor::empty_tree(),
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
             },
             target_height: sapling_activation_height,
             expiry_height: sapling_activation_height + DEFAULT_TX_EXPIRY_DELTA,
@@ -989,8 +999,8 @@ mod tests {
             .unwrap();
 
         let build_config = BuildConfig::Standard {
-            sapling_anchor: witness1.root().into(),
-            orchard_anchor: orchard::Anchor::empty_tree(),
+            sapling_anchor: Some(witness1.root().into()),
+            orchard_anchor: None,
         };
         let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
 
@@ -1027,8 +1037,8 @@ mod tests {
         // 0.0001 t-ZEC fee
         {
             let build_config = BuildConfig::Standard {
-                sapling_anchor: sapling::Anchor::empty_tree(),
-                orchard_anchor: orchard::Anchor::empty_tree(),
+                sapling_anchor: None,
+                orchard_anchor: None,
             };
             let builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             assert_matches!(
@@ -1045,8 +1055,8 @@ mod tests {
         // 0.0005 z-ZEC out, 0.0001 t-ZEC fee
         {
             let build_config = BuildConfig::Standard {
-                sapling_anchor: sapling::Anchor::empty_tree(),
-                orchard_anchor: orchard::Anchor::empty_tree(),
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
@@ -1068,8 +1078,8 @@ mod tests {
         // 0.0005 t-ZEC out, 0.0001 t-ZEC fee
         {
             let build_config = BuildConfig::Standard {
-                sapling_anchor: sapling::Anchor::empty_tree(),
-                orchard_anchor: orchard::Anchor::empty_tree(),
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
@@ -1098,8 +1108,8 @@ mod tests {
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.00059999 z-ZEC in
         {
             let build_config = BuildConfig::Standard {
-                sapling_anchor: witness1.root().into(),
-                orchard_anchor: orchard::Anchor::empty_tree(),
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
@@ -1138,8 +1148,8 @@ mod tests {
         // 0.0003 z-ZEC out, 0.0002 t-ZEC out, 0.0001 t-ZEC fee, 0.0006 z-ZEC in
         {
             let build_config = BuildConfig::Standard {
-                sapling_anchor: witness1.root().into(),
-                orchard_anchor: orchard::Anchor::empty_tree(),
+                sapling_anchor: Some(witness1.root().into()),
+                orchard_anchor: Some(orchard::Anchor::empty_tree()),
             };
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder

@@ -239,6 +239,7 @@ impl<N, S> WalletSaplingOutput<N, S> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WalletNote {
     Sapling(sapling::Note),
+    #[cfg(feature = "orchard")]
     Orchard(orchard::Note),
 }
 
@@ -248,6 +249,7 @@ impl WalletNote {
             WalletNote::Sapling(n) => n.value().try_into().expect(
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
+            #[cfg(feature = "orchard")]
             WalletNote::Orchard(n) => NonNegativeAmount::from_u64(n.value().inner()).expect(
                 "Orchard notes must have values in the range of valid non-negative ZEC values.",
             ),

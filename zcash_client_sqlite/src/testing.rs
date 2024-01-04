@@ -841,6 +841,8 @@ pub(crate) fn fake_compact_block_from_tx(
             ctx.outputs.push(output.into());
         }
     }
+
+    #[cfg(feature = "orchard")]
     if let Some(bundle) = tx.orchard_bundle() {
         for action in bundle.actions() {
             ctx.actions.push(action.into());

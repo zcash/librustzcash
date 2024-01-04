@@ -760,7 +760,12 @@ pub mod testing {
             sapling in arb_payment_address(),
             transparent in option::of(arb_transparent_addr()),
         ) -> UnifiedAddress {
-            UnifiedAddress::from_receivers(None, Some(sapling), transparent).unwrap()
+            UnifiedAddress::from_receivers(
+                #[cfg(feature = "orchard")]
+                None,
+                Some(sapling),
+                transparent
+            ).unwrap()
         }
     }
 
