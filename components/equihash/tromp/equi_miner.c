@@ -222,6 +222,10 @@ u32 minu32(const u32 a, const u32 b) {
 
 struct equi {
   BLAKE2bState* blake_ctx;
+  blake2b_clone blake2b_clone;
+  blake2b_free blake2b_free;
+  blake2b_update blake2b_update;
+  blake2b_finalize blake2b_finalize;
   htalloc hta;
   bsizes *nslots; // PUT IN BUCKET STRUCT
   proof *sols;
@@ -234,10 +238,21 @@ struct equi {
 };
 typedef struct equi equi;
   void equi_clearslots(equi *eq);
-  equi *equi_new(const u32 n_threads) {
+  equi *equi_new(
+    const u32 n_threads,
+    blake2b_clone blake2b_clone,
+    blake2b_free blake2b_free,
+    blake2b_update blake2b_update,
+    blake2b_finalize blake2b_finalize
+  ) {
     assert(sizeof(hashunit) == 4);
     equi *eq = malloc(sizeof(equi));
     eq->nthreads = n_threads;
+    eq->blake2b_clone = blake2b_clone;
+    eq->blake2b_free = blake2b_free;
+    eq->blake2b_update = blake2b_update;
+    eq->blake2b_finalize = blake2b_finalize;
+
     const int err = pthread_barrier_init(&eq->barry, NULL, eq->nthreads);
     assert(!err);
 
@@ -257,15 +272,16 @@ typedef struct equi equi;
 
     free(eq->nslots);
     free(eq->sols);
-    blake2b_free(eq->blake_ctx);
+    eq->blake2b_free(eq->blake_ctx);
+
     free(eq);
   }
   void equi_setstate(equi *eq, const BLAKE2bState *ctx) {
     if (eq->blake_ctx) {
-      blake2b_free(eq->blake_ctx);
+      eq->blake2b_free(eq->blake_ctx);
     }
 
-    eq->blake_ctx = blake2b_clone(ctx);
+    eq->blake_ctx = eq->blake2b_clone(ctx);
     memset(eq->nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     eq->nsols = 0;
   }
@@ -481,11 +497,12 @@ typedef struct equi equi;
     htlayout htl = htlayout_new(eq, 0);
     const u32 hashbytes = hashsize(0);
     for (u32 block = id; block < NBLOCKS; block += eq->nthreads) {
-      state = blake2b_clone(eq->blake_ctx);
+      state = eq->blake2b_clone(eq->blake_ctx);
       u32 leb = htole32(block);
-      blake2b_update(state, (uchar *)&leb, sizeof(u32));
-      blake2b_finalize(state, hash, HASHOUT);
-      blake2b_free(state);
+      eq->blake2b_update(state, (uchar *)&leb, sizeof(u32));
+      eq->blake2b_finalize(state, hash, HASHOUT);
+      eq->blake2b_free(state);
+
       for (u32 i = 0; i<HASHESPERBLAKE; i++) {
         const uchar *ph = hash + i * WN/8;
 #if BUCKBITS == 16 && RESTBITS == 4
