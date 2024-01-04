@@ -10,8 +10,7 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_client_backend::data_api`:
   - `BlockMetadata::orchard_tree_size` (when the `orchard` feature is enabled).
-  - `TransparentInputSource`
-  - `SaplingInputSource`
+  - `InputSource`
   - `ScannedBlock::{into_commitments, sapling}`
   - `ScannedBlock::orchard` (when the `orchard` feature is enabled.)
   - `ScannedBundles`
@@ -112,15 +111,11 @@ and this library adheres to Rust's notion of
     - `wallet::create_spend_to_address`
     - `wallet::shield_transparent_funds`
     - `wallet::spend`
-  - In order to support better reusability for input selection code, two new
-    traits have been factored out from `WalletRead`:
-    - `zcash_client_backend::data_api::TransparentInputSource`
-    - `zcash_client_backend::data_api::SaplingInputSource`
   - `wallet::input_selection::InputSelector::propose_shielding`,
     has been moved out to the newly-created `ShieldingSelector` trait.
     - `ShieldingSelector::propose_shielding` has been altered such that it takes
       an explicit `target_height` in order to minimize the capabilities that the
-      `data_api::TransparentInputSource` trait must expose. Also, it now takes its
+      `data_api::InputSource` trait must expose. Also, it now takes its
       `min_confirmations` argument as `u32` instead of `NonZeroU32`.
   - The `wallet::input_selection::InputSelector::DataSource`
     associated type has been renamed to `InputSource`.
@@ -128,7 +123,7 @@ and this library adheres to Rust's notion of
     has been altered such that it longer takes `min_confirmations` as an
     argument, instead taking explicit `target_height` and `anchor_height`
     arguments. This helps to minimize the set of capabilities that the
-    `data_api::SaplingInputSource` must expose.
+    `data_api::InputSource` must expose.
   - `WalletRead::get_checkpoint_depth` has been removed without replacement. This
     is no longer needed given the change to use the stored anchor height for transaction
     proposal execution.
@@ -207,10 +202,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::WalletRead::is_valid_account_extfvk` has been
   removed; it was unused in the ECC mobile wallet SDKs and has been superseded by
   `get_account_for_ufvk`.
-- `zcash_client_backend::data_api::WalletRead::get_spendable_sapling_notes` has been
-  removed without replacement as it was unused, and its functionality will be
-  fully reproduced by `SaplingInputSource::select_spendable_sapling_notes` in a future
-  change.
+- `zcash_client_backend::data_api::WalletRead::{
+     get_spendable_sapling_notes
+     select_spendable_sapling_notes,
+     get_unspent_transparent_outputs,
+   }` - use `data_api::InputSource` instead.
 - `zcash_client_backend::data_api::ScannedBlock::from_parts` has been made crate-private.
 - `zcash_client_backend::data_api::ScannedBlock::into_sapling_commitments` has been
   replaced by `into_commitments` which returns both Sapling and Orchard note commitments

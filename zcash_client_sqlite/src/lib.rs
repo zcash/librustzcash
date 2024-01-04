@@ -63,7 +63,7 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, DecryptedTransaction, NullifierQuery, SaplingInputSource,
+        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
     },
@@ -76,10 +76,7 @@ use zcash_client_backend::{
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "transparent-inputs")]
-use {
-    zcash_client_backend::data_api::TransparentInputSource,
-    zcash_primitives::transaction::components::OutPoint,
-};
+use zcash_primitives::transaction::components::OutPoint;
 
 #[cfg(feature = "unstable")]
 use {
@@ -166,24 +163,24 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
     }
 }
 
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSource
-    for WalletDb<C, P>
-{
+impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for WalletDb<C, P> {
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
 
-    fn get_spendable_sapling_note(
+    fn get_spendable_note(
         &self,
         txid: &TxId,
+        _protocol: ShieldedProtocol,
         index: u32,
     ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error> {
         wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), &self.params, txid, index)
     }
 
-    fn select_spendable_sapling_notes(
+    fn select_spendable_notes(
         &self,
         account: AccountId,
         target_value: Amount,
+        _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error> {
@@ -196,14 +193,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> SaplingInputSour
             exclude,
         )
     }
-}
 
-#[cfg(feature = "transparent-inputs")]
-impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> TransparentInputSource
-    for WalletDb<C, P>
-{
-    type Error = SqliteClientError;
-
+    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
         outpoint: &OutPoint,
@@ -211,6 +202,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> TransparentInput
         wallet::get_unspent_transparent_output(self.conn.borrow(), outpoint)
     }
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_outputs(
         &self,
         address: &TransparentAddress,

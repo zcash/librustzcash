@@ -41,6 +41,7 @@ use zcash_client_backend::{
     proto::compact_formats::{
         self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
+    proto::proposal,
     wallet::OvkPolicy,
     zip321,
 };
@@ -71,11 +72,8 @@ use super::BlockDb;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    zcash_client_backend::{
-        data_api::wallet::{
-            input_selection::ShieldingSelector, propose_shielding, shield_transparent_funds,
-        },
-        proto::proposal,
+    zcash_client_backend::data_api::wallet::{
+        input_selection::ShieldingSelector, propose_shielding, shield_transparent_funds,
     },
     zcash_primitives::legacy::TransparentAddress,
 };
@@ -571,7 +569,6 @@ impl<Cache> TestState<Cache> {
             change_memo,
         );
 
-        #[cfg(feature = "transparent-inputs")]
         if let Ok(proposal) = &result {
             check_proposal_serialization_roundtrip(self.wallet(), proposal);
         }
@@ -1075,7 +1072,6 @@ pub(crate) fn input_selector(
 
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
-#[cfg(feature = "transparent-inputs")]
 pub(crate) fn check_proposal_serialization_roundtrip(
     db_data: &WalletDb<rusqlite::Connection, Network>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,

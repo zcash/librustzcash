@@ -17,10 +17,7 @@ use zcash_primitives::{
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     transaction::{
-        components::{
-            amount::{Amount, BalanceError, NonNegativeAmount},
-            OutPoint,
-        },
+        components::amount::{Amount, BalanceError, NonNegativeAmount},
         Transaction, TxId,
     },
     zip32::{AccountId, Scope},
@@ -32,10 +29,14 @@ use crate::{
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
     wallet::{NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
+    ShieldedProtocol,
 };
 
 use self::chain::CommitmentTreeRoot;
 use self::scanning::ScanRange;
+
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::transaction::components::OutPoint;
 
 pub mod chain;
 pub mod error;
@@ -337,9 +338,9 @@ impl WalletSummary {
     }
 }
 
-/// A trait representing the capability to query a data store for unspent Sapling notes belonging
-/// to a wallet.
-pub trait SaplingInputSource {
+/// A trait representing the capability to query a data store for unspent transaction outputs
+/// belonging to a wallet.
+pub trait InputSource {
     /// The type of errors produced by a wallet backend.
     type Error;
 
@@ -349,51 +350,53 @@ pub trait SaplingInputSource {
     /// or a UUID.
     type NoteRef: Copy + Debug + Eq + Ord;
 
-    /// Fetches a spendable Sapling note by indexing into the specified transaction's
-    /// [`sapling::Bundle::shielded_outputs`].
+    /// Fetches a spendable note by indexing into a transaction's shielded outputs for the
+    /// specified shielded protocol.
     ///
     /// Returns `Ok(None)` if the note is not known to belong to the wallet or if the note
     /// is not spendable.
-    fn get_spendable_sapling_note(
+    fn get_spendable_note(
         &self,
         txid: &TxId,
+        protocol: ShieldedProtocol,
         index: u32,
     ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error>;
 
-    /// Returns a list of spendable Sapling notes sufficient to cover the specified target value,
-    /// if possible.
-    fn select_spendable_sapling_notes(
+    /// Returns a list of spendable notes sufficient to cover the specified target value, if
+    /// possible. Only spendable notes corresponding to the specified shielded protocol will
+    /// be included.
+    fn select_spendable_notes(
         &self,
         account: AccountId,
         target_value: Amount,
+        sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error>;
-}
-
-/// A trait representing the capability to query a data store for unspent transparent UTXOs
-/// belonging to a wallet.
-pub trait TransparentInputSource {
-    /// The type of errors produced by a wallet backend.
-    type Error;
 
     /// Fetches a spendable transparent output.
     ///
     /// Returns `Ok(None)` if the UTXO is not known to belong to the wallet or is not
     /// spendable.
+    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_output(
         &self,
-        outpoint: &OutPoint,
-    ) -> Result<Option<WalletTransparentOutput>, Self::Error>;
+        _outpoint: &OutPoint,
+    ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
+        Ok(None)
+    }
 
     /// Returns a list of unspent transparent UTXOs that appear in the chain at heights up to and
     /// including `max_height`.
+    #[cfg(feature = "transparent-inputs")]
     fn get_unspent_transparent_outputs(
         &self,
-        address: &TransparentAddress,
-        max_height: BlockHeight,
-        exclude: &[OutPoint],
-    ) -> Result<Vec<WalletTransparentOutput>, Self::Error>;
+        _address: &TransparentAddress,
+        _max_height: BlockHeight,
+        _exclude: &[OutPoint],
+    ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
+        Ok(vec![])
+    }
 }
 
 /// Read-only operations required for light wallet functions.
@@ -1094,11 +1097,12 @@ pub mod testing {
         address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
         wallet::{NoteId, ReceivedNote, WalletTransparentOutput},
+        ShieldedProtocol,
     };
 
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, NullifierQuery, SaplingInputSource, ScannedBlock, SentTransaction,
+        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
         WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
@@ -1111,9 +1115,6 @@ pub mod testing {
         >,
     }
 
-    #[cfg(feature = "transparent-inputs")]
-    use {super::TransparentInputSource, zcash_primitives::transaction::components::OutPoint};
-
     impl MockWalletDb {
         pub fn new(network: Network) -> Self {
             Self {
@@ -1123,46 +1124,27 @@ pub mod testing {
         }
     }
 
-    impl SaplingInputSource for MockWalletDb {
+    impl InputSource for MockWalletDb {
         type Error = ();
         type NoteRef = u32;
 
-        fn get_spendable_sapling_note(
+        fn get_spendable_note(
             &self,
             _txid: &TxId,
+            _protocol: ShieldedProtocol,
             _index: u32,
         ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error> {
             Ok(None)
         }
 
-        fn select_spendable_sapling_notes(
+        fn select_spendable_notes(
             &self,
             _account: AccountId,
             _target_value: Amount,
+            _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
         ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error> {
-            Ok(Vec::new())
-        }
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    impl TransparentInputSource for MockWalletDb {
-        type Error = ();
-
-        fn get_unspent_transparent_output(
-            &self,
-            _outpoint: &OutPoint,
-        ) -> Result<Option<WalletTransparentOutput>, Self::Error> {
-            Ok(None)
-        }
-
-        fn get_unspent_transparent_outputs(
-            &self,
-            _address: &TransparentAddress,
-            _anchor_height: BlockHeight,
-            _exclude: &[OutPoint],
-        ) -> Result<Vec<WalletTransparentOutput>, Self::Error> {
             Ok(Vec::new())
         }
     }

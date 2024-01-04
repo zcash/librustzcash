@@ -36,13 +36,13 @@ use input_selection::{
     GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
 };
 
-use super::SaplingInputSource;
+use super::InputSource;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    super::TransparentInputSource, crate::wallet::WalletTransparentOutput,
-    input_selection::ShieldingSelector, sapling::keys::OutgoingViewingKey,
-    std::convert::Infallible, zcash_primitives::legacy::TransparentAddress,
+    crate::wallet::WalletTransparentOutput, input_selection::ShieldingSelector,
+    sapling::keys::OutgoingViewingKey, std::convert::Infallible,
+    zcash_primitives::legacy::TransparentAddress,
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -216,10 +216,8 @@ pub fn create_spend_to_address<DbT, ParamsT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletWrite
-        + WalletCommitmentTrees
-        + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
-    DbT::NoteRef: Copy + Eq + Ord,
+    DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
 {
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
@@ -326,10 +324,8 @@ pub fn spend<DbT, ParamsT, InputsT>(
     >,
 >
 where
-    DbT: WalletWrite
-        + WalletCommitmentTrees
-        + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
-    DbT::NoteRef: Copy + Eq + Ord,
+    DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<InputSource = DbT>,
 {
@@ -371,7 +367,7 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     request: zip321::TransactionRequest,
     min_confirmations: NonZeroU32,
 ) -> Result<
-    Proposal<InputsT::FeeRule, DbT::NoteRef>,
+    Proposal<InputsT::FeeRule, <DbT as InputSource>::NoteRef>,
     Error<
         <DbT as WalletRead>::Error,
         CommitmentTreeErrT,
@@ -380,8 +376,8 @@ pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     >,
 >
 where
-    DbT: WalletRead + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
-    DbT::NoteRef: Copy + Eq + Ord,
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<InputSource = DbT>,
 {
@@ -444,7 +440,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletRead + SaplingInputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![Payment {
@@ -494,7 +490,7 @@ pub fn propose_shielding<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
 >
 where
     ParamsT: consensus::Parameters,
-    DbT: WalletRead + TransparentInputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
     InputsT: ShieldingSelector<InputSource = DbT>,
 {
     let chain_tip_height = wallet_db
@@ -874,9 +870,7 @@ pub fn shield_transparent_funds<DbT, ParamsT, InputsT>(
 >
 where
     ParamsT: consensus::Parameters,
-    DbT: WalletWrite
-        + WalletCommitmentTrees
-        + TransparentInputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
     InputsT: ShieldingSelector<InputSource = DbT>,
 {
     let proposal = propose_shielding(

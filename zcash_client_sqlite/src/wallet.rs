@@ -1993,9 +1993,7 @@ mod tests {
         },
         sapling::zip32::ExtendedSpendingKey,
         zcash_client_backend::{
-            data_api::{
-                wallet::input_selection::GreedyInputSelector, TransparentInputSource, WalletWrite,
-            },
+            data_api::{wallet::input_selection::GreedyInputSelector, InputSource, WalletWrite},
             encoding::AddressCodec,
             fees::{fixed, DustOutputPolicy},
             wallet::WalletTransparentOutput,

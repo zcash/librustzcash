@@ -19,15 +19,16 @@ use zcash_primitives::{
 
 use crate::{
     address::{Address, UnifiedAddress},
-    data_api::SaplingInputSource,
+    data_api::InputSource,
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
     wallet::{ReceivedNote, WalletTransparentOutput},
     zip321::TransactionRequest,
+    ShieldedProtocol,
 };
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::data_api::TransparentInputSource, std::collections::BTreeSet, std::convert::Infallible,
+    std::collections::BTreeSet, std::convert::Infallible,
     zcash_primitives::transaction::components::OutPoint,
 };
 
@@ -297,9 +298,9 @@ pub trait InputSelector {
     /// The type of data source that the input selector expects to access to obtain input Sapling
     /// notes. This associated type permits input selectors that may use specialized knowledge of
     /// the internals of a particular backing data store, if the generic API of
-    /// `SaplingInputSource` does not provide sufficiently fine-grained operations for a particular
+    /// `InputSource` does not provide sufficiently fine-grained operations for a particular
     /// backing store to optimally perform input selection.
-    type InputSource: SaplingInputSource;
+    type InputSource: InputSource;
     /// The type of the fee rule that this input selector uses when computing fees.
     type FeeRule: FeeRule;
 
@@ -327,8 +328,8 @@ pub trait InputSelector {
         account: AccountId,
         transaction_request: TransactionRequest,
     ) -> Result<
-        Proposal<Self::FeeRule, <Self::InputSource as SaplingInputSource>::NoteRef>,
-        InputSelectorError<<Self::InputSource as SaplingInputSource>::Error, Self::Error>,
+        Proposal<Self::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
+        InputSelectorError<<Self::InputSource as InputSource>::Error, Self::Error>,
     >
     where
         ParamsT: consensus::Parameters;
@@ -344,9 +345,9 @@ pub trait ShieldingSelector {
     /// The type of data source that the input selector expects to access to obtain input
     /// transparent UTXOs. This associated type permits input selectors that may use specialized
     /// knowledge of the internals of a particular backing data store, if the generic API of
-    /// `TransparentInputSource` does not provide sufficiently fine-grained operations for a
+    /// [`InputSource`] does not provide sufficiently fine-grained operations for a
     /// particular backing store to optimally perform input selection.
-    type InputSource: TransparentInputSource;
+    type InputSource: InputSource;
     /// The type of the fee rule that this input selector uses when computing fees.
     type FeeRule: FeeRule;
 
@@ -369,7 +370,7 @@ pub trait ShieldingSelector {
         min_confirmations: u32,
     ) -> Result<
         Proposal<Self::FeeRule, Infallible>,
-        InputSelectorError<<Self::InputSource as TransparentInputSource>::Error, Self::Error>,
+        InputSelectorError<<Self::InputSource as InputSource>::Error, Self::Error>,
     >
     where
         ParamsT: consensus::Parameters;
@@ -450,7 +451,7 @@ impl sapling::OutputView for SaplingPayment {
 /// notes.
 ///
 /// This implementation performs input selection using methods available via the
-/// [`SaplingInputSource`] and `TransparentInputSource` interfaces.
+/// [`InputSource`] interface.
 pub struct GreedyInputSelector<DbT, ChangeT> {
     change_strategy: ChangeT,
     dust_output_policy: DustOutputPolicy,
@@ -471,7 +472,7 @@ impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
 
 impl<DbT, ChangeT> InputSelector for GreedyInputSelector<DbT, ChangeT>
 where
-    DbT: SaplingInputSource,
+    DbT: InputSource,
     ChangeT: ChangeStrategy,
     ChangeT::FeeRule: Clone,
 {
@@ -490,11 +491,11 @@ where
         transaction_request: TransactionRequest,
     ) -> Result<
         Proposal<Self::FeeRule, DbT::NoteRef>,
-        InputSelectorError<<DbT as SaplingInputSource>::Error, Self::Error>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error>,
     >
     where
         ParamsT: consensus::Parameters,
-        Self::InputSource: SaplingInputSource,
+        Self::InputSource: InputSource,
     {
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
@@ -575,9 +576,10 @@ where
             }
 
             sapling_inputs = wallet_db
-                .select_spendable_sapling_notes(
+                .select_spendable_notes(
                     account,
                     amount_required.into(),
+                    &[ShieldedProtocol::Sapling],
                     anchor_height,
                     &exclude,
                 )
@@ -606,7 +608,7 @@ where
 #[cfg(feature = "transparent-inputs")]
 impl<DbT, ChangeT> ShieldingSelector for GreedyInputSelector<DbT, ChangeT>
 where
-    DbT: TransparentInputSource,
+    DbT: InputSource,
     ChangeT: ChangeStrategy,
     ChangeT::FeeRule: Clone,
 {
@@ -625,7 +627,7 @@ where
         min_confirmations: u32,
     ) -> Result<
         Proposal<Self::FeeRule, Infallible>,
-        InputSelectorError<<DbT as TransparentInputSource>::Error, Self::Error>,
+        InputSelectorError<<DbT as InputSource>::Error, Self::Error>,
     >
     where
         ParamsT: consensus::Parameters,
