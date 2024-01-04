@@ -1,3 +1,5 @@
+//! Build script for the equihash tromp solver in C.
+
 fn main() {
     cc::Build::new()
         .include("tromp/")

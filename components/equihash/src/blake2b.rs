@@ -2,6 +2,9 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
+// This module uses unsafe code for FFI into blake2b.
+#![allow(unsafe_code)]
+
 use blake2b_simd::{State, PERSONALBYTES};
 
 use std::ptr;
