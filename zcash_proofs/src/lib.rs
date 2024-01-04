@@ -8,6 +8,7 @@
 //!
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 // Temporary until we have addressed all Result<T, ()> cases.
@@ -31,14 +32,9 @@ mod hashreader;
 pub mod sprout;
 
 #[cfg(any(feature = "local-prover", feature = "bundled-prover"))]
-#[cfg_attr(
-    docsrs,
-    doc(cfg(any(feature = "local-prover", feature = "bundled-prover")))
-)]
 pub mod prover;
 
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 mod downloadreader;
 
 // Circuit names
@@ -67,7 +63,6 @@ const DOWNLOAD_URL: &str = "https://download.z.cash/downloads";
 
 /// The paths to the Sapling parameter files.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SaplingParameterPaths {
     /// The path to the Sapling spend parameter file.
@@ -79,7 +74,6 @@ pub struct SaplingParameterPaths {
 
 /// Returns the default folder that the Zcash proving parameters are located in.
 #[cfg(feature = "directories")]
-#[cfg_attr(docsrs, doc(cfg(feature = "directories")))]
 pub fn default_params_folder() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -107,7 +101,6 @@ pub fn default_params_folder() -> Option<PathBuf> {
 ///
 /// This mirrors the behaviour of the `fetch-params.sh` script from `zcashd`.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 #[deprecated(
     since = "0.6.0",
     note = "please replace with `download_sapling_parameters`, and use `download_sprout_parameters` if needed"
@@ -126,7 +119,6 @@ pub fn download_parameters() -> Result<(), minreq::Error> {
 ///
 /// Returns the paths to the downloaded files.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_sapling_parameters(
     timeout: Option<u64>,
 ) -> Result<SaplingParameterPaths, minreq::Error> {
@@ -156,7 +148,6 @@ pub fn download_sapling_parameters(
 ///
 /// Returns the path to the downloaded file.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minreq::Error> {
     fetch_params(SPROUT_NAME, SPROUT_HASH, SPROUT_BYTES, timeout)
 }
@@ -166,7 +157,6 @@ pub fn download_sprout_parameters(timeout: Option<u64>) -> Result<PathBuf, minre
 ///
 /// See [`download_sapling_parameters`] for details.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 fn fetch_params(
     name: &str,
     expected_hash: &str,
@@ -234,7 +224,6 @@ fn fetch_params(
 ///
 /// See [`download_sapling_parameters`] for details.
 #[cfg(feature = "download-params")]
-#[cfg_attr(docsrs, doc(cfg(feature = "download-params")))]
 fn stream_params_downloads_to_disk(
     params_path: &Path,
     name: &str,

@@ -97,7 +97,6 @@ impl LocalTxProver {
     /// This function will panic if the parameters in the default local location do not
     /// have the expected hashes.
     #[cfg(feature = "local-prover")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "local-prover")))]
     pub fn with_default_location() -> Option<Self> {
         let params_dir = default_params_folder()?;
         let (spend_path, output_path) = if params_dir.exists() {
@@ -120,7 +119,6 @@ impl LocalTxProver {
     /// This requires the `bundled-prover` feature, which will increase the binary size by
     /// around 50 MiB.
     #[cfg(feature = "bundled-prover")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "bundled-prover")))]
     pub fn bundled() -> Self {
         let (spend_buf, output_buf) = wagyu_zcash_parameters::load_sapling_parameters();
         let p = parse_parameters(&spend_buf[..], &output_buf[..], None);

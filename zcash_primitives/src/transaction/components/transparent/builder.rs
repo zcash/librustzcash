@@ -203,7 +203,6 @@ impl TransparentBuilder {
 
 impl TxIn<Unauthorized> {
     #[cfg(feature = "transparent-inputs")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "transparent-inputs")))]
     pub fn new(prevout: OutPoint) -> Self {
         TxIn {
             prevout,

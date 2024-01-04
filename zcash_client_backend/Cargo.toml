@@ -20,6 +20,10 @@ exclude = ["*.proto"]
 [package.metadata.cargo-udeps.ignore]
 development = ["zcash_proofs"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
