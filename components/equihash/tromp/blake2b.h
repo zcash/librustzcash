@@ -16,7 +16,7 @@ typedef struct BLAKE2bState BLAKE2bState;
 /// `personalization` MUST be a pointer to a 16-byte array.
 ///
 /// Please free this with `blake2b_free` when you are done.
-BLAKE2bState* blake2b_init(
+typedef BLAKE2bState* (*blake2b_init)(
     size_t output_len,
     const unsigned char* personalization);
 
@@ -24,13 +24,13 @@ BLAKE2bState* blake2b_init(
 ///
 /// Both states need to be separately freed with `blake2b_free` when you are
 /// done.
-BLAKE2bState* blake2b_clone(const BLAKE2bState* state);
+typedef BLAKE2bState* (*blake2b_clone)(const BLAKE2bState* state);
 
 /// Frees a BLAKE2b state returned by `blake2b_init`.
-void blake2b_free(BLAKE2bState* state);
+typedef void (*blake2b_free)(BLAKE2bState* state);
 
 /// Adds input to the hash. You can call this any number of times.
-void blake2b_update(
+typedef void (*blake2b_update)(
     BLAKE2bState* state,
     const unsigned char* input,
     size_t input_len);
@@ -43,7 +43,7 @@ void blake2b_update(
 /// This method is idempotent, and calling it multiple times will give the same
 /// result. It's also possible to call `blake2b_update` with more input in
 /// between.
-void blake2b_finalize(
+typedef void (*blake2b_finalize)(
     BLAKE2bState* state,
     unsigned char* output,
     size_t output_len);
