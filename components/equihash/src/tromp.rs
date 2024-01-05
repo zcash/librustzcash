@@ -66,6 +66,8 @@ unsafe fn worker(p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
         };
         equi_clearslots(eq);
     }
+    // Review Note: nsols is increased here, but only if the solution passes the strictly ordered check.
+    // With 256 nonces, we get to around 6/9 digits strictly ordered.
     equi_digitK(eq, 0);
 
     let solutions = {
