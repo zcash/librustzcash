@@ -74,6 +74,9 @@ use zcash_client_backend::{
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
+#[cfg(feature = "orchard")]
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::TransparentAddressMetadata,
@@ -805,6 +808,37 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         Ok(())
     }
+
+    #[cfg(feature = "orchard")]
+    type OrchardShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >;
+
+    #[cfg(feature = "orchard")]
+    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::OrchardShardStore<'a>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        todo!()
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_orchard_subtree_roots(
+        &mut self,
+        _start_index: u64,
+        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        todo!()
+    }
 }
 
 impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
@@ -844,6 +878,37 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
             start_index,
             roots,
         )
+    }
+
+    #[cfg(feature = "orchard")]
+    type OrchardShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >;
+
+    #[cfg(feature = "orchard")]
+    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::OrchardShardStore<'a>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        todo!()
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_orchard_subtree_roots(
+        &mut self,
+        _start_index: u64,
+        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        todo!()
     }
 }
 

@@ -17,6 +17,8 @@ and this library adheres to Rust's notion of
   - `BlockMetadata::orchard_tree_size`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
+  - `ORCHARD_SHARD_HEIGHT`
+  - `BlockMetadata::orchard_tree_size`
 - `zcash_client_backend::fees::orchard`
 - `zcash_client_backend::fees::ChangeValue::orchard`
 - `zcash_client_backend::wallet`:
@@ -29,6 +31,10 @@ and this library adheres to Rust's notion of
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
   - `ShieldedProtocol` has a new `Orchard` variant.
+  - `WalletCommitmentTrees` has new members when the `orchard` feature is enabled:
+    - `type OrchardShardStore`
+    - `fn with_orchard_tree_mut`
+    - `fn put_orchard_subtree_roots`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 

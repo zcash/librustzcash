@@ -8,7 +8,7 @@ use std::{
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
-use sapling::{Node, NOTE_COMMITMENT_TREE_DEPTH};
+use sapling;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
@@ -50,6 +50,13 @@ pub mod wallet;
 /// This conforms to the structure of subtree data returned by
 /// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
 pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
+
+/// The height of subtree roots in the Orchard note commitment tree.
+///
+/// This conforms to the structure of subtree data returned by
+/// `lightwalletd` when using the `GetSubtreeRoots` GRPC call.
+#[cfg(feature = "orchard")]
+pub const ORCHARD_SHARD_HEIGHT: u8 = { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 } / 2;
 
 /// An enumeration of constraints that can be applied when querying for nullifiers for notes
 /// belonging to the wallet.
@@ -870,7 +877,7 @@ impl SentTransactionOutput {
 #[derive(Clone, Debug)]
 pub struct AccountBirthday {
     height: BlockHeight,
-    sapling_frontier: Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH>,
+    sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
     recover_until: Option<BlockHeight>,
 }
 
@@ -911,7 +918,7 @@ impl AccountBirthday {
     #[cfg(feature = "test-dependencies")]
     pub fn from_parts(
         height: BlockHeight,
-        sapling_frontier: Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH>,
+        sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
         recover_until: Option<BlockHeight>,
     ) -> Self {
         Self {
@@ -944,7 +951,9 @@ impl AccountBirthday {
 
     /// Returns the Sapling note commitment tree frontier as of the end of the block at
     /// [`Self::height`].
-    pub fn sapling_frontier(&self) -> &Frontier<Node, NOTE_COMMITMENT_TREE_DEPTH> {
+    pub fn sapling_frontier(
+        &self,
+    ) -> &Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }> {
         &self.sapling_frontier
     }
 
@@ -1081,13 +1090,15 @@ pub trait WalletWrite: WalletRead {
 /// also provide operations related to Orchard note commitment trees in the future.
 pub trait WalletCommitmentTrees {
     type Error;
+    /// The type of the backing [`ShardStore`] for the Sapling note commitment tree.
     type SaplingShardStore<'a>: ShardStore<
         H = sapling::Node,
         CheckpointId = BlockHeight,
         Error = Self::Error,
     >;
 
-    ///
+    /// Evaluates the given callback function with a reference to the Sapling
+    /// note commitment tree maintained by the wallet.
     fn with_sapling_tree_mut<F, A, E>(&mut self, callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
@@ -1099,11 +1110,47 @@ pub trait WalletCommitmentTrees {
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>;
 
-    /// Adds a sequence of note commitment tree subtree roots to the data store.
+    /// Adds a sequence of Sapling note commitment tree subtree roots to the data store.
+    ///
+    /// Each such value should be the Merkle root of a subtree of the Sapling note commitment tree
+    /// containing 2^[`SAPLING_SHARD_HEIGHT`] note commitments.
     fn put_sapling_subtree_roots(
         &mut self,
         start_index: u64,
         roots: &[CommitmentTreeRoot<sapling::Node>],
+    ) -> Result<(), ShardTreeError<Self::Error>>;
+
+    /// The type of the backing [`ShardStore`] for the Orchard note commitment tree.
+    #[cfg(feature = "orchard")]
+    type OrchardShardStore<'a>: ShardStore<
+        H = orchard::tree::MerkleHashOrchard,
+        CheckpointId = BlockHeight,
+        Error = Self::Error,
+    >;
+
+    /// Evaluates the given callback function with a reference to the Orchard
+    /// note commitment tree maintained by the wallet.
+    #[cfg(feature = "orchard")]
+    fn with_orchard_tree_mut<F, A, E>(&mut self, callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::OrchardShardStore<'a>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>;
+
+    /// Adds a sequence of Orchard note commitment tree subtree roots to the data store.
+    ///
+    /// Each such value should be the Merkle root of a subtree of the Orchard note commitment tree
+    /// containing 2^[`ORCHARD_SHARD_HEIGHT`] note commitments.
+    #[cfg(feature = "orchard")]
+    fn put_orchard_subtree_roots(
+        &mut self,
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>>;
 }
 
@@ -1138,12 +1185,21 @@ pub mod testing {
     #[cfg(feature = "transparent-inputs")]
     use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
 
+    #[cfg(feature = "orchard")]
+    use super::ORCHARD_SHARD_HEIGHT;
+
     pub struct MockWalletDb {
         pub network: Network,
         pub sapling_tree: ShardTree<
             MemoryShardStore<sapling::Node, BlockHeight>,
             { SAPLING_SHARD_HEIGHT * 2 },
             SAPLING_SHARD_HEIGHT,
+        >,
+        #[cfg(feature = "orchard")]
+        pub orchard_tree: ShardTree<
+            MemoryShardStore<orchard::tree::MerkleHashOrchard, BlockHeight>,
+            { ORCHARD_SHARD_HEIGHT * 2 },
+            ORCHARD_SHARD_HEIGHT,
         >,
     }
 
@@ -1152,6 +1208,8 @@ pub mod testing {
             Self {
                 network,
                 sapling_tree: ShardTree::new(MemoryShardStore::empty(), 100),
+                #[cfg(feature = "orchard")]
+                orchard_tree: ShardTree::new(MemoryShardStore::empty(), 100),
             }
         }
     }
@@ -1399,6 +1457,44 @@ pub mod testing {
                 for (root, i) in roots.iter().zip(0u64..) {
                     let root_addr =
                         Address::from_parts(SAPLING_SHARD_HEIGHT.into(), start_index + i);
+                    t.insert(root_addr, *root.root_hash())?;
+                }
+                Ok::<_, ShardTreeError<Self::Error>>(())
+            })?;
+
+            Ok(())
+        }
+
+        #[cfg(feature = "orchard")]
+        type OrchardShardStore<'a> =
+            MemoryShardStore<orchard::tree::MerkleHashOrchard, BlockHeight>;
+
+        #[cfg(feature = "orchard")]
+        fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
+        where
+            for<'a> F: FnMut(
+                &'a mut ShardTree<
+                    Self::OrchardShardStore<'a>,
+                    { ORCHARD_SHARD_HEIGHT * 2 },
+                    ORCHARD_SHARD_HEIGHT,
+                >,
+            ) -> Result<A, E>,
+            E: From<ShardTreeError<Self::Error>>,
+        {
+            callback(&mut self.orchard_tree)
+        }
+
+        /// Adds a sequence of note commitment tree subtree roots to the data store.
+        #[cfg(feature = "orchard")]
+        fn put_orchard_subtree_roots(
+            &mut self,
+            start_index: u64,
+            roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+        ) -> Result<(), ShardTreeError<Self::Error>> {
+            self.with_orchard_tree_mut(|t| {
+                for (root, i) in roots.iter().zip(0u64..) {
+                    let root_addr =
+                        Address::from_parts(ORCHARD_SHARD_HEIGHT.into(), start_index + i);
                     t.insert(root_addr, *root.root_hash())?;
                 }
                 Ok::<_, ShardTreeError<Self::Error>>(())

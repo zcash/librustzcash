@@ -682,28 +682,24 @@ where
                 let sapling_inputs = inputs
                     .notes()
                     .iter()
-                    .map(|selected| {
-                        match selected.note() {
-                            Note::Sapling(note) => {
-                                let key = match selected.spending_key_scope() {
-                                    Scope::External => usk.sapling().clone(),
-                                    Scope::Internal => usk.sapling().derive_internal(),
-                                };
+                    .filter_map(|selected| match selected.note() {
+                        Note::Sapling(note) => {
+                            let key = match selected.spending_key_scope() {
+                                Scope::External => usk.sapling().clone(),
+                                Scope::Internal => usk.sapling().derive_internal(),
+                            };
 
-                                let merkle_path = sapling_tree.witness_at_checkpoint_id_caching(
+                            sapling_tree
+                                .witness_at_checkpoint_id_caching(
                                     selected.note_commitment_tree_position(),
                                     &inputs.anchor_height(),
-                                )?;
-
-                                Ok((key, note, merkle_path))
-                            }
-                            #[cfg(feature = "orchard")]
-                            Note::Orchard(_) => {
-                                // FIXME: Implement this once `Proposal` has been refactored to
-                                // include Orchard notes.
-                                panic!("Orchard spends are not yet supported");
-                            }
+                                )
+                                .map(|merkle_path| Some((key, note, merkle_path)))
+                                .map_err(Error::from)
+                                .transpose()
                         }
+                        #[cfg(feature = "orchard")]
+                        Note::Orchard(_) => None,
                     })
                     .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
 
@@ -712,6 +708,39 @@ where
         },
     )?;
 
+    #[cfg(feature = "orchard")]
+    let (orchard_anchor, orchard_inputs) = proposal_step.shielded_inputs().map_or_else(
+        || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
+        |inputs| {
+            wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _>>(|orchard_tree| {
+                let anchor = orchard_tree
+                    .root_at_checkpoint_id(&inputs.anchor_height())?
+                    .into();
+
+                let orchard_inputs = inputs
+                    .notes()
+                    .iter()
+                    .filter_map(|selected| match selected.note() {
+                        #[cfg(feature = "orchard")]
+                        Note::Orchard(note) => orchard_tree
+                            .witness_at_checkpoint_id_caching(
+                                selected.note_commitment_tree_position(),
+                                &inputs.anchor_height(),
+                            )
+                            .map(|merkle_path| Some((note, merkle_path)))
+                            .map_err(Error::from)
+                            .transpose(),
+                        Note::Sapling(_) => None,
+                    })
+                    .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
+
+                Ok((Some(anchor), orchard_inputs))
+            })
+        },
+    )?;
+    #[cfg(not(feature = "orchard"))]
+    let orchard_anchor = None;
+
     // Create the transaction. The type of the proposal ensures that there
     // are no possible transparent inputs, so we ignore those
     let mut builder = Builder::new(
@@ -719,12 +748,17 @@ where
         min_target_height,
         BuildConfig::Standard {
             sapling_anchor: Some(sapling_anchor),
-            orchard_anchor: None,
+            orchard_anchor,
         },
     );
 
-    for (key, note, merkle_path) in sapling_inputs.into_iter() {
-        builder.add_sapling_spend(&key, note.clone(), merkle_path)?;
+    for (sapling_key, sapling_note, merkle_path) in sapling_inputs.into_iter() {
+        builder.add_sapling_spend(&sapling_key, sapling_note.clone(), merkle_path)?;
+    }
+
+    #[cfg(feature = "orchard")]
+    for (orchard_note, merkle_path) in orchard_inputs.into_iter() {
+        builder.add_orchard_spend(usk.orchard(), *orchard_note, merkle_path.into())?;
     }
 
     #[cfg(feature = "transparent-inputs")]
