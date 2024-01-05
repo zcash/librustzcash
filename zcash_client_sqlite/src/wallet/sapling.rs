@@ -5,7 +5,7 @@ use incrementalmerkletree::Position;
 use rusqlite::{named_params, params, types::Value, Connection, Row};
 use std::rc::Rc;
 
-use sapling::{Diversifier, Note, Nullifier, Rseed};
+use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
@@ -18,7 +18,7 @@ use zcash_primitives::{
 
 use zcash_client_backend::{
     keys::UnifiedFullViewingKey,
-    wallet::{ReceivedNote, WalletNote, WalletSaplingOutput},
+    wallet::{Note, ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
 
@@ -30,7 +30,7 @@ use super::{memo_repr, parse_scope, scope_code, wallet_birthday};
 pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;
     fn account(&self) -> AccountId;
-    fn note(&self) -> &Note;
+    fn note(&self) -> &sapling::Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> bool;
     fn nullifier(&self) -> Option<&sapling::Nullifier>;
@@ -45,7 +45,7 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope> {
     fn account(&self) -> AccountId {
         WalletSaplingOutput::account(self)
     }
-    fn note(&self) -> &Note {
+    fn note(&self) -> &sapling::Note {
         WalletSaplingOutput::note(self)
     }
     fn memo(&self) -> Option<&MemoBytes> {
@@ -66,14 +66,14 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope> {
     }
 }
 
-impl ReceivedSaplingOutput for DecryptedOutput<Note> {
+impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note> {
     fn index(&self) -> usize {
         self.index
     }
     fn account(&self) -> AccountId {
         self.account
     }
-    fn note(&self) -> &Note {
+    fn note(&self) -> &sapling::Note {
         &self.note
     }
     fn memo(&self) -> Option<&MemoBytes> {
@@ -163,7 +163,7 @@ fn to_spendable_note<P: consensus::Parameters>(
         note_id,
         txid,
         output_index,
-        WalletNote::Sapling(sapling::Note::from_parts(
+        Note::Sapling(sapling::Note::from_parts(
             recipient,
             note_value.into(),
             rseed,
@@ -471,10 +471,11 @@ pub(crate) mod tests {
     use zcash_proofs::prover::LocalTxProver;
 
     use sapling::{
+        self,
         note_encryption::try_sapling_output_recovery,
         prover::{OutputProver, SpendProver},
         zip32::ExtendedSpendingKey,
-        Node, Note, PaymentAddress,
+        Node, PaymentAddress,
     };
     use zcash_primitives::{
         block::BlockHash,
@@ -1045,7 +1046,7 @@ pub(crate) mod tests {
         let send_and_recover_with_policy = |st: &mut TestState<BlockCache>,
                                             ovk_policy|
          -> Result<
-            Option<(Note, PaymentAddress, MemoBytes)>,
+            Option<(sapling::Note, PaymentAddress, MemoBytes)>,
             Error<
                 SqliteClientError,
                 commitment_tree::Error,

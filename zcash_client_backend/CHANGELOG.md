@@ -29,7 +29,7 @@ and this library adheres to Rust's notion of
     functionality and move it behind the `transparent-inputs` feature flag.
 - `zcash_client_backend::fees::{standard, sapling}`
 - `zcash_client_backend::wallet`:
-  - `WalletNote`
+  - `Note`
   - `ReceivedNote`
   - `WalletSaplingOutput::recipient_key_scope`
 - `zcash_client_backend::zip321::TransactionRequest::total`
