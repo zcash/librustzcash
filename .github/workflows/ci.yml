@@ -143,6 +143,23 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  protobuf:
+    name: protobuf consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        uses: supplypike/setup-bin@v3
+        with:
+          uri: 'https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip'
+          name: 'protoc'
+          version: '25.1'
+          subPath: 'bin'
+      - name: Trigger protobuf regeneration
+        run: cargo check --workspace  --all-features
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
   uuid:
     name: UUID validity
     runs-on: ubuntu-latest
