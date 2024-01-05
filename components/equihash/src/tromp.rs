@@ -45,12 +45,15 @@ extern "C" {
 /// This function uses unsafe code for FFI into the tromp solver.
 #[allow(unsafe_code)]
 unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
+    // SAFETY: caller must supply a valid `eq` instance.
+    //
     // Review Note: nsols is set to zero in C++ here
     equi_setstate(eq, curr_state);
 
     // Initialization done, start algo driver.
     equi_digit0(eq, 0);
     equi_clearslots(eq);
+    // SAFETY: caller must supply a `p` instance that matches the hard-coded values in the C code.
     for r in 1..p.k {
         if (r & 1) != 0 {
             equi_digitodd(eq, r, 0)
