@@ -44,15 +44,8 @@ extern "C" {
 ///
 /// This function uses unsafe code for FFI into the tromp solver.
 #[allow(unsafe_code)]
-unsafe fn worker(p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
-    // Create solver and initialize it.
-    let eq = equi_new(
-        1,
-        blake2b::blake2b_clone,
-        blake2b::blake2b_free,
-        blake2b::blake2b_update,
-        blake2b::blake2b_finalize,
-    );
+unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
+    // Review Note: nsols is set to zero in C++ here
     equi_setstate(eq, curr_state);
 
     // Initialization done, start algo driver.
@@ -82,8 +75,6 @@ unsafe fn worker(p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
             .collect::<Vec<_>>()
     };
 
-    equi_free(eq);
-
     solutions
 }
 
@@ -100,22 +91,51 @@ pub fn solve_200_9<const N: usize>(
     let mut state = verify::initialise_state(p.n, p.k, p.hash_output());
     state.update(input);
 
-    loop {
+    // Create solver and initialize it.
+    //
+    // # SAFETY
+    // - the parameters 200,9 match the hard-coded parameters in the C++ code.
+    // - tromp is compiled without multi-threading support, so each instance can only support 1 thread.
+    // - the blake2b functions are in the correct order in Rust and C++ initializers.
+    #[allow(unsafe_code)]
+    let eq = unsafe {
+        equi_new(
+            1,
+            blake2b::blake2b_clone,
+            blake2b::blake2b_free,
+            blake2b::blake2b_update,
+            blake2b::blake2b_finalize,
+        )
+    };
+
+    let solutions = loop {
         let nonce = match next_nonce() {
             Some(nonce) => nonce,
             None => break vec![],
         };
 
         let mut curr_state = state.clone();
+        // Review Note: these hashes are changing when the nonce changes
         curr_state.update(&nonce);
 
-        // SAFETY: the parameters 200,9 match the hard-coded parameters in the C++ code.
+        // SAFETY:
+        // - the parameters 200,9 match the hard-coded parameters in the C++ code.
+        // - the eq instance is initilized above.
         #[allow(unsafe_code)]
-        let solutions = unsafe { worker(p, &curr_state) };
+        let solutions = unsafe { worker(eq, p, &curr_state) };
         if !solutions.is_empty() {
             break solutions;
         }
-    }
+    };
+
+    // SAFETY:
+    // - the eq instance is initilized above, and not used after this point.
+    #[allow(unsafe_code)]
+    unsafe {
+        equi_free(eq)
+    };
+
+    solutions
 }
 
 /// Performs multiple equihash solver runs with equihash parameters `200, 9`, initialising the hash with
