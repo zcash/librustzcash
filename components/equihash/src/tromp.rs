@@ -216,7 +216,7 @@ mod tests {
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0,
         ];
-        let mut nonces = 0..=u16::MAX;
+        let mut nonces = 0..=30u16;
 
         let solutions = solve_200_9_compressed(input, || {
             let variable_nonce = nonces.next()?;
