@@ -48,7 +48,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
-            Error::Serialization(err) => write!(f, "Commitment tree serializtion error: {}", err),
+            Error::Serialization(err) => write!(f, "Commitment tree serialization error: {}", err),
             Error::Query(err) => write!(f, "Commitment tree query or update error: {}", err),
             Error::CheckpointConflict {
                 checkpoint_id,
@@ -68,7 +68,7 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "Attempted to write subtree roots with indicies {:?} which is discontinuous with existing subtree range {:?}",
+                    "Attempted to write subtree roots with indices {:?} which is discontinuous with existing subtree range {:?}",
                     attempted_insertion_range, existing_range,
                 )
             }
