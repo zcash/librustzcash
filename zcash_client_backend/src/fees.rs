@@ -16,6 +16,7 @@ use crate::ShieldedProtocol;
 
 pub(crate) mod common;
 pub mod fixed;
+#[cfg(feature = "orchard")]
 pub mod orchard;
 pub mod sapling;
 pub mod standard;

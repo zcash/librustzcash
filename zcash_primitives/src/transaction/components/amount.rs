@@ -297,6 +297,16 @@ impl NonNegativeAmount {
     pub fn to_i64_le_bytes(self) -> [u8; 8] {
         self.0.to_i64_le_bytes()
     }
+
+    /// Returns whether or not this `NonNegativeAmount` is the zero value.
+    pub fn is_zero(&self) -> bool {
+        self == &NonNegativeAmount::ZERO
+    }
+
+    /// Returns whether or not this `NonNegativeAmount` is positive.
+    pub fn is_positive(&self) -> bool {
+        self > &NonNegativeAmount::ZERO
+    }
 }
 
 impl From<NonNegativeAmount> for Amount {

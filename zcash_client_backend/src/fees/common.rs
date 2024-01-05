@@ -87,10 +87,10 @@ where
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
     #[cfg(feature = "orchard")]
     let (change_pool, sapling_change, orchard_change) =
-        if orchard_in > NonNegativeAmount::ZERO || orchard_out > NonNegativeAmount::ZERO {
+        if orchard_in.is_positive() || orchard_out.is_positive() {
             // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs
             (ShieldedProtocol::Orchard, 0, 1)
-        } else if sapling_in > NonNegativeAmount::ZERO || sapling_out > NonNegativeAmount::ZERO {
+        } else if sapling_in.is_positive() || sapling_out.is_positive() {
             // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
             // Sapling outputs, so that we avoid pool-crossing.
             (ShieldedProtocol::Sapling, 1, 0)
@@ -119,7 +119,10 @@ where
             target_height,
             transparent_inputs,
             transparent_outputs,
-            sapling.inputs().len(),
+            sapling
+                .bundle_type()
+                .num_spends(sapling.inputs().len())
+                .map_err(ChangeError::BundleError)?,
             sapling
                 .bundle_type()
                 .num_outputs(
@@ -139,7 +142,7 @@ where
         required: total_out,
     })?;
 
-    if proposed_change == NonNegativeAmount::ZERO {
+    if proposed_change.is_zero() {
         TransactionBalance::new(vec![], fee_amount).map_err(|_| overflow())
     } else {
         let dust_threshold = dust_output_policy

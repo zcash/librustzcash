@@ -4,12 +4,10 @@
 use std::convert::Infallible;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 
-#[cfg(feature = "orchard")]
 use orchard::builder::BundleType;
 
 /// A trait that provides a minimized view of Orchard bundle configuration
 /// suitable for use in fee and change calculation.
-#[cfg(feature = "orchard")]
 pub trait BundleView<NoteRef> {
     /// The type of inputs to the bundle.
     type In: InputView<NoteRef>;
@@ -24,7 +22,6 @@ pub trait BundleView<NoteRef> {
     fn outputs(&self) -> &[Self::Out];
 }
 
-#[cfg(feature = "orchard")]
 impl<'a, NoteRef, In: InputView<NoteRef>, Out: OutputView> BundleView<NoteRef>
     for (BundleType, &'a [In], &'a [Out])
 {

@@ -41,6 +41,8 @@ and this library adheres to Rust's notion of
   - `NonNegativeAmount::const_from_u64`
   - `NonNegativeAmount::from_nonnegative_i64_le_bytes`
   - `NonNegativeAmount::to_i64_le_bytes`
+  - `NonNegativeAmount::is_zero`
+  - `NonNegativeAmount::is_positive`
   - `impl From<&NonNegativeAmount> for Amount`
   - `impl From<NonNegativeAmount> for u64`
   - `impl From<NonNegativeAmount> for zcash_primitives::sapling::value::NoteValue`

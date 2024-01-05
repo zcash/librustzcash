@@ -259,6 +259,7 @@ impl Note {
         }
     }
 
+    /// Returns the shielded protocol used by this note.
     pub fn protocol(&self) -> ShieldedProtocol {
         match self {
             Note::Sapling(_) => ShieldedProtocol::Sapling,
@@ -337,16 +338,6 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
             spending_key_scope: self.spending_key_scope,
             note_commitment_tree_position: self.note_commitment_tree_position,
         })
-    }
-}
-
-impl<NoteRef> ReceivedNote<NoteRef, Note> {
-    pub fn protocol(&self) -> ShieldedProtocol {
-        match self.note() {
-            Note::Sapling(_) => ShieldedProtocol::Sapling,
-            #[cfg(feature = "orchard")]
-            Note::Orchard(_) => ShieldedProtocol::Orchard,
-        }
     }
 }
 
