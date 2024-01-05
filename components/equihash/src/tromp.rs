@@ -71,7 +71,7 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
         let nsols = equi_nsols(eq);
         let sols = equi_sols(eq);
         let solution_len = 1 << p.k;
-        println!("{nsols} solutions of length {solution_len} at {sols:?}");
+        //println!("{nsols} solutions of length {solution_len} at {sols:?}");
 
         // SAFETY:
         // - caller must supply a `p` instance that matches the hard-coded values in the C code.
@@ -79,10 +79,12 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
         // - this slice is a shared ref to the memory in a valid `eq` instance supplied by the caller.
         let solutions: &[u32] = slice::from_raw_parts(sols, nsols * solution_len);
 
+        /*
         println!(
             "{nsols} solutions of length {solution_len} as a slice of length {:?}",
             solutions.len()
         );
+        */
 
         let mut chunks = solutions.chunks_exact(solution_len);
 
@@ -100,6 +102,7 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
         solutions
     };
 
+    /*
     println!(
         "{} solutions as cloned vectors of length {:?}",
         solutions.len(),
@@ -108,6 +111,7 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
             .map(|solution| solution.len())
             .collect::<Vec<_>>()
     );
+    */
 
     solutions
 }
