@@ -69,9 +69,18 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
     let solutions = {
         let nsols = equi_nsols(eq);
         let sols = equi_sols(eq);
+        // SAFETY:
+        // - caller must supply a `p` instance that matches the hard-coded values in the C code.
+        // - `sols` is an array of at least `nsols` solutions.
+        // - this slice is a shared ref to the memory in a valid `eq` instance supplied by the caller.
         let solutions = slice::from_raw_parts(sols, nsols);
         let solution_len = 1 << p.k;
 
+        // SAFETY:
+        // - caller must supply a `p` instance that matches the hard-coded values in the C code.
+        // - each solution contains `solution_len` u32 values.
+        // - the temporary slices are shared refs to a valid `eq` instance supplied by the caller.
+        // - the bytes in the shared ref are copied before they are returned.
         solutions
             .iter()
             .map(|solution| slice::from_raw_parts(*solution, solution_len).to_vec())
