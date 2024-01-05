@@ -324,7 +324,7 @@ typedef struct equi equi;
           "failed check: wanted: proof[%d] > proof[%d], actual: %d <= %d\n",
           i, i-1, prf[i], prf[i-1]
         );
-        //return;
+        return;
       }
 #ifdef EQUIHASH_TROMP_ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&eq->nsols, 1U, std::memory_order_relaxed);
