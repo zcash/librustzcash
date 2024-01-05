@@ -32,7 +32,8 @@ extern "C" {
     fn equi_digiteven(eq: *mut CEqui, r: u32, id: u32);
     fn equi_digitK(eq: *mut CEqui, id: u32);
     fn equi_nsols(eq: *const CEqui) -> usize;
-    fn equi_sols(eq: *const CEqui) -> *const *const u32;
+    /// Returns `equi_nsols()` solutions of length `2^K`, in a single memory allocation.
+    fn equi_sols(eq: *const CEqui) -> *const u32;
 }
 
 /// Performs a single equihash solver run with equihash parameters `p` and hash state `curr_state`.
@@ -69,23 +70,44 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
     let solutions = {
         let nsols = equi_nsols(eq);
         let sols = equi_sols(eq);
+        let solution_len = 1 << p.k;
+        println!("{nsols} solutions of length {solution_len} at {sols:?}");
+
         // SAFETY:
         // - caller must supply a `p` instance that matches the hard-coded values in the C code.
-        // - `sols` is an array of at least `nsols` solutions.
+        // - `sols` is a single allocation containing at least `nsols` solutions.
         // - this slice is a shared ref to the memory in a valid `eq` instance supplied by the caller.
-        let solutions = slice::from_raw_parts(sols, nsols);
-        let solution_len = 1 << p.k;
+        let solutions: &[u32] = slice::from_raw_parts(sols, nsols * solution_len);
+
+        println!(
+            "{nsols} solutions of length {solution_len} as a slice of length {:?}",
+            solutions.len()
+        );
+
+        let mut chunks = solutions.chunks_exact(solution_len);
 
         // SAFETY:
         // - caller must supply a `p` instance that matches the hard-coded values in the C code.
         // - each solution contains `solution_len` u32 values.
         // - the temporary slices are shared refs to a valid `eq` instance supplied by the caller.
         // - the bytes in the shared ref are copied before they are returned.
+        let solutions = (&mut chunks)
+            .map(|solution| solution.to_vec())
+            .collect::<Vec<_>>();
+
+        assert_eq!(chunks.remainder().len(), 0);
+
+        solutions
+    };
+
+    println!(
+        "{} solutions as cloned vectors of length {:?}",
+        solutions.len(),
         solutions
             .iter()
-            .map(|solution| slice::from_raw_parts(*solution, solution_len).to_vec())
+            .map(|solution| solution.len())
             .collect::<Vec<_>>()
-    };
+    );
 
     solutions
 }
