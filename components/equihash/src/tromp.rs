@@ -214,11 +214,16 @@ mod tests {
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0,
         ];
-        let mut nonces = 0..=u8::MAX;
+        let mut nonces = 0..=u16::MAX;
 
         let solutions = solve_200_9_compressed(input, || {
-            nonce[0] = nonces.next()?;
-            println!("Using nonce[0] of {}", nonce[0]);
+            let variable_nonce = nonces.next()?;
+            println!("Using variable nonce [0..2] of {}", variable_nonce);
+
+            let variable_nonce = variable_nonce.to_be_bytes();
+            nonce[0] = variable_nonce[0];
+            nonce[1] = variable_nonce[1];
+
             Some(nonce)
         });
 
