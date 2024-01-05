@@ -241,11 +241,12 @@ fn compress_array(array: Vec<u8>, out_len: usize, bit_len: usize, byte_pad: usiz
         if acc_bits < 8 {
             acc_value <<= bit_len;
             for x in byte_pad..in_width {
-                acc_value = acc_value
-                    | ((
-                        // Apply bit_len_mask across byte boundaries
-                        array[j + x] & (bit_len_mask >> (8 * (in_width - x - 1))) as u8
-                    ) << (8 * (in_width - x - 1))) as u32; // Big-endian
+                acc_value |= ((
+                    // Apply bit_len_mask across byte boundaries
+                    array[j + x] & (bit_len_mask >> (8 * (in_width - x - 1))) as u8
+                )
+                    .wrapping_shl(8 * (in_width - x - 1) as u32))
+                    as u32; // Big-endian
             }
             j += in_width;
             acc_bits += bit_len;
