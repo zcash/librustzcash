@@ -45,6 +45,7 @@ extern "C" {
 ///
 /// This function uses unsafe code for FFI into the tromp solver.
 #[allow(unsafe_code)]
+#[allow(clippy::print_stdout)]
 unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<Vec<u32>> {
     // SAFETY: caller must supply a valid `eq` instance.
     //
