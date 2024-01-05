@@ -237,20 +237,20 @@ impl<N, S> WalletSaplingOutput<N, S> {
 
 /// An enumeration of supported shielded note types for use in [`ReceivedNote`]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WalletNote {
+pub enum Note {
     Sapling(sapling::Note),
     #[cfg(feature = "orchard")]
     Orchard(orchard::Note),
 }
 
-impl WalletNote {
+impl Note {
     pub fn value(&self) -> NonNegativeAmount {
         match self {
-            WalletNote::Sapling(n) => n.value().try_into().expect(
+            Note::Sapling(n) => n.value().try_into().expect(
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
-            WalletNote::Orchard(n) => NonNegativeAmount::from_u64(n.value().inner()).expect(
+            Note::Orchard(n) => NonNegativeAmount::from_u64(n.value().inner()).expect(
                 "Orchard notes must have values in the range of valid non-negative ZEC values.",
             ),
         }
@@ -264,7 +264,7 @@ pub struct ReceivedNote<NoteRef> {
     note_id: NoteRef,
     txid: TxId,
     output_index: u16,
-    note: WalletNote,
+    note: Note,
     spending_key_scope: Scope,
     note_commitment_tree_position: Position,
 }
@@ -274,7 +274,7 @@ impl<NoteRef> ReceivedNote<NoteRef> {
         note_id: NoteRef,
         txid: TxId,
         output_index: u16,
-        note: WalletNote,
+        note: Note,
         spending_key_scope: Scope,
         note_commitment_tree_position: Position,
     ) -> Self {
@@ -297,7 +297,7 @@ impl<NoteRef> ReceivedNote<NoteRef> {
     pub fn output_index(&self) -> u16 {
         self.output_index
     }
-    pub fn note(&self) -> &WalletNote {
+    pub fn note(&self) -> &Note {
         &self.note
     }
     pub fn value(&self) -> NonNegativeAmount {

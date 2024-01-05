@@ -26,7 +26,7 @@ use crate::{
     decrypt_transaction,
     fees::{self, ChangeValue, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    wallet::{OvkPolicy, Recipient, WalletNote},
+    wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
 };
@@ -586,7 +586,7 @@ where
                     .iter()
                     .map(|selected| {
                         match selected.note() {
-                            WalletNote::Sapling(note) => {
+                            Note::Sapling(note) => {
                                 let key = match selected.spending_key_scope() {
                                     Scope::External => usk.sapling().clone(),
                                     Scope::Internal => usk.sapling().derive_internal(),
@@ -600,7 +600,7 @@ where
                                 Ok((key, note, merkle_path))
                             }
                             #[cfg(feature = "orchard")]
-                            WalletNote::Orchard(_) => {
+                            Note::Orchard(_) => {
                                 // FIXME: Implement this once `Proposal` has been refactored to
                                 // include Orchard notes.
                                 panic!("Orchard spends are not yet supported");
