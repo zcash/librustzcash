@@ -355,8 +355,15 @@ typedef struct equi equi;
     listindices1(eq, WK, t, prf); // assume WK odd
     qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
     for (u32 i=1; i<PROOFSIZE; i++)
-      if (prf[i] <= prf[i-1])
+      if (prf[i] <= prf[i-1]) {
+        /*
+        printf(
+          "failed dup indexes check: wanted: proof[%d] > proof[%d], actual: %d <= %d\n",
+          i, i-1, prf[i], prf[i-1]
+        );
+        */
         return;
+      }
 #ifdef EQUIHASH_TROMP_ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&eq->nsols, 1U, std::memory_order_relaxed);
 #else
@@ -678,7 +685,7 @@ nc++,       candidate(eq, tree_from_bid(bucketid, s0, s1));
         }
       }
     }
-//printf(" %d candidates ", nc);
+//printf(" %d candidates\n", nc);
   }
 
   size_t equi_nsols(const equi *eq) {

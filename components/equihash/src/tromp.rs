@@ -44,6 +44,7 @@ extern "C" {
 ///
 /// This function uses unsafe code for FFI into the tromp solver.
 #[allow(unsafe_code)]
+#[allow(clippy::print_stdout)]
 unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>> {
     // SAFETY: caller must supply a valid `eq` instance.
     //
@@ -70,12 +71,20 @@ unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>>
         let nsols = equi_nsols(eq);
         let sols = equi_sols(eq);
         let solution_len = 1 << p.k;
+        //println!("{nsols} solutions of length {solution_len} at {sols:?}");
 
         // SAFETY:
         // - caller must supply a `p` instance that matches the hard-coded values in the C code.
         // - `sols` is a single allocation containing at least `nsols` solutions.
         // - this slice is a shared ref to the memory in a valid `eq` instance supplied by the caller.
         let solutions: &[u32] = slice::from_raw_parts(sols, nsols * solution_len);
+
+        /*
+        println!(
+            "{nsols} solutions of length {solution_len} as a slice of length {:?}",
+            solutions.len()
+        );
+        */
 
         let mut chunks = solutions.chunks_exact(solution_len);
 
@@ -97,6 +106,17 @@ unsafe fn worker(eq: *mut CEqui, p: Params, curr_state: &State) -> Vec<Vec<u32>>
 
         solutions
     };
+
+    /*
+    println!(
+        "{} solutions as cloned vectors of length {:?}",
+        solutions.len(),
+        solutions
+            .iter()
+            .map(|solution| solution.len())
+            .collect::<Vec<_>>()
+    );
+    */
 
     solutions
 }
