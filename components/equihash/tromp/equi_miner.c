@@ -329,10 +329,12 @@ typedef struct equi equi;
     qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
     for (u32 i=1; i<PROOFSIZE; i++)
       if (prf[i] <= prf[i-1]) {
+        /*
         printf(
           "failed dup indexes check: wanted: proof[%d] > proof[%d], actual: %d <= %d\n",
           i, i-1, prf[i], prf[i-1]
         );
+        */
         return;
       }
 #ifdef EQUIHASH_TROMP_ATOMIC
