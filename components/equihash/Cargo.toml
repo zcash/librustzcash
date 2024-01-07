@@ -9,12 +9,18 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 rust-version = "1.56.1"
 
+[features]
+default = []
+
+## Builds the C++ tromp solver and Rust FFI layer.
+solver = ["dep:cc"]
+
 [dependencies]
 blake2b_simd = "1"
 byteorder = "1"
 
 [build-dependencies]
-cc = "1"
+cc = { version = "1", optional = true }
 
 [dev-dependencies]
 hex = "0.4"

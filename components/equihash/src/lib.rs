@@ -27,5 +27,7 @@ mod test_vectors;
 
 pub use verify::{is_valid_solution, Error};
 
+#[cfg(feature = "solver")]
 mod blake2b;
+#[cfg(feature = "solver")]
 pub mod tromp;
