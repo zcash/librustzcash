@@ -670,30 +670,30 @@ void *worker(void *vp) {
   thread_ctx *tp = (thread_ctx *)vp;
   equi *eq = tp->eq;
 
-  if (tp->id == 0)
+//  if (tp->id == 0)
 //    printf("Digit 0\n");
   barrier(&eq->barry);
   equi_digit0(eq, tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) {
-    eq->xfull = eq->bfull = eq->hfull = 0;
+    equi_clearslots(eq);
     showbsizes(eq, 0);
   }
   barrier(&eq->barry);
   for (u32 r = 1; r < WK; r++) {
-    if (tp->id == 0)
+//    if (tp->id == 0)
 //      printf("Digit %d", r);
     barrier(&eq->barry);
     r&1 ? equi_digitodd(eq, r, tp->id) : equi_digiteven(eq, r, tp->id);
     barrier(&eq->barry);
     if (tp->id == 0) {
 //      printf(" x%d b%d h%d\n", eq->xfull, eq->bfull, eq->hfull);
-      eq->xfull = eq->bfull = eq->hfull = 0;
+      equi_clearslots(eq);
       showbsizes(eq, r);
     }
     barrier(&eq->barry);
   }
-  if (tp->id == 0)
+//  if (tp->id == 0)
 //    printf("Digit %d\n", WK);
   equi_digitK(eq, tp->id);
   barrier(&eq->barry);
