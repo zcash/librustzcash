@@ -204,8 +204,22 @@ typedef struct htalloc htalloc;
         hta->trees1[r/2]  = (bucket1 *)(hta->heap1 + r/2);
   }
   void dealloctrees(htalloc *hta) {
+    if (hta == NULL) {
+      return;
+    }
+
     free(hta->heap0);
     free(hta->heap1);
+    // Avoid use-after-free and double-free
+    hta->heap0 = NULL;
+    hta->heap1 = NULL;
+
+    for (int r=0; r<WK; r++)
+      if ((r&1) == 0)
+        hta->trees0[r/2]  = NULL;
+      else
+        hta->trees1[r/2]  = NULL;
+    hta->alloced = 0;
   }
   void *htalloc_alloc(htalloc *hta, const u32 n, const u32 sz) {
     void *mem  = calloc(n, sz);
@@ -268,11 +282,19 @@ typedef struct equi equi;
     return eq;
   }
   void equi_free(equi *eq) {
+    if (eq == NULL) {
+      return;
+    }
+
     dealloctrees(&eq->hta);
 
     free(eq->nslots);
     free(eq->sols);
     eq->blake2b_free(eq->blake_ctx);
+    // Avoid use-after-free and double-free
+    eq->nslots = NULL;
+    eq->sols = NULL;
+    eq->blake_ctx = NULL;
 
     free(eq);
   }
@@ -505,6 +527,8 @@ typedef struct equi equi;
       eq->blake2b_update(state, (uchar *)&leb, sizeof(u32));
       eq->blake2b_finalize(state, hash, HASHOUT);
       eq->blake2b_free(state);
+      // Avoid use-after-free and double-free
+      state = NULL;
 
       for (u32 i = 0; i<HASHESPERBLAKE; i++) {
         const uchar *ph = hash + i * WN/8;
