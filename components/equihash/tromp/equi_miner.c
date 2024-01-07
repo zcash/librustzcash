@@ -204,6 +204,15 @@ typedef struct htalloc htalloc;
   void dealloctrees(htalloc *hta) {
     free(hta->heap0);
     free(hta->heap1);
+/*
+    // Avoid use-after-free
+    for (int r=0; r<WK; r++)
+      if ((r&1) == 0)
+        hta->trees0[r/2]  = NULL;
+      else
+        hta->trees1[r/2]  = NULL;
+    hta->alloced = 0;
+*/
   }
   void *htalloc_alloc(htalloc *hta, const u32 n, const u32 sz) {
     void *mem  = calloc(n, sz);
