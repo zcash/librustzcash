@@ -275,13 +275,14 @@ mod tests {
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0,
         ];
-        let mut nonces = 2400..=u16::MAX;
+        let mut nonces = 0..=32_u32;
+        let nonce_count = nonces.clone().count();
 
         let solutions = solve_200_9_compressed(input, || {
             let variable_nonce = nonces.next()?;
             println!("Using variable nonce [0..4] of {}", variable_nonce);
 
-            let variable_nonce = variable_nonce.to_be_bytes();
+            let variable_nonce = variable_nonce.to_le_bytes();
             nonce[0] = variable_nonce[0];
             nonce[1] = variable_nonce[1];
             nonce[2] = variable_nonce[2];
@@ -291,22 +292,23 @@ mod tests {
         });
 
         if solutions.is_empty() {
-            println!("Found no solutions");
+            // Expected solution rate is documented at:
+            // https://github.com/tromp/equihash/blob/master/README.md
+            panic!("Found no solutions after {nonce_count} runs, expected 1.88 solutions per run",);
         } else {
             println!("Found {} solutions:", solutions.len());
-            for solution in solutions {
-                println!("- {:?}", solution);
-                crate::is_valid_solution(200, 9, input, &nonce, &solution).unwrap_or_else(
-                    |error| {
-                        panic!(
-                            "unexpected invalid equihash 200, 9 solution:\n\
+            for (sol_num, solution) in solutions.iter().enumerate() {
+                println!("Validating solution {sol_num}:-\n{}", hex::encode(solution));
+                crate::is_valid_solution(200, 9, input, &nonce, solution).unwrap_or_else(|error| {
+                    panic!(
+                        "unexpected invalid equihash 200, 9 solution:\n\
                              error: {error:?}\n\
                              input: {input:?}\n\
                              nonce: {nonce:?}\n\
                              solution: {solution:?}"
-                        )
-                    },
-                );
+                    )
+                });
+                println!("Solution {sol_num} is valid!\n");
             }
         }
     }
