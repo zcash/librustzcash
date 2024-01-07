@@ -660,6 +660,7 @@ dependencies = [
  "blake2b_simd",
  "byteorder",
  "cc",
+ "hex",
 ]
 
 [[package]]
