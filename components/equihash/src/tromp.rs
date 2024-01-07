@@ -280,11 +280,13 @@ mod tests {
 
         let solutions = solve_200_9_compressed(input, || {
             let variable_nonce = nonces.next()?;
-            println!("Using variable nonce [0..2] of {}", variable_nonce);
+            println!("Using variable nonce [0..4] of {}", variable_nonce);
 
             let variable_nonce = variable_nonce.to_be_bytes();
             nonce[0] = variable_nonce[0];
             nonce[1] = variable_nonce[1];
+            nonce[2] = variable_nonce[2];
+            nonce[3] = variable_nonce[3];
 
             Some(nonce)
         });
