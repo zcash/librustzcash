@@ -281,7 +281,7 @@ typedef struct equi equi;
   u32 getnslots(equi *eq, const u32 r, const u32 bid) { // SHOULD BE METHOD IN BUCKET STRUCT
     au32 *nslot = &eq->nslots[r&1][bid];
     const u32 n = min(*nslot, NSLOTS);
-    nslot = 0;
+    *nslot = 0;
     return n;
   }
   void orderindices(u32 *indices, u32 size) {
