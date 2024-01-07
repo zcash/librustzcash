@@ -44,9 +44,9 @@ pub const MINIMUM_FEE: NonNegativeAmount = NonNegativeAmount::const_from_u64(10_
 
 /// A [`FeeRule`] implementation that implements the [ZIP 317] fee rule.
 ///
-/// This fee rule supports only P2pkh transparent inputs; an error will be returned if a coin
-/// containing a non-p2pkh script is provided as an input.  This fee rule may slightly overestimate
-/// fees in case where the user is attempting to spend more than ~150 transparent inputs.
+/// This fee rule supports inputs from orchard, sapling, and transparent pools (P2PKH only).
+/// An error will be returned if a coin containing a non-p2pkh script is provided as an input.
+/// This fee rule may slightly overestimate fees in case where the user is attempting to spend more than ~150 transparent inputs.
 ///
 /// [`FeeRule`]: crate::transaction::fees::FeeRule
 /// [ZIP 317]: https//zips.z.cash/zip-0317
