@@ -65,11 +65,33 @@ impl NoteId {
 /// internal account ID and the pool to which funds were sent in the case of a wallet-internal
 /// output.
 #[derive(Debug, Clone)]
-pub enum Recipient {
+pub enum Recipient<N> {
     Transparent(TransparentAddress),
     Sapling(sapling::PaymentAddress),
     Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, PoolType),
+    InternalAccount(AccountId, N),
+}
+
+impl<N> Recipient<N> {
+    pub fn map<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<B> {
+        match self {
+            Recipient::Transparent(t) => Recipient::Transparent(t),
+            Recipient::Sapling(s) => Recipient::Sapling(s),
+            Recipient::Unified(u, p) => Recipient::Unified(u, p),
+            Recipient::InternalAccount(a, n) => Recipient::InternalAccount(a, f(n)),
+        }
+    }
+}
+
+impl<N> Recipient<Option<N>> {
+    pub fn transpose(self) -> Option<Recipient<N>> {
+        match self {
+            Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
+            Recipient::Sapling(s) => Some(Recipient::Sapling(s)),
+            Recipient::Unified(u, p) => Some(Recipient::Unified(u, p)),
+            Recipient::InternalAccount(a, n) => n.map(|n0| Recipient::InternalAccount(a, n0)),
+        }
+    }
 }
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
@@ -393,7 +415,7 @@ pub enum OvkPolicy {
     ///
     /// Transaction outputs will be decryptable by the recipients, and whoever controls
     /// the provided outgoing viewing key.
-    Custom(sapling::keys::OutgoingViewingKey),
+    Custom([u8; 32]),
 
     /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.

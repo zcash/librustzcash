@@ -96,9 +96,8 @@ where
             // Sapling outputs, so that we avoid pool-crossing.
             (ShieldedProtocol::Sapling, 1, 0)
         } else {
-            // For all other transactions, send change to Sapling.
-            // FIXME: Change this to Orchard once Orchard outputs are enabled.
-            (ShieldedProtocol::Sapling, 1, 0)
+            // For all other transactions, send change to Orchard.
+            (ShieldedProtocol::Orchard, 0, 1)
         };
     #[cfg(not(feature = "orchard"))]
     let (change_pool, sapling_change) = (ShieldedProtocol::Sapling, 1);

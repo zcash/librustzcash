@@ -69,7 +69,7 @@ use zcash_client_backend::{
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
-    DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
+    DecryptedOutput, ShieldedProtocol, TransferType,
 };
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
@@ -591,12 +591,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             for output in d_tx.sapling_outputs {
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
+                        let value = output.note.value();
                         let recipient = if output.transfer_type == TransferType::Outgoing {
                             Recipient::Sapling(output.note.recipient())
                         } else {
                             Recipient::InternalAccount(
                                 output.account,
-                                PoolType::Shielded(ShieldedProtocol::Sapling)
+                                Note::Sapling(output.note.clone()),
                             )
                         };
 
@@ -607,7 +608,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             tx_ref,
                             output.index,
                             &recipient,
-                            NonNegativeAmount::from_u64(output.note.value().inner()).map_err(|_| {
+                            NonNegativeAmount::from_u64(value.inner()).map_err(|_| {
                                 SqliteClientError::CorruptedData(
                                     "Note value is not a valid Zcash amount.".to_string(),
                                 )
@@ -715,21 +716,28 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     output,
                 )?;
 
-                if let Some((account, note)) = output.sapling_change_to() {
-                    wallet::sapling::put_received_note(
-                        wdb.conn.0,
-                        &DecryptedOutput {
-                            index: output.output_index(),
-                            note: note.clone(),
-                            account: *account,
-                            memo: output
-                                .memo()
-                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                            transfer_type: TransferType::WalletInternal,
-                        },
-                        tx_ref,
-                        None,
-                    )?;
+                match output.recipient() {
+                    Recipient::InternalAccount(account, Note::Sapling(note)) => {
+                        wallet::sapling::put_received_note(
+                            wdb.conn.0,
+                            &DecryptedOutput {
+                                index: output.output_index(),
+                                note: note.clone(),
+                                account: *account,
+                                memo: output
+                                    .memo()
+                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                                transfer_type: TransferType::WalletInternal,
+                            },
+                            tx_ref,
+                            None,
+                        )?;
+                    }
+                    #[cfg(feature = "orchard")]
+                    Recipient::InternalAccount(_account, Note::Orchard(_note)) => {
+                        todo!();
+                    }
+                    _ => (),
                 }
             }
 

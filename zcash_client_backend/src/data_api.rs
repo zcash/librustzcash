@@ -818,26 +818,32 @@ pub struct SentTransaction<'a> {
 /// A type that represents an output (either Sapling or transparent) that was sent by the wallet.
 pub struct SentTransactionOutput {
     output_index: usize,
-    recipient: Recipient,
+    recipient: Recipient<Note>,
     value: NonNegativeAmount,
     memo: Option<MemoBytes>,
-    sapling_change_to: Option<(AccountId, sapling::Note)>,
 }
 
 impl SentTransactionOutput {
+    /// Constructs a new [`SentTransactionOutput`] from its constituent parts.
+    ///
+    /// ### Fields:
+    /// * `output_index` - the index of the output or action in the sent transaction
+    /// * `recipient` - the recipient of the output, either a Zcash address or a
+    ///    wallet-internal account and the note belonging to the wallet created by
+    ///    the output
+    /// * `value` - the value of the output, in zatoshis
+    /// * `memo` - the memo that was sent with this output
     pub fn from_parts(
         output_index: usize,
-        recipient: Recipient,
+        recipient: Recipient<Note>,
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
-        sapling_change_to: Option<(AccountId, sapling::Note)>,
     ) -> Self {
         Self {
             output_index,
             recipient,
             value,
             memo,
-            sapling_change_to,
         }
     }
 
@@ -850,9 +856,9 @@ impl SentTransactionOutput {
     pub fn output_index(&self) -> usize {
         self.output_index
     }
-    /// Returns the recipient address of the transaction, or the account id for wallet-internal
-    /// transactions.
-    pub fn recipient(&self) -> &Recipient {
+    /// Returns the recipient address of the transaction, or the account id and
+    /// resulting note for wallet-internal outputs.
+    pub fn recipient(&self) -> &Recipient<Note> {
         &self.recipient
     }
     /// Returns the value of the newly created output.
@@ -863,12 +869,6 @@ impl SentTransactionOutput {
     /// for transparent outputs.
     pub fn memo(&self) -> Option<&MemoBytes> {
         self.memo.as_ref()
-    }
-
-    /// Returns the account to which change (or wallet-internal value in the case of a shielding
-    /// transaction) was sent, along with the change note.
-    pub fn sapling_change_to(&self) -> Option<&(AccountId, sapling::Note)> {
-        self.sapling_change_to.as_ref()
     }
 }
 

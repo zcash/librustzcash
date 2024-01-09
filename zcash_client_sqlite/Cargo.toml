@@ -44,7 +44,7 @@ jubjub.workspace = true
 secrecy.workspace = true
 
 # - Shielded protocols
-orchard.workspace = true
+orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
 # - Note commitment trees
@@ -90,7 +90,7 @@ multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
 
 ## Enables support for storing data related to the sending and receiving of 
 ## Orchard funds.
-orchard = ["zcash_client_backend/orchard"]
+orchard = ["dep:orchard", "zcash_client_backend/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [

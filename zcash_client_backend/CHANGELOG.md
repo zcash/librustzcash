@@ -65,6 +65,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
+  - `Recipient::{map, transpose}`
   - `WalletSaplingOutput::recipient_key_scope`
   - `TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
   - `impl {Debug, Clone} for OvkPolicy`
@@ -127,7 +128,7 @@ and this library adheres to Rust's notion of
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
     - New variants have been added:
-      - `Error::UnsupportedPoolType`
+      - `Error::UnsupportedChangeType`
       - `Error::NoSupportedReceivers`
       - `Error::NoSpendingKey`
       - `Error::Proposal`
@@ -232,6 +233,11 @@ and this library adheres to Rust's notion of
   - The fields of `ReceivedSaplingNote` are now private. Use
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
     are provided for each previously public field.
+  - `Recipient` is now polymorphic in the type of the payload for wallet-internal
+    recipients. This simplifies the handling of wallet-internal outputs.
+  - `SentTransactionOutput::from_parts` now takes a `Recipient<Note>`
+  - `SentTransactionOutput::recipient` now returns a `Recipient<Note>`
+  - `OvkPolicy::Custom` now wraps a bare `[u8; 32]` instead of a Sapling `OutgoingViewingKey`.
 - `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
 - `zcash_client_backend::zip321::TransactionRequest::payments` now returns a
   `BTreeMap<usize, Payment>` instead of `&[Payment]` so that parameter
@@ -273,6 +279,8 @@ and this library adheres to Rust's notion of
   `zcash_client_backend::ReceivedNote`.
 - `zcash_client_backend::::wallet::input_selection::{Proposal, ShieldedInputs, ProposalError}`
   have been moved to `zcash_client_backend::proposal`.
+- `zcash_client_backend::wallet::SentTransactionOutput::sapling_change_to` - the
+  note created by an internal transfer is now conveyed in the `recipient` field.
 - `zcash_client_backend::data_api`
 - `zcash_client_backend::data_api::ScannedBlock::from_parts` has been made crate-private.
 - `zcash_client_backend::data_api::ScannedBlock::into_sapling_commitments` has been

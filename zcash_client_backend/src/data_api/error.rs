@@ -13,6 +13,7 @@ use zcash_primitives::{
     zip32::AccountId,
 };
 
+use crate::address::UnifiedAddress;
 use crate::data_api::wallet::input_selection::InputSelectorError;
 use crate::proposal::ProposalError;
 use crate::PoolType;
@@ -66,11 +67,11 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// It is forbidden to provide a memo when constructing a transparent output.
     MemoForbidden,
 
-    /// Attempted to create a spend to an unsupported pool type (currently, Orchard).
-    UnsupportedPoolType(PoolType),
+    /// Attempted to create a send change to an unsupported pool.
+    UnsupportedChangeType(PoolType),
 
     /// Attempted to create a spend to an unsupported Unified Address receiver
-    NoSupportedReceivers(Vec<u32>),
+    NoSupportedReceivers(Box<UnifiedAddress>),
 
     /// A proposed transaction cannot be built because it requires spending an input
     /// for which no spending key is available.
@@ -140,8 +141,8 @@ where
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
-            Error::UnsupportedPoolType(t) => write!(f, "Attempted to send to an unsupported pool: {}", t),
-            Error::NoSupportedReceivers(t) => write!(f, "Unified address contained only unsupported receiver types: {:?}", &t[..]),
+            Error::UnsupportedChangeType(t) => write!(f, "Attempted to send change to an unsupported pool type: {}", t),
+            Error::NoSupportedReceivers(_) => write!(f, "A recipient's unified address does not contain any receivers to which the wallet can send funds."),
             Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 

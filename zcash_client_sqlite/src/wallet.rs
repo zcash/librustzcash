@@ -74,6 +74,7 @@ use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
 use zcash_client_backend::data_api::{AccountBalance, Ratio, WalletSummary};
+use zcash_client_backend::wallet::Note;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 use zcash_primitives::zip32::Scope;
 
@@ -1796,7 +1797,7 @@ pub(crate) fn update_expired_notes(
 // and `put_sent_output`
 fn recipient_params<P: consensus::Parameters>(
     params: &P,
-    to: &Recipient,
+    to: &Recipient<Note>,
 ) -> (Option<String>, Option<u32>, PoolType) {
     match to {
         Recipient::Transparent(addr) => (Some(addr.encode(params)), None, PoolType::Transparent),
@@ -1806,7 +1807,11 @@ fn recipient_params<P: consensus::Parameters>(
             PoolType::Shielded(ShieldedProtocol::Sapling),
         ),
         Recipient::Unified(addr, pool) => (Some(addr.encode(params)), None, *pool),
-        Recipient::InternalAccount(id, pool) => (None, Some(u32::from(*id)), *pool),
+        Recipient::InternalAccount(id, note) => (
+            None,
+            Some(u32::from(*id)),
+            PoolType::Shielded(note.protocol()),
+        ),
     }
 }
 
@@ -1862,7 +1867,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     from_account: AccountId,
     tx_ref: i64,
     output_index: usize,
-    recipient: &Recipient,
+    recipient: &Recipient<Note>,
     value: NonNegativeAmount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
