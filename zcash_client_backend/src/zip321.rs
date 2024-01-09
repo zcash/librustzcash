@@ -794,8 +794,7 @@ pub mod testing {
             label in option::of(any::<String>()),
             // prevent duplicates by generating a set rather than a vec
             other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
-            ) -> Payment {
-
+        ) -> Payment {
             let is_shielded = match recipient_address {
                 Address::Transparent(_) => false,
                 Address::Sapling(_) | Address::Unified(_) => true,

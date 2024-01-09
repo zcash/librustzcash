@@ -67,7 +67,7 @@ use zcash_client_backend::{
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
     },
-    keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
@@ -401,6 +401,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn get_next_available_address(
         &mut self,
         account: AccountId,
+        request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error> {
         self.transactionally(
             |wdb| match wdb.get_unified_full_viewing_keys()?.get(&account) {
@@ -417,7 +418,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         };
 
                     let (addr, diversifier_index) = ufvk
-                        .find_address(search_from)
+                        .find_address(search_from, request)
                         .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
 
                     wallet::insert_address(
@@ -1109,7 +1110,10 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
-    use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
+    use zcash_client_backend::{
+        data_api::{AccountBirthday, WalletRead, WalletWrite},
+        keys::UnifiedAddressRequest,
+    };
 
     use crate::{testing::TestBuilder, AccountId};
 
@@ -1132,7 +1136,11 @@ mod tests {
         let current_addr = st.wallet().get_current_address(account).unwrap();
         assert!(current_addr.is_some());
 
-        let addr2 = st.wallet_mut().get_next_available_address(account).unwrap();
+        // TODO: Add Orchard
+        let addr2 = st
+            .wallet_mut()
+            .get_next_available_address(account, UnifiedAddressRequest::DEFAULT)
+            .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
