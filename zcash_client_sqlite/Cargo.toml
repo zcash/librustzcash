@@ -42,6 +42,7 @@ jubjub.workspace = true
 secrecy.workspace = true
 
 # - Shielded protocols
+orchard.workspace = true
 sapling.workspace = true
 
 # - Note commitment trees

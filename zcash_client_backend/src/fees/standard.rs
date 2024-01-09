@@ -15,8 +15,12 @@ use zcash_primitives::{
 };
 
 use super::{
-    fixed, sapling, zip317, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance,
+    fixed, sapling as sapling_fees, zip317, ChangeError, ChangeStrategy, DustOutputPolicy,
+    TransactionBalance,
 };
+
+#[cfg(feature = "orchard")]
+use super::orchard as orchard_fees;
 
 /// A change strategy that proposes change as a single output to the most current supported
 /// shielded pool and delegates fee calculation to the provided fee rule.
@@ -50,8 +54,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView<NoteRefT>],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling: &impl sapling_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         #[allow(deprecated)]
@@ -65,8 +69,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 target_height,
                 transparent_inputs,
                 transparent_outputs,
-                sapling_inputs,
-                sapling_outputs,
+                sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
                 dust_output_policy,
             )
             .map_err(|e| e.map(Zip317FeeError::Balance)),
@@ -79,8 +84,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 target_height,
                 transparent_inputs,
                 transparent_outputs,
-                sapling_inputs,
-                sapling_outputs,
+                sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
                 dust_output_policy,
             )
             .map_err(|e| e.map(Zip317FeeError::Balance)),
@@ -93,8 +99,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
                 target_height,
                 transparent_inputs,
                 transparent_outputs,
-                sapling_inputs,
-                sapling_outputs,
+                sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
                 dust_output_policy,
             ),
         }

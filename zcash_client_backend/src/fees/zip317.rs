@@ -14,9 +14,12 @@ use zcash_primitives::{
 };
 
 use super::{
-    common::single_change_output_balance, sapling, ChangeError, ChangeStrategy, DustOutputPolicy,
-    TransactionBalance,
+    common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
+    DustOutputPolicy, TransactionBalance,
 };
+
+#[cfg(feature = "orchard")]
+use super::orchard as orchard_fees;
 
 /// A change strategy that and proposes change as a single output to the most current supported
 /// shielded pool and delegates fee calculation to the provided fee rule.
@@ -50,8 +53,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
         target_height: BlockHeight,
         transparent_inputs: &[impl transparent::InputView],
         transparent_outputs: &[impl transparent::OutputView],
-        sapling_inputs: &[impl sapling::InputView<NoteRefT>],
-        sapling_outputs: &[impl sapling::OutputView],
+        sapling: &impl sapling_fees::BundleView<NoteRefT>,
+        #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
         dust_output_policy: &DustOutputPolicy,
     ) -> Result<TransactionBalance, ChangeError<Self::Error, NoteRefT>> {
         let mut transparent_dust: Vec<_> = transparent_inputs
@@ -67,11 +70,12 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             })
             .collect();
 
-        let mut sapling_dust: Vec<_> = sapling_inputs
+        let mut sapling_dust: Vec<_> = sapling
+            .inputs()
             .iter()
             .filter_map(|i| {
-                if i.value() < self.fee_rule.marginal_fee() {
-                    Some(i.note_id().clone())
+                if sapling_fees::InputView::<NoteRefT>::value(i) < self.fee_rule.marginal_fee() {
+                    Some(sapling_fees::InputView::<NoteRefT>::note_id(i).clone())
                 } else {
                     None
                 }
@@ -88,8 +92,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             // We add one to the sapling outputs for the (single) change output Note that this
             // means that wallet-internal shielding transactions are an opportunity to spend a dust
             // note.
-            let s_non_dust = sapling_inputs.len() - sapling_dust.len();
-            let s_allowed_dust = (sapling_outputs.len() + 1).saturating_sub(s_non_dust);
+            let s_non_dust = sapling.inputs().len() - sapling_dust.len();
+            let s_allowed_dust = (sapling.outputs().len() + 1).saturating_sub(s_non_dust);
 
             let available_grace_inputs = self
                 .fee_rule
@@ -135,8 +139,9 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             target_height,
             transparent_inputs,
             transparent_outputs,
-            sapling_inputs,
-            sapling_outputs,
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
             dust_output_policy,
             self.fee_rule.marginal_fee(),
             self.change_memo.clone(),
@@ -146,6 +151,8 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
 
 #[cfg(test)]
 mod tests {
+
+    use std::convert::Infallible;
 
     use zcash_primitives::{
         consensus::{Network, NetworkUpgrade, Parameters},
@@ -177,13 +184,22 @@ mod tests {
                 .unwrap(),
             &Vec::<TestTransparentInput>::new(),
             &Vec::<TxOut>::new(),
-            &[TestSaplingInput {
-                note_id: 0,
-                value: NonNegativeAmount::const_from_u64(55000),
-            }],
-            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                40000,
-            ))],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: NonNegativeAmount::const_from_u64(55000),
+                }][..],
+                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                    40000,
+                ))][..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
             &DustOutputPolicy::default(),
         );
 
@@ -210,11 +226,20 @@ mod tests {
                 value: NonNegativeAmount::const_from_u64(40000),
                 script_pubkey: Script(vec![]),
             }],
-            &[TestSaplingInput {
-                note_id: 0,
-                value: NonNegativeAmount::const_from_u64(55000),
-            }],
-            &Vec::<SaplingPayment>::new(),
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: NonNegativeAmount::const_from_u64(55000),
+                }][..],
+                &Vec::<Infallible>::new()[..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
             &DustOutputPolicy::default(),
         );
 
@@ -237,19 +262,28 @@ mod tests {
                 .unwrap(),
             &Vec::<TestTransparentInput>::new(),
             &Vec::<TxOut>::new(),
-            &[
-                TestSaplingInput {
-                    note_id: 0,
-                    value: NonNegativeAmount::const_from_u64(49000),
-                },
-                TestSaplingInput {
-                    note_id: 1,
-                    value: NonNegativeAmount::const_from_u64(1000),
-                },
-            ],
-            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                40000,
-            ))],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[
+                    TestSaplingInput {
+                        note_id: 0,
+                        value: NonNegativeAmount::const_from_u64(49000),
+                    },
+                    TestSaplingInput {
+                        note_id: 1,
+                        value: NonNegativeAmount::const_from_u64(1000),
+                    },
+                ][..],
+                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                    40000,
+                ))][..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
             &DustOutputPolicy::default(),
         );
 
@@ -272,23 +306,32 @@ mod tests {
                 .unwrap(),
             &Vec::<TestTransparentInput>::new(),
             &Vec::<TxOut>::new(),
-            &[
-                TestSaplingInput {
-                    note_id: 0,
-                    value: NonNegativeAmount::const_from_u64(29000),
-                },
-                TestSaplingInput {
-                    note_id: 1,
-                    value: NonNegativeAmount::const_from_u64(20000),
-                },
-                TestSaplingInput {
-                    note_id: 2,
-                    value: NonNegativeAmount::const_from_u64(1000),
-                },
-            ],
-            &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
-                40000,
-            ))],
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[
+                    TestSaplingInput {
+                        note_id: 0,
+                        value: NonNegativeAmount::const_from_u64(29000),
+                    },
+                    TestSaplingInput {
+                        note_id: 1,
+                        value: NonNegativeAmount::const_from_u64(20000),
+                    },
+                    TestSaplingInput {
+                        note_id: 2,
+                        value: NonNegativeAmount::const_from_u64(1000),
+                    },
+                ][..],
+                &[SaplingPayment::new(NonNegativeAmount::const_from_u64(
+                    40000,
+                ))][..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
             &DustOutputPolicy::default(),
         );
 

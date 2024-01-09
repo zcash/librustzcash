@@ -19,6 +19,9 @@ use zcash_primitives::{
 
 use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
 
+#[cfg(feature = "orchard")]
+use crate::fees::orchard as orchard_fees;
+
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NoteId {
@@ -255,26 +258,35 @@ impl Note {
             ),
         }
     }
+
+    /// Returns the shielded protocol used by this note.
+    pub fn protocol(&self) -> ShieldedProtocol {
+        match self {
+            Note::Sapling(_) => ShieldedProtocol::Sapling,
+            #[cfg(feature = "orchard")]
+            Note::Orchard(_) => ShieldedProtocol::Orchard,
+        }
+    }
 }
 
 /// Information about a note that is tracked by the wallet that is available for spending,
 /// with sufficient information for use in note selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReceivedNote<NoteRef> {
+pub struct ReceivedNote<NoteRef, NoteT> {
     note_id: NoteRef,
     txid: TxId,
     output_index: u16,
-    note: Note,
+    note: NoteT,
     spending_key_scope: Scope,
     note_commitment_tree_position: Position,
 }
 
-impl<NoteRef> ReceivedNote<NoteRef> {
+impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
     pub fn from_parts(
         note_id: NoteRef,
         txid: TxId,
         output_index: u16,
-        note: Note,
+        note: NoteT,
         spending_key_scope: Scope,
         note_commitment_tree_position: Position,
     ) -> Self {
@@ -297,11 +309,8 @@ impl<NoteRef> ReceivedNote<NoteRef> {
     pub fn output_index(&self) -> u16 {
         self.output_index
     }
-    pub fn note(&self) -> &Note {
+    pub fn note(&self) -> &NoteT {
         &self.note
-    }
-    pub fn value(&self) -> NonNegativeAmount {
-        self.note.value()
     }
     pub fn spending_key_scope(&self) -> Scope {
         self.spending_key_scope
@@ -309,15 +318,53 @@ impl<NoteRef> ReceivedNote<NoteRef> {
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
     }
+
+    /// Applies the given function to the `note` field of this ReceivedNote and returns
+    /// `None` if that function returns `None`, or otherwise a `Some` containing
+    /// a `ReceivedNote` with its `note` field swapped out for the result of the function.
+    ///
+    /// The name `traverse` refers to the general operation that has the Haskell type
+    /// `Applicative f => (a -> f b) -> t a -> f (t b)`, that this method specializes
+    /// with `ReceivedNote<NoteRef, _>` for `t` and `Option<_>` for `f`.
+    pub fn traverse_opt<B>(
+        self,
+        f: impl FnOnce(NoteT) -> Option<B>,
+    ) -> Option<ReceivedNote<NoteRef, B>> {
+        f(self.note).map(|n0| ReceivedNote {
+            note_id: self.note_id,
+            txid: self.txid,
+            output_index: self.output_index,
+            note: n0,
+            spending_key_scope: self.spending_key_scope,
+            note_commitment_tree_position: self.note_commitment_tree_position,
+        })
+    }
 }
 
-impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef> {
+impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling::Note> {
     fn note_id(&self) -> &NoteRef {
         &self.note_id
     }
 
     fn value(&self) -> NonNegativeAmount {
-        self.note.value()
+        self.note
+            .value()
+            .try_into()
+            .expect("Sapling note values are indirectly checked by consensus.")
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard::Note> {
+    fn note_id(&self) -> &NoteRef {
+        &self.note_id
+    }
+
+    fn value(&self) -> NonNegativeAmount {
+        self.note
+            .value()
+            .try_into()
+            .expect("Orchard note values are indirectly checked by consensus.")
     }
 }
 

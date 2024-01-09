@@ -297,6 +297,16 @@ impl NonNegativeAmount {
     pub fn to_i64_le_bytes(self) -> [u8; 8] {
         self.0.to_i64_le_bytes()
     }
+
+    /// Returns whether or not this `NonNegativeAmount` is the zero value.
+    pub fn is_zero(&self) -> bool {
+        self == &NonNegativeAmount::ZERO
+    }
+
+    /// Returns whether or not this `NonNegativeAmount` is positive.
+    pub fn is_positive(&self) -> bool {
+        self > &NonNegativeAmount::ZERO
+    }
 }
 
 impl From<NonNegativeAmount> for Amount {
@@ -327,6 +337,20 @@ impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount {
     type Error = ();
 
     fn try_from(value: sapling::value::NoteValue) -> Result<Self, Self::Error> {
+        Self::from_u64(value.inner())
+    }
+}
+
+impl From<NonNegativeAmount> for orchard::NoteValue {
+    fn from(n: NonNegativeAmount) -> Self {
+        orchard::NoteValue::from_raw(n.into())
+    }
+}
+
+impl TryFrom<orchard::NoteValue> for NonNegativeAmount {
+    type Error = ();
+
+    fn try_from(value: orchard::NoteValue) -> Result<Self, Self::Error> {
         Self::from_u64(value.inner())
     }
 }

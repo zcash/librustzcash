@@ -21,16 +21,19 @@ use crate::{
     address::{Address, UnifiedAddress},
     data_api::InputSource,
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
-    wallet::{ReceivedNote, WalletTransparentOutput},
+    wallet::{Note, ReceivedNote, WalletTransparentOutput},
     zip321::TransactionRequest,
     ShieldedProtocol,
 };
 
+#[cfg(any(feature = "transparent-inputs", feature = "orchard"))]
+use std::convert::Infallible;
+
 #[cfg(feature = "transparent-inputs")]
-use {
-    std::collections::BTreeSet, std::convert::Infallible,
-    zcash_primitives::transaction::components::OutPoint,
-};
+use {std::collections::BTreeSet, zcash_primitives::transaction::components::OutPoint};
+
+#[cfg(feature = "orchard")]
+use crate::fees::orchard as orchard_fees;
 
 /// The type of errors that may be produced in input selection.
 pub enum InputSelectorError<DbErrT, SelectorErrT> {
@@ -83,7 +86,7 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
 pub struct Proposal<FeeRuleT, NoteRef> {
     transaction_request: TransactionRequest,
     transparent_inputs: Vec<WalletTransparentOutput>,
-    sapling_inputs: Option<SaplingInputs<NoteRef>>,
+    shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     balance: TransactionBalance,
     fee_rule: FeeRuleT,
     min_target_height: BlockHeight,
@@ -151,7 +154,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     pub fn from_parts(
         transaction_request: TransactionRequest,
         transparent_inputs: Vec<WalletTransparentOutput>,
-        sapling_inputs: Option<SaplingInputs<NoteRef>>,
+        shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         balance: TransactionBalance,
         fee_rule: FeeRuleT,
         min_target_height: BlockHeight,
@@ -163,14 +166,14 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
                 (acc? + a).ok_or(ProposalError::Overflow)
             })?;
-        let sapling_input_total = sapling_inputs
+        let shielded_input_total = shielded_inputs
             .iter()
             .flat_map(|s_in| s_in.notes().iter())
-            .map(|out| out.value())
+            .map(|out| out.note().value())
             .fold(Some(NonNegativeAmount::ZERO), |acc, a| (acc? + a))
             .ok_or(ProposalError::Overflow)?;
         let input_total =
-            (transparent_input_total + sapling_input_total).ok_or(ProposalError::Overflow)?;
+            (transparent_input_total + shielded_input_total).ok_or(ProposalError::Overflow)?;
 
         let request_total = transaction_request
             .total()
@@ -179,7 +182,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
 
         if is_shielding
             && (transparent_input_total == NonNegativeAmount::ZERO
-                || sapling_input_total > NonNegativeAmount::ZERO
+                || shielded_input_total > NonNegativeAmount::ZERO
                 || request_total > NonNegativeAmount::ZERO)
         {
             return Err(ProposalError::ShieldingInvalid);
@@ -189,7 +192,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
             Ok(Self {
                 transaction_request,
                 transparent_inputs,
-                sapling_inputs,
+                shielded_inputs,
                 balance,
                 fee_rule,
                 min_target_height,
@@ -212,8 +215,8 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         &self.transparent_inputs
     }
     /// Returns the Sapling inputs that have been selected to fund the transaction.
-    pub fn sapling_inputs(&self) -> Option<&SaplingInputs<NoteRef>> {
-        self.sapling_inputs.as_ref()
+    pub fn shielded_inputs(&self) -> Option<&ShieldedInputs<NoteRef>> {
+        self.shielded_inputs.as_ref()
     }
     /// Returns the change outputs to be added to the transaction and the fee to be paid.
     pub fn balance(&self) -> &TransactionBalance {
@@ -244,12 +247,12 @@ impl<FeeRuleT, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
             .field("transaction_request", &self.transaction_request)
             .field("transparent_inputs", &self.transparent_inputs)
             .field(
-                "sapling_inputs",
-                &self.sapling_inputs().map(|i| i.notes.len()),
+                "shielded_inputs",
+                &self.shielded_inputs().map(|i| i.notes.len()),
             )
             .field(
-                "sapling_anchor_height",
-                &self.sapling_inputs().map(|i| i.anchor_height),
+                "anchor_height",
+                &self.shielded_inputs().map(|i| i.anchor_height),
             )
             .field("balance", &self.balance)
             //.field("fee_rule", &self.fee_rule)
@@ -261,14 +264,17 @@ impl<FeeRuleT, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
 
 /// The Sapling inputs to a proposed transaction.
 #[derive(Clone, PartialEq, Eq)]
-pub struct SaplingInputs<NoteRef> {
+pub struct ShieldedInputs<NoteRef> {
     anchor_height: BlockHeight,
-    notes: NonEmpty<ReceivedNote<NoteRef>>,
+    notes: NonEmpty<ReceivedNote<NoteRef, Note>>,
 }
 
-impl<NoteRef> SaplingInputs<NoteRef> {
-    /// Constructs a [`SaplingInputs`] from its constituent parts.
-    pub fn from_parts(anchor_height: BlockHeight, notes: NonEmpty<ReceivedNote<NoteRef>>) -> Self {
+impl<NoteRef> ShieldedInputs<NoteRef> {
+    /// Constructs a [`ShieldedInputs`] from its constituent parts.
+    pub fn from_parts(
+        anchor_height: BlockHeight,
+        notes: NonEmpty<ReceivedNote<NoteRef, Note>>,
+    ) -> Self {
         Self {
             anchor_height,
             notes,
@@ -282,7 +288,7 @@ impl<NoteRef> SaplingInputs<NoteRef> {
     }
 
     /// Returns the list of Sapling notes to be used as inputs to the proposed transaction.
-    pub fn notes(&self) -> &NonEmpty<ReceivedNote<NoteRef>> {
+    pub fn notes(&self) -> &NonEmpty<ReceivedNote<NoteRef, Note>> {
         &self.notes
     }
 }
@@ -447,6 +453,23 @@ impl sapling::OutputView for SaplingPayment {
     }
 }
 
+pub(crate) struct OrchardPayment(NonNegativeAmount);
+
+// TODO: introduce this method when it is needed for testing.
+// #[cfg(test)]
+// impl OrchardPayment {
+//     pub(crate) fn new(amount: NonNegativeAmount) -> Self {
+//         OrchardPayment(amount)
+//     }
+// }
+
+#[cfg(feature = "orchard")]
+impl orchard_fees::OutputView for OrchardPayment {
+    fn value(&self) -> NonNegativeAmount {
+        self.0
+    }
+}
+
 /// An [`InputSelector`] implementation that uses a greedy strategy to select between available
 /// notes.
 ///
@@ -499,6 +522,7 @@ where
     {
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
+        let mut orchard_outputs = vec![];
         for payment in transaction_request.payments() {
             let mut push_transparent = |taddr: TransparentAddress| {
                 transparent_outputs.push(TxOut {
@@ -509,6 +533,9 @@ where
             let mut push_sapling = || {
                 sapling_outputs.push(SaplingPayment(payment.amount));
             };
+            let mut push_orchard = || {
+                orchard_outputs.push(OrchardPayment(payment.amount));
+            };
 
             match &payment.recipient_address {
                 Address::Transparent(addr) => {
@@ -518,7 +545,14 @@ where
                     push_sapling();
                 }
                 Address::Unified(addr) => {
-                    if addr.sapling().is_some() {
+                    #[cfg(feature = "orchard")]
+                    let has_orchard = addr.orchard().is_some();
+                    #[cfg(not(feature = "orchard"))]
+                    let has_orchard = false;
+
+                    if has_orchard {
+                        push_orchard();
+                    } else if addr.sapling().is_some() {
                         push_sapling();
                     } else if let Some(addr) = addr.transparent() {
                         push_transparent(*addr);
@@ -531,7 +565,7 @@ where
             }
         }
 
-        let mut sapling_inputs: Vec<ReceivedNote<DbT::NoteRef>> = vec![];
+        let mut shielded_inputs: Vec<ReceivedNote<DbT::NoteRef, Note>> = vec![];
         let mut prior_available = NonNegativeAmount::ZERO;
         let mut amount_required = NonNegativeAmount::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
@@ -544,8 +578,34 @@ where
                 target_height,
                 &Vec::<WalletTransparentOutput>::new(),
                 &transparent_outputs,
-                &sapling_inputs,
-                &sapling_outputs,
+                &(
+                    ::sapling::builder::BundleType::DEFAULT,
+                    &shielded_inputs
+                        .iter()
+                        .filter_map(|i| {
+                            i.clone().traverse_opt(|wn| match wn {
+                                Note::Sapling(n) => Some(n),
+                                #[cfg(feature = "orchard")]
+                                _ => None,
+                            })
+                        })
+                        .collect::<Vec<_>>()[..],
+                    &sapling_outputs[..],
+                ),
+                #[cfg(feature = "orchard")]
+                &(
+                    ::orchard::builder::BundleType::DEFAULT,
+                    &shielded_inputs
+                        .iter()
+                        .filter_map(|i| {
+                            i.clone().traverse_opt(|wn| match wn {
+                                Note::Orchard(n) => Some(n),
+                                _ => None,
+                            })
+                        })
+                        .collect::<Vec<_>>()[..],
+                    &orchard_outputs[..],
+                ),
                 &self.dust_output_policy,
             );
 
@@ -554,8 +614,8 @@ where
                     return Ok(Proposal {
                         transaction_request,
                         transparent_inputs: vec![],
-                        sapling_inputs: NonEmpty::from_vec(sapling_inputs).map(|notes| {
-                            SaplingInputs {
+                        shielded_inputs: NonEmpty::from_vec(shielded_inputs).map(|notes| {
+                            ShieldedInputs {
                                 anchor_height,
                                 notes,
                             }
@@ -575,19 +635,19 @@ where
                 Err(other) => return Err(other.into()),
             }
 
-            sapling_inputs = wallet_db
+            shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
                     amount_required.into(),
-                    &[ShieldedProtocol::Sapling],
+                    &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard],
                     anchor_height,
                     &exclude,
                 )
                 .map_err(InputSelectorError::DataSource)?;
 
-            let new_available = sapling_inputs
+            let new_available = shielded_inputs
                 .iter()
-                .map(|n| n.value())
+                .map(|n| n.note().value())
                 .sum::<Option<NonNegativeAmount>>()
                 .ok_or(BalanceError::Overflow)?;
 
@@ -652,8 +712,17 @@ where
             target_height,
             &transparent_inputs,
             &Vec::<TxOut>::new(),
-            &Vec::<ReceivedNote<Infallible>>::new(),
-            &Vec::<SaplingPayment>::new(),
+            &(
+                ::sapling::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &Vec::<Infallible>::new()[..],
+            ),
             &self.dust_output_policy,
         );
 
@@ -668,8 +737,17 @@ where
                     target_height,
                     &transparent_inputs,
                     &Vec::<TxOut>::new(),
-                    &Vec::<ReceivedNote<Infallible>>::new(),
-                    &Vec::<SaplingPayment>::new(),
+                    &(
+                        ::sapling::builder::BundleType::DEFAULT,
+                        &Vec::<Infallible>::new()[..],
+                        &Vec::<Infallible>::new()[..],
+                    ),
+                    #[cfg(feature = "orchard")]
+                    &(
+                        orchard::builder::BundleType::DEFAULT,
+                        &Vec::<Infallible>::new()[..],
+                        &Vec::<Infallible>::new()[..],
+                    ),
                     &self.dust_output_policy,
                 )?
             }
@@ -682,7 +760,7 @@ where
             Ok(Proposal {
                 transaction_request: TransactionRequest::empty(),
                 transparent_inputs,
-                sapling_inputs: None,
+                shielded_inputs: None,
                 balance,
                 fee_rule: (*self.change_strategy.fee_rule()).clone(),
                 min_target_height: target_height,

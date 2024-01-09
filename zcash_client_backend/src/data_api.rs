@@ -28,7 +28,7 @@ use crate::{
     decrypt::DecryptedOutput,
     keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
-    wallet::{NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
+    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
     ShieldedProtocol,
 };
 
@@ -360,7 +360,7 @@ pub trait InputSource {
         txid: &TxId,
         protocol: ShieldedProtocol,
         index: u32,
-    ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
     /// Returns a list of spendable notes sufficient to cover the specified target value, if
     /// possible. Only spendable notes corresponding to the specified shielded protocol will
@@ -372,7 +372,7 @@ pub trait InputSource {
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error>;
+    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
 
     /// Fetches a spendable transparent output.
     ///
@@ -526,13 +526,22 @@ pub trait WalletRead {
     /// Returns a transaction.
     fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error>;
 
-    /// Returns the nullifiers for notes that the wallet is tracking, along with their associated
-    /// account IDs, that are either unspent or have not yet been confirmed as spent (in that a
-    /// spending transaction known to the wallet has not yet been included in a block).
+    /// Returns the nullifiers for Sapling notes that the wallet is tracking, along with their
+    /// associated account IDs, that are either unspent or have not yet been confirmed as spent (in
+    /// that a spending transaction known to the wallet has not yet been included in a block).
     fn get_sapling_nullifiers(
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error>;
+
+    /// Returns the nullifiers for Orchard notes that the wallet is tracking, along with their
+    /// associated account IDs, that are either unspent or have not yet been confirmed as spent (in
+    /// that a spending transaction known to the wallet has not yet been included in a block).
+    #[cfg(feature = "orchard")]
+    fn get_orchard_nullifiers(
+        &self,
+        query: NullifierQuery,
+    ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error>;
 
     /// Returns the set of all transparent receivers associated with the given account.
     ///
@@ -1096,7 +1105,7 @@ pub mod testing {
     use crate::{
         address::{AddressMetadata, UnifiedAddress},
         keys::{UnifiedFullViewingKey, UnifiedSpendingKey},
-        wallet::{NoteId, ReceivedNote, WalletTransparentOutput},
+        wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
         ShieldedProtocol,
     };
 
@@ -1133,7 +1142,7 @@ pub mod testing {
             _txid: &TxId,
             _protocol: ShieldedProtocol,
             _index: u32,
-        ) -> Result<Option<ReceivedNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
             Ok(None)
         }
 
@@ -1144,7 +1153,7 @@ pub mod testing {
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedNote<Self::NoteRef>>, Self::Error> {
+        ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
             Ok(Vec::new())
         }
     }
@@ -1248,6 +1257,14 @@ pub mod testing {
             &self,
             _query: NullifierQuery,
         ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        #[cfg(feature = "orchard")]
+        fn get_orchard_nullifiers(
+            &self,
+            _query: NullifierQuery,
+        ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
             Ok(Vec::new())
         }
 

@@ -3,6 +3,12 @@
 This library contains Rust structs and traits for creating shielded Zcash light
 clients.
 
+## Building
+
+Note that in order to (re)build the GRPC interface, you will need `protoc` on
+your `$PATH`. This is not required unless you make changes to any of the files
+in `./proto/`.
+
 ## License
 
 Licensed under either of

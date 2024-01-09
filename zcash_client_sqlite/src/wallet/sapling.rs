@@ -100,7 +100,7 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note> {
 fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
-) -> Result<ReceivedNote<ReceivedNoteId>, SqliteClientError> {
+) -> Result<ReceivedNote<ReceivedNoteId, Note>, SqliteClientError> {
     let note_id = ReceivedNoteId(row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
@@ -182,7 +182,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     params: &P,
     txid: &TxId,
     index: u32,
-) -> Result<Option<ReceivedNote<ReceivedNoteId>>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     let mut stmt_select_note = conn.prepare_cached(
         "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                 accounts.ufvk, recipient_key_scope
@@ -239,7 +239,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_value: Amount,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
-) -> Result<Vec<ReceivedNote<ReceivedNoteId>>, SqliteClientError> {
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     let birthday_height = match wallet_birthday(conn)? {
         Some(birthday) => birthday,
         None => {

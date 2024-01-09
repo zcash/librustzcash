@@ -41,12 +41,16 @@ and this library adheres to Rust's notion of
   - `NonNegativeAmount::const_from_u64`
   - `NonNegativeAmount::from_nonnegative_i64_le_bytes`
   - `NonNegativeAmount::to_i64_le_bytes`
+  - `NonNegativeAmount::is_zero`
+  - `NonNegativeAmount::is_positive`
   - `impl From<&NonNegativeAmount> for Amount`
   - `impl From<NonNegativeAmount> for u64`
   - `impl From<NonNegativeAmount> for zcash_primitives::sapling::value::NoteValue`
+  - `impl From<NonNegativeAmount> for orchard::::NoteValue`
   - `impl Sum<NonNegativeAmount> for Option<NonNegativeAmount>`
   - `impl<'a> Sum<&'a NonNegativeAmount> for Option<NonNegativeAmount>`
   - `impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+  - `impl TryFrom<orchard::NoteValue> for NonNegativeAmount`
 - `impl {Clone, PartialEq, Eq} for zcash_primitives::memo::Error`
 - `impl {PartialEq, Eq} for zcash_primitives::sapling::note::Rseed`
 - `impl From<TxId> for [u8; 32]`
