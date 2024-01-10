@@ -94,6 +94,7 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
         // - each solution contains `solution_len` u32 values.
         // - the temporary slices are shared refs to a valid `eq` instance supplied by the caller.
         // - the bytes in the shared ref are copied before they are returned.
+        // - dropping `solutions: &[u32]` does not drop the underlying memory owned by `eq`.
         let solutions = (&mut chunks)
             .map(|solution| solution.to_vec())
             .collect::<Vec<_>>();

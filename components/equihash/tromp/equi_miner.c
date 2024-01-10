@@ -263,11 +263,19 @@ typedef struct equi equi;
     eq->blake2b_free = blake2b_free;
     eq->blake2b_update = blake2b_update;
     eq->blake2b_finalize = blake2b_finalize;
+
     const int err = pthread_barrier_init(&eq->barry, NULL, eq->nthreads);
     assert(!err);
+
     alloctrees(&eq->hta);
     eq->nslots = (bsizes *)htalloc_alloc(&eq->hta, 2 * NBUCKETS, sizeof(au32));
     eq->sols   =  (proof *)htalloc_alloc(&eq->hta, MAXSOLS, sizeof(proof));
+
+    // C malloc() does not guarantee zero-initialized memory (but calloc() does)
+    eq->blake_ctx = NULL;
+    eq->nsols = 0;
+    equi_clearslots(eq);
+
     return eq;
   }
   void equi_free(equi *eq) {
@@ -276,6 +284,7 @@ typedef struct equi equi;
     }
 
     dealloctrees(&eq->hta);
+
     free(eq->nslots);
     free(eq->sols);
     eq->blake2b_free(eq->blake_ctx);
@@ -287,6 +296,10 @@ typedef struct equi equi;
     free(eq);
   }
   void equi_setstate(equi *eq, const BLAKE2bState *ctx) {
+    if (eq->blake_ctx) {
+      eq->blake2b_free(eq->blake_ctx);
+    }
+
     eq->blake_ctx = eq->blake2b_clone(ctx);
     memset(eq->nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     eq->nsols = 0;
