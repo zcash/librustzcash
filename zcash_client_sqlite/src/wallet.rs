@@ -1458,6 +1458,20 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     Ok(res)
 }
 
+/// Returns a vector with the IDs of all accounts known to this wallet.
+pub(crate) fn get_account_ids(conn: &rusqlite::Connection) -> Result<Vec<AccountId>, SqliteClientError> {
+    let mut stmt = conn.prepare("SELECT account FROM accounts")?;
+    let mut rows = stmt.query([])?;
+    let mut result = Vec::new();
+    while let Some(row) = rows.next()? {
+        let id: u32 = row.get(0)?;
+        result.push(AccountId::try_from(id).map_err(|_| {
+            SqliteClientError::CorruptedData("Account ID out of range".to_string())
+        })?);
+    }
+    Ok(result)
+}
+
 /// Inserts information about a scanned block into the database.
 pub(crate) fn put_block(
     conn: &rusqlite::Transaction<'_>,
@@ -2126,6 +2140,20 @@ mod tests {
 
         let res2 = st.wallet_mut().put_received_transparent_utxo(&utxo2);
         assert_matches!(res2, Err(_));
+    }
+
+    #[test]
+    fn get_account_ids() {
+        use crate::testing::TestBuilder;
+
+        let st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+
+        assert_eq!(
+            vec![AccountId::try_from(0).unwrap()],
+            st.wallet().get_account_ids().unwrap()
+        );
     }
 
     #[test]

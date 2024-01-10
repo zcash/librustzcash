@@ -560,6 +560,9 @@ pub trait WalletRead {
         account: AccountId,
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error>;
+
+    /// Returns a vector with the IDs of all accounts known to this wallet.
+    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error>;
 }
 
 /// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
@@ -1282,6 +1285,10 @@ pub mod testing {
             _max_height: BlockHeight,
         ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
             Ok(HashMap::new())
+        }
+
+        fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
+            Ok(Vec::new())
         }
     }
 

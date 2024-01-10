@@ -372,6 +372,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
         todo!()
     }
+
+    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
+        wallet::get_account_ids(self.conn.borrow())
+    }
 }
 
 impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P> {
