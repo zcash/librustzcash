@@ -174,10 +174,16 @@ pub fn solve_200_9_compressed<const N: usize>(
     let p = Params::new(200, 9).expect("should be valid");
     let solutions = solve_200_9(input, next_nonce);
 
-    solutions
+    let mut solutions: Vec<Vec<u8>> = solutions
         .iter()
         .map(|solution| minimal_from_indices(p, solution))
-        .collect()
+        .collect();
+
+    // Just in case the solver returns solutions that become the same when compressed.
+    solutions.sort();
+    solutions.dedup();
+
+    solutions
 }
 
 #[cfg(test)]
