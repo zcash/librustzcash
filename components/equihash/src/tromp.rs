@@ -37,7 +37,7 @@ extern "C" {
 }
 
 /// Performs a single equihash solver run with equihash parameters `p` and hash state `curr_state`.
-/// Returns zero or more solutions.
+/// Returns zero or more unique solutions.
 ///
 /// # SAFETY
 ///
@@ -95,11 +95,15 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
         // - the temporary slices are shared refs to a valid `eq` instance supplied by the caller.
         // - the bytes in the shared ref are copied before they are returned.
         // - dropping `solutions: &[u32]` does not drop the underlying memory owned by `eq`.
-        let solutions = (&mut chunks)
+        let mut solutions = (&mut chunks)
             .map(|solution| solution.to_vec())
             .collect::<Vec<_>>();
 
         assert_eq!(chunks.remainder().len(), 0);
+
+        // Sometimes the solver returns identical solutions.
+        solutions.sort();
+        solutions.dedup();
 
         solutions
     };
@@ -122,7 +126,7 @@ unsafe fn worker(eq: *mut CEqui, p: verify::Params, curr_state: &State) -> Vec<V
 /// the supplied partial `input`. Between each run, generates a new nonce of length `N` using the
 /// `next_nonce` function.
 ///
-/// Returns zero or more solutions.
+/// Returns zero or more unique solutions.
 pub fn solve_200_9<const N: usize>(
     input: &[u8],
     mut next_nonce: impl FnMut() -> Option<[u8; N]>,
@@ -182,7 +186,7 @@ pub fn solve_200_9<const N: usize>(
 /// the supplied partial `input`. Between each run, generates a new nonce of length `N` using the
 /// `next_nonce` function.
 ///
-/// Returns zero or more compressed solutions.
+/// Returns zero or more unique compressed solutions.
 pub fn solve_200_9_compressed<const N: usize>(
     input: &[u8],
     next_nonce: impl FnMut() -> Option<[u8; N]>,
@@ -191,10 +195,16 @@ pub fn solve_200_9_compressed<const N: usize>(
     const DIGIT_BITS: usize = 200 / (9 + 1);
     let solutions = solve_200_9(input, next_nonce);
 
-    solutions
+    let mut solutions: Vec<Vec<u8>> = solutions
         .iter()
         .map(|solution| get_minimal_from_indices(solution, DIGIT_BITS))
-        .collect()
+        .collect();
+
+    // Just in case the solver returns solutions that become the same when compressed.
+    solutions.sort();
+    solutions.dedup();
+
+    solutions
 }
 
 // Rough translation of GetMinimalFromIndices() from:
