@@ -249,6 +249,7 @@ struct equi {
   pthread_barrier_t barry;
 };
 typedef struct equi equi;
+  void equi_clearslots(equi *eq);
   equi *equi_new(
     const u32 n_threads,
     blake2b_clone blake2b_clone,
