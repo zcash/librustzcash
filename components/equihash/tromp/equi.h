@@ -28,10 +28,10 @@ typedef unsigned char uchar;
 #define DIGITBITS	(WN/(NDIGITS))
 
 #define PROOFSIZE (1<<WK)
-static const u32 BASE = 1<<DIGITBITS;
-static const u32 NHASHES = 2*BASE;
-static const u32 HASHESPERBLAKE = 512/WN;
-static const u32 HASHOUT = HASHESPERBLAKE*WN/8;
+#define BASE (1<<DIGITBITS)
+#define NHASHES (2*BASE)
+#define HASHESPERBLAKE (512/WN)
+#define HASHOUT (HASHESPERBLAKE*WN/8)
 
 typedef u32 proof[PROOFSIZE];
 
