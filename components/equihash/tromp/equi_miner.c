@@ -22,6 +22,10 @@
 #define ZCASH_POW_TROMP_EQUI_MINER_H
 
 #include "equi.h"
+
+// Provides htole32() on macOS and Windows
+#include "portable_endian.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>

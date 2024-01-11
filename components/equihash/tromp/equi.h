@@ -4,10 +4,6 @@
 #ifndef ZCASH_POW_TROMP_EQUI_H
 #define ZCASH_POW_TROMP_EQUI_H
 
-#ifdef __APPLE__
-#include "osx_barrier.h"
-#endif
-
 #include <stdbool.h> // for type bool
 #include <stdint.h> // for types uint32_t,uint64_t
 #include <string.h> // for functions memset
