@@ -140,7 +140,7 @@ and this library adheres to Rust's notion of
     - `get_spendable_sapling_notes`, `select_spendable_sapling_notes`, and
       `get_unspent_transparent_outputs` have been removed; use
       `data_api::InputSource` instead.
-    - Added `get_account_ids`
+    - Added `get_account_ids`.
   - `wallet::{propose_shielding, shield_transparent_funds}` now takes their
     `min_confirmations` arguments as `u32` rather than a `NonZeroU32` to permit
     implmentations to enable zero-conf shielding.
