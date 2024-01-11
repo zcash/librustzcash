@@ -71,7 +71,9 @@
 #elif defined(__WINDOWS__)
 
 #	include <winsock2.h>
-#	include <sys/param.h>
+
+// Not available in librustzcash CI
+//#	include <sys/param.h>
 
 #	if BYTE_ORDER == LITTLE_ENDIAN
 
