@@ -73,7 +73,7 @@ static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
 #define NRESTS (1<<RESTBITS)
 // number of blocks of hashes extracted from single 512 bit blake2b output
-static const u32 NBLOCKS = (NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE;
+#define NBLOCKS ((NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE)
 // nothing larger found in 100000 runs
 static const u32 MAXSOLS = 8;
 
@@ -231,7 +231,7 @@ typedef struct htalloc htalloc;
 
 typedef au32 bsizes[NBUCKETS];
 
-u32 min(const u32 a, const u32 b) {
+u32 minu32(const u32 a, const u32 b) {
   return a < b ? a : b;
 }
 
@@ -313,7 +313,7 @@ typedef struct equi equi;
   }
   u32 getnslots(equi *eq, const u32 r, const u32 bid) { // SHOULD BE METHOD IN BUCKET STRUCT
     au32 *nslot = &eq->nslots[r&1][bid];
-    const u32 n = min(*nslot, NSLOTS);
+    const u32 n = minu32(*nslot, NSLOTS);
     *nslot = 0;
     return n;
   }
@@ -374,7 +374,7 @@ typedef struct equi equi;
     u32 binsizes[65];
     memset(binsizes, 0, 65 * sizeof(u32));
     for (u32 bucketid = 0; bucketid < NBUCKETS; bucketid++) {
-      u32 bsize = min(eq->nslots[r&1][bucketid], NSLOTS) >> (SLOTBITS-6);
+      u32 bsize = minu32(eq->nslots[r&1][bucketid], NSLOTS) >> (SLOTBITS-6);
       binsizes[bsize]++;
     }
     for (u32 i=0; i < 65; i++) {
