@@ -28,7 +28,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <assert.h>
 
 typedef uint16_t u16;
@@ -248,16 +247,13 @@ struct equi {
   bsizes *nslots; // PUT IN BUCKET STRUCT
   proof *sols;
   au32 nsols;
-  u32 nthreads;
   u32 xfull;
   u32 hfull;
   u32 bfull;
-  pthread_barrier_t barry;
 };
 typedef struct equi equi;
   void equi_clearslots(equi *eq);
   equi *equi_new(
-    const u32 n_threads,
     blake2b_clone blake2b_clone,
     blake2b_free blake2b_free,
     blake2b_update blake2b_update,
@@ -265,14 +261,10 @@ typedef struct equi equi;
   ) {
     assert(sizeof(hashunit) == 4);
     equi *eq = malloc(sizeof(equi));
-    eq->nthreads = n_threads;
     eq->blake2b_clone = blake2b_clone;
     eq->blake2b_free = blake2b_free;
     eq->blake2b_update = blake2b_update;
     eq->blake2b_finalize = blake2b_finalize;
-
-    const int err = pthread_barrier_init(&eq->barry, NULL, eq->nthreads);
-    assert(!err);
 
     alloctrees(&eq->hta);
     eq->nslots = (bsizes *)htalloc_alloc(&eq->hta, 2 * NBUCKETS, sizeof(au32));
@@ -409,7 +401,7 @@ typedef struct equi equi;
     u32 nextbo;
   };
   typedef struct htlayout htlayout;
-  
+
     htlayout htlayout_new(equi *eq, u32 r) {
       htlayout htl;
       htl.hta = eq->hta;
@@ -525,7 +517,7 @@ typedef struct equi equi;
     BLAKE2bState* state;
     htlayout htl = htlayout_new(eq, 0);
     const u32 hashbytes = hashsize(0);
-    for (u32 block = id; block < NBLOCKS; block += eq->nthreads) {
+    for (u32 block = id; block < NBLOCKS; block++) {
       state = eq->blake2b_clone(eq->blake_ctx);
       u32 leb = htole32(block);
       eq->blake2b_update(state, (uchar *)&leb, sizeof(u32));
@@ -561,11 +553,11 @@ typedef struct equi equi;
       }
     }
   }
-  
+
   void equi_digitodd(equi *eq, const u32 r, const u32 id) {
     htlayout htl = htlayout_new(eq, r);
     collisiondata cd;
-    for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
+    for (u32 bucketid=id; bucketid < NBUCKETS; bucketid++) {
       collisiondata_clear(&cd);
       slot0 *buck = htl.hta.trees0[(r-1)/2][bucketid]; // optimize by updating previous buck?!
       u32 bsize = getnslots(eq, r-1, bucketid);       // optimize by putting bucketsize with block?!
@@ -613,11 +605,11 @@ typedef struct equi equi;
       }
     }
   }
-  
+
   void equi_digiteven(equi *eq, const u32 r, const u32 id) {
     htlayout htl = htlayout_new(eq, r);
     collisiondata cd;
-    for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
+    for (u32 bucketid=id; bucketid < NBUCKETS; bucketid++) {
       collisiondata_clear(&cd);
       slot1 *buck = htl.hta.trees1[(r-1)/2][bucketid]; // OPTIMIZE BY UPDATING PREVIOUS
       u32 bsize = getnslots(eq, r-1, bucketid);
@@ -665,12 +657,12 @@ typedef struct equi equi;
       }
     }
   }
-  
+
   void equi_digitK(equi *eq, const u32 id) {
     collisiondata cd;
     htlayout htl = htlayout_new(eq, WK);
 u32 nc = 0;
-    for (u32 bucketid = id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
+    for (u32 bucketid = id; bucketid < NBUCKETS; bucketid++) {
       collisiondata_clear(&cd);
       slot0 *buck = htl.hta.trees0[(WK-1)/2][bucketid];
       u32 bsize = getnslots(eq, WK-1, bucketid);
@@ -697,17 +689,8 @@ nc++,       candidate(eq, tree_from_bid(bucketid, s0, s1));
 
 typedef struct {
   u32 id;
-  pthread_t thread;
   equi *eq;
 } thread_ctx;
-
-void barrier(pthread_barrier_t *barry) {
-  const int rc = pthread_barrier_wait(barry);
-  if (rc != 0 && rc != PTHREAD_BARRIER_SERIAL_THREAD) {
-//    printf("Could not wait on barrier\n");
-    pthread_exit(NULL);
-  }
-}
 
 void *worker(void *vp) {
   thread_ctx *tp = (thread_ctx *)vp;
@@ -715,22 +698,17 @@ void *worker(void *vp) {
 
 //  if (tp->id == 0)
 //    printf("Digit 0\n");
-  barrier(&eq->barry);
   equi_digit0(eq, tp->id);
-  barrier(&eq->barry);
   if (tp->id == 0) {
     equi_clearslots(eq);
 #ifdef EQUIHASH_SHOW_BUCKET_SIZES
     showbsizes(eq, 0);
 #endif
   }
-  barrier(&eq->barry);
   for (u32 r = 1; r < WK; r++) {
 //    if (tp->id == 0)
 //      printf("Digit %d", r);
-    barrier(&eq->barry);
     r&1 ? equi_digitodd(eq, r, tp->id) : equi_digiteven(eq, r, tp->id);
-    barrier(&eq->barry);
     if (tp->id == 0) {
 //      printf(" x%d b%d h%d\n", eq->xfull, eq->bfull, eq->hfull);
       equi_clearslots(eq);
@@ -738,13 +716,10 @@ void *worker(void *vp) {
       showbsizes(eq, r);
 #endif
     }
-    barrier(&eq->barry);
   }
 //  if (tp->id == 0)
 //    printf("Digit %d\n", WK);
   equi_digitK(eq, tp->id);
-  barrier(&eq->barry);
-  pthread_exit(NULL);
   return 0;
 }
 
