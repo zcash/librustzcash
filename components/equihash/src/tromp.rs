@@ -17,7 +17,6 @@ struct CEqui {
 extern "C" {
     #[allow(improper_ctypes)]
     fn equi_new(
-        n_threads: u32,
         blake2b_clone: extern "C" fn(state: *const State) -> *mut State,
         blake2b_free: extern "C" fn(state: *mut State),
         blake2b_update: extern "C" fn(state: *mut State, input: *const u8, input_len: usize),
@@ -144,7 +143,6 @@ pub fn solve_200_9<const N: usize>(
     #[allow(unsafe_code)]
     let eq = unsafe {
         equi_new(
-            1,
             blake2b::blake2b_clone,
             blake2b::blake2b_free,
             blake2b::blake2b_update,
