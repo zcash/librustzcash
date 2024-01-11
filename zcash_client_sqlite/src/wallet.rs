@@ -1459,7 +1459,9 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
 }
 
 /// Returns a vector with the IDs of all accounts known to this wallet.
-pub(crate) fn get_account_ids(conn: &rusqlite::Connection) -> Result<Vec<AccountId>, SqliteClientError> {
+pub(crate) fn get_account_ids(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<AccountId>, SqliteClientError> {
     let mut stmt = conn.prepare("SELECT account FROM accounts")?;
     let mut rows = stmt.query([])?;
     let mut result = Vec::new();
