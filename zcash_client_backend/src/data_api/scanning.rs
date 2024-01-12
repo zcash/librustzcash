@@ -1,3 +1,4 @@
+use bitflags::bitflags;
 use std::fmt;
 use std::ops::Range;
 
@@ -26,35 +27,68 @@ pub enum ScanPriority {
     Verify,
 }
 
+bitflags! {
+    /// A set of flags indicating what pools have not yet been scanned for a given [`ScanRange`]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ScanFlags: u8 {
+        /// Sapling notes in the associated scan range have not yet been scanned.
+        const SAPLING = 0b00000001;
+        /// Orchard notes in the associated scan range have not yet been scanned.
+        const ORCHARD = 0b00000010;
+    }
+}
+
+impl fmt::Display for ScanFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
+        let mut sep = "";
+        if self.contains(ScanFlags::ORCHARD) {
+            write!(f, "O")?;
+            sep = ", ";
+        }
+        if self.contains(ScanFlags::SAPLING) {
+            write!(f, "{}S", sep)?;
+        }
+        write!(f, "}}")
+    }
+}
+
 /// A range of blocks to be scanned, along with its associated priority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanRange {
     block_range: Range<BlockHeight>,
     priority: ScanPriority,
+    flags: ScanFlags,
 }
 
 impl fmt::Display for ScanRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:?}({}..{})",
-            self.priority, self.block_range.start, self.block_range.end,
+            "{:?}({}..{}, {})",
+            self.priority, self.block_range.start, self.block_range.end, self.flags
         )
     }
 }
 
 impl ScanRange {
     /// Constructs a scan range from its constituent parts.
-    pub fn from_parts(block_range: Range<BlockHeight>, priority: ScanPriority) -> Self {
+    pub fn from_parts(
+        block_range: Range<BlockHeight>,
+        priority: ScanPriority,
+        flags: ScanFlags,
+    ) -> Self {
         assert!(
             block_range.end >= block_range.start,
             "{:?} is invalid for ScanRange({:?})",
             block_range,
             priority,
         );
+
         ScanRange {
             block_range,
             priority,
+            flags,
         }
     }
 
@@ -66,6 +100,30 @@ impl ScanRange {
     /// Returns the priority with which the scan range should be scanned.
     pub fn priority(&self) -> ScanPriority {
         self.priority
+    }
+
+    /// Replace the priority of this [`ScanRange`] with the specified priority.
+    pub fn with_priority(self, priority: ScanPriority) -> Self {
+        Self {
+            block_range: self.block_range,
+            priority,
+            flags: self.flags,
+        }
+    }
+
+    /// Returns the set of flags indicating which pools need have their outputs scanned within this
+    /// range.
+    pub fn flags(&self) -> ScanFlags {
+        self.flags
+    }
+
+    /// Replace the flags of this [`ScanRange`] with the specified flags.
+    pub fn with_flags(self, flags: ScanFlags) -> Self {
+        Self {
+            block_range: self.block_range,
+            priority: self.priority,
+            flags,
+        }
     }
 
     /// Returns whether or not the scan range is empty.
@@ -89,6 +147,7 @@ impl ScanRange {
             Some(ScanRange {
                 block_range: self.block_range.start.max(block_height)..self.block_range.end,
                 priority: self.priority,
+                flags: self.flags,
             })
         }
     }
@@ -103,6 +162,7 @@ impl ScanRange {
             Some(ScanRange {
                 block_range: self.block_range.start..self.block_range.end.min(block_height),
                 priority: self.priority,
+                flags: self.flags,
             })
         }
     }
@@ -115,10 +175,12 @@ impl ScanRange {
             ScanRange {
                 block_range: self.block_range.start..p,
                 priority: self.priority,
+                flags: self.flags,
             },
             ScanRange {
                 block_range: p..self.block_range.end,
                 priority: self.priority,
+                flags: self.flags,
             },
         ))
     }
@@ -126,10 +188,14 @@ impl ScanRange {
 
 #[cfg(test)]
 mod tests {
-    use super::{ScanPriority, ScanRange};
+    use super::{ScanFlags, ScanPriority, ScanRange};
 
     fn scan_range(start: u32, end: u32) -> ScanRange {
-        ScanRange::from_parts((start.into())..(end.into()), ScanPriority::Scanned)
+        ScanRange::from_parts(
+            (start.into())..(end.into()),
+            ScanPriority::Scanned,
+            ScanFlags::empty(),
+        )
     }
 
     #[test]

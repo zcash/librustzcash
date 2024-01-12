@@ -45,6 +45,7 @@ rand_core.workspace = true
 base64.workspace = true
 bech32.workspace = true
 bs58.workspace = true
+bitflags = "2.4.1"
 
 # - Errors
 hdwallet = { workspace = true, optional = true }

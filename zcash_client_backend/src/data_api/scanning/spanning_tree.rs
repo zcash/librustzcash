@@ -1,7 +1,9 @@
-use std::cmp::{max, Ordering};
+use std::cmp::Ordering;
 use std::ops::{Not, Range};
 
 use zcash_primitives::consensus::BlockHeight;
+
+use crate::data_api::scanning::ScanFlags;
 
 use super::{ScanPriority, ScanRange};
 
@@ -125,10 +127,11 @@ fn join_nonoverlapping(left: ScanRange, right: ScanRange) -> Joined {
     assert!(left.block_range().end <= right.block_range().start);
 
     if left.block_range().end == right.block_range().start {
-        if left.priority() == right.priority() {
+        if left.priority() == right.priority() && left.flags() == right.flags() {
             Joined::One(ScanRange::from_parts(
                 left.block_range().start..right.block_range().end,
                 left.priority(),
+                left.flags(),
             ))
         } else {
             Joined::Two(left, right)
@@ -138,6 +141,7 @@ fn join_nonoverlapping(left: ScanRange, right: ScanRange) -> Joined {
         let gap = ScanRange::from_parts(
             left.block_range().end..right.block_range().start,
             ScanPriority::Historic,
+            ScanFlags::all(),
         );
 
         match join_nonoverlapping(left, gap) {
@@ -165,27 +169,40 @@ fn insert(current: ScanRange, to_insert: ScanRange, force_rescans: bool) -> Join
             InsertOn::Right => dominance(&left.priority(), &right.priority(), insert),
         };
 
-        match dominance {
-            Dominance::Left => {
-                if let Some(right) = right.truncate_start(left.block_range().end) {
-                    Joined::Two(left, right)
-                } else {
-                    Joined::One(left)
-                }
-            }
-            Dominance::Equal => Joined::One(ScanRange::from_parts(
-                left.block_range().start..max(left.block_range().end, right.block_range().end),
-                left.priority(),
-            )),
-            Dominance::Right => match (
-                left.truncate_end(right.block_range().start),
-                left.truncate_start(right.block_range().end),
-            ) {
-                (Some(before), Some(after)) => Joined::Three(before, right, after),
-                (Some(before), None) => Joined::Two(before, right),
-                (None, Some(after)) => Joined::Two(right, after),
-                (None, None) => Joined::One(right),
+        let pre_overlap = left.truncate_end(right.block_range().start);
+        let overlap = left
+            .truncate_start(right.block_range().start)
+            .and_then(|mid| {
+                // If the right argument is fully contained in the left range, then
+                // we have to truncate its end
+                mid.truncate_end(right.block_range().end).map(|mid| {
+                    mid.with_flags(left.flags() | right.flags())
+                        .with_priority(match dominance {
+                            Dominance::Left | Dominance::Equal => left.priority(),
+                            Dominance::Right => right.priority(),
+                        })
+                })
+            });
+        let post_overlap = right
+            .truncate_start(left.block_range().end)
+            .or_else(|| left.truncate_start(right.block_range().end));
+
+        match (pre_overlap, overlap, post_overlap) {
+            (Some(pre), Some(mid), Some(post)) => match join_nonoverlapping(pre, mid) {
+                Joined::One(l) => join_nonoverlapping(l, post),
+                Joined::Two(l, m) => match join_nonoverlapping(m, post) {
+                    Joined::One(r) => Joined::Two(l, r),
+                    Joined::Two(m, r) => Joined::Three(l, m, r),
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
             },
+            (Some(pre), Some(mid), None) => join_nonoverlapping(pre, mid),
+            (None, Some(mid), Some(post)) => join_nonoverlapping(mid, post),
+            (None, Some(mid), None) => Joined::One(mid),
+            _ => unreachable!(
+                "The assertion at the start of this function ensures that some overlap exists."
+            ),
         }
     }
 
@@ -195,17 +212,25 @@ fn insert(current: ScanRange, to_insert: ScanRange, force_rescans: bool) -> Join
         LeftFirstOverlap | RightContained => {
             join_overlapping(to_insert, current, Insert::left(force_rescans))
         }
-        Equal => Joined::One(ScanRange::from_parts(
-            to_insert.block_range().clone(),
-            match dominance(
+        Equal => {
+            let dom = dominance(
                 &current.priority(),
                 &to_insert.priority(),
                 Insert::right(force_rescans),
-            ) {
-                Dominance::Left | Dominance::Equal => current.priority(),
-                Dominance::Right => to_insert.priority(),
-            },
-        )),
+            );
+            Joined::One(ScanRange::from_parts(
+                to_insert.block_range().clone(),
+                match dom {
+                    Dominance::Left | Dominance::Equal => current.priority(),
+                    Dominance::Right => to_insert.priority(),
+                },
+                match dom {
+                    Dominance::Left => current.flags(),
+                    Dominance::Equal => to_insert.flags() | current.flags(),
+                    Dominance::Right => to_insert.flags(),
+                },
+            ))
+        }
         RightFirstOverlap | LeftContained => {
             join_overlapping(current, to_insert, Insert::right(force_rescans))
         }
@@ -399,12 +424,13 @@ pub mod testing {
 
     use zcash_primitives::consensus::BlockHeight;
 
-    use crate::data_api::scanning::{ScanPriority, ScanRange};
+    use crate::data_api::scanning::{ScanFlags, ScanPriority, ScanRange};
 
-    pub fn scan_range(range: Range<u32>, priority: ScanPriority) -> ScanRange {
+    pub fn scan_range(range: Range<u32>, priority: ScanPriority, flags: ScanFlags) -> ScanRange {
         ScanRange::from_parts(
             BlockHeight::from(range.start)..BlockHeight::from(range.end),
             priority,
+            flags,
         )
     }
 }
@@ -416,7 +442,9 @@ mod tests {
     use zcash_primitives::consensus::BlockHeight;
 
     use super::{join_nonoverlapping, testing::scan_range, Joined, RangeOrdering, SpanningTree};
-    use crate::data_api::scanning::{ScanPriority, ScanRange};
+    use crate::data_api::scanning::{ScanFlags, ScanPriority, ScanRange};
+
+    const NO_FLAGS: ScanFlags = ScanFlags::empty();
 
     #[test]
     fn test_join_nonoverlapping() {
@@ -431,6 +459,14 @@ mod tests {
                 ScanRange::from_parts(
                     BlockHeight::from($start)..BlockHeight::from($end),
                     ScanPriority::$priority,
+                    NO_FLAGS,
+                )
+            };
+            ( $start:expr, $end:expr; $priority:ident; $flags:expr ) => {
+                ScanRange::from_parts(
+                    BlockHeight::from($start)..BlockHeight::from($end),
+                    ScanPriority::$priority,
+                    $flags,
                 )
             };
         }
@@ -461,6 +497,18 @@ mod tests {
                 Joined::Three(
                     range!($a_start, $a_end; $a_priority),
                     range!($b_start, $b_end; $b_priority),
+                    range!($c_start, $c_end; $c_priority)
+                )
+            };
+            (
+                ($a_start:expr, $a_end:expr; $a_priority:ident),
+                ($b_start:expr, $b_end:expr; $b_priority:ident; $flags:expr),
+                ($c_start:expr, $c_end:expr; $c_priority:ident)
+
+            ) => {
+                Joined::Three(
+                    range!($a_start, $a_end; $a_priority),
+                    range!($b_start, $b_end; $b_priority; $flags),
                     range!($c_start, $c_end; $c_priority)
                 )
             };
@@ -495,7 +543,7 @@ mod tests {
             range!(13, 15; OpenAdjacent),
             joined!(
                 (1, 9; OpenAdjacent),
-                (9, 13; Historic),
+                (9, 13; Historic; ScanFlags::all()),
                 (13, 15; OpenAdjacent)
             ),
         );
@@ -504,7 +552,8 @@ mod tests {
             range!(1, 9; Historic),
             range!(13, 15; OpenAdjacent),
             joined!(
-                (1, 13; Historic),
+                (1, 9; Historic),
+                (9, 13; Historic; ScanFlags::all()),
                 (13, 15; OpenAdjacent)
             ),
         );
@@ -514,7 +563,8 @@ mod tests {
             range!(13, 15; Historic),
             joined!(
                 (1, 9; OpenAdjacent),
-                (9, 15; Historic)
+                (9, 13; Historic; ScanFlags::all()),
+                (13, 15; Historic)
             ),
         );
     }
@@ -548,14 +598,16 @@ mod tests {
         assert_eq!(RangeOrdering::cmp(&(1..3), &(0..2)), RightFirstOverlap);
     }
 
-    fn spanning_tree(to_insert: &[(Range<u32>, ScanPriority)]) -> Option<SpanningTree> {
-        to_insert.iter().fold(None, |acc, (range, priority)| {
-            let scan_range = scan_range(range.clone(), *priority);
-            match acc {
-                None => Some(SpanningTree::Leaf(scan_range)),
-                Some(t) => Some(t.insert(scan_range, false)),
-            }
-        })
+    fn spanning_tree(to_insert: &[(Range<u32>, ScanPriority, ScanFlags)]) -> Option<SpanningTree> {
+        to_insert
+            .iter()
+            .fold(None, |acc, (range, priority, flags)| {
+                let scan_range = scan_range(range.clone(), *priority, *flags);
+                match acc {
+                    None => Some(SpanningTree::Leaf(scan_range)),
+                    Some(t) => Some(t.insert(scan_range, false)),
+                }
+            })
     }
 
     #[test]
@@ -563,19 +615,19 @@ mod tests {
         use ScanPriority::*;
 
         let t = spanning_tree(&[
-            (0..3, Historic),
-            (3..6, Scanned),
-            (6..8, ChainTip),
-            (8..10, ChainTip),
+            (0..3, Historic, NO_FLAGS),
+            (3..6, Scanned, NO_FLAGS),
+            (6..8, ChainTip, NO_FLAGS),
+            (8..10, ChainTip, NO_FLAGS),
         ])
         .unwrap();
 
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..3, Historic),
-                scan_range(3..6, Scanned),
-                scan_range(6..10, ChainTip),
+                scan_range(0..3, Historic, NO_FLAGS),
+                scan_range(3..6, Scanned, NO_FLAGS),
+                scan_range(6..10, ChainTip, NO_FLAGS),
             ]
         );
     }
@@ -585,21 +637,22 @@ mod tests {
         use ScanPriority::*;
 
         let t = spanning_tree(&[
-            (0..3, Historic),
-            (2..5, Scanned),
-            (6..8, ChainTip),
-            (7..10, Scanned),
+            (0..3, Historic, NO_FLAGS),
+            (2..5, Scanned, NO_FLAGS),
+            // 5..6 mind the gap!
+            (6..8, ChainTip, NO_FLAGS),
+            (7..10, Scanned, NO_FLAGS),
         ])
         .unwrap();
 
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..2, Historic),
-                scan_range(2..5, Scanned),
-                scan_range(5..6, Historic),
-                scan_range(6..7, ChainTip),
-                scan_range(7..10, Scanned),
+                scan_range(0..2, Historic, NO_FLAGS),
+                scan_range(2..5, Scanned, NO_FLAGS),
+                scan_range(5..6, Historic, ScanFlags::all()),
+                scan_range(6..7, ChainTip, NO_FLAGS),
+                scan_range(7..10, Scanned, NO_FLAGS),
             ]
         );
     }
@@ -609,20 +662,20 @@ mod tests {
         use ScanPriority::*;
 
         let t = spanning_tree(&[
-            (0..3, Historic),
-            (3..6, Scanned),
-            (6..6, FoundNote),
-            (6..8, Scanned),
-            (8..10, ChainTip),
+            (0..3, Historic, NO_FLAGS),
+            (3..6, Scanned, NO_FLAGS),
+            (6..6, FoundNote, NO_FLAGS),
+            (6..8, Scanned, NO_FLAGS),
+            (8..10, ChainTip, NO_FLAGS),
         ])
         .unwrap();
 
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..3, Historic),
-                scan_range(3..8, Scanned),
-                scan_range(8..10, ChainTip),
+                scan_range(0..3, Historic, NO_FLAGS),
+                scan_range(3..8, Scanned, NO_FLAGS),
+                scan_range(8..10, ChainTip, NO_FLAGS),
             ]
         );
     }
@@ -631,22 +684,37 @@ mod tests {
     fn spanning_tree_insert_gaps() {
         use ScanPriority::*;
 
-        let t = spanning_tree(&[(0..3, Historic), (6..8, ChainTip)]).unwrap();
-
-        assert_eq!(
-            t.into_vec(),
-            vec![scan_range(0..6, Historic), scan_range(6..8, ChainTip),]
-        );
-
-        let t = spanning_tree(&[(0..3, Historic), (3..4, Verify), (6..8, ChainTip)]).unwrap();
+        let t = spanning_tree(&[
+            (0..3, Historic, NO_FLAGS),
+            // 3..6 mind the gap!
+            (6..8, ChainTip, NO_FLAGS),
+        ])
+        .unwrap();
 
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..3, Historic),
-                scan_range(3..4, Verify),
-                scan_range(4..6, Historic),
-                scan_range(6..8, ChainTip),
+                scan_range(0..3, Historic, NO_FLAGS),
+                scan_range(3..6, Historic, ScanFlags::all()),
+                scan_range(6..8, ChainTip, NO_FLAGS),
+            ]
+        );
+
+        let t = spanning_tree(&[
+            (0..3, Historic, NO_FLAGS),
+            (3..4, Verify, NO_FLAGS),
+            // 4..6 mind the gap!
+            (6..8, ChainTip, NO_FLAGS),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            t.into_vec(),
+            vec![
+                scan_range(0..3, Historic, NO_FLAGS),
+                scan_range(3..4, Verify, NO_FLAGS),
+                scan_range(4..6, Historic, ScanFlags::all()),
+                scan_range(6..8, ChainTip, NO_FLAGS),
             ]
         );
     }
@@ -661,15 +729,15 @@ mod tests {
         // heal this specific kind of bug.
         let t = spanning_tree(&[
             // 6..8
-            (6..8, Scanned),
+            (6..8, Scanned, NO_FLAGS),
             //       6..12
             // 6..8        8..12
             //         8..10  10..12
-            (10..12, ChainTip),
+            (10..12, ChainTip, NO_FLAGS),
             //          3..12
             //    3..8        8..12
             // 3..6  6..8  8..10  10..12
-            (3..6, Historic),
+            (3..6, Historic, NO_FLAGS),
         ])
         .unwrap();
 
@@ -677,10 +745,10 @@ mod tests {
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(3..6, Historic),
-                scan_range(6..8, Scanned),
-                scan_range(8..10, Historic),
-                scan_range(10..12, ChainTip),
+                scan_range(3..6, Historic, NO_FLAGS),
+                scan_range(6..8, Scanned, NO_FLAGS),
+                scan_range(8..10, Historic, ScanFlags::all()),
+                scan_range(10..12, ChainTip, NO_FLAGS),
             ]
         );
     }
@@ -689,74 +757,102 @@ mod tests {
     fn spanning_tree_dominance() {
         use ScanPriority::*;
 
-        let t = spanning_tree(&[(0..3, Verify), (2..8, Scanned), (6..10, Verify)]).unwrap();
+        let t = spanning_tree(&[
+            (0..3, Verify, NO_FLAGS),
+            (2..8, Scanned, NO_FLAGS),
+            (6..10, Verify, NO_FLAGS),
+        ])
+        .unwrap();
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..2, Verify),
-                scan_range(2..6, Scanned),
-                scan_range(6..10, Verify),
+                scan_range(0..2, Verify, NO_FLAGS),
+                scan_range(2..6, Scanned, NO_FLAGS),
+                scan_range(6..10, Verify, NO_FLAGS),
             ]
         );
 
-        let t = spanning_tree(&[(0..3, Verify), (2..8, Historic), (6..10, Verify)]).unwrap();
+        let t = spanning_tree(&[
+            (0..3, Verify, NO_FLAGS),
+            (2..8, Historic, NO_FLAGS),
+            (6..10, Verify, NO_FLAGS),
+        ])
+        .unwrap();
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..3, Verify),
-                scan_range(3..6, Historic),
-                scan_range(6..10, Verify),
+                scan_range(0..3, Verify, NO_FLAGS),
+                scan_range(3..6, Historic, NO_FLAGS),
+                scan_range(6..10, Verify, NO_FLAGS),
             ]
         );
 
-        let t = spanning_tree(&[(0..3, Scanned), (2..8, Verify), (6..10, Scanned)]).unwrap();
+        let t = spanning_tree(&[
+            (0..3, Scanned, NO_FLAGS),
+            (2..8, Verify, NO_FLAGS),
+            (6..10, Scanned, NO_FLAGS),
+        ])
+        .unwrap();
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..2, Scanned),
-                scan_range(2..6, Verify),
-                scan_range(6..10, Scanned),
+                scan_range(0..2, Scanned, NO_FLAGS),
+                scan_range(2..6, Verify, NO_FLAGS),
+                scan_range(6..10, Scanned, NO_FLAGS),
             ]
         );
 
-        let t = spanning_tree(&[(0..3, Scanned), (2..8, Historic), (6..10, Scanned)]).unwrap();
+        let t = spanning_tree(&[
+            (0..3, Scanned, NO_FLAGS),
+            (2..8, Historic, NO_FLAGS),
+            (6..10, Scanned, NO_FLAGS),
+        ])
+        .unwrap();
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..3, Scanned),
-                scan_range(3..6, Historic),
-                scan_range(6..10, Scanned),
+                scan_range(0..3, Scanned, NO_FLAGS),
+                scan_range(3..6, Historic, NO_FLAGS),
+                scan_range(6..10, Scanned, NO_FLAGS),
             ]
         );
 
         // a `ChainTip` insertion should not overwrite a scanned range.
-        let mut t = spanning_tree(&[(0..3, ChainTip), (3..5, Scanned), (5..7, ChainTip)]).unwrap();
-        t = t.insert(scan_range(0..7, ChainTip), false);
+        let mut t = spanning_tree(&[
+            (0..3, ChainTip, NO_FLAGS),
+            (3..5, Scanned, NO_FLAGS),
+            (5..7, ChainTip, NO_FLAGS),
+        ])
+        .unwrap();
+        t = t.insert(scan_range(0..7, ChainTip, NO_FLAGS), false);
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(0..3, ChainTip),
-                scan_range(3..5, Scanned),
-                scan_range(5..7, ChainTip),
+                scan_range(0..3, ChainTip, NO_FLAGS),
+                scan_range(3..5, Scanned, NO_FLAGS),
+                scan_range(5..7, ChainTip, NO_FLAGS),
             ]
         );
 
-        let mut t =
-            spanning_tree(&[(280300..280310, FoundNote), (280310..280320, Scanned)]).unwrap();
+        let mut t = spanning_tree(&[
+            (280300..280310, FoundNote, NO_FLAGS),
+            (280310..280320, Scanned, NO_FLAGS),
+        ])
+        .unwrap();
         assert_eq!(
             t.clone().into_vec(),
             vec![
-                scan_range(280300..280310, FoundNote),
-                scan_range(280310..280320, Scanned)
+                scan_range(280300..280310, FoundNote, NO_FLAGS),
+                scan_range(280310..280320, Scanned, NO_FLAGS)
             ]
         );
-        t = t.insert(scan_range(280300..280340, ChainTip), false);
+        t = t.insert(scan_range(280300..280340, ChainTip, NO_FLAGS), false);
         assert_eq!(
             t.into_vec(),
             vec![
-                scan_range(280300..280310, ChainTip),
-                scan_range(280310..280320, Scanned),
-                scan_range(280320..280340, ChainTip)
+                scan_range(280300..280310, ChainTip, NO_FLAGS),
+                scan_range(280310..280320, Scanned, NO_FLAGS),
+                scan_range(280320..280340, ChainTip, NO_FLAGS)
             ]
         );
     }
@@ -766,17 +862,17 @@ mod tests {
         use ScanPriority::*;
 
         let mut t = spanning_tree(&[
-            (0..3, Historic),
-            (2..5, Scanned),
-            (6..8, ChainTip),
-            (7..10, Scanned),
+            (0..3, Historic, NO_FLAGS),
+            (2..5, Scanned, NO_FLAGS),
+            // 5..6 mind the gap
+            (6..8, ChainTip, NO_FLAGS),
+            (7..10, Scanned, NO_FLAGS),
         ])
         .unwrap();
 
-        t = t.insert(scan_range(0..3, Scanned), false);
-        t = t.insert(scan_range(5..8, Scanned), false);
-
-        assert_eq!(t.into_vec(), vec![scan_range(0..10, Scanned)]);
+        t = t.insert(scan_range(0..3, Scanned, NO_FLAGS), false);
+        t = t.insert(scan_range(5..8, Scanned, NO_FLAGS), false);
+        assert_eq!(t.into_vec(), vec![scan_range(0..10, Scanned, NO_FLAGS)]);
     }
 
     #[test]
@@ -784,28 +880,28 @@ mod tests {
         use ScanPriority::*;
 
         let mut t = spanning_tree(&[
-            (0..3, Historic),
-            (3..5, Scanned),
-            (5..7, ChainTip),
-            (7..10, Scanned),
+            (0..3, Historic, NO_FLAGS),
+            (3..5, Scanned, NO_FLAGS),
+            (5..7, ChainTip, NO_FLAGS),
+            (7..10, Scanned, NO_FLAGS),
         ])
         .unwrap();
 
-        t = t.insert(scan_range(4..9, OpenAdjacent), true);
+        t = t.insert(scan_range(4..9, OpenAdjacent, NO_FLAGS), true);
 
         let expected = vec![
-            scan_range(0..3, Historic),
-            scan_range(3..4, Scanned),
-            scan_range(4..5, OpenAdjacent),
-            scan_range(5..7, ChainTip),
-            scan_range(7..9, OpenAdjacent),
-            scan_range(9..10, Scanned),
+            scan_range(0..3, Historic, NO_FLAGS),
+            scan_range(3..4, Scanned, NO_FLAGS),
+            scan_range(4..5, OpenAdjacent, NO_FLAGS),
+            scan_range(5..7, ChainTip, NO_FLAGS),
+            scan_range(7..9, OpenAdjacent, NO_FLAGS),
+            scan_range(9..10, Scanned, NO_FLAGS),
         ];
         assert_eq!(t.clone().into_vec(), expected);
 
         // An insert of an ignored range should not override a scanned range; the existing
         // priority should prevail, and so the expected state of the tree is unchanged.
-        t = t.insert(scan_range(2..5, Ignored), true);
+        t = t.insert(scan_range(2..5, Ignored, NO_FLAGS), true);
         assert_eq!(t.into_vec(), expected);
     }
 }
