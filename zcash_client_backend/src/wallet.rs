@@ -72,10 +72,10 @@ pub enum Recipient {
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
-pub struct WalletTx<N, S> {
+pub struct WalletTx<N, S, A> {
     pub txid: TxId,
     pub index: usize,
-    pub sapling_spends: Vec<WalletSaplingSpend>,
+    pub sapling_spends: Vec<WalletSaplingSpend<A>>,
     pub sapling_outputs: Vec<WalletSaplingOutput<N, S>>,
 }
 
@@ -136,13 +136,13 @@ impl transparent_fees::InputView for WalletTransparentOutput {
 /// A subset of a [`SpendDescription`] relevant to wallets and light clients.
 ///
 /// [`SpendDescription`]: zcash_primitives::transaction::components::SpendDescription
-pub struct WalletSaplingSpend {
+pub struct WalletSaplingSpend<AccountId> {
     index: usize,
     nf: sapling::Nullifier,
     account: AccountId,
 }
 
-impl WalletSaplingSpend {
+impl<AccountId> WalletSaplingSpend<AccountId> {
     pub fn from_parts(index: usize, nf: sapling::Nullifier, account: AccountId) -> Self {
         Self { index, nf, account }
     }

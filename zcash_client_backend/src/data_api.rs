@@ -20,7 +20,7 @@ use zcash_primitives::{
         components::amount::{Amount, BalanceError, NonNegativeAmount},
         Transaction, TxId,
     },
-    zip32::{AccountId, Scope},
+    zip32::Scope,
 };
 
 use crate::{
@@ -283,14 +283,14 @@ impl<T> Ratio<T> {
 /// this circumstance it is possible that a newly created transaction could conflict with a
 /// not-yet-mined transaction in the mempool.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WalletSummary {
+pub struct WalletSummary<AccountId> {
     account_balances: BTreeMap<AccountId, AccountBalance>,
     chain_tip_height: BlockHeight,
     fully_scanned_height: BlockHeight,
     scan_progress: Option<Ratio<u64>>,
 }
 
-impl WalletSummary {
+impl<AccountId> WalletSummary<AccountId> {
     /// Constructs a new [`WalletSummary`] from its constituent parts.
     pub fn new(
         account_balances: BTreeMap<AccountId, AccountBalance>,
@@ -344,6 +344,9 @@ pub trait InputSource {
     /// The type of errors produced by a wallet backend.
     type Error;
 
+    /// The type used to track unique account identifiers.
+    type AccountId;
+
     /// Backend-specific note identifier.
     ///
     /// For example, this might be a database identifier type
@@ -367,7 +370,7 @@ pub trait InputSource {
     /// be included.
     fn select_spendable_notes(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
         target_value: Amount,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
@@ -407,6 +410,9 @@ pub trait InputSource {
 pub trait WalletRead {
     /// The type of errors that may be generated when querying a wallet data store.
     type Error;
+
+    /// The type used to track unique account identifiers.
+    type AccountId;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
@@ -486,7 +492,7 @@ pub trait WalletRead {
 
     /// Returns the birthday height for the given account, or an error if the account is not known
     /// to the wallet.
-    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error>;
+    fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error>;
 
     /// Returns the most recently generated unified address for the specified account, if the
     /// account identifier specified refers to a valid account for this wallet.
@@ -495,26 +501,26 @@ pub trait WalletRead {
     /// account.
     fn get_current_address(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns all unified full viewing keys known to this wallet.
     fn get_unified_full_viewing_keys(
         &self,
-    ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error>;
+    ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
 
     /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<AccountId>, Self::Error>;
+    ) -> Result<Option<Self::AccountId>, Self::Error>;
 
     /// Returns the wallet balances and sync status for an account given the specified minimum
     /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
     fn get_wallet_summary(
         &self,
         min_confirmations: u32,
-    ) -> Result<Option<WalletSummary>, Self::Error>;
+    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
 
     /// Returns the memo for a note.
     ///
@@ -532,7 +538,7 @@ pub trait WalletRead {
     fn get_sapling_nullifiers(
         &self,
         query: NullifierQuery,
-    ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error>;
+    ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error>;
 
     /// Returns the nullifiers for Orchard notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as spent (in
@@ -541,7 +547,7 @@ pub trait WalletRead {
     fn get_orchard_nullifiers(
         &self,
         query: NullifierQuery,
-    ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error>;
+    ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error>;
 
     /// Returns the set of all transparent receivers associated with the given account.
     ///
@@ -550,19 +556,19 @@ pub trait WalletRead {
     /// receivers.
     fn get_transparent_receivers(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
     ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error>;
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
     /// for each address associated with a nonzero balance.
     fn get_transparent_balances(
         &self,
-        account: AccountId,
+        account: Self::AccountId,
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error>;
 
     /// Returns a vector with the IDs of all accounts known to this wallet.
-    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error>;
+    fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error>;
 }
 
 /// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
@@ -781,18 +787,18 @@ pub struct DecryptedTransaction<'a> {
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are created and submitted
 /// to the network.
-pub struct SentTransaction<'a> {
+pub struct SentTransaction<'a, AccountId> {
     pub tx: &'a Transaction,
     pub created: time::OffsetDateTime,
     pub account: AccountId,
-    pub outputs: Vec<SentTransactionOutput>,
+    pub outputs: Vec<SentTransactionOutput<AccountId>>,
     pub fee_amount: Amount,
     #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
 }
 
 /// A type that represents an output (either Sapling or transparent) that was sent by the wallet.
-pub struct SentTransactionOutput {
+pub struct SentTransactionOutput<AccountId> {
     output_index: usize,
     recipient: Recipient,
     value: NonNegativeAmount,
@@ -800,7 +806,7 @@ pub struct SentTransactionOutput {
     sapling_change_to: Option<(AccountId, sapling::Note)>,
 }
 
-impl SentTransactionOutput {
+impl<AccountId> SentTransactionOutput<AccountId> {
     pub fn from_parts(
         output_index: usize,
         recipient: Recipient,
@@ -997,7 +1003,7 @@ pub trait WalletWrite: WalletRead {
         &mut self,
         seed: &SecretVec<u8>,
         birthday: AccountBirthday,
-    ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error>;
+    ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
     /// addresses known to the wallet.
@@ -1006,7 +1012,7 @@ pub trait WalletWrite: WalletRead {
     /// account.
     fn get_next_available_address(
         &mut self,
-        account: AccountId,
+        account: Self::AccountId,
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
@@ -1034,7 +1040,7 @@ pub trait WalletWrite: WalletRead {
 
     /// Saves information about a transaction that was constructed and sent by the wallet to the
     /// persistent wallet store.
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<(), Self::Error>;
+    fn store_sent_tx(&mut self, sent_tx: &SentTransaction<Self::AccountId>) -> Result<(), Self::Error>;
 
     /// Truncates the wallet database to the specified height.
     ///
@@ -1140,6 +1146,7 @@ pub mod testing {
     impl InputSource for MockWalletDb {
         type Error = ();
         type NoteRef = u32;
+        type AccountId = AccountId;
 
         fn get_spendable_note(
             &self,
@@ -1164,6 +1171,7 @@ pub mod testing {
 
     impl WalletRead for MockWalletDb {
         type Error = ();
+        type AccountId = AccountId;
 
         fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)
@@ -1218,34 +1226,34 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_account_birthday(&self, _account: AccountId) -> Result<BlockHeight, Self::Error> {
+        fn get_account_birthday(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
             Err(())
         }
 
         fn get_current_address(
             &self,
-            _account: AccountId,
+            _account: Self::AccountId,
         ) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
         }
 
         fn get_unified_full_viewing_keys(
             &self,
-        ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
+        ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error> {
             Ok(HashMap::new())
         }
 
         fn get_account_for_ufvk(
             &self,
             _ufvk: &UnifiedFullViewingKey,
-        ) -> Result<Option<AccountId>, Self::Error> {
+        ) -> Result<Option<Self::AccountId>, Self::Error> {
             Ok(None)
         }
 
         fn get_wallet_summary(
             &self,
             _min_confirmations: u32,
-        ) -> Result<Option<WalletSummary>, Self::Error> {
+        ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
             Ok(None)
         }
 
@@ -1333,7 +1341,7 @@ pub mod testing {
             Ok(())
         }
 
-        fn store_sent_tx(&mut self, _sent_tx: &SentTransaction) -> Result<(), Self::Error> {
+        fn store_sent_tx(&mut self, _sent_tx: &SentTransaction<AccountId>) -> Result<(), Self::Error> {
             Ok(())
         }
 

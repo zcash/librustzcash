@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::hash::Hash;
 use std::fmt::{self, Debug};
 
 use incrementalmerkletree::{Position, Retention};
@@ -251,14 +252,14 @@ impl fmt::Display for ScanError {
 /// [`IncrementalWitness`]: sapling::IncrementalWitness
 /// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
+pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey, A: Clone + Default + Eq + Hash + Send + ConditionallySelectable>(
     params: &P,
     block: CompactBlock,
-    vks: &[(&AccountId, &K)],
-    sapling_nullifiers: &[(AccountId, sapling::Nullifier)],
+    vks: &[(&A, &K)],
+    sapling_nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
 ) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
-    scan_block_with_runner::<_, _, ()>(
+    scan_block_with_runner::<_, _, (), A>(
         params,
         block,
         vks,
@@ -268,19 +269,20 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
-type TaggedBatch<S> = Batch<(AccountId, S), SaplingDomain, CompactOutputDescription>;
-type TaggedBatchRunner<S, T> =
-    BatchRunner<(AccountId, S), SaplingDomain, CompactOutputDescription, T>;
+type TaggedBatch<A, S> = Batch<(A, S), SaplingDomain, CompactOutputDescription>;
+type TaggedBatchRunner<A, S, T> =
+    BatchRunner<(A, S), SaplingDomain, CompactOutputDescription, T>;
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn add_block_to_runner<P, S, T>(
+pub(crate) fn add_block_to_runner<P, S, T, A>(
     params: &P,
     block: CompactBlock,
-    batch_runner: &mut TaggedBatchRunner<S, T>,
+    batch_runner: &mut TaggedBatchRunner<A, S, T>,
 ) where
     P: consensus::Parameters + Send + 'static,
     S: Clone + Send + 'static,
-    T: Tasks<TaggedBatch<S>>,
+    T: Tasks<TaggedBatch<A, S>>,
+    A: Clone + Default + Eq + Send
 {
     let block_hash = block.hash();
     let block_height = block.height();
@@ -332,14 +334,15 @@ fn check_hash_continuity(
 pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,
-    T: Tasks<TaggedBatch<K::Scope>> + Sync,
+    T: Tasks<TaggedBatch<A, K::Scope>> + Sync,
+    A: Clone + Default + Eq + Hash + ConditionallySelectable
 >(
     params: &P,
     block: CompactBlock,
-    vks: &[(&AccountId, K)],
-    nullifiers: &[(AccountId, sapling::Nullifier)],
+    vks: &[(&A, K)],
+    nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-    mut batch_runner: Option<&mut TaggedBatchRunner<K::Scope, T>>,
+    mut batch_runner: Option<&mut TaggedBatchRunner<A, K::Scope, T>>,
 ) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
@@ -467,7 +470,7 @@ pub(crate) fn scan_block_with_runner<
             let spend = nullifiers
                 .iter()
                 .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
-                .fold(CtOption::new(AccountId::ZERO, 0.into()), |first, next| {
+                .fold(CtOption::new(A::default(), 0.into()), |first, next| {
                     CtOption::conditional_select(&next, &first, first.is_some())
                 })
                 .map(|account| WalletSaplingSpend::from_parts(index, spend_nf, account));

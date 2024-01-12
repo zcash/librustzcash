@@ -161,6 +161,8 @@ use crate::{
 pub mod error;
 use error::Error;
 
+use super::WalletRead;
+
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
 /// This stores the block height at which the leaf that completed the subtree was
@@ -276,7 +278,8 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
 where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
-    DbT: WalletWrite,
+    DbT: WalletWrite, 
+    <DbT as WalletRead>::AccountId: Clone + Default + Eq + Send,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data_db
