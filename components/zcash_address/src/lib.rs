@@ -34,7 +34,7 @@ pub enum Network {
 
 /// Known kinds of Zcash addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum AddressKind {
+pub enum AddressKind {
     Sprout(kind::sprout::Data),
     Sapling(kind::sapling::Data),
     Unified(unified::Address),
@@ -43,6 +43,16 @@ enum AddressKind {
 }
 
 impl ZcashAddress {
+    /// Returns the [`AddressKind`] of this address
+    pub fn kind(&self) -> &AddressKind {
+        &self.kind
+    }
+
+    /// Returns the [`Network`] that this address can be used on
+    pub fn net(&self) -> Network {
+        self.net
+    }
+
     /// Encodes this Zcash address in its canonical string representation.
     ///
     /// This provides the encoded string representation of the address as defined by the
