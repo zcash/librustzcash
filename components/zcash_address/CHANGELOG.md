@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.1] - 2024-01-12
 ### Fixed
 - Stubs for `zcash_address::convert` traits that are created by `rust-analyzer`
   and similar LSPs no longer reference crate-private type aliases.
