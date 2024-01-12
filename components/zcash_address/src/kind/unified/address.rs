@@ -1,5 +1,4 @@
 use super::{private::SealedItem, ParseError, Typecode};
-use crate::kind;
 
 use std::convert::{TryFrom, TryInto};
 
@@ -7,9 +6,9 @@ use std::convert::{TryFrom, TryInto};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Orchard([u8; 43]),
-    Sapling(kind::sapling::Data),
-    P2pkh(kind::p2pkh::Data),
-    P2sh(kind::p2sh::Data),
+    Sapling([u8; 43]),
+    P2pkh([u8; 20]),
+    P2sh([u8; 20]),
     Unknown { typecode: u32, data: Vec<u8> },
 }
 

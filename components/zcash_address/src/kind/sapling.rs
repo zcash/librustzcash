@@ -18,5 +18,3 @@ pub(crate) const TESTNET: &str = "ztestsapling";
 ///
 /// [the `zcashd` codebase]: https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L493
 pub(crate) const REGTEST: &str = "zregtestsapling";
-
-pub(crate) type Data = [u8; 43];

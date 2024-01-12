@@ -35,11 +35,11 @@ pub enum Network {
 /// Known kinds of Zcash addresses.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum AddressKind {
-    Sprout(kind::sprout::Data),
-    Sapling(kind::sapling::Data),
+    Sprout([u8; 64]),
+    Sapling([u8; 43]),
     Unified(unified::Address),
-    P2pkh(kind::p2pkh::Data),
-    P2sh(kind::p2sh::Data),
+    P2pkh([u8; 20]),
+    P2sh([u8; 20]),
 }
 
 impl ZcashAddress {

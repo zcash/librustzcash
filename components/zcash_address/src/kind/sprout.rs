@@ -11,5 +11,3 @@ pub(crate) const MAINNET: [u8; 2] = [0x16, 0x9a];
 ///
 /// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
 pub(crate) const TESTNET: [u8; 2] = [0x16, 0xb6];
-
-pub(crate) type Data = [u8; 64];
