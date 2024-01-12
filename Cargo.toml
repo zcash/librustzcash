@@ -10,6 +10,7 @@ members = [
     "zcash_history",
     "zcash_primitives",
     "zcash_proofs",
+    "zcash_script",
 ]
 
 [workspace.package]
