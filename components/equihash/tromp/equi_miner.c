@@ -702,6 +702,9 @@ void *worker(void *vp) {
 
 //  if (tp->id == 0)
 //    printf("Digit 0\n");
+  if (tp->id == 0) {
+    equi_clearslots(eq);
+  }
   equi_digit0(eq, tp->id);
   if (tp->id == 0) {
     equi_clearslots(eq);
