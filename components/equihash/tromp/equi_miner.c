@@ -301,6 +301,7 @@ typedef struct equi equi;
 
     eq->blake_ctx = eq->blake2b_clone(ctx);
     memset(eq->nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
+    equi_clearslots(eq);
     eq->nsols = 0;
   }
   void equi_clearslots(equi *eq) {
@@ -698,6 +699,9 @@ void *worker(void *vp) {
 
 //  if (tp->id == 0)
 //    printf("Digit 0\n");
+  if (tp->id == 0) {
+    equi_clearslots(eq);
+  }
   equi_digit0(eq, tp->id);
   if (tp->id == 0) {
     equi_clearslots(eq);
