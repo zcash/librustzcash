@@ -83,6 +83,30 @@ impl SealedItem for Ivk {
 }
 
 /// A Unified Incoming Viewing Key.
+///
+/// # Examples
+///
+/// ```
+/// # use std::error::Error;
+/// use zcash_address::unified::{self, Container, Encoding};
+///
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # let uivk_from_user = || "uivk1djetqg3fws7y7qu5tekynvcdhz69gsyq07ewvppmzxdqhpfzdgmx8urnkqzv7ylz78ez43ux266pqjhecd59fzhn7wpe6zarnzh804hjtkyad25ryqla5pnc8p5wdl3phj9fczhz64zprun3ux7y9jc08567xryumuz59rjmg4uuflpjqwnq0j0tzce0x74t4tv3gfjq7nczkawxy6y7hse733ae3vw7qfjd0ss0pytvezxp42p6rrpzeh6t2zrz7zpjk0xhngcm6gwdppxs58jkx56gsfflugehf5vjlmu7vj3393gj6u37wenavtqyhdvcdeaj86s6jczl4zq";
+/// let example_uivk: &str = uivk_from_user();
+///
+/// let (network, uivk) = unified::Uivk::decode(example_uivk)?;
+///
+/// // We can obtain the pool-specific Incoming Viewing Keys for the UIVK in
+/// // preference order (the order in which wallets should prefer to use their
+/// // corresponding address receivers):
+/// let ivks: Vec<unified::Ivk> = uivk.items();
+///
+/// // And we can create the UIVK from a list of IVKs:
+/// let new_uivk = unified::Uivk::try_from_items(ivks)?;
+/// assert_eq!(new_uivk, uivk);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Uivk(pub(crate) Vec<Ivk>);
 

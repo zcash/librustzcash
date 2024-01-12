@@ -1,3 +1,5 @@
+//! Implementation of [ZIP 316](https://zips.z.cash/zip-0316) Unified Addresses and Viewing Keys.
+
 use bech32::{self, FromBase32, ToBase32, Variant};
 use std::cmp;
 use std::convert::{TryFrom, TryInto};
@@ -17,12 +19,23 @@ pub use ivk::{Ivk, Uivk};
 
 const PADDING_LEN: usize = 16;
 
+/// The known Receiver and Viewing Key types.
+///
+/// The typecodes `0xFFFA..=0xFFFF` reserved for experiments are currently not
+/// distinguished from unknown values, and will be parsed as [`Typecode::Unknown`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Typecode {
+    /// A transparent P2PKH address, FVK, or IVK encoding as specified in [ZIP 316](https://zips.z.cash/zip-0316).
     P2pkh,
+    /// A transparent P2SH address.
+    ///
+    /// This typecode cannot occur in a [`Ufvk`] or [`Uivk`].
     P2sh,
+    /// A Sapling raw address, FVK, or IVK encoding as specified in [ZIP 316](https://zips.z.cash/zip-0316).
     Sapling,
+    /// An Orchard raw address, FVK, or IVK encoding as specified in [ZIP 316](https://zips.z.cash/zip-0316).
     Orchard,
+    /// An unknown or experimental typecode.
     Unknown(u32),
 }
 
