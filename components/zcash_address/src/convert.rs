@@ -2,7 +2,7 @@ use std::{error::Error, fmt};
 
 use crate::{kind::*, AddressKind, Network, ZcashAddress};
 
-/// An address type is not supported for conversion.
+/// An error indicating that an address type is not supported for conversion.
 #[derive(Debug)]
 pub struct UnsupportedAddress(&'static str);
 

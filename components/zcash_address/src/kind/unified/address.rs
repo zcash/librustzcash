@@ -55,6 +55,49 @@ impl SealedItem for Receiver {
 }
 
 /// A Unified Address.
+///
+/// # Examples
+///
+/// ```
+/// # use std::convert::Infallible;
+/// # use std::error::Error;
+/// use zcash_address::{
+///     unified::{self, Container, Encoding},
+///     ConversionError, TryFromRawAddress, ZcashAddress,
+/// };
+///
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// # let address_from_user = || "u1pg2aaph7jp8rpf6yhsza25722sg5fcn3vaca6ze27hqjw7jvvhhuxkpcg0ge9xh6drsgdkda8qjq5chpehkcpxf87rnjryjqwymdheptpvnljqqrjqzjwkc2ma6hcq666kgwfytxwac8eyex6ndgr6ezte66706e3vaqrd25dzvzkc69kw0jgywtd0cmq52q5lkw6uh7hyvzjse8ksx";
+/// let example_ua: &str = address_from_user();
+///
+/// // We can parse this directly as a `unified::Address`:
+/// let (network, ua) = unified::Address::decode(example_ua)?;
+///
+/// // Or we can parse via `ZcashAddress` (which you should do):
+/// struct MyUnifiedAddress(unified::Address);
+/// impl TryFromRawAddress for MyUnifiedAddress {
+///     // In this example we aren't checking the validity of the
+///     // inner Unified Address, but your code should do so!
+///     type Error = Infallible;
+///
+///     fn try_from_raw_unified(ua: unified::Address) -> Result<Self, ConversionError<Self::Error>> {
+///         Ok(MyUnifiedAddress(ua))
+///     }
+/// }
+/// let addr: ZcashAddress = example_ua.parse()?;
+/// let parsed = addr.convert_if_network::<MyUnifiedAddress>(network)?;
+/// assert_eq!(parsed.0, ua);
+///
+/// // We can obtain the receivers for the UA in preference order
+/// // (the order in which wallets should prefer to use them):
+/// let receivers: Vec<unified::Receiver> = ua.items();
+///
+/// // And we can create the UA from a list of receivers:
+/// let new_ua = unified::Address::try_from_items(receivers)?;
+/// assert_eq!(new_ua, ua);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Address(pub(crate) Vec<Receiver>);
 
