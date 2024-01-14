@@ -1,7 +1,7 @@
 [package]
-name = "zcash_client_backend"
-description = "APIs for creating shielded Zcash light clients"
-version = "0.10.0"
+name = "zcash_keys"
+description = "Zcash key and address management"
+version = "0.0.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -14,12 +14,6 @@ edition.workspace = true
 rust-version.workspace = true
 categories.workspace = true
 
-# Exclude proto files so crates.io consumers don't need protoc.
-exclude = ["*.proto"]
-
-[package.metadata.cargo-udeps.ignore]
-development = ["zcash_proofs"]
-
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -27,39 +21,27 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
-zcash_keys.workspace = true
-zcash_note_encryption.workspace = true
 zcash_primitives.workspace = true
 zip32.workspace = true
 
 # Dependencies exposed in a public API:
-# (Breaking upgrades to these require a breaking upgrade to this crate.)
-# - Data Access API
-time = "0.3.22"
 nonempty.workspace = true
 
 # - CSPRNG
 rand_core.workspace = true
 
 # - Encodings
-base64.workspace = true
 bech32.workspace = true
 bs58.workspace = true
 
-# - Errors
+# - Transparent protocols
 hdwallet = { workspace = true, optional = true }
 
 # - Logging and metrics
 memuse.workspace = true
 tracing.workspace = true
 
-# - Protobuf interfaces and gRPC bindings
-hex.workspace = true
-prost.workspace = true
-tonic = { workspace = true, optional = true }
-
 # - Secret management
-secrecy.workspace = true
 subtle.workspace = true
 
 # - Shielded protocols
@@ -68,15 +50,8 @@ group.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
-# - Note commitment trees
-incrementalmerkletree.workspace = true
-shardtree.workspace = true
-
 # - Test dependencies
 proptest = { workspace = true, optional = true }
-
-# - ZIP 321
-nom = "7"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -85,37 +60,19 @@ document-features.workspace = true
 
 # - Encodings
 byteorder = { workspace = true, optional = true }
-percent-encoding.workspace = true
-
-# - Scanning
-crossbeam-channel.workspace = true
-rayon.workspace = true
-
-[build-dependencies]
-tonic-build.workspace = true
-which = "4"
 
 [dev-dependencies]
-assert_matches.workspace = true
-gumdrop = "0.8"
-incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
+hex.workspace = true
 jubjub.workspace = true
 proptest.workspace = true
 rand_core.workspace = true
-shardtree = { workspace = true, features = ["test-dependencies"] }
-zcash_proofs.workspace = true
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 
-time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
-
 [features]
-## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
-lightwalletd-tonic = ["dep:tonic"]
-
-## Enables receiving transparent funds and shielding them.
+## Enables use of transparent key parts and addresses
 transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
 
-## Enables receiving and spending Orchard funds.
+## Enables use of Orchard key parts and addresses
 orchard = ["dep:orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
@@ -123,22 +80,12 @@ test-dependencies = [
     "dep:proptest",
     "orchard?/test-dependencies",
     "zcash_primitives/test-dependencies",
-    "incrementalmerkletree/test-dependencies",
 ]
 
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["dep:byteorder"]
-
-## Exposes APIs for unstable serialization formats. These may change at any time.
-unstable-serialization = ["dep:byteorder"]
-
-## Exposes the [`data_api::scanning::spanning_tree`] module.
-unstable-spanning-tree = []
-
-[lib]
-bench = false
 
 [badges]
 maintenance = { status = "actively-developed" }

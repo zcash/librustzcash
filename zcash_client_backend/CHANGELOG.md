@@ -29,9 +29,6 @@ and this library adheres to Rust's notion of
     functionality and move it behind the `transparent-inputs` feature flag.
 - `zcash_client_backend::fees::{standard, orchard, sapling}`
 - `zcash_client_backend::fees::ChangeValue::{new, orchard}`
-- `zcash_client_backend::keys`:
-  - `AddressGenerationError`
-  - `UnifiedAddressRequest`
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
@@ -193,29 +190,6 @@ and this library adheres to Rust's notion of
   - `zcash_client_backend::wallet`:
     - `ReceivedSaplingNote::value`
     - `WalletTransparentOutput::value`
-
-- `zcash_client_backend::address`:
-  - `RecipientAddress` has been renamed to `Address`
-  - `Address::Shielded` has been renamed to `Address::Sapling`
-  - `UnifiedAddress::from_receivers` no longer takes an Orchard receiver
-    argument unless the `orchard` feature is enabled.
-  - `UnifiedAddress::orchard` is now only available when the `orchard` feature
-    is enabled.
-
-- `zcash_client_backend::keys`:
-  - `DerivationError::Orchard` is now only available when the `orchard` feature
-    is enabled.
-  - `UnifiedSpendingKey::address` now takes an argument that specifies the
-    receivers to be generated in the resulting address. Also, it now returns
-    `Result<UnifiedAddress, AddressGenerationError>` instead of
-    `Option<UnifiedAddress>` so that we may better report to the user how
-    address generation has failed.
-  - `UnifiedSpendingKey::orchard` is now only available when the `orchard`
-    feature is enabled.
-  - `UnifiedSpendingKey::transparent` is now only available when the
-    `transparent-inputs` feature is enabled.
-  - `UnifiedFullViewingKey::new` no longer takes an Orchard full viewing key
-    argument unless the `orchard` feature is enabled.
 
 ### Removed
 - `zcash_client_backend::wallet::ReceivedSaplingNote` has been replaced by

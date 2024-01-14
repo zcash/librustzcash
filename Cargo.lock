@@ -3038,6 +3038,7 @@ dependencies = [
  "which",
  "zcash_address",
  "zcash_encoding",
+ "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
@@ -3112,6 +3113,33 @@ dependencies = [
  "byteorder",
  "primitive-types",
  "proptest",
+]
+
+[[package]]
+name = "zcash_keys"
+version = "0.0.0"
+dependencies = [
+ "bech32",
+ "bls12_381",
+ "bs58",
+ "byteorder",
+ "document-features",
+ "group",
+ "hdwallet",
+ "hex",
+ "jubjub",
+ "memuse",
+ "nonempty",
+ "orchard",
+ "proptest",
+ "rand_core",
+ "sapling-crypto",
+ "subtle",
+ "tracing",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_primitives",
+ "zip32",
 ]
 
 [[package]]

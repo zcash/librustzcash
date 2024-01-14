@@ -44,12 +44,8 @@ pub mod sapling {
     /// # Examples
     ///
     /// ```
-    /// use zcash_primitives::{
-    ///     constants::testnet::COIN_TYPE,
-    /// };
-    /// use zcash_client_backend::{
-    ///     keys::sapling,
-    /// };
+    /// use zcash_primitives::constants::testnet::COIN_TYPE;
+    /// use zcash_keys::keys::sapling;
     /// use zip32::AccountId;
     ///
     /// let extsk = sapling::spending_key(&[0; 32][..], COIN_TYPE, AccountId::ZERO);

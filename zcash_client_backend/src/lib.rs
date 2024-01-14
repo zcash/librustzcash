@@ -14,12 +14,12 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
-pub mod address;
+pub use zcash_keys::address;
 pub mod data_api;
 mod decrypt;
-pub mod encoding;
+pub use zcash_keys::encoding;
 pub mod fees;
-pub mod keys;
+pub use zcash_keys::keys;
 pub mod proto;
 pub mod scan;
 pub mod scanning;
