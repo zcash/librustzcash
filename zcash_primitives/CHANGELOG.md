@@ -10,7 +10,7 @@ and this library adheres to Rust's notion of
 - Dependency on `bellman 0.14`.
 - `zcash_primitives::consensus::sapling_zip212_enforcement`
 - `zcash_primitives::transaction`:
-  - `builder::{BuildConfig, FeeError, get_fee}`
+  - `builder::{BuildConfig, FeeError, get_fee, BuildResult}`
   - `builder::Error::SaplingBuilderNotAvailable`
   - `components::sapling`:
     - Sapling bundle component parsers, behind the `temporary-zcashd` feature
@@ -78,6 +78,8 @@ and this library adheres to Rust's notion of
     `Builder` typed on the provided channel.
   - `builder::Builder::get_fee` now returns a `builder::FeeError` instead of the
     bare `FeeRule::Error` when returning `Err`.
+  - `builder::Builder::build` now returns a `Result<BuildResult, ...>` instead of 
+    using a tuple to return the constructed transaction and build metadata.
   - `builder::Error::OrchardAnchorNotAvailable` has been renamed to
     `OrchardBuilderNotAvailable`.
   - `builder::{build, build_zfuture}` each now take an additional `rng` argument.
