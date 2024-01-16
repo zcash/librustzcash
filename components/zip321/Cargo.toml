@@ -14,3 +14,15 @@ rust-version.workspace = true
 categories.workspace = true
 
 [dependencies]
+zcash_address.workspace = true
+zcash_protocol.workspace = true
+
+# - Parsing and Encoding
+nom = "7"
+base64.workspace = true
+percent-encoding.workspace = true
+
+[dev-dependencies]
+zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["test-dependencies"] }
+proptest.workspace = true

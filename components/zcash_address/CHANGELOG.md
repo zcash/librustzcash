@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::ZcashAddress::can_receive_memo`
+- `zcash_address::unified::Address::can_receive_memo`
+- Module `zcash_address::testing` under the `test-dependencies` feature.
+- Module `zcash_address::unified::address::testing` under the 
+  `test-dependencies` feature.
+
 ## [0.3.2] - 2024-03-06
 ### Added
 - `zcash_address::convert`:

@@ -266,4 +266,89 @@ impl ZcashAddress {
             }),
         }
     }
+
+    /// Returns whether this address can receive a memo.
+    pub fn can_receive_memo(&self) -> bool {
+        match &self.kind {
+            AddressKind::Sprout(_) => true,
+            AddressKind::Sapling(_) => true,
+            AddressKind::Unified(addr) => addr.can_receive_memo(),
+            AddressKind::P2pkh(_) => false,
+            AddressKind::P2sh(_) => false,
+            AddressKind::Tex(_) => false,
+        }
+    }
+}
+
+#[cfg(feature = "test-dependencies")]
+pub mod testing {
+    use std::convert::TryInto;
+
+    use proptest::{array::uniform20, collection::vec, prelude::any, prop_compose, prop_oneof};
+
+    use crate::{unified::address::testing::arb_unified_address, AddressKind, ZcashAddress};
+    use zcash_protocol::consensus::NetworkType;
+
+    prop_compose! {
+        fn arb_sprout_addr_kind()(
+            r_bytes in vec(any::<u8>(), 64)
+        ) -> AddressKind {
+            AddressKind::Sprout(r_bytes.try_into().unwrap())
+        }
+    }
+
+    prop_compose! {
+        fn arb_sapling_addr_kind()(
+            r_bytes in vec(any::<u8>(), 43)
+        ) -> AddressKind {
+            AddressKind::Sapling(r_bytes.try_into().unwrap())
+        }
+    }
+
+    prop_compose! {
+        fn arb_p2pkh_addr_kind()(
+            r_bytes in uniform20(any::<u8>())
+        ) -> AddressKind {
+            AddressKind::P2pkh(r_bytes)
+        }
+    }
+
+    prop_compose! {
+        fn arb_p2sh_addr_kind()(
+            r_bytes in uniform20(any::<u8>())
+        ) -> AddressKind {
+            AddressKind::P2sh(r_bytes)
+        }
+    }
+
+    prop_compose! {
+        fn arb_unified_addr_kind()(
+            uaddr in arb_unified_address()
+        ) -> AddressKind {
+            AddressKind::Unified(uaddr)
+        }
+    }
+
+    prop_compose! {
+        fn arb_tex_addr_kind()(
+            r_bytes in uniform20(any::<u8>())
+        ) -> AddressKind {
+            AddressKind::Tex(r_bytes)
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_address(net: NetworkType)(
+            kind in prop_oneof!(
+                arb_sprout_addr_kind(),
+                arb_sapling_addr_kind(),
+                arb_p2pkh_addr_kind(),
+                arb_p2sh_addr_kind(),
+                arb_unified_addr_kind(),
+                arb_tex_addr_kind()
+            )
+        ) -> ZcashAddress {
+            ZcashAddress { net, kind }
+        }
+    }
 }

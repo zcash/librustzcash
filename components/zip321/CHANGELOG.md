@@ -6,4 +6,25 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+The entries below are relative to the `zcash_client_backend` crate as of
+`zcash_client_backend-0.10.0`.
 
+### Added
+- `impl From<zcash_address:ConversionError<E>> for Zip321Error`
+
+### Changed
+- `zip321::Payment::recipient_address` has type `zcash_address::ZcashAddress`
+- `zip321::Payment::without_memo` now takes a `zcash_address::ZcashAddress` for
+  its `recipient_address` argument.
+- Uses of `zcash_primitives::transaction::components::amount::NonNegartiveAmount`
+  have been replace with `zcash_protocol::value::Zatoshis`. Also, some incorrect
+  uses of the signed `zcash_primitibves::transaction::components::amount Amount`
+  type have been corrected via replacement with the `Zatoshis` type.
+- The following methods that previously required a 
+  `zcash_primitives::consensus::Parameters` argument to facilitate address
+  parsing no longer take such an argument.
+  - `zip321::TransactionRequest::{to_uri, from_uri}`
+  - `zip321::render::addr_param`
+  - `zip321::parse::{lead_addr, zcashparam}`
+- `zip321::Param::Memo` now boxes its argument.
+- `zip321::Param::Addr` now wraps a `zcash_address::ZcashAddress`
