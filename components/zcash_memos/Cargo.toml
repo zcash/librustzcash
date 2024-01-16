@@ -1,0 +1,18 @@
+[package]
+name = "zcash_memos"
+description = "Parsing functions and data types for Zcash Memos"
+version = "0.0.0"
+authors = [
+    "Jack Grigg <jack@z.cash>",
+    "Kris Nuttycombe <kris@electriccoin.co>"
+]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+readme = "README.md"
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+
+[dependencies]
+

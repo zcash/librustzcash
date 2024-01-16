@@ -22,6 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 equihash.workspace = true
 zcash_address.workspace = true
 zcash_encoding.workspace = true
+zcash_memos.workspace = true
 zip32.workspace = true
 
 # Dependencies exposed in a public API:

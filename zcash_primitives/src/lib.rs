@@ -21,7 +21,7 @@ pub mod block;
 pub mod consensus;
 pub mod constants;
 pub mod legacy;
-pub mod memo;
+pub use zcash_memos as memo;
 pub mod merkle_tree;
 use sapling;
 pub mod transaction;
