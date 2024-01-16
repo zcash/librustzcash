@@ -71,6 +71,7 @@ pub mod proto;
 pub mod scan;
 pub mod scanning;
 pub mod wallet;
+pub use zip321;
 
 #[cfg(feature = "unstable-serialization")]
 pub mod serialization;

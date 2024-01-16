@@ -14,3 +14,11 @@ rust-version.workspace = true
 categories.workspace = true
 
 [dependencies]
+zcash_address.workspace = true
+zcash_protocol.workspace = true
+
+# - Parsing and Encoding
+nom = "7"
+base64.workspace = true
+percent-encoding.workspace = true
+

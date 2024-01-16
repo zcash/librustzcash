@@ -35,6 +35,10 @@ and this library adheres to Rust's notion of
   `NonNegativeAmount` rather than a signed `Amount` as its argument.
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a
   `NonNegativeAmount` rather than a signed `Amount`.
+- `zcash_client_backend::zip321` has been extracted to, and is now a reexport 
+  of the root module of the `zip321` crate. Several of the APIs of this module
+  have changed as a consequence of this extraction; please see the `zip321`
+  CHANGELOG for details.
 
 ## [0.11.0-pre-release] Unreleased
 
