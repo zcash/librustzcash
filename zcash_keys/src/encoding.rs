@@ -175,7 +175,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
 ///     zip32::AccountId,
 /// };
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_extended_spending_key,
 ///     keys::sapling,
 /// };
@@ -208,7 +208,7 @@ pub fn decode_extended_spending_key(
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
 ///     zip32::AccountId,
 /// };
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_extended_full_viewing_key,
 ///     keys::sapling,
 /// };
@@ -239,7 +239,7 @@ pub fn decode_extended_full_viewing_key(
 /// ```
 /// use group::Group;
 /// use sapling::{Diversifier, PaymentAddress};
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_payment_address,
 /// };
 /// use zcash_primitives::{
@@ -283,7 +283,7 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 /// ```
 /// use group::Group;
 /// use sapling::{Diversifier, PaymentAddress};
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::decode_payment_address,
 /// };
 /// use zcash_primitives::{
@@ -327,7 +327,7 @@ pub fn decode_payment_address(
 /// # Examples
 ///
 /// ```
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_transparent_address,
 /// };
 /// use zcash_primitives::{
@@ -398,7 +398,7 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 /// use zcash_primitives::{
 ///     consensus::{TEST_NETWORK, Parameters},
 /// };
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::decode_transparent_address,
 /// };
 /// use zcash_primitives::legacy::TransparentAddress;
