@@ -1,16 +1,7 @@
 use crate::{
-    consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+    consensus::{BlockHeight, NetworkUpgrade, Parameters},
     constants,
 };
-
-/// Represents the Network Parameters of the Full Node the caller connects to.
-pub enum FullNodeParameters<P: Parameters> {
-    /// Variant indicating a Zcash Full Node running on public Mainnet or Testnet
-    Consensus(Network),
-    /// The consensus parameters of a local or non-public network like one or more nodes
-    /// in `regtest` mode.
-    Local(P),
-}
 
 /// a `LocalNetwork` setup should define the activation heights
 /// of network upgrades. `None` is considered as "not activated"
@@ -60,15 +51,10 @@ pub struct LocalNetwork {
 
 /// Parameters default implementation for `LocalNetwork`
 /// Important note:
-/// The following functions return `constants::regtest` values
-/// ```
-/// fn coin_type()
-/// fn address_network()
-/// fn hrp_sapling_extended_spending_key()
-/// fn hrp_sapling_extended_full_viewing_key()
-/// fn hrp_sapling_payment_address()
-/// fn b58_script_address_prefix()
-/// ```
+/// The functions `coin_type()`, `address_network()`,  
+/// `hrp_sapling_extended_spending_key()`, `hrp_sapling_extended_full_viewing_key()`,
+/// `hrp_sapling_payment_address()`, `b58_script_address_prefix()` return 
+/// `constants::regtest` values
 impl Parameters for LocalNetwork {
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
         match nu {

@@ -56,12 +56,10 @@ and this library adheres to Rust's notion of
 - `impl From<TxId> for [u8; 32]`
 - Added feature `local-consensus` to crate `zcash_primitives`
   - Adds `pub mod local_consensus`
-  - `local_consensus::FullNodeParameters` adds functionality to refer to Full Node
-    parameters that can be either (public) Consensus nodes like `Network::MainNetwork`
-    or `Network::TestNetwork`, or a `Local(P)` with a set of Parameters `P`. `Regtest` 
-    is considered a `LocalConsensus`.
   - `zcash_primitives::local_consensus::LocalNetwork` provides a type for specifying 
-    network upgrade activation heights for a given `FullNodeParameters::Local(P)`
+    network upgrade activation heights for a local or specific configuration of a full
+    node. Developers can make use of this type when connecting to a Regtest node by
+    replicating the activation heights used on their node configuration.
   - `impl Parameters for LocalNetwork` that use provided activation heights and
     defaults to `constants::regtest::` for everything else. 
 
