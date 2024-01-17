@@ -113,7 +113,11 @@ time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 lightwalletd-tonic = ["dep:tonic"]
 
 ## Enables receiving transparent funds and shielding them.
-transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
+transparent-inputs = [
+    "dep:hdwallet",
+    "zcash_keys/transparent-inputs",
+    "zcash_primitives/transparent-inputs",
+]
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard"]
