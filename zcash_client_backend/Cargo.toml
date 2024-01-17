@@ -120,7 +120,7 @@ transparent-inputs = [
 ]
 
 ## Enables receiving and spending Orchard funds.
-orchard = ["dep:orchard"]
+orchard = ["dep:orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
