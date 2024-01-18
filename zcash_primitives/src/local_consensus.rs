@@ -53,7 +53,7 @@ pub struct LocalNetwork {
 /// Important note:
 /// The functions `coin_type()`, `address_network()`,  
 /// `hrp_sapling_extended_spending_key()`, `hrp_sapling_extended_full_viewing_key()`,
-/// `hrp_sapling_payment_address()`, `b58_script_address_prefix()` return 
+/// `hrp_sapling_payment_address()`, `b58_script_address_prefix()` return
 /// `constants::regtest` values
 impl Parameters for LocalNetwork {
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
