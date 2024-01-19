@@ -54,6 +54,14 @@ and this library adheres to Rust's notion of
 - `impl {Clone, PartialEq, Eq} for zcash_primitives::memo::Error`
 - `impl {PartialEq, Eq} for zcash_primitives::sapling::note::Rseed`
 - `impl From<TxId> for [u8; 32]`
+- Added feature `local-consensus` to crate `zcash_primitives`
+  - Adds `pub mod local_consensus`
+  - `zcash_primitives::local_consensus::LocalNetwork` provides a type for specifying 
+    network upgrade activation heights for a local or specific configuration of a full
+    node. Developers can make use of this type when connecting to a Regtest node by
+    replicating the activation heights used on their node configuration.
+  - `impl Parameters for LocalNetwork` that use provided activation heights and
+    defaults to `constants::regtest::` for everything else. 
 
 ### Changed
 - `zcash_primitives::transaction`:
@@ -112,6 +120,9 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::zip32`:
   - `ChildIndex` has been changed from an enum to an opaque struct, and no
     longer supports non-hardened indices.
+- `zcash_client_backend` changes related to `local-consensus` feature:
+  - added tests that verify `zip321` supports Payment URIs with `Local(P)`
+  network parameters.
 
 ### Removed
 - `zcash_primitives::constants`:
