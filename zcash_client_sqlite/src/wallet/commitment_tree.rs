@@ -391,6 +391,7 @@ pub(crate) fn last_shard<H: HashSer>(
 /// Returns an error iff the proposed insertion range
 /// for the tree shards would create a discontinuity
 /// in the database.
+#[tracing::instrument(skip(conn))]
 fn check_shard_discontinuity(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,
@@ -517,6 +518,7 @@ pub(crate) fn truncate(
     .map(|_| ())
 }
 
+#[tracing::instrument(skip(conn))]
 pub(crate) fn get_cap<H: HashSer>(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,
@@ -534,6 +536,7 @@ pub(crate) fn get_cap<H: HashSer>(
     )
 }
 
+#[tracing::instrument(skip(conn, cap))]
 pub(crate) fn put_cap<H: HashSer>(
     conn: &rusqlite::Connection,
     table_prefix: &'static str,
@@ -949,6 +952,7 @@ pub(crate) fn truncate_checkpoints(
     Ok(())
 }
 
+#[tracing::instrument(skip(conn, roots))]
 pub(crate) fn put_shard_roots<
     H: Hashable + HashSer + Clone + Eq,
     const DEPTH: u8,
@@ -1004,6 +1008,7 @@ pub(crate) fn put_shard_roots<
             .map_err(ShardTreeError::Storage)?,
     );
 
+    let insert_into_cap = tracing::info_span!("insert_into_cap").entered();
     let cap_result = cap
         .batch_insert(
             Position::from(start_index),
@@ -1019,6 +1024,7 @@ pub(crate) fn put_shard_roots<
         )
         .map_err(ShardTreeError::Insert)?
         .expect("slice of inserted roots was verified to be nonempty");
+    drop(insert_into_cap);
 
     put_cap(conn, table_prefix, cap_result.subtree.take_root()).map_err(ShardTreeError::Storage)?;
 
@@ -1029,6 +1035,7 @@ pub(crate) fn put_shard_roots<
     )
     .map_err(ShardTreeError::Storage)?;
 
+    let put_roots = tracing::info_span!("write_shards").entered();
     for (root, i) in roots.iter().zip(0u64..) {
         // We want to avoid deserializing the subtree just to annotate its root node, so we simply
         // cache the downloaded root alongside of any already-persisted subtree. We will update the
@@ -1063,6 +1070,7 @@ pub(crate) fn put_shard_roots<
         ])
         .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
     }
+    drop(put_roots);
 
     Ok(())
 }
