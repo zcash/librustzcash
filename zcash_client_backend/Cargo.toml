@@ -133,7 +133,7 @@ test-dependencies = [
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
-unstable = ["dep:byteorder"]
+unstable = ["dep:byteorder", "zcash_keys/unstable"]
 
 ## Exposes APIs for unstable serialization formats. These may change at any time.
 unstable-serialization = ["dep:byteorder"]
