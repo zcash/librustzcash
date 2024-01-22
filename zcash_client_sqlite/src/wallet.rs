@@ -486,9 +486,11 @@ pub(crate) trait ScanProgress {
     ) -> Result<Option<Ratio<u64>>, SqliteClientError>;
 }
 
+#[derive(Debug)]
 pub(crate) struct SubtreeScanProgress;
 
 impl ScanProgress for SubtreeScanProgress {
+    #[tracing::instrument(skip(conn))]
     fn sapling_scan_progress(
         &self,
         conn: &rusqlite::Connection,
@@ -572,6 +574,7 @@ impl ScanProgress for SubtreeScanProgress {
 ///
 /// `min_confirmations` can be 0, but that case is currently treated identically to
 /// `min_confirmations == 1` for shielded notes. This behaviour may change in the future.
+#[tracing::instrument(skip(conn, params, progress))]
 pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -601,17 +604,25 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     // If the shard containing the summary height contains any unscanned ranges that start below or
     // including that height, none of our balance is currently spendable.
-    let any_spendable = conn.query_row(
-        "SELECT NOT EXISTS(
-             SELECT 1 FROM v_sapling_shard_unscanned_ranges
-             WHERE :summary_height
-                BETWEEN subtree_start_height
-                AND IFNULL(subtree_end_height, :summary_height)
-             AND block_range_start <= :summary_height
-         )",
-        named_params![":summary_height": u32::from(summary_height)],
-        |row| row.get::<_, bool>(0),
-    )?;
+    #[tracing::instrument(skip_all)]
+    fn is_any_spendable(
+        conn: &rusqlite::Connection,
+        summary_height: BlockHeight,
+    ) -> Result<bool, SqliteClientError> {
+        conn.query_row(
+            "SELECT NOT EXISTS(
+                 SELECT 1 FROM v_sapling_shard_unscanned_ranges
+                 WHERE :summary_height
+                    BETWEEN subtree_start_height
+                    AND IFNULL(subtree_end_height, :summary_height)
+                 AND block_range_start <= :summary_height
+             )",
+            named_params![":summary_height": u32::from(summary_height)],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|e| e.into())
+    }
+    let any_spendable = is_any_spendable(conn, summary_height)?;
 
     let mut stmt_accounts = conn.prepare_cached("SELECT account FROM accounts")?;
     let mut account_balances = stmt_accounts
@@ -623,6 +634,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         })
         .collect::<Result<BTreeMap<AccountId, AccountBalance>, _>>()?;
 
+    let sapling_trace = tracing::info_span!("stmt_select_notes").entered();
     let mut stmt_select_notes = conn.prepare_cached(
         "SELECT n.account, n.value, n.is_change, scan_state.max_priority, t.block
          FROM sapling_received_notes n
@@ -695,9 +707,11 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             })?;
         }
     }
+    drop(sapling_trace);
 
     #[cfg(feature = "transparent-inputs")]
     {
+        let transparent_trace = tracing::info_span!("stmt_transparent_balances").entered();
         let zero_conf_height = (chain_tip_height + 1).saturating_sub(min_confirmations);
         let stable_height = chain_tip_height.saturating_sub(PRUNING_DEPTH);
 
@@ -727,6 +741,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 balances.add_unshielded_value(value)?;
             }
         }
+        drop(transparent_trace);
     }
 
     let summary = WalletSummary::new(
@@ -1011,6 +1026,7 @@ fn parse_block_metadata<P: consensus::Parameters>(
     ))
 }
 
+#[tracing::instrument(skip(conn, params))]
 pub(crate) fn block_metadata<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1041,6 +1057,7 @@ pub(crate) fn block_metadata<P: consensus::Parameters>(
     .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
 }
 
+#[tracing::instrument(skip_all)]
 pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
