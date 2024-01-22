@@ -2014,17 +2014,18 @@ pub(crate) fn prune_nullifier_map(
 mod tests {
     use std::num::NonZeroU32;
 
+    use sapling::zip32::ExtendedSpendingKey;
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead};
+    use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
-    use crate::{testing::TestBuilder, AccountId};
+    use crate::{
+        testing::{AddressType, BlockCache, TestBuilder, TestState},
+        AccountId,
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{
-            testing::{AddressType, TestState},
-            PRUNING_DEPTH,
-        },
-        sapling::zip32::ExtendedSpendingKey,
+        crate::PRUNING_DEPTH,
         zcash_client_backend::{
             data_api::{wallet::input_selection::GreedyInputSelector, InputSource, WalletWrite},
             encoding::AddressCodec,
@@ -2034,7 +2035,7 @@ mod tests {
         zcash_primitives::{
             consensus::BlockHeight,
             transaction::{
-                components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+                components::{Amount, OutPoint, TxOut},
                 fees::fixed::FeeRule as FixedFeeRule,
             },
         },
@@ -2316,5 +2317,65 @@ mod tests {
         check_balance(&st, 0, value);
         check_balance(&st, 1, value);
         check_balance(&st, 2, value);
+    }
+
+    #[test]
+    fn block_fully_scanned() {
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+
+        let block_fully_scanned = |st: &TestState<BlockCache>| {
+            st.wallet()
+                .block_fully_scanned()
+                .unwrap()
+                .map(|meta| meta.block_height())
+        };
+
+        // A fresh wallet should have no fully-scanned block.
+        assert_eq!(block_fully_scanned(&st), None);
+
+        // Scan a block above the wallet's birthday height.
+        let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+        let not_our_value = NonNegativeAmount::const_from_u64(10000);
+        let end_height = st.sapling_activation_height() + 2;
+        let _ = st.generate_block_at(
+            end_height,
+            BlockHash([37; 32]),
+            &not_our_key,
+            AddressType::DefaultExternal,
+            not_our_value,
+            17,
+        );
+        st.scan_cached_blocks(end_height, 1);
+
+        // The wallet should still have no fully-scanned block, as no scanned block range
+        // overlaps the wallet's birthday.
+        assert_eq!(block_fully_scanned(&st), None);
+
+        // Scan the block at the wallet's birthday height.
+        let start_height = st.sapling_activation_height();
+        let _ = st.generate_block_at(
+            start_height,
+            BlockHash([0; 32]),
+            &not_our_key,
+            AddressType::DefaultExternal,
+            not_our_value,
+            0,
+        );
+        st.scan_cached_blocks(start_height, 1);
+
+        // The fully-scanned height should now be that of the scanned block.
+        assert_eq!(block_fully_scanned(&st), Some(start_height));
+
+        // Scan the block in between the two previous blocks.
+        let (h, _, _) =
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        st.scan_cached_blocks(h, 1);
+
+        // The fully-scanned height should now be the latest block, as the two disjoint
+        // ranges have been connected.
+        assert_eq!(block_fully_scanned(&st), Some(end_height));
     }
 }
