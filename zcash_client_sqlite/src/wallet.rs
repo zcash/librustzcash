@@ -104,7 +104,7 @@ use crate::{
     SAPLING_TABLES_PREFIX,
 };
 
-use self::scanning::{parse_priority_code, replace_queue_entries};
+use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -1069,42 +1069,42 @@ pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
         // `put_block`, and the effective combination of intra-range linear scanning and the nullifier
         // map ensures that we discover all wallet-related information within the contiguous range.
         //
-        // The fully-scanned height is therefore the greatest height in the first contiguous range of
-        // block rows, which is a combined case of the "gaps and islands" and "greatest N per group"
+        // We also assume that every contiguous range of block heights in the `blocks` table has a
+        // single matching entry in the `scan_queue` table with priority "Scanned". This requires no
+        // bugs in the scan queue update logic, which we have had before. However, a bug here would
+        // mean that we return a more conservative fully-scanned height, which likely just causes a
+        // performance regression.
+        //
+        // The fully-scanned height is therefore the last height that falls within the first range in
+        // the scan queue with priority "Scanned".
         // SQL query problems.
-        conn.query_row(
-            "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
-            FROM blocks
-            INNER JOIN (
-                WITH contiguous AS (
-                    SELECT height, ROW_NUMBER() OVER (ORDER BY height) - height AS grp
-                    FROM blocks
-                )
-                SELECT MIN(height) AS group_min_height, MAX(height) AS group_max_height
-                FROM contiguous
-                GROUP BY grp
-                HAVING :birthday_height BETWEEN group_min_height AND group_max_height
+        let fully_scanned_height = match conn
+            .query_row(
+                "SELECT block_range_start, block_range_end
+                FROM scan_queue
+                WHERE priority = :priority
+                ORDER BY block_range_start ASC
+                LIMIT 1",
+                named_params![":priority": priority_code(&ScanPriority::Scanned)],
+                |row| {
+                    let block_range_start = BlockHeight::from_u32(row.get(0)?);
+                    let block_range_end = BlockHeight::from_u32(row.get(1)?);
+
+                    Ok(if block_range_start <= birthday_height {
+                        // Scan ranges are end-exclusive.
+                        Some(block_range_end - 1)
+                    } else {
+                        None
+                    })
+                },
             )
-            ON height = group_max_height",
-            named_params![":birthday_height": u32::from(birthday_height)],
-            |row| {
-                let height: u32 = row.get(0)?;
-                let block_hash: Vec<u8> = row.get(1)?;
-                let sapling_tree_size: Option<u32> = row.get(2)?;
-                let sapling_tree: Vec<u8> = row.get(3)?;
-                let orchard_tree_size: Option<u32> = row.get(4)?;
-                Ok((
-                    BlockHeight::from(height),
-                    block_hash,
-                    sapling_tree_size,
-                    sapling_tree,
-                    orchard_tree_size
-                ))
-            },
-        )
-        .optional()
-        .map_err(SqliteClientError::from)
-        .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
+            .optional()?
+        {
+            Some(Some(h)) => h,
+            _ => return Ok(None),
+        };
+
+        block_metadata(conn, params, fully_scanned_height)
     } else {
         Ok(None)
     }
