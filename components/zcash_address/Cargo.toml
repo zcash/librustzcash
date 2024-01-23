@@ -26,6 +26,7 @@ f4jumble = { version = "0.1.1", path = "../f4jumble", default-features = false, 
 zcash_protocol.workspace = true
 zcash_encoding.workspace = true
 proptest = { workspace = true, optional = true }
+static_assertions.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
