@@ -8,10 +8,25 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 ### Added
 - `zcash_address::ZcashAddress::{can_receive_memo, can_receive_as, matches_receiver}`
-- `zcash_address::unified::Address::{can_receive_memo, has_receiver_of_type, contains_receiver}`
+- `zcash_address::unified`:
+  - `Address::{can_receive_memo, has_receiver_of_type, contains_receiver, receivers}`
+  - `DataTypecode`
+  - `MetadataTypecode`
+  - `Item`
+  - `MetadataItem`
 - Module `zcash_address::testing` under the `test-dependencies` feature.
 - Module `zcash_address::unified::address::testing` under the 
   `test-dependencies` feature.
+
+### Changed
+- `zcash_address::unified`:
+  - `Typecode` has changed. Instead of having a variant for each receiver type,
+    it now has two variants, `Typecode::Data` and `Typecode::Metadata`.
+
+### Removed
+- `zcash_address::unified::Container::items` Preference order is only
+  significant when considering unified address receivers; use
+  `Address::receivers` instead.
 
 ## [0.3.2] - 2024-03-06
 ### Added
