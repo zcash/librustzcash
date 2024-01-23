@@ -28,6 +28,7 @@ proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 assert_matches.workspace = true
+proptest.workspace = true
 
 [features]
 test-dependencies = ["dep:proptest"]
