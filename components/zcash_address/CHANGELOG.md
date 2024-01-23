@@ -1,4 +1,4 @@
-# Changelog
+ Changelog
 All notable changes to this library will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
@@ -7,8 +7,34 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_address::unified`:
+  - `Address::receivers`
+  - `DataTypecode`
+  - `MetadataTypecode`
+  - `Item`
+  - `MetadataItem`
+- `impl serde::{Serialize, Deserialize} for zcash_address::ZcashAddress` behind
+  the `serde` feature flag.
+
+### Changed
+- `zcash_address::unified`:
+  - `Typecode` has changed. Instead of having a variant for each receiver type,
+    it now has two variants, `Typecode::Data` and `Typecode::Metadata`.
+  - `Encoding::try_from_items` arguments have changed.
+  - The result type of `Container::items_as_parsed` has changed.
+  - `ParseError::InvalidTypecodeValue` now wraps a `u32` instead of a `u64`.
+  - `ParseError` has added variant `NotUnderstood`.
+
 ### Deprecated
 - `zcash_address::Network` (use `zcash_protocol::consensus::NetworkType` instead).
+
+### Removed
+- `zcash_address::unified::Container::items` Preference order is only
+  significant when considering unified address receivers; use
+  `Address::receivers` instead.
+- `zcash_address::kind::unified::address::testing`:
+  - `{arb_transparent_typecode,, arb_shielded_typecode, arb_typecodes, arb_unified_address_for_typecodes}`
 
 ## [0.6.2] - 2024-12-13
 ### Fixed
@@ -28,8 +54,7 @@ and this library adheres to Rust's notion of
 
 ## [0.4.0] - 2024-08-19
 ### Added
-- `zcash_address::ZcashAddress::{can_receive_memo, can_receive_as, matches_receiver}`
-- `zcash_address::unified::Address::{can_receive_memo, has_receiver_of_type, contains_receiver}`
+- `zcash_address::ZcashAddress::{has_receiver_of_type, contains_receiver, contains_receiver}`
 - Module `zcash_address::testing` under the `test-dependencies` feature.
 - Module `zcash_address::unified::address::testing` under the
   `test-dependencies` feature.

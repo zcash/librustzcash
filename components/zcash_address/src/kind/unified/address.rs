@@ -1,11 +1,11 @@
 use zcash_protocol::{constants, PoolType};
 
-use super::{private::SealedItem, ParseError, Typecode};
+use super::{private::SealedDataItem, DataTypecode, Item, ParseError};
 
 use alloc::vec::Vec;
-use core::convert::{TryFrom, TryInto};
+use core::{cmp, convert::TryInto};
 
-/// The set of known Receivers for Unified Addresses.
+/// The enumeration of Unified Address Receivers of known types.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     Orchard([u8; 43]),
@@ -15,34 +15,39 @@ pub enum Receiver {
     Unknown { typecode: u32, data: Vec<u8> },
 }
 
-impl TryFrom<(u32, &[u8])> for Receiver {
-    type Error = ParseError;
-
-    fn try_from((typecode, addr): (u32, &[u8])) -> Result<Self, Self::Error> {
-        match typecode.try_into()? {
-            Typecode::P2pkh => addr.try_into().map(Receiver::P2pkh),
-            Typecode::P2sh => addr.try_into().map(Receiver::P2sh),
-            Typecode::Sapling => addr.try_into().map(Receiver::Sapling),
-            Typecode::Orchard => addr.try_into().map(Receiver::Orchard),
-            Typecode::Unknown(_) => Ok(Receiver::Unknown {
-                typecode,
-                data: addr.to_vec(),
-            }),
-        }
-        .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid address for typecode {}: {}", typecode, e))
-        })
+impl Receiver {
+    fn preference_order(a: &Self, b: &Self) -> cmp::Ordering {
+        DataTypecode::preference_order(&a.typecode(), &b.typecode())
     }
 }
 
-impl SealedItem for Receiver {
-    fn typecode(&self) -> Typecode {
+impl SealedDataItem for Receiver {
+    fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
+        match typecode {
+            DataTypecode::P2pkh => data.try_into().map(Receiver::P2pkh),
+            DataTypecode::P2sh => data.try_into().map(Receiver::P2sh),
+            DataTypecode::Sapling => data.try_into().map(Receiver::Sapling),
+            DataTypecode::Orchard => data.try_into().map(Receiver::Orchard),
+            DataTypecode::Unknown(typecode) => Ok(Receiver::Unknown {
+                typecode,
+                data: data.to_vec(),
+            }),
+        }
+        .map_err(|e| {
+            ParseError::InvalidEncoding(format!(
+                "Invalid address for typecode {:?}: {:?}",
+                typecode, e
+            ))
+        })
+    }
+
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Receiver::P2pkh(_) => Typecode::P2pkh,
-            Receiver::P2sh(_) => Typecode::P2sh,
-            Receiver::Sapling(_) => Typecode::Sapling,
-            Receiver::Orchard(_) => Typecode::Orchard,
-            Receiver::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
+            Receiver::P2pkh(_) => DataTypecode::P2pkh,
+            Receiver::P2sh(_) => DataTypecode::P2sh,
+            Receiver::Sapling(_) => DataTypecode::Sapling,
+            Receiver::Orchard(_) => DataTypecode::Orchard,
+            Receiver::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -64,7 +69,7 @@ impl SealedItem for Receiver {
 /// ```
 /// # use core::convert::Infallible;
 /// use zcash_address::{
-///     unified::{self, Container, Encoding},
+///     unified::{self, Container, Encoding, Item},
 ///     ConversionError, TryFromRawAddress, ZcashAddress,
 /// };
 ///
@@ -95,38 +100,65 @@ impl SealedItem for Receiver {
 ///
 /// // We can obtain the receivers for the UA in preference order
 /// // (the order in which wallets should prefer to use them):
-/// let receivers: Vec<unified::Receiver> = ua.items();
+/// let receivers: Vec<unified::Receiver> = ua.receivers();
 ///
 /// // And we can create the UA from a list of receivers:
-/// let new_ua = unified::Address::try_from_items(receivers)?;
+/// let new_ua = unified::Address::try_from_items(receivers.into_iter().map(Item::Data).collect())?;
 /// assert_eq!(new_ua, ua);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Address(pub(crate) Vec<Receiver>);
+pub struct Address(pub(crate) Vec<Item<Receiver>>);
+
+impl Address {
+    /// Returns the receiver items for this address, in order of decreasing preference.
+    ///
+    /// The receiver for a wallet to send to can safely be chosen by selecting the first receiver
+    /// of a type that wallet supports from the result.
+    pub fn receivers(&self) -> Vec<Receiver> {
+        let mut result = self
+            .0
+            .iter()
+            .filter_map(|item| match item {
+                Item::Data(r) => Some(r.clone()),
+                Item::Metadata(_) => None,
+            })
+            .collect::<Vec<Receiver>>();
+        result.sort_unstable_by(Receiver::preference_order);
+        result
+    }
+}
 
 impl Address {
     /// Returns whether this address has the ability to receive transfers of the given pool type.
     pub fn has_receiver_of_type(&self, pool_type: PoolType) -> bool {
-        self.0.iter().any(|r| match r {
-            Receiver::Orchard(_) => pool_type == PoolType::ORCHARD,
-            Receiver::Sapling(_) => pool_type == PoolType::SAPLING,
-            Receiver::P2pkh(_) | Receiver::P2sh(_) => pool_type == PoolType::TRANSPARENT,
-            Receiver::Unknown { .. } => false,
+        self.0.iter().any(|item| match item {
+            Item::Data(Receiver::Orchard(_)) => pool_type == PoolType::ORCHARD,
+            Item::Data(Receiver::Sapling(_)) => pool_type == PoolType::SAPLING,
+            Item::Data(Receiver::P2pkh(_)) | Item::Data(Receiver::P2sh(_)) => {
+                pool_type == PoolType::TRANSPARENT
+            }
+            Item::Data(Receiver::Unknown { .. }) => false,
+            Item::Metadata(_) => false,
         })
     }
 
     /// Returns whether this address contains the given receiver.
     pub fn contains_receiver(&self, receiver: &Receiver) -> bool {
-        self.0.contains(receiver)
+        self.0
+            .iter()
+            .any(|item| matches!(item, Item::Data(r) if r == receiver))
     }
 
     /// Returns whether this address can receive a memo.
     pub fn can_receive_memo(&self) -> bool {
-        self.0
-            .iter()
-            .any(|r| matches!(r, Receiver::Sapling(_) | Receiver::Orchard(_)))
+        self.0.iter().any(|r| {
+            matches!(
+                r,
+                Item::Data(Receiver::Sapling(_)) | Item::Data(Receiver::Orchard(_))
+            )
+        })
     }
 }
 
@@ -148,16 +180,16 @@ impl super::private::SealedContainer for Address {
     /// The HRP for a Bech32m-encoded regtest Unified Address.
     const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS;
 
-    fn from_inner(receivers: Vec<Self::Item>) -> Self {
+    fn from_inner(receivers: Vec<Item<Self::DataItem>>) -> Self {
         Self(receivers)
     }
 }
 
 impl super::Encoding for Address {}
 impl super::Container for Address {
-    type Item = Receiver;
+    type DataItem = Receiver;
 
-    fn items_as_parsed(&self) -> &[Receiver] {
+    fn items_as_parsed(&self) -> &[Item<Receiver>] {
         &self.0
     }
 }
@@ -173,10 +205,10 @@ pub mod testing {
         sample::select,
         strategy::Strategy,
     };
-    use zcash_encoding::MAX_COMPACT_SIZE;
 
     use super::{Address, Receiver};
-    use crate::unified::Typecode;
+    use crate::unified::{DataTypecode, Item};
+    use zcash_encoding::MAX_COMPACT_SIZE;
 
     prop_compose! {
         fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
@@ -188,61 +220,62 @@ pub mod testing {
     }
 
     /// A strategy to generate an arbitrary transparent typecode.
-    pub fn arb_transparent_typecode() -> impl Strategy<Value = Typecode> {
-        select(vec![Typecode::P2pkh, Typecode::P2sh])
+    fn arb_transparent_typecode() -> impl Strategy<Value = DataTypecode> {
+        select(vec![DataTypecode::P2pkh, DataTypecode::P2sh])
     }
 
     /// A strategy to generate an arbitrary shielded (Sapling, Orchard, or unknown) typecode.
-    pub fn arb_shielded_typecode() -> impl Strategy<Value = Typecode> {
+    fn arb_shielded_typecode() -> impl Strategy<Value = DataTypecode> {
         prop_oneof![
-            Just(Typecode::Sapling),
-            Just(Typecode::Orchard),
-            ((<u32>::from(Typecode::Orchard) + 1)..MAX_COMPACT_SIZE).prop_map(Typecode::Unknown)
+            Just(DataTypecode::Sapling),
+            Just(DataTypecode::Orchard),
+            ((<u32>::from(DataTypecode::Orchard) + 1)..MAX_COMPACT_SIZE)
+                .prop_map(DataTypecode::Unknown)
         ]
     }
 
     /// A strategy to generate an arbitrary valid set of typecodes without
     /// duplication and containing only one of P2sh and P2pkh transparent
-    /// typecodes. The resulting vector will be sorted in encoding order.
-    pub fn arb_typecodes() -> impl Strategy<Value = Vec<Typecode>> {
+    /// typecodes.
+    fn arb_typecodes() -> impl Strategy<Value = Vec<DataTypecode>> {
         prop::option::of(arb_transparent_typecode()).prop_flat_map(|transparent| {
-            prop::collection::hash_set(arb_shielded_typecode(), 1..4).prop_map(move |xs| {
-                let mut typecodes: Vec<_> = xs.into_iter().chain(transparent).collect();
-                typecodes.sort_unstable_by(Typecode::encoding_order);
-                typecodes
-            })
+            prop::collection::hash_set(arb_shielded_typecode(), 1..4)
+                .prop_map(move |xs| xs.into_iter().chain(transparent).collect::<Vec<_>>())
         })
     }
 
-    /// Generates an arbitrary Unified address containing receivers corresponding to the provided
-    /// set of typecodes. The receivers of this address are likely to not represent valid protocol
-    /// receivers, and should only be used for testing parsing and/or encoding functions that do
-    /// not concern themselves with the validity of the underlying receivers.
-    pub fn arb_unified_address_for_typecodes(
-        typecodes: Vec<Typecode>,
+    /// A strategy to generate a vector of unified address receivers containing random data. The
+    /// resulting receivers may not be valid according to protocol rules; this generator is only
+    /// intended for use in testing parsing and serialization.
+    fn arb_unified_address_receivers(
+        typecodes: Vec<DataTypecode>,
     ) -> impl Strategy<Value = Vec<Receiver>> {
         typecodes
             .into_iter()
             .map(|tc| match tc {
-                Typecode::P2pkh => uniform20(0u8..).prop_map(Receiver::P2pkh).boxed(),
-                Typecode::P2sh => uniform20(0u8..).prop_map(Receiver::P2sh).boxed(),
-                Typecode::Sapling => uniform43().prop_map(Receiver::Sapling).boxed(),
-                Typecode::Orchard => uniform43().prop_map(Receiver::Orchard).boxed(),
-                Typecode::Unknown(typecode) => vec(any::<u8>(), 32..256)
+                DataTypecode::P2pkh => uniform20(0u8..).prop_map(Receiver::P2pkh).boxed(),
+                DataTypecode::P2sh => uniform20(0u8..).prop_map(Receiver::P2sh).boxed(),
+                DataTypecode::Sapling => uniform43().prop_map(Receiver::Sapling).boxed(),
+                DataTypecode::Orchard => uniform43().prop_map(Receiver::Orchard).boxed(),
+                DataTypecode::Unknown(typecode) => vec(any::<u8>(), 32..256)
                     .prop_map(move |data| Receiver::Unknown { typecode, data })
                     .boxed(),
             })
             .collect::<Vec<_>>()
     }
 
-    /// Generates an arbitrary Unified address. The receivers of this address are likely to not
-    /// represent valid protocol receivers, and should only be used for testing parsing and/or
-    /// encoding functions that do not concern themselves with the validity of the underlying
-    /// receivers.
+    /// A strategy to generate an arbitrary Unified Address containing only receivers, without
+    /// additional metadata. The receivers in the resulting address  may not be valid according to
+    /// protocol rules; this generator is only intended for use in testing parsing and
+    /// serialization.
     pub fn arb_unified_address() -> impl Strategy<Value = Address> {
         arb_typecodes()
-            .prop_flat_map(arb_unified_address_for_typecodes)
-            .prop_map(Address)
+            .prop_flat_map(arb_unified_address_receivers)
+            .prop_map(|rs| {
+                let mut items = rs.into_iter().map(Item::Data).collect::<Vec<_>>();
+                items.sort_unstable_by(Item::encoding_order);
+                Address(items)
+            })
     }
 }
 
@@ -254,16 +287,15 @@ mod tests {
     use alloc::borrow::ToOwned;
 
     use assert_matches::assert_matches;
-    use zcash_protocol::consensus::NetworkType;
-
-    use crate::{
-        kind::unified::{private::SealedContainer, Container, Encoding},
-        unified::address::testing::arb_unified_address,
-    };
-
     use proptest::{prelude::*, sample::select};
 
-    use super::{Address, ParseError, Receiver, Typecode};
+    use zcash_protocol::consensus::NetworkType;
+
+    use super::{Address, ParseError, Receiver};
+    use crate::{
+        kind::unified::{private::SealedContainer, Encoding as _},
+        unified::{address::testing::arb_unified_address, Item, Typecode},
+    };
 
     proptest! {
         #[test]
@@ -354,11 +386,14 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![Receiver::Sapling([1; 43]), Receiver::Sapling([2; 43])]);
+        let ua = Address(vec![
+            Item::Data(Receiver::Sapling([1; 43])),
+            Item::Data(Receiver::Sapling([2; 43])),
+        ]);
         let encoded = ua.to_jumbled_bytes(Address::MAINNET);
         assert_eq!(
             Address::parse_internal(Address::MAINNET, &encoded[..]),
-            Err(ParseError::DuplicateTypecode(Typecode::Sapling))
+            Err(ParseError::DuplicateTypecode(Typecode::SAPLING))
         );
     }
 
@@ -366,7 +401,10 @@ mod tests {
     fn p2pkh_and_p2sh() {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![Receiver::P2pkh([0; 20]), Receiver::P2sh([0; 20])]);
+        let ua = Address(vec![
+            Item::Data(Receiver::P2pkh([0; 20])),
+            Item::Data(Receiver::P2sh([0; 20])),
+        ]);
         let encoded = ua.to_jumbled_bytes(Address::MAINNET);
         // ensure that decoding catches the error
         assert_eq!(
@@ -379,7 +417,10 @@ mod tests {
     fn addresses_out_of_order() {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![Receiver::Sapling([0; 43]), Receiver::P2pkh([0; 20])]);
+        let ua = Address(vec![
+            Item::Data(Receiver::Sapling([0; 43])),
+            Item::Data(Receiver::P2pkh([0; 20])),
+        ]);
         let encoded = ua.to_jumbled_bytes(Address::MAINNET);
         // ensure that decoding catches the error
         assert_eq!(
@@ -411,18 +452,18 @@ mod tests {
     fn receivers_are_sorted() {
         // Construct a UA with receivers in an unsorted order.
         let ua = Address(vec![
-            Receiver::P2pkh([0; 20]),
-            Receiver::Orchard([0; 43]),
-            Receiver::Unknown {
+            Item::Data(Receiver::P2pkh([0; 20])),
+            Item::Data(Receiver::Orchard([0; 43])),
+            Item::Data(Receiver::Unknown {
                 typecode: 0xff,
                 data: vec![],
-            },
-            Receiver::Sapling([0; 43]),
+            }),
+            Item::Data(Receiver::Sapling([0; 43])),
         ]);
 
         // `Address::receivers` sorts the receivers in priority order.
         assert_eq!(
-            ua.items(),
+            ua.receivers(),
             vec![
                 Receiver::Orchard([0; 43]),
                 Receiver::Sapling([0; 43]),

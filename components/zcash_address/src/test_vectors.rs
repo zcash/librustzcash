@@ -8,6 +8,7 @@ use {
         unified::{
             self,
             address::{test_vectors::TEST_VECTORS, Receiver},
+            Item,
         },
         ToAddress, ZcashAddress,
     },
@@ -38,6 +39,7 @@ fn unified() {
                     data: data.to_vec(),
                 })
             }))
+            .map(Item::Data)
             .collect();
 
         let expected_addr =
