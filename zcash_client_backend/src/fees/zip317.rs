@@ -21,7 +21,7 @@ use super::{
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
-/// A change strategy that and proposes change as a single output to the most current supported
+/// A change strategy that proposes change as a single output to the most current supported
 /// shielded pool and delegates fee calculation to the provided fee rule.
 pub struct SingleOutputChangeStrategy {
     fee_rule: Zip317FeeRule,

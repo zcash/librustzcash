@@ -76,13 +76,24 @@ where
     }
 }
 
+/// A trait for encoding and decoding Zcash addresses.
 pub trait AddressCodec<P>
 where
     Self: std::marker::Sized,
 {
     type Error;
 
+    /// Encode a Zcash address.
+    ///
+    /// # Arguments
+    /// * `params` - The network the address is to be used on.
     fn encode(&self, params: &P) -> String;
+
+    /// Decodes a Zcash address from its string representation.
+    ///
+    /// # Arguments
+    /// * `params` - The network the address is to be used on.
+    /// * `address` - The string representation of the address.
     fn decode(params: &P, address: &str) -> Result<Self, Self::Error>;
 }
 
