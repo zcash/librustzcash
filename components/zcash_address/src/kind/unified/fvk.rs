@@ -1,8 +1,8 @@
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 
 use super::{
-    private::{SealedContainer, SealedItem},
-    Container, Encoding, ParseError, Typecode,
+    private::{SealedContainer, SealedDataItem},
+    Container, DataTypecode, Encoding, Item, ParseError,
 };
 
 /// The set of known FVKs for Unified FVKs.
@@ -39,31 +39,27 @@ pub enum Fvk {
     },
 }
 
-impl TryFrom<(u32, &[u8])> for Fvk {
-    type Error = ParseError;
-
-    fn try_from((typecode, data): (u32, &[u8])) -> Result<Self, Self::Error> {
+impl SealedDataItem for Fvk {
+    fn parse(typecode: DataTypecode, data: &[u8]) -> Result<Self, ParseError> {
         let data = data.to_vec();
-        match typecode.try_into()? {
-            Typecode::P2pkh => data.try_into().map(Fvk::P2pkh),
-            Typecode::P2sh => Err(data),
-            Typecode::Sapling => data.try_into().map(Fvk::Sapling),
-            Typecode::Orchard => data.try_into().map(Fvk::Orchard),
-            Typecode::Unknown(_) => Ok(Fvk::Unknown { typecode, data }),
+        match typecode {
+            DataTypecode::P2pkh => data.try_into().map(Fvk::P2pkh),
+            DataTypecode::P2sh => Err(data),
+            DataTypecode::Sapling => data.try_into().map(Fvk::Sapling),
+            DataTypecode::Orchard => data.try_into().map(Fvk::Orchard),
+            DataTypecode::Unknown(typecode) => Ok(Fvk::Unknown { typecode, data }),
         }
         .map_err(|e| {
-            ParseError::InvalidEncoding(format!("Invalid fvk for typecode {}: {:?}", typecode, e))
+            ParseError::InvalidEncoding(format!("Invalid fvk for typecode {:?}: {:?}", typecode, e))
         })
     }
-}
 
-impl SealedItem for Fvk {
-    fn typecode(&self) -> Typecode {
+    fn typecode(&self) -> DataTypecode {
         match self {
-            Fvk::P2pkh(_) => Typecode::P2pkh,
-            Fvk::Sapling(_) => Typecode::Sapling,
-            Fvk::Orchard(_) => Typecode::Orchard,
-            Fvk::Unknown { typecode, .. } => Typecode::Unknown(*typecode),
+            Fvk::P2pkh(_) => DataTypecode::P2pkh,
+            Fvk::Sapling(_) => DataTypecode::Sapling,
+            Fvk::Orchard(_) => DataTypecode::Orchard,
+            Fvk::Unknown { typecode, .. } => DataTypecode::Unknown(*typecode),
         }
     }
 
@@ -83,7 +79,7 @@ impl SealedItem for Fvk {
 ///
 /// ```
 /// # use std::error::Error;
-/// use zcash_address::unified::{self, Container, Encoding};
+/// use zcash_address::unified::{self, Container, Encoding, Item};
 ///
 /// # fn main() -> Result<(), Box<dyn Error>> {
 /// # let ufvk_from_user = || "uview1cgrqnry478ckvpr0f580t6fsahp0a5mj2e9xl7hv2d2jd4ldzy449mwwk2l9yeuts85wjls6hjtghdsy5vhhvmjdw3jxl3cxhrg3vs296a3czazrycrr5cywjhwc5c3ztfyjdhmz0exvzzeyejamyp0cr9z8f9wj0953fzht0m4lenk94t70ruwgjxag2tvp63wn9ftzhtkh20gyre3w5s24f6wlgqxnjh40gd2lxe75sf3z8h5y2x0atpxcyf9t3em4h0evvsftluruqne6w4sm066sw0qe5y8qg423grple5fftxrqyy7xmqmatv7nzd7tcjadu8f7mqz4l83jsyxy4t8pkayytyk7nrp467ds85knekdkvnd7hqkfer8mnqd7pv";
@@ -91,28 +87,22 @@ impl SealedItem for Fvk {
 ///
 /// let (network, ufvk) = unified::Ufvk::decode(example_ufvk)?;
 ///
-/// // We can obtain the pool-specific Full Viewing Keys for the UFVK in preference
-/// // order (the order in which wallets should prefer to use their corresponding
-/// // address receivers):
-/// let fvks: Vec<unified::Fvk> = ufvk.items();
+/// // We can obtain the pool-specific Full Viewing Keys for the UFVK.
+/// let fvks: &[Item<unified::Fvk>] = ufvk.items_as_parsed();
 ///
 /// // And we can create the UFVK from a list of FVKs:
-/// let new_ufvk = unified::Ufvk::try_from_items(fvks)?;
+/// let new_ufvk = unified::Ufvk::try_from_items(fvks.to_vec())?;
 /// assert_eq!(new_ufvk, ufvk);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Ufvk(pub(crate) Vec<Fvk>);
+pub struct Ufvk(pub(crate) Vec<Item<Fvk>>);
 
 impl Container for Ufvk {
-    type Item = Fvk;
+    type DataItem = Fvk;
 
-    /// Returns the FVKs contained within this UFVK, in the order they were
-    /// parsed from the string encoding.
-    ///
-    /// This API is for advanced usage; in most cases you should use `Ufvk::receivers`.
-    fn items_as_parsed(&self) -> &[Fvk] {
+    fn items_as_parsed(&self) -> &[Item<Fvk>] {
         &self.0
     }
 }
@@ -137,7 +127,7 @@ impl SealedContainer for Ufvk {
     /// The HRP for a Bech32m-encoded regtest Unified FVK.
     const REGTEST: &'static str = "uviewregtest";
 
-    fn from_inner(fvks: Vec<Self::Item>) -> Self {
+    fn from_inner(fvks: Vec<Item<Self::DataItem>>) -> Self {
         Self(fvks)
     }
 }
@@ -148,12 +138,10 @@ mod tests {
 
     use proptest::{array::uniform1, array::uniform32, prelude::*, sample::select};
 
-    use super::{Fvk, ParseError, Typecode, Ufvk};
+    use super::{Fvk, ParseError, Ufvk};
     use crate::{
-        kind::unified::{
-            private::{SealedContainer, SealedItem},
-            Container, Encoding,
-        },
+        kind::unified::{private::SealedContainer, Encoding},
+        unified::{Item, Typecode},
         Network,
     };
 
@@ -211,8 +199,8 @@ mod tests {
             shielded in arb_shielded_fvk(),
             transparent in prop::option::of(arb_transparent_fvk()),
         ) -> Ufvk {
-            let mut items: Vec<_> = transparent.into_iter().chain(shielded).collect();
-            items.sort_unstable_by(Fvk::encoding_order);
+            let mut items: Vec<_> = transparent.into_iter().chain(shielded).map(Item::Data).collect();
+            items.sort_unstable_by(Item::encoding_order);
             Ufvk(items)
         }
     }
@@ -319,11 +307,14 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid Ufvk. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ufvk = Ufvk(vec![Fvk::Sapling([1; 128]), Fvk::Sapling([2; 128])]);
+        let ufvk = Ufvk(vec![
+            Item::Data(Fvk::Sapling([1; 128])),
+            Item::Data(Fvk::Sapling([2; 128])),
+        ]);
         let encoded = ufvk.to_jumbled_bytes(Ufvk::MAINNET);
         assert_eq!(
             Ufvk::parse_internal(Ufvk::MAINNET, &encoded[..]),
-            Err(ParseError::DuplicateTypecode(Typecode::Sapling))
+            Err(ParseError::DuplicateTypecode(Typecode::SAPLING))
         );
     }
 
@@ -343,33 +334,5 @@ mod tests {
             Ufvk::parse_internal(Ufvk::MAINNET, &encoded[..]),
             Err(ParseError::OnlyTransparent)
         );
-    }
-
-    #[test]
-    fn fvks_are_sorted() {
-        // Construct a UFVK with fvks in an unsorted order.
-        let ufvk = Ufvk(vec![
-            Fvk::P2pkh([0; 65]),
-            Fvk::Orchard([0; 96]),
-            Fvk::Unknown {
-                typecode: 0xff,
-                data: vec![],
-            },
-            Fvk::Sapling([0; 128]),
-        ]);
-
-        // `Ufvk::items` sorts the fvks in priority order.
-        assert_eq!(
-            ufvk.items(),
-            vec![
-                Fvk::Orchard([0; 96]),
-                Fvk::Sapling([0; 128]),
-                Fvk::P2pkh([0; 65]),
-                Fvk::Unknown {
-                    typecode: 0xff,
-                    data: vec![],
-                },
-            ]
-        )
     }
 }
