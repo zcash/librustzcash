@@ -150,6 +150,11 @@ impl UnifiedAddress {
         self.transparent.as_ref()
     }
 
+    /// Returns the set of unknown receivers of the unified address.
+    pub fn unknown(&self) -> &[(u32, Vec<u8>)] {
+        &self.unknown
+    }
+
     fn to_address(&self, net: Network) -> ZcashAddress {
         #[cfg(feature = "orchard")]
         let orchard_receiver = self

@@ -693,9 +693,9 @@ where
                         builder.add_transparent_output(taddr, payment.amount)?;
                     }
                 } else {
-                    return Err(Error::UnsupportedPoolType(PoolType::Shielded(
-                        ShieldedProtocol::Orchard,
-                    )));
+                    return Err(Error::NoSupportedReceivers(
+                        ua.unknown().iter().map(|(tc, _)| *tc).collect(),
+                    ));
                 }
             }
             Address::Sapling(addr) => {
@@ -738,6 +738,7 @@ where
                     Some(memo),
                 ))
             }
+            #[cfg(zcash_unstable = "orchard")]
             ShieldedProtocol::Orchard => {
                 #[cfg(not(feature = "orchard"))]
                 return Err(Error::UnsupportedPoolType(PoolType::Shielded(
