@@ -66,7 +66,7 @@
 
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, OptionalExtension};
-use shardtree::ShardTree;
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
@@ -744,11 +744,34 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         drop(transparent_trace);
     }
 
+    let next_sapling_subtree_index = {
+        // This will return a runtime error if we call `get_wallet_summary` from two
+        // threads at the same time, as transactions cannot nest.
+        let tx = conn.unchecked_transaction()?;
+        let shard_store =
+            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+                &tx,
+                SAPLING_TABLES_PREFIX,
+            )?;
+
+        // The last shard will be incomplete, and we want the next range to overlap with
+        // the last complete shard, so return the index of the second-to-last shard root.
+        shard_store
+            .get_shard_roots()
+            .map_err(ShardTreeError::Storage)?
+            .iter()
+            .rev()
+            .nth(1)
+            .map(|addr| addr.index())
+            .unwrap_or(0)
+    };
+
     let summary = WalletSummary::new(
         account_balances,
         chain_tip_height,
         fully_scanned_height,
         sapling_scan_progress,
+        next_sapling_subtree_index,
     );
 
     Ok(Some(summary))
