@@ -20,33 +20,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare feature flags
-        id: prepare
-        shell: bash
-        run: >
-          echo "flags=--features '
-          bundled-prover
-          download-params
-          lightwalletd-tonic
-          temporary-zcashd
-          transparent-inputs
-          unstable
-          unstable-serialization
-          unstable-spanning-tree
-          ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
-          '" >> $GITHUB_OUTPUT
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          extra_flags: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
       - name: Run tests
         run: >
           cargo test
           --release
           --workspace
-          ${{ steps.prepare.outputs.flags }}
+          ${{ steps.prepare.outputs.feature-flags }}
       - name: Run slow tests
         run: >
           cargo test
           --release
           --workspace
-          ${{ steps.prepare.outputs.flags }}
+          ${{ steps.prepare.outputs.feature-flags }}
           -- --ignored
       - name: Verify working directory is clean
         run: git diff --exit-code
@@ -59,13 +48,20 @@ jobs:
         os: [ubuntu-latest, windows-latest, macOS-latest]
     steps:
       - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
       - run: rustup override set ${{steps.toolchain.outputs.name}}
       - name: Remove lockfile to build with latest dependencies
         run: rm Cargo.lock
       - name: Build crates
-        run: cargo build --workspace --all-targets --all-features --verbose
+        run: >
+          cargo build
+          --workspace
+          --all-targets
+          ${{ steps.prepare.outputs.feature-flags }}
+          --verbose
       - name: Verify working directory is clean (excluding lockfile)
         run: git diff --exit-code ':!Cargo.lock'
 
@@ -117,12 +113,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
       - name: Run clippy
         uses: actions-rs/clippy-check@v1
         with:
           name: Clippy (MSRV)
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
+          args: >
+            ${{ steps.prepare.outputs.feature-flags }}
+            --all-targets
+            --
+            -D warnings
 
   clippy-beta:
     name: Clippy (beta)
@@ -131,6 +133,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
       - uses: dtolnay/rust-toolchain@beta
         id: toolchain
       - run: rustup override set ${{steps.toolchain.outputs.name}}
@@ -140,7 +144,11 @@ jobs:
         with:
           name: Clippy (beta)
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -W clippy::all
+          args: >
+            ${{ steps.prepare.outputs.feature-flags }}
+            --all-targets
+            --
+            -W clippy::all
 
   codecov:
     name: Code coverage
@@ -151,8 +159,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
       - name: Generate coverage report
-        run: cargo tarpaulin --engine llvm --all-features --release --timeout 600 --out xml
+        run: >
+          cargo tarpaulin
+          --engine llvm
+          ${{ steps.prepare.outputs.feature-flags }}
+          --release
+          --timeout 600
+          --out xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.1.4
 
@@ -161,10 +177,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
       - run: cargo fetch
       # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
       - name: Check intra-doc links
-        run: cargo doc --all --all-features --document-private-items
+        run: >
+          cargo doc
+          --all
+          ${{ steps.prepare.outputs.feature-flags }}
+          --document-private-items
 
   fmt:
     name: Rustfmt
@@ -180,6 +202,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
       - name: Install protoc
         uses: supplypike/setup-bin@v3
         with:
@@ -188,7 +212,10 @@ jobs:
           version: '25.1'
           subPath: 'bin'
       - name: Trigger protobuf regeneration
-        run: cargo check --workspace  --all-features
+        run: >
+          cargo check
+          --workspace
+          ${{ steps.prepare.outputs.feature-flags }}
       - name: Verify working directory is clean
         run: git diff --exit-code
 
