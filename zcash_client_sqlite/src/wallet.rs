@@ -574,14 +574,14 @@ impl ScanProgress for SubtreeScanProgress {
 ///
 /// `min_confirmations` can be 0, but that case is currently treated identically to
 /// `min_confirmations == 1` for shielded notes. This behaviour may change in the future.
-#[tracing::instrument(skip(conn, params, progress))]
+#[tracing::instrument(skip(tx, params, progress))]
 pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
+    tx: &rusqlite::Transaction,
     params: &P,
     min_confirmations: u32,
     progress: &impl ScanProgress,
 ) -> Result<Option<WalletSummary>, SqliteClientError> {
-    let chain_tip_height = match scan_queue_extrema(conn)? {
+    let chain_tip_height = match scan_queue_extrema(tx)? {
         Some(range) => *range.end(),
         None => {
             return Ok(None);
@@ -589,14 +589,14 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     };
 
     let birthday_height =
-        wallet_birthday(conn)?.expect("If a scan range exists, we know the wallet birthday.");
+        wallet_birthday(tx)?.expect("If a scan range exists, we know the wallet birthday.");
 
     let fully_scanned_height =
-        block_fully_scanned(conn, params)?.map_or(birthday_height - 1, |m| m.block_height());
+        block_fully_scanned(tx, params)?.map_or(birthday_height - 1, |m| m.block_height());
     let summary_height = (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
 
     let sapling_scan_progress = progress.sapling_scan_progress(
-        conn,
+        tx,
         birthday_height,
         fully_scanned_height,
         chain_tip_height,
@@ -622,9 +622,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         )
         .map_err(|e| e.into())
     }
-    let any_spendable = is_any_spendable(conn, summary_height)?;
+    let any_spendable = is_any_spendable(tx, summary_height)?;
 
-    let mut stmt_accounts = conn.prepare_cached("SELECT account FROM accounts")?;
+    let mut stmt_accounts = tx.prepare_cached("SELECT account FROM accounts")?;
     let mut account_balances = stmt_accounts
         .query([])?
         .and_then(|row| {
@@ -635,7 +635,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         .collect::<Result<BTreeMap<AccountId, AccountBalance>, _>>()?;
 
     let sapling_trace = tracing::info_span!("stmt_select_notes").entered();
-    let mut stmt_select_notes = conn.prepare_cached(
+    let mut stmt_select_notes = tx.prepare_cached(
         "SELECT n.account, n.value, n.is_change, scan_state.max_priority, t.block
          FROM sapling_received_notes n
          JOIN transactions t ON t.id_tx = n.tx
@@ -715,7 +715,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let zero_conf_height = (chain_tip_height + 1).saturating_sub(min_confirmations);
         let stable_height = chain_tip_height.saturating_sub(PRUNING_DEPTH);
 
-        let mut stmt_transparent_balances = conn.prepare(
+        let mut stmt_transparent_balances = tx.prepare(
             "SELECT u.received_by_account, SUM(u.value_zat)
              FROM utxos u
              LEFT OUTER JOIN transactions tx
@@ -745,12 +745,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     }
 
     let next_sapling_subtree_index = {
-        // This will return a runtime error if we call `get_wallet_summary` from two
-        // threads at the same time, as transactions cannot nest.
-        let tx = conn.unchecked_transaction()?;
         let shard_store =
             SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
-                &tx,
+                tx,
                 SAPLING_TABLES_PREFIX,
             )?;
 
