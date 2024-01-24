@@ -132,6 +132,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     match pool_type {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
+        #[cfg(zcash_unstable = "orchard")]
         PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
     }
 }
@@ -759,6 +760,7 @@ pub(crate) fn get_received_memo(
             )
             .optional()?
             .flatten(),
+        #[cfg(zcash_unstable = "orchard")]
         _ => {
             return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
                 note_id.protocol(),

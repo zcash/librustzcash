@@ -635,11 +635,16 @@ where
                 Err(other) => return Err(other.into()),
             }
 
+            #[cfg(not(zcash_unstable = "orchard"))]
+            let selectable_pools = &[ShieldedProtocol::Sapling];
+            #[cfg(zcash_unstable = "orchard")]
+            let selectable_pools = &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard];
+
             shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
                     amount_required.into(),
-                    &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard],
+                    selectable_pools,
                     anchor_height,
                     &exclude,
                 )
