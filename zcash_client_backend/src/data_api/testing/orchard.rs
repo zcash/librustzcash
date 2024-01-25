@@ -75,7 +75,6 @@ impl ShieldedPoolTester for OrchardPoolTester {
             None,
             None,
         )
-        .unwrap()
         .into()
     }
 
@@ -155,9 +154,7 @@ impl ShieldedPoolTester for OrchardPoolTester {
                 return result.map(|(note, addr, memo)| {
                     (
                         Note::Orchard(note),
-                        UnifiedAddress::from_receivers(Some(addr), None, None)
-                            .unwrap()
-                            .into(),
+                        UnifiedAddress::from_receivers(Some(addr), None, None).into(),
                         MemoBytes::from_bytes(&memo).expect("correct length"),
                     )
                 });
