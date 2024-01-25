@@ -37,7 +37,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::zip321::parse::Param::name`
 - `zcash_client_backend::proto::`
   - `PROPOSAL_SER_V1`
-  - `ProposalError`
+  - `ProposalDecodingError`
   - `proposal` module, for parsing and serializing transaction proposals.
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
@@ -90,6 +90,7 @@ and this library adheres to Rust's notion of
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
     - A new variant `UnsupportedPoolType` has been added.
+    - A new variant `NoSupportedReceivers` has been added.
   - `wallet::shield_transparent_funds` no longer takes a `memo` argument;
     instead, memos to be associated with the shielded outputs should be
     specified in the construction of the value of the `input_selector`
