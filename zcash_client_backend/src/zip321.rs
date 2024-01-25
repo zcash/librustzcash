@@ -740,6 +740,7 @@ pub mod testing {
     use crate::address::Address;
 
     use super::{MemoBytes, Payment, TransactionRequest};
+
     pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
 
     #[cfg(feature = "transparent-inputs")]
@@ -748,7 +749,7 @@ pub mod testing {
     const TRANSPARENT_INPUTS_ENABLED: bool = false;
 
     pub(crate) const UA_REQUEST: UnifiedAddressRequest =
-        UnifiedAddressRequest::unsafe_new(false, true, TRANSPARENT_INPUTS_ENABLED);
+        UnifiedAddressRequest::unsafe_new_without_expiry(false, true, TRANSPARENT_INPUTS_ENABLED);
 
     prop_compose! {
         pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> MemoBytes {

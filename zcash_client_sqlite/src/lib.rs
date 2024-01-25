@@ -125,7 +125,7 @@ pub(crate) const UA_TRANSPARENT: bool = false;
 pub(crate) const UA_TRANSPARENT: bool = true;
 
 pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+    UnifiedAddressRequest::unsafe_new_without_expiry(false, true, UA_TRANSPARENT);
 
 /// The ID type for accounts.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
@@ -1015,7 +1015,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                     Some(output.note().recipient()),
                                     None,
                                     None
-                                ).expect("UA has an Orchard receiver by construction."),
+                                ),
                                 PoolType::Shielded(ShieldedProtocol::Orchard)
                             )
                         } else {
