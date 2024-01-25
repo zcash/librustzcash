@@ -20,6 +20,11 @@ jobs:
         include:
           - extra_flags: orchard
             rustflags: '--cfg zcash_unstable="orchard"'
+        exclude:
+          - os: macOS-latest
+            extra_flags: unstable-nu6
+          - os: macOS-latest
+            extra_flags: zfuture
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
 
