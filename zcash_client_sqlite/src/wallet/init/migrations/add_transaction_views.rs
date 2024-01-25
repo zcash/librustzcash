@@ -443,12 +443,12 @@ mod tests {
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (ua, _) = ufvk
-            .default_address(UnifiedAddressRequest::unsafe_new(
+            .default_address(UnifiedAddressRequest::unsafe_new_without_expiry(
                 false,
                 true,
                 UA_TRANSPARENT,
             ))
-            .expect("A valid default address exists for the UFVK");
+            .unwrap();
         let taddr = ufvk
             .transparent()
             .and_then(|k| {
