@@ -88,6 +88,10 @@ jobs:
         run: cargo init --lib ci-build
       - name: Copy Rust version into synthetic crate
         run: cp crates/rust-toolchain.toml ci-build/
+      - name: Copy patch directives into synthetic crate
+        run: |
+          echo "[patch.crates-io]" >> ./ci-build/Cargo.toml
+          cat ./crates/Cargo.toml | sed "0,/.\+\(patch.crates.\+\)/d" >> ./ci-build/Cargo.toml
       - name: Add zcash_proofs as a dependency of the synthetic crate
         working-directory: ./ci-build
         run: cargo add --no-default-features --path ../crates/zcash_proofs
