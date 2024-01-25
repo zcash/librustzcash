@@ -302,8 +302,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         min_confirmations: u32,
     ) -> Result<Option<WalletSummary>, Self::Error> {
+        // This will return a runtime error if we call `get_wallet_summary` from two
+        // threads at the same time, as transactions cannot nest.
         wallet::get_wallet_summary(
-            self.conn.borrow(),
+            &self.conn.borrow().unchecked_transaction()?,
             &self.params,
             min_confirmations,
             &SubtreeScanProgress,

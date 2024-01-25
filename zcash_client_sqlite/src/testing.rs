@@ -683,15 +683,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
         f: F,
     ) -> T {
-        let binding = get_wallet_summary(
-            &self.wallet().conn,
-            &self.wallet().params,
-            min_confirmations,
-            &SubtreeScanProgress,
-        )
-        .unwrap()
-        .unwrap();
-
+        let binding = self.get_wallet_summary(min_confirmations).unwrap();
         f(binding.account_balances().get(&account).unwrap())
     }
 
@@ -734,7 +726,7 @@ impl<Cache> TestState<Cache> {
 
     pub(crate) fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary> {
         get_wallet_summary(
-            &self.wallet().conn,
+            &self.wallet().conn.unchecked_transaction().unwrap(),
             &self.wallet().params,
             min_confirmations,
             &SubtreeScanProgress,

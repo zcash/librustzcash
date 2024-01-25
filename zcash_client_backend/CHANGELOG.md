@@ -21,6 +21,7 @@ and this library adheres to Rust's notion of
       with_orchard_balance_mut,
       add_unshielded_value
     }`
+  - `WalletSummary::next_sapling_subtree_index`
   - `wallet::propose_standard_transfer_to_address`
   - `wallet::input_selection::Proposal::{from_parts, shielded_inputs}`
   - `wallet::input_selection::ShieldedInputs`
@@ -81,6 +82,8 @@ and this library adheres to Rust's notion of
   - Fields of `Balance` and `AccountBalance` have been made private and the values
     of these fields have been made available via methods having the same names
     as the previously-public fields.
+  - `WalletSummary::new` now takes an additional `next_sapling_subtree_index`
+    argument.
   - `WalletWrite::get_next_available_address` now takes an additional 
     `UnifiedAddressRequest` argument.
   - `chain::scan_cached_blocks` now returns a `ScanSummary` containing metadata

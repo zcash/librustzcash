@@ -288,6 +288,7 @@ pub struct WalletSummary {
     chain_tip_height: BlockHeight,
     fully_scanned_height: BlockHeight,
     scan_progress: Option<Ratio<u64>>,
+    next_sapling_subtree_index: u64,
 }
 
 impl WalletSummary {
@@ -297,12 +298,14 @@ impl WalletSummary {
         chain_tip_height: BlockHeight,
         fully_scanned_height: BlockHeight,
         scan_progress: Option<Ratio<u64>>,
+        next_sapling_subtree_idx: u64,
     ) -> Self {
         Self {
             account_balances,
             chain_tip_height,
             fully_scanned_height,
             scan_progress,
+            next_sapling_subtree_index: next_sapling_subtree_idx,
         }
     }
 
@@ -330,6 +333,12 @@ impl WalletSummary {
     /// wallet is unable to determine the size of the note commitment tree.
     pub fn scan_progress(&self) -> Option<Ratio<u64>> {
         self.scan_progress
+    }
+
+    /// Returns the Sapling subtree index that should start the next range of subtree
+    /// roots passed to [`WalletCommitmentTrees::put_sapling_subtree_roots`].
+    pub fn next_sapling_subtree_index(&self) -> u64 {
+        self.next_sapling_subtree_index
     }
 
     /// Returns whether or not wallet scanning is complete.
