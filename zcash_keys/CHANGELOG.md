@@ -67,7 +67,12 @@ and this library adheres to Rust's notion of
 ## [0.2.0] - 2024-03-25
 
 ### Added
-- `zcash_keys::address::Address::has_receiver`
+- `zcash_keys::address`:
+  - `Address::has_receiver`
+  - `UnifiedAddress::{
+      new, expiry_height, expiry_time,
+      unknown_data, unknown_metadata
+     }`
 - `impl Display for zcash_keys::keys::AddressGenerationError`
 - `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
 - `impl From<hdwallet::error::Error> for zcash_keys::keys::DerivationError`
@@ -90,6 +95,7 @@ and this library adheres to Rust's notion of
 - `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
   feature flag. UFVKs should only be produced by derivation from the USK, or
   parsed from their string representation.
+- `zcash_keys::address::UnifiedAddress::from_receivers`
 
 ### Fixed
 - `UnifiedFullViewingKey::find_address` can now find an address for a diversifier

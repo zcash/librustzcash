@@ -989,7 +989,8 @@ mod tests {
 
             // Unified addresses at the time of the addition of migrations did not contain an
             // Orchard component.
-            let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+            let ua_request =
+                UnifiedAddressRequest::unsafe_new_without_expiry(false, true, UA_TRANSPARENT);
             let address_str = Address::Unified(
                 ufvk.default_address(Some(ua_request))
                     .expect("A valid default address exists for the UFVK")
@@ -1116,7 +1117,8 @@ mod tests {
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 // hardcoded with knowledge of what's coming next
-                let ua_request = UnifiedAddressRequest::unsafe_new(false, true, true);
+                let ua_request =
+                    UnifiedAddressRequest::unsafe_new_without_expiry(false, true, true);
                 db_data
                     .get_next_available_address(account_id, Some(ua_request))
                     .unwrap()
