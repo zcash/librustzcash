@@ -799,6 +799,7 @@ pub mod testing {
     use zcash_protocol::{consensus::NetworkType, value::testing::arb_zatoshis};
 
     use super::{MemoBytes, Payment, TransactionRequest};
+
     pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
 
     prop_compose! {

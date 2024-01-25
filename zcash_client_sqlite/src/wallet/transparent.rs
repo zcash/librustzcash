@@ -9,7 +9,7 @@ use ::transparent::{
     bundle::{OutPoint, TxOut},
     keys::{IncomingViewingKey, NonHardenedChildIndex},
 };
-use zcash_address::unified::{Ivk, Uivk};
+use zcash_address::unified::{Item, Ivk, Uivk};
 use zcash_client_backend::{
     data_api::{AccountBalance, TransactionDataRequest},
     wallet::{TransparentAddressMetadata, WalletTransparentOutput},
@@ -152,9 +152,9 @@ pub(crate) fn uivk_legacy_transparent_address<P: consensus::Parameters>(
     }
 
     // Derive the default transparent address (if it wasn't already part of a derived UA).
-    for item in uivk.items() {
-        if let Ivk::P2pkh(tivk_bytes) = item {
-            let tivk = ExternalIvk::deserialize(&tivk_bytes)?;
+    for item in uivk.items_as_parsed() {
+        if let Item::Data(Ivk::P2pkh(tivk_bytes)) = item {
+            let tivk = ExternalIvk::deserialize(tivk_bytes)?;
             return Ok(Some(tivk.default_address()));
         }
     }

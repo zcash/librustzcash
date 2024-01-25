@@ -150,7 +150,9 @@ pub(crate) fn inspect_mnemonic(mnemonic: bip0039::Mnemonic, context: Option<Cont
                 .collect();
 
             eprintln!("   - Unified ({}):", item_names.join(", "));
-            let ufvk = unified::Ufvk::try_from_items(items).unwrap();
+            let ufvk =
+                unified::Ufvk::try_from_items(items.into_iter().map(unified::Item::Data).collect())
+                    .unwrap();
             eprintln!("     - UFVK: {}", ufvk.encode(&addr_net));
         }
         seed.zeroize();

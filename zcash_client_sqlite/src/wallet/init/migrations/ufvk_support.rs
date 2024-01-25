@@ -85,7 +85,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         //   our second assumption above, and we report this as corrupted data.
         let mut seed_is_relevant = false;
 
-        let ua_request = UnifiedAddressRequest::unsafe_new(Omit, Require, UA_TRANSPARENT);
+        let ua_request =
+            UnifiedAddressRequest::unsafe_new_without_expiry(Omit, Require, UA_TRANSPARENT);
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             // We only need to check for the presence of the seed if we have keys that

@@ -5,14 +5,16 @@ use alloc::vec::Vec;
 
 use transparent::address::TransparentAddress;
 use zcash_address::{
-    unified::{self, Container, Encoding, Typecode},
+    unified::{self, Container, DataTypecode, Encoding, Item, Typecode},
     ConversionError, ToAddress, TryFromRawAddress, ZcashAddress,
 };
-use zcash_protocol::consensus::{self, NetworkType};
+use zcash_protocol::{
+    consensus::{self, BlockHeight, NetworkType},
+    PoolType, ShieldedProtocol,
+};
 
 #[cfg(feature = "sapling")]
 use sapling::PaymentAddress;
-use zcash_protocol::{PoolType, ShieldedProtocol};
 
 /// A Unified Address.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,7 +24,10 @@ pub struct UnifiedAddress {
     #[cfg(feature = "sapling")]
     sapling: Option<PaymentAddress>,
     transparent: Option<TransparentAddress>,
-    unknown: Vec<(u32, Vec<u8>)>,
+    unknown_data: Vec<(u32, Vec<u8>)>,
+    expiry_height: Option<BlockHeight>,
+    expiry_time: Option<u64>,
+    unknown_metadata: Vec<(u32, Vec<u8>)>,
 }
 
 impl TryFrom<unified::Address> for UnifiedAddress {
@@ -34,14 +39,16 @@ impl TryFrom<unified::Address> for UnifiedAddress {
         #[cfg(feature = "sapling")]
         let mut sapling = None;
         let mut transparent = None;
-
-        let mut unknown: Vec<(u32, Vec<u8>)> = vec![];
+        let mut unknown_data = vec![];
+        let mut expiry_height = None;
+        let mut expiry_time = None;
+        let mut unknown_metadata = vec![];
 
         // We can use as-parsed order here for efficiency, because we're breaking out the
         // receivers we support from the unknown receivers.
         for item in ua.items_as_parsed() {
             match item {
-                unified::Receiver::Orchard(data) => {
+                Item::Data(unified::Receiver::Orchard(data)) => {
                     #[cfg(feature = "orchard")]
                     {
                         orchard = Some(
@@ -51,11 +58,11 @@ impl TryFrom<unified::Address> for UnifiedAddress {
                     }
                     #[cfg(not(feature = "orchard"))]
                     {
-                        unknown.push((unified::Typecode::Orchard.into(), data.to_vec()));
+                        unknown_data.push((unified::Typecode::ORCHARD.into(), data.to_vec()));
                     }
                 }
 
-                unified::Receiver::Sapling(data) => {
+                Item::Data(unified::Receiver::Sapling(data)) => {
                     #[cfg(feature = "sapling")]
                     {
                         sapling = Some(
@@ -65,20 +72,26 @@ impl TryFrom<unified::Address> for UnifiedAddress {
                     }
                     #[cfg(not(feature = "sapling"))]
                     {
-                        unknown.push((unified::Typecode::Sapling.into(), data.to_vec()));
+                        unknown_data.push((unified::Typecode::SAPLING.into(), data.to_vec()));
                     }
                 }
-
-                unified::Receiver::P2pkh(data) => {
+                Item::Data(unified::Receiver::P2pkh(data)) => {
                     transparent = Some(TransparentAddress::PublicKeyHash(*data));
                 }
-
-                unified::Receiver::P2sh(data) => {
+                Item::Data(unified::Receiver::P2sh(data)) => {
                     transparent = Some(TransparentAddress::ScriptHash(*data));
                 }
-
-                unified::Receiver::Unknown { typecode, data } => {
-                    unknown.push((*typecode, data.clone()));
+                Item::Data(unified::Receiver::Unknown { typecode, data }) => {
+                    unknown_data.push((*typecode, data.clone()));
+                }
+                Item::Metadata(unified::MetadataItem::ExpiryHeight(h)) => {
+                    expiry_height = Some(BlockHeight::from(*h));
+                }
+                Item::Metadata(unified::MetadataItem::ExpiryTime(t)) => {
+                    expiry_time = Some(*t);
+                }
+                Item::Metadata(unified::MetadataItem::Unknown { typecode, data }) => {
+                    unknown_metadata.push((*typecode, data.clone()));
                 }
             }
         }
@@ -89,7 +102,10 @@ impl TryFrom<unified::Address> for UnifiedAddress {
             #[cfg(feature = "sapling")]
             sapling,
             transparent,
-            unknown,
+            unknown_data,
+            expiry_height,
+            expiry_time,
+            unknown_metadata,
         })
     }
 }
@@ -97,36 +113,43 @@ impl TryFrom<unified::Address> for UnifiedAddress {
 impl UnifiedAddress {
     /// Constructs a Unified Address from a given set of receivers.
     ///
-    /// Returns `None` if the receivers would produce an invalid Unified Address (namely,
-    /// if no shielded receiver is provided).
+    /// This method is only available when the `test-dependencies` feature is enabled, as
+    /// derivation from the UFVK or UIVK, or deserialization from the serialized form should be
+    /// used instead. This method may generate invalid addresses that contain no receivers.
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn from_receivers(
         #[cfg(feature = "orchard")] orchard: Option<orchard::Address>,
         #[cfg(feature = "sapling")] sapling: Option<PaymentAddress>,
         transparent: Option<TransparentAddress>,
-        // TODO: Add handling for address metadata items.
-    ) -> Option<Self> {
-        #[cfg(feature = "orchard")]
-        let has_orchard = orchard.is_some();
-        #[cfg(not(feature = "orchard"))]
-        let has_orchard = false;
+    ) -> Self {
+        Self::new_internal(
+            #[cfg(feature = "orchard")]
+            orchard,
+            #[cfg(feature = "sapling")]
+            sapling,
+            transparent,
+            None,
+            None,
+        )
+    }
 
-        #[cfg(feature = "sapling")]
-        let has_sapling = sapling.is_some();
-        #[cfg(not(feature = "sapling"))]
-        let has_sapling = false;
-
-        if has_orchard || has_sapling {
-            Some(Self {
-                #[cfg(feature = "orchard")]
-                orchard,
-                #[cfg(feature = "sapling")]
-                sapling,
-                transparent,
-                unknown: vec![],
-            })
-        } else {
-            // UAs require at least one shielded receiver.
-            None
+    pub(crate) fn new_internal(
+        #[cfg(feature = "orchard")] orchard: Option<orchard::Address>,
+        #[cfg(feature = "sapling")] sapling: Option<PaymentAddress>,
+        transparent: Option<TransparentAddress>,
+        expiry_height: Option<BlockHeight>,
+        expiry_time: Option<u64>,
+    ) -> Self {
+        Self {
+            #[cfg(feature = "orchard")]
+            orchard,
+            #[cfg(feature = "sapling")]
+            sapling,
+            transparent,
+            unknown_data: vec![],
+            expiry_height,
+            expiry_time,
+            unknown_metadata: vec![],
         }
     }
 
@@ -171,22 +194,66 @@ impl UnifiedAddress {
         self.transparent.as_ref()
     }
 
-    /// Returns the set of unknown receivers of the unified address.
-    pub fn unknown(&self) -> &[(u32, Vec<u8>)] {
-        &self.unknown
+    /// Returns any unknown data items parsed from the encoded form of the address.
+    pub fn unknown_data(&self) -> &[(u32, Vec<u8>)] {
+        self.unknown_data.as_ref()
+    }
+
+    /// Returns the expiration height for this address.
+    pub fn expiry_height(&self) -> Option<BlockHeight> {
+        self.expiry_height
+    }
+
+    /// Sets the expiry height of this address.
+    pub fn set_expiry_height(&mut self, height: BlockHeight) {
+        self.expiry_height = Some(height);
+    }
+
+    /// Removes the expiry height from this address.
+    pub fn unset_expiry_height(&mut self) {
+        self.expiry_height = None;
+    }
+
+    /// Returns the expiration time for this address.
+    ///
+    /// The returned value is an integer representing a UTC time in seconds relative to the Unix
+    /// Epoch of 1970-01-01T00:00:00Z.
+    pub fn expiry_time(&self) -> Option<u64> {
+        self.expiry_time
+    }
+
+    /// Sets the expiry time of this address.
+    ///
+    /// The argument should be an integer representing a UTC time in seconds relative to the Unix
+    /// Epoch of 1970-01-01T00:00:00Z.
+    pub fn set_expiry_time(&mut self, time: u64) {
+        self.expiry_time = Some(time);
+    }
+
+    /// Removes the expiry time from this address.
+    pub fn unset_expiry_time(&mut self) {
+        self.expiry_time = None;
+    }
+
+    /// Returns any unknown metadata items parsed from the encoded form of the address.
+    ///
+    /// Unknown metadata items are guaranteed by construction and parsing to not have keys in the
+    /// MUST-understand metadata typecode range.
+    pub fn unknown_metadata(&self) -> &[(u32, Vec<u8>)] {
+        self.unknown_metadata.as_ref()
     }
 
     fn to_address(&self, net: NetworkType) -> ZcashAddress {
-        let items = self
-            .unknown
-            .iter()
-            .map(|(typecode, data)| unified::Receiver::Unknown {
-                typecode: *typecode,
-                data: data.clone(),
-            });
+        let data_items =
+            self.unknown_data
+                .iter()
+                .map(|(typecode, data)| unified::Receiver::Unknown {
+                    typecode: *typecode,
+                    data: data.clone(),
+                });
 
         #[cfg(feature = "orchard")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.orchard
                 .as_ref()
                 .map(|addr| addr.to_raw_address_bytes())
@@ -194,20 +261,38 @@ impl UnifiedAddress {
         );
 
         #[cfg(feature = "sapling")]
-        let items = items.chain(
+        let data_items = data_items.chain(
             self.sapling
                 .as_ref()
                 .map(|pa| pa.to_bytes())
                 .map(unified::Receiver::Sapling),
         );
 
-        let items = items.chain(self.transparent.as_ref().map(|taddr| match taddr {
+        let data_items = data_items.chain(self.transparent.as_ref().map(|taddr| match taddr {
             TransparentAddress::PublicKeyHash(data) => unified::Receiver::P2pkh(*data),
             TransparentAddress::ScriptHash(data) => unified::Receiver::P2sh(*data),
         }));
 
-        let ua = unified::Address::try_from_items(items.collect())
-            .expect("UnifiedAddress should only be constructed safely");
+        let meta_items = self
+            .unknown_metadata
+            .iter()
+            .map(|(typecode, data)| unified::MetadataItem::Unknown {
+                typecode: *typecode,
+                data: data.clone(),
+            })
+            .chain(
+                self.expiry_height
+                    .map(|h| unified::MetadataItem::ExpiryHeight(u32::from(h))),
+            )
+            .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
+
+        let ua = unified::Address::try_from_items(
+            data_items
+                .map(Item::Data)
+                .chain(meta_items.map(Item::Metadata))
+                .collect(),
+        )
+        .expect("UnifiedAddress should only be constructed safely");
         ZcashAddress::from_unified(net, ua)
     }
 
@@ -220,17 +305,17 @@ impl UnifiedAddress {
     pub fn receiver_types(&self) -> Vec<Typecode> {
         let result = core::iter::empty();
         #[cfg(feature = "orchard")]
-        let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
+        let result = result.chain(self.orchard.map(|_| Typecode::ORCHARD));
         #[cfg(feature = "sapling")]
-        let result = result.chain(self.sapling.map(|_| Typecode::Sapling));
+        let result = result.chain(self.sapling.map(|_| Typecode::SAPLING));
         let result = result.chain(self.transparent.map(|taddr| match taddr {
-            TransparentAddress::PublicKeyHash(_) => Typecode::P2pkh,
-            TransparentAddress::ScriptHash(_) => Typecode::P2sh,
+            TransparentAddress::PublicKeyHash(_) => Typecode::P2PKH,
+            TransparentAddress::ScriptHash(_) => Typecode::P2SH,
         }));
         let result = result.chain(
-            self.unknown()
+            self.unknown_data()
                 .iter()
-                .map(|(typecode, _)| Typecode::Unknown(*typecode)),
+                .map(|(typecode, _)| Typecode::Data(DataTypecode::Unknown(*typecode))),
         );
         result.collect()
     }
@@ -259,7 +344,8 @@ impl Receiver {
         match self {
             #[cfg(feature = "orchard")]
             Receiver::Orchard(addr) => {
-                let receiver = unified::Receiver::Orchard(addr.to_raw_address_bytes());
+                let receiver =
+                    unified::Item::Data(unified::Receiver::Orchard(addr.to_raw_address_bytes()));
                 let ua = unified::Address::try_from_items(vec![receiver])
                     .expect("A unified address may contain a single Orchard receiver.");
                 ZcashAddress::from_unified(net, ua)
@@ -462,7 +548,8 @@ pub mod testing {
         params: Network,
         request: UnifiedAddressRequest,
     ) -> impl Strategy<Value = UnifiedAddress> {
-        arb_unified_spending_key(params).prop_map(move |k| k.default_address(Some(request)).0)
+        arb_unified_spending_key(params)
+            .prop_map(move |k| k.default_address(Some(request)).unwrap().0)
     }
 
     #[cfg(feature = "sapling")]
@@ -490,13 +577,13 @@ mod tests {
     use zcash_address::test_vectors;
     use zcash_protocol::consensus::MAIN_NETWORK;
 
-    use super::{Address, UnifiedAddress};
+    use super::Address;
 
     #[cfg(feature = "sapling")]
     use crate::keys::sapling;
 
     #[cfg(any(feature = "orchard", feature = "sapling"))]
-    use zip32::AccountId;
+    use {super::UnifiedAddress, zip32::AccountId};
 
     #[test]
     #[cfg(any(feature = "orchard", feature = "sapling"))]
@@ -519,24 +606,17 @@ mod tests {
         let transparent = None;
 
         #[cfg(all(feature = "orchard", feature = "sapling"))]
-        let ua = UnifiedAddress::from_receivers(orchard, sapling, transparent).unwrap();
+        let ua = UnifiedAddress::new_internal(orchard, sapling, transparent, None, None);
 
         #[cfg(all(not(feature = "orchard"), feature = "sapling"))]
-        let ua = UnifiedAddress::from_receivers(sapling, transparent).unwrap();
+        let ua = UnifiedAddress::new_internal(sapling, transparent, None, None);
 
         #[cfg(all(feature = "orchard", not(feature = "sapling")))]
-        let ua = UnifiedAddress::from_receivers(orchard, transparent).unwrap();
+        let ua = UnifiedAddress::new_internal(orchard, transparent, None, None);
 
         let addr = Address::Unified(ua);
         let addr_str = addr.encode(&MAIN_NETWORK);
         assert_eq!(Address::decode(&MAIN_NETWORK, &addr_str), Some(addr));
-    }
-
-    #[test]
-    #[cfg(not(any(feature = "orchard", feature = "sapling")))]
-    fn ua_round_trip() {
-        let transparent = None;
-        assert_eq!(UnifiedAddress::from_receivers(transparent), None)
     }
 
     #[test]

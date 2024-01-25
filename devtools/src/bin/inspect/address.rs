@@ -1,5 +1,5 @@
 use zcash_address::{
-    unified::{self, Container, Encoding},
+    unified::{self, Encoding},
     ConversionError, ToAddress, ZcashAddress,
 };
 use zcash_protocol::consensus::NetworkType;
@@ -114,14 +114,14 @@ pub(crate) fn inspect(addr: ZcashAddress) {
             match addr.kind {
                 AddressKind::Unified(ua) => {
                     eprintln!(" - Receivers:");
-                    for receiver in ua.items() {
+                    for receiver in ua.receivers() {
                         match receiver {
                             unified::Receiver::Orchard(data) => {
                                 eprintln!(
                                     "   - Orchard ({})",
-                                    unified::Address::try_from_items(vec![
+                                    unified::Address::try_from_items(vec![unified::Item::Data(
                                         unified::Receiver::Orchard(data)
-                                    ])
+                                    )])
                                     .unwrap()
                                     .encode(&addr.net)
                                 );

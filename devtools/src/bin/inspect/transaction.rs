@@ -540,8 +540,8 @@ pub(crate) fn inspect(
                             // Construct a single-receiver UA.
                             let zaddr = ZcashAddress::from_unified(
                                 net,
-                                unified::Address::try_from_items(vec![unified::Receiver::Orchard(
-                                    addr.to_raw_address_bytes(),
+                                unified::Address::try_from_items(vec![unified::Item::Data(
+                                    unified::Receiver::Orchard(addr.to_raw_address_bytes()),
                                 )])
                                 .unwrap(),
                             );
