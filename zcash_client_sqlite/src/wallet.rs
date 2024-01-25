@@ -1110,6 +1110,10 @@ pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
                     let block_range_start = BlockHeight::from_u32(row.get(0)?);
                     let block_range_end = BlockHeight::from_u32(row.get(1)?);
 
+                    // If the start of the earliest scanned range is greater than
+                    // the birthday height, then there is an unscanned range between
+                    // the wallet birthday and that range, so there is no fully
+                    // scanned height.
                     Ok(if block_range_start <= birthday_height {
                         // Scan ranges are end-exclusive.
                         Some(block_range_end - 1)
