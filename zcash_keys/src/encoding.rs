@@ -1,9 +1,7 @@
 //! Encoding and decoding functions for Zcash key and address structs.
 //!
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
-//! [zcash_primitives::constants][constants] module.
-//!
-//! [constants]: zcash_primitives::constants
+//! [zcash_primitives::constants] module.
 
 use crate::address::UnifiedAddress;
 use bech32::{self, Error, FromBase32, ToBase32, Variant};

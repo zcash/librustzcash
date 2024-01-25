@@ -135,7 +135,7 @@ impl transparent_fees::InputView for WalletTransparentOutput {
 
 /// A subset of a [`SpendDescription`] relevant to wallets and light clients.
 ///
-/// [`SpendDescription`]: zcash_primitives::transaction::components::SpendDescription
+/// [`SpendDescription`]: sapling::bundle::SpendDescription
 pub struct WalletSaplingSpend {
     index: usize,
     nf: sapling::Nullifier,
@@ -169,7 +169,7 @@ impl WalletSaplingSpend {
 /// this output; this will usually be [`zcash_primitives::zip32::Scope`] for received notes, and
 /// `()` for sent notes.
 ///
-/// [`OutputDescription`]: zcash_primitives::transaction::components::OutputDescription
+/// [`OutputDescription`]: sapling::bundle::OutputDescription
 pub struct WalletSaplingOutput<N, S> {
     index: usize,
     cmu: sapling::note::ExtractedNoteCommitment,

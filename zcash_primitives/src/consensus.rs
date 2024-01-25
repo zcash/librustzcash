@@ -9,14 +9,17 @@ use zcash_address;
 
 use crate::{constants, sapling::note_encryption::Zip212Enforcement};
 
-/// A wrapper type representing blockchain heights. Safe conversion from
-/// various integer types, as well as addition and subtraction, are provided.
+/// A wrapper type representing blockchain heights.
+///
+/// Safe conversion from various integer types, as well as addition and subtraction, are
+/// provided.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockHeight(u32);
 
 memuse::impl_no_dynamic_usage!(BlockHeight);
 
+/// The height of the genesis block on a network.
 pub const H0: BlockHeight = BlockHeight(0);
 
 impl BlockHeight {
@@ -201,6 +204,7 @@ pub struct MainNetwork;
 
 memuse::impl_no_dynamic_usage!(MainNetwork);
 
+/// The production network.
 pub const MAIN_NETWORK: MainNetwork = MainNetwork;
 
 impl Parameters for MainNetwork {
@@ -254,6 +258,7 @@ pub struct TestNetwork;
 
 memuse::impl_no_dynamic_usage!(TestNetwork);
 
+/// The test network.
 pub const TEST_NETWORK: TestNetwork = TestNetwork;
 
 impl Parameters for TestNetwork {
@@ -301,6 +306,7 @@ impl Parameters for TestNetwork {
     }
 }
 
+/// Marker enum for the deployed Zcash consensus networks.
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum Network {
     MainNetwork,
@@ -462,6 +468,9 @@ const UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     NetworkUpgrade::Nu6,
 ];
 
+/// The "grace period" defined in [ZIP 212].
+///
+/// [ZIP 212]: https://zips.z.cash/zip-0212#changes-to-the-process-of-receiving-sapling-or-orchard-notes
 pub const ZIP212_GRACE_PERIOD: u32 = 32256;
 
 /// A globally-unique identifier for a set of consensus rules within the Zcash chain.

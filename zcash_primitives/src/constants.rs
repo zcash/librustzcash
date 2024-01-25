@@ -1,4 +1,4 @@
-//! Various constants used by the Zcash primitives.
+//! Network-specific Zcash constants.
 
 pub mod mainnet;
 pub mod regtest;

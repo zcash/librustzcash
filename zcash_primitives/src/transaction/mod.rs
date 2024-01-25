@@ -60,6 +60,13 @@ const ZFUTURE_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;
 #[cfg(feature = "zfuture")]
 const ZFUTURE_TX_VERSION: u32 = 0x0000FFFF;
 
+/// The identifier for a Zcash transaction.
+///
+/// - For v1-4 transactions, this is a double-SHA-256 hash of the encoded transaction.
+///   This means that it is malleable, and only a reliable identifier for transactions
+///   that have been mined.
+/// - For v5 transactions onwards, this identifier is derived only from "effecting" data,
+///   and is non-malleable in all contexts.
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct TxId([u8; 32]);
 
@@ -193,6 +200,7 @@ impl TxVersion {
         }
     }
 
+    /// Returns `true` if this transaction version supports the Sprout protocol.
     pub fn has_sprout(&self) -> bool {
         match self {
             TxVersion::Sprout(v) => *v >= 2u32,
@@ -207,6 +215,7 @@ impl TxVersion {
         !matches!(self, TxVersion::Sprout(_))
     }
 
+    /// Returns `true` if this transaction version supports the Sapling protocol.
     pub fn has_sapling(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
@@ -217,6 +226,7 @@ impl TxVersion {
         }
     }
 
+    /// Returns `true` if this transaction version supports the Orchard protocol.
     pub fn has_orchard(&self) -> bool {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
@@ -231,6 +241,7 @@ impl TxVersion {
         matches!(self, TxVersion::ZFuture)
     }
 
+    /// Suggests the transaction version that should be used in the given Zcash epoch.
     pub fn suggested_for_branch(consensus_branch_id: BranchId) -> Self {
         match consensus_branch_id {
             BranchId::Sprout => TxVersion::Sprout(2),
@@ -257,6 +268,7 @@ pub trait Authorization {
     type TzeAuth: tze::Authorization;
 }
 
+/// [`Authorization`] marker type for fully-authorized transactions.
 #[derive(Debug)]
 pub struct Authorized;
 
@@ -269,6 +281,10 @@ impl Authorization for Authorized {
     type TzeAuth = tze::Authorized;
 }
 
+/// [`Authorization`] marker type for transactions without authorization data.
+///
+/// Currently this includes Sapling proofs because the types in this crate support v4
+/// transactions, which commit to the Sapling proofs in the transaction digest.
 pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
@@ -303,6 +319,7 @@ impl PartialEq for Transaction {
     }
 }
 
+/// The information contained in a Zcash transaction.
 #[derive(Debug)]
 pub struct TransactionData<A: Authorization> {
     version: TxVersion,
@@ -318,6 +335,7 @@ pub struct TransactionData<A: Authorization> {
 }
 
 impl<A: Authorization> TransactionData<A> {
+    /// Constructs a `TransactionData` from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         version: TxVersion,
@@ -343,6 +361,8 @@ impl<A: Authorization> TransactionData<A> {
         }
     }
 
+    /// Constructs a `TransactionData` from its constituent parts, including speculative
+    /// future parts that are not in the current Zcash consensus rules.
     #[cfg(feature = "zfuture")]
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts_zfuture(
@@ -369,10 +389,12 @@ impl<A: Authorization> TransactionData<A> {
         }
     }
 
+    /// Returns the transaction version.
     pub fn version(&self) -> TxVersion {
         self.version
     }
 
+    /// Returns the Zcash epoch that this transaction can be mined in.
     pub fn consensus_branch_id(&self) -> BranchId {
         self.consensus_branch_id
     }
