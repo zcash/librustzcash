@@ -51,6 +51,9 @@ incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
+# Warning: One of the downstream consumers requires that SQLite be available through
+# CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
+# version required for `rusqlite` is a version that is available through CocoaPods.
 rusqlite = { version = "0.29.0", features = ["bundled", "time", "array"] }
 schemer = "0.2"
 schemer-rusqlite = "0.2.2"
