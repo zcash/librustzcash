@@ -6,7 +6,27 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::address::UnifiedAddress::{
+   expiry_height, set_expiry_height, unset_expiry_height,
+   expiry_time, set_expiry_time, unset_expiry_time,
+   unknown_data, unknown_metadata
+ }`
+- `zcash_keys::keys::UnifiedFullViewingKey::{
+   expiry_height, set_expiry_height, unset_expiry_height,
+   expiry_time, set_expiry_time, unset_expiry_time,
+   unknown_data, unknown_metadata
+ }`
+- `zcash_keys::keys::UnifiedIncomingViewingKey::{
+   expiry_height, set_expiry_height, unset_expiry_height,
+   expiry_time, set_expiry_time, unset_expiry_time,
+   unknown_data, unknown_metadata
+ }`
+- `zcash_keys::address::UnifiedAddressRequest::unsafe_new_without_expiry`
+
 ### Changed
+- `zcash_keys::address::UnifiedAddressRequest::new` now takes additional
+  optional `expiry_height` and `expiry_time` arguments.
 - The `UnifiedAddressRequest` argument to the following methods is now optional:
   - `zcash_keys::keys::UnifiedSpendingKey::address`
   - `zcash_keys::keys::UnifiedSpendingKey::default_address`
@@ -15,6 +35,17 @@ and this library adheres to Rust's notion of
   - `zcash_keys::keys::UnifiedIncomingViewingKey::address`
   - `zcash_keys::keys::UnifiedIncomingViewingKey::find_address`
   - `zcash_keys::keys::UnifiedIncomingViewingKey::default_address`
+- `zcash_keys::address::UnifiedAddress::from_receivers` is now only available
+  under the `test-dependencies` feature flag. It should not be used for
+  non-test purposes as it can potentially generate addresses that contain no
+  receivers.
+- `zcash_keys::keys::UnifiedSpendingKey::default_address` is now failable, and
+  now returns a `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`.
+
+### Removed
+- `zcash_keys::address::UnifiedAddress::unknown` (use `unknown_data` instead.)
+- `zcash_keys::address::UnifiedAddressRequest::unsafe_new` (use 
+  `UnifiedAddressRequest::unsafe_new_without_expiry` instead)
 
 ## [0.5.0] - 2024-11-14
 
