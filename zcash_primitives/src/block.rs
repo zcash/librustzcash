@@ -12,7 +12,7 @@ pub use equihash;
 
 /// The identifier for a Zcash block.
 ///
-/// Derived from a [`BlockHeader`].
+/// This is the SHA-256d hash of the encoded [`BlockHeader`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockHash(pub [u8; 32]);
 
