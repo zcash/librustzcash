@@ -37,12 +37,18 @@ pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
 #[macro_use]
 extern crate assert_matches;
 
+#[cfg(all(feature = "orchard", not(zcash_unstable = "orchard")))]
+core::compile_error!(
+    "The `orchard` feature flag requires the `zcash_unstable=\"orchard\"` RUSTFLAG."
+);
+
 /// A shielded transfer protocol known to the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
     /// The Orchard protocol
+    #[cfg(zcash_unstable = "orchard")]
     Orchard,
 }
 
@@ -60,6 +66,7 @@ impl fmt::Display for PoolType {
         match self {
             PoolType::Transparent => f.write_str("Transparent"),
             PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
+            #[cfg(zcash_unstable = "orchard")]
             PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
         }
     }

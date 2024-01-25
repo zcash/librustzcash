@@ -222,7 +222,7 @@ pub enum ProposalDecodingError<DbError> {
     /// A transaction identifier string did not decode to a valid transaction ID.
     TxIdInvalid(TryFromSliceError),
     /// An invalid value pool identifier was encountered.
-    ValuePoolInvalid(i32),
+    ValuePoolNotSupported(i32),
     /// A failure occurred trying to retrieve an unspent note or UTXO from the wallet database.
     InputRetrieval(DbError),
     /// The unspent note or UTXO corresponding to a proposal input was not found in the wallet
@@ -257,7 +257,7 @@ impl<E: Display> Display for ProposalDecodingError<E> {
             ProposalDecodingError::TxIdInvalid(err) => {
                 write!(f, "Invalid transaction id: {:?}", err)
             }
-            ProposalDecodingError::ValuePoolInvalid(id) => {
+            ProposalDecodingError::ValuePoolNotSupported(id) => {
                 write!(f, "Invalid value pool identifier: {:?}", id)
             }
             ProposalDecodingError::InputRetrieval(err) => write!(
@@ -312,8 +312,9 @@ fn pool_type<T>(pool_id: i32) -> Result<PoolType, ProposalDecodingError<T>> {
     match proposal::ValuePool::try_from(pool_id) {
         Ok(proposal::ValuePool::Transparent) => Ok(PoolType::Transparent),
         Ok(proposal::ValuePool::Sapling) => Ok(PoolType::Shielded(ShieldedProtocol::Sapling)),
+        #[cfg(zcash_unstable = "orchard")]
         Ok(proposal::ValuePool::Orchard) => Ok(PoolType::Shielded(ShieldedProtocol::Orchard)),
-        _ => Err(ProposalDecodingError::ValuePoolInvalid(pool_id)),
+        _ => Err(ProposalDecodingError::ValuePoolNotSupported(pool_id)),
     }
 }
 
@@ -337,6 +338,7 @@ impl From<ShieldedProtocol> for proposal::ValuePool {
     fn from(value: ShieldedProtocol) -> Self {
         match value {
             ShieldedProtocol::Sapling => proposal::ValuePool::Sapling,
+            #[cfg(zcash_unstable = "orchard")]
             ShieldedProtocol::Orchard => proposal::ValuePool::Orchard,
         }
     }
@@ -447,7 +449,7 @@ impl proposal::Proposal {
                     match input.pool_type()? {
                         PoolType::Transparent => {
                             #[cfg(not(feature = "transparent-inputs"))]
-                            return Err(ProposalDecodingError::ValuePoolInvalid(1));
+                            return Err(ProposalDecodingError::ValuePoolNotSupported(1));
 
                             #[cfg(feature = "transparent-inputs")]
                             {

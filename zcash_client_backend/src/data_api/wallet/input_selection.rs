@@ -453,6 +453,7 @@ impl sapling::OutputView for SaplingPayment {
     }
 }
 
+#[cfg(feature = "orchard")]
 pub(crate) struct OrchardPayment(NonNegativeAmount);
 
 // TODO: introduce this method when it is needed for testing.
@@ -522,6 +523,7 @@ where
     {
         let mut transparent_outputs = vec![];
         let mut sapling_outputs = vec![];
+        #[cfg(feature = "orchard")]
         let mut orchard_outputs = vec![];
         for payment in transaction_request.payments() {
             let mut push_transparent = |taddr: TransparentAddress| {
@@ -533,6 +535,7 @@ where
             let mut push_sapling = || {
                 sapling_outputs.push(SaplingPayment(payment.amount));
             };
+            #[cfg(feature = "orchard")]
             let mut push_orchard = || {
                 orchard_outputs.push(OrchardPayment(payment.amount));
             };
@@ -551,6 +554,7 @@ where
                     let has_orchard = false;
 
                     if has_orchard {
+                        #[cfg(feature = "orchard")]
                         push_orchard();
                     } else if addr.sapling().is_some() {
                         push_sapling();
@@ -635,11 +639,16 @@ where
                 Err(other) => return Err(other.into()),
             }
 
+            #[cfg(not(zcash_unstable = "orchard"))]
+            let selectable_pools = &[ShieldedProtocol::Sapling];
+            #[cfg(zcash_unstable = "orchard")]
+            let selectable_pools = &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard];
+
             shielded_inputs = wallet_db
                 .select_spendable_notes(
                     account,
                     amount_required.into(),
-                    &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard],
+                    selectable_pools,
                     anchor_height,
                     &exclude,
                 )

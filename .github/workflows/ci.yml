@@ -17,6 +17,11 @@ jobs:
           - orchard
           - unstable-nu6
           - zfuture
+        include:
+          - extra_flags: orchard
+            rustflags: '--cfg zcash_unstable="orchard"'
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
 
     steps:
       - uses: actions/checkout@v4

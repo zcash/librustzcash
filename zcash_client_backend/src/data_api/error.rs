@@ -61,6 +61,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// Attempted to create a spend to an unsupported pool type (currently, Orchard).
     UnsupportedPoolType(PoolType),
 
+    /// Attempted to create a spend to an unsupported Unified Address receiver
+    NoSupportedReceivers(Vec<u32>),
+
     /// A note being spent does not correspond to either the internal or external
     /// full viewing key for an account.
     NoteMismatch(NoteId),
@@ -117,7 +120,8 @@ where
             Error::ScanRequired => write!(f, "Must scan blocks first"),
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
-            Error::UnsupportedPoolType(t) => write!(f, "Attempted to create spend to an unsupported pool type: {}", t),
+            Error::UnsupportedPoolType(t) => write!(f, "Attempted to send to an unsupported pool: {}", t),
+            Error::NoSupportedReceivers(t) => write!(f, "Unified address contained only unsupported receiver types: {:?}", &t[..]),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
             #[cfg(feature = "transparent-inputs")]
