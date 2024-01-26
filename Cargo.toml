@@ -49,11 +49,11 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
-sapling = { package = "sapling-crypto", version = "0.0" }
+sapling = { package = "sapling-crypto", version = "0.1" }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.6", default-features = false }
+orchard = { version = "0.7", default-features = false }
 
 # - Transparent
 hdwallet = "0.4"
@@ -115,7 +115,3 @@ zip32 = "0.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
-
-[patch.crates-io]
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "4ec6a48daab0af1fe6cb930f6a150030ce91d0e9" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "9a85034ce932ca398da16529482e5efecc474c50" }
