@@ -264,3 +264,472 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         panic!("Cannot revert this migration.");
     }
 }
+
+#[cfg(feature = "transparent-inputs")]
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use incrementalmerkletree::Position;
+    use maybe_rayon::{
+        iter::{IndexedParallelIterator, ParallelIterator},
+        slice::ParallelSliceMut,
+    };
+    use rand_core::OsRng;
+    use rusqlite::{named_params, params, Connection};
+    use tempfile::NamedTempFile;
+    use zcash_client_backend::{
+        data_api::{
+            BlockMetadata, DecryptedTransaction, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT,
+        },
+        decrypt_transaction,
+        proto::compact_formats::{CompactBlock, CompactTx},
+        scanning::scan_block,
+        wallet::Recipient,
+        PoolType, ShieldedProtocol, TransferType,
+    };
+    use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
+    use zcash_primitives::{
+        block::BlockHash,
+        consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
+        legacy::keys::IncomingViewingKey,
+        memo::MemoBytes,
+        transaction::{
+            builder::{BuildConfig, BuildResult, Builder},
+            components::amount::NonNegativeAmount,
+        },
+        transaction::{components::transparent, fees::fixed},
+        zip32::{AccountId, Scope},
+    };
+    use zcash_proofs::prover::LocalTxProver;
+
+    use crate::{
+        error::SqliteClientError,
+        wallet::{
+            init::{
+                init_wallet_db_internal,
+                migrations::{add_account_birthdays, shardtree_support, wallet_summaries},
+            },
+            memo_repr, parse_scope,
+            sapling::ReceivedSaplingOutput,
+        },
+        WalletDb,
+    };
+
+    // These must be different.
+    const EXTERNAL_VALUE: u64 = 10;
+    const INTERNAL_VALUE: u64 = 5;
+
+    fn prepare_wallet_state<P: Parameters>(
+        db_data: &mut WalletDb<Connection, P>,
+    ) -> (UnifiedFullViewingKey, BlockHeight, BuildResult) {
+        // Create an account in the wallet
+        let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
+            .unwrap();
+        let ufvk0 = usk0.to_unified_full_viewing_key();
+        let height = db_data
+            .params
+            .activation_height(NetworkUpgrade::Sapling)
+            .unwrap();
+        db_data
+            .conn
+            .execute(
+                "INSERT INTO accounts (account, ufvk, birthday_height) VALUES (0, ?, ?)",
+                params![ufvk0.encode(&db_data.params), u32::from(height)],
+            )
+            .unwrap();
+        let sapling_dfvk = ufvk0.sapling().unwrap();
+        let ovk = sapling_dfvk.to_ovk(Scope::External);
+        let (_, external_addr) = sapling_dfvk.default_address();
+        let (_, internal_addr) = sapling_dfvk.change_address();
+
+        // Create a shielding transaction that has an external note and an internal note.
+        let mut builder = Builder::new(
+            db_data.params.clone(),
+            height,
+            BuildConfig::Standard {
+                sapling_anchor: Some(sapling::Anchor::empty_tree()),
+                orchard_anchor: None,
+            },
+        );
+        builder
+            .add_transparent_input(
+                usk0.transparent().derive_external_secret_key(0).unwrap(),
+                transparent::OutPoint::new([1; 32], 0),
+                transparent::TxOut {
+                    value: NonNegativeAmount::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),
+                    script_pubkey: usk0
+                        .transparent()
+                        .to_account_pubkey()
+                        .derive_external_ivk()
+                        .unwrap()
+                        .default_address()
+                        .0
+                        .script(),
+                },
+            )
+            .unwrap();
+        builder
+            .add_sapling_output::<Infallible>(
+                Some(ovk),
+                external_addr,
+                NonNegativeAmount::const_from_u64(EXTERNAL_VALUE),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+        builder
+            .add_sapling_output::<Infallible>(
+                Some(ovk),
+                internal_addr,
+                NonNegativeAmount::const_from_u64(INTERNAL_VALUE),
+                MemoBytes::empty(),
+            )
+            .unwrap();
+        let prover = LocalTxProver::bundled();
+        let res = builder
+            .build(
+                OsRng,
+                &prover,
+                &prover,
+                &fixed::FeeRule::non_standard(NonNegativeAmount::ZERO),
+            )
+            .unwrap();
+
+        (ufvk0, height, res)
+    }
+
+    fn put_received_note_before_migration<T: ReceivedSaplingOutput>(
+        conn: &Connection,
+        output: &T,
+        tx_ref: i64,
+        spent_in: Option<i64>,
+    ) -> Result<(), SqliteClientError> {
+        let mut stmt_upsert_received_note = conn.prepare_cached(
+            "INSERT INTO sapling_received_notes
+            (tx, output_index, account, diversifier, value, rcm, memo, nf,
+             is_change, spent, commitment_tree_position)
+            VALUES (
+                :tx,
+                :output_index,
+                :account,
+                :diversifier,
+                :value,
+                :rcm,
+                :memo,
+                :nf,
+                :is_change,
+                :spent,
+                :commitment_tree_position
+            )
+            ON CONFLICT (tx, output_index) DO UPDATE
+            SET account = :account,
+                diversifier = :diversifier,
+                value = :value,
+                rcm = :rcm,
+                nf = IFNULL(:nf, nf),
+                memo = IFNULL(:memo, memo),
+                is_change = IFNULL(:is_change, is_change),
+                spent = IFNULL(:spent, spent),
+                commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position)",
+        )?;
+
+        let rcm = output.note().rcm().to_bytes();
+        let to = output.note().recipient();
+        let diversifier = to.diversifier();
+
+        let sql_args = named_params![
+            ":tx": &tx_ref,
+            ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
+            ":account": u32::from(output.account()),
+            ":diversifier": &diversifier.0.as_ref(),
+            ":value": output.note().value().inner(),
+            ":rcm": &rcm.as_ref(),
+            ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
+            ":memo": memo_repr(output.memo()),
+            ":is_change": output.is_change(),
+            ":spent": spent_in,
+            ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
+        ];
+
+        stmt_upsert_received_note
+            .execute(sql_args)
+            .map_err(SqliteClientError::from)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn receiving_key_scopes_migration_enhanced() {
+        let params = Network::TestNetwork;
+
+        // Create wallet upgraded to just before the current migration.
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), params).unwrap();
+        init_wallet_db_internal(
+            &mut db_data,
+            None,
+            &[
+                add_account_birthdays::MIGRATION_ID,
+                shardtree_support::MIGRATION_ID,
+            ],
+        )
+        .unwrap();
+
+        let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
+        let tx = res.transaction();
+
+        // We can't use `decrypt_and_store_transaction` because we haven't migrated yet.
+        // Replicate its relevant innards here.
+        let d_tx = DecryptedTransaction {
+            tx,
+            sapling_outputs: &decrypt_transaction(
+                &params,
+                height,
+                tx,
+                &[(AccountId::ZERO, ufvk0)].into_iter().collect(),
+            ),
+        };
+        db_data
+            .transactionally::<_, _, rusqlite::Error>(|wdb| {
+                let tx_ref = crate::wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None).unwrap();
+
+                let mut spending_account_id: Option<AccountId> = None;
+                for output in d_tx.sapling_outputs {
+                    match output.transfer_type {
+                        TransferType::Outgoing | TransferType::WalletInternal => {
+                            let recipient = if output.transfer_type == TransferType::Outgoing {
+                                Recipient::Sapling(output.note.recipient())
+                            } else {
+                                Recipient::InternalAccount(
+                                    output.account,
+                                    PoolType::Shielded(ShieldedProtocol::Sapling),
+                                )
+                            };
+
+                            // Don't need to bother with sent outputs for this test.
+                            if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                                put_received_note_before_migration(
+                                    wdb.conn.0, output, tx_ref, None,
+                                )
+                                .unwrap();
+                            }
+                        }
+                        TransferType::Incoming => {
+                            match spending_account_id {
+                                Some(id) => assert_eq!(id, output.account),
+                                None => {
+                                    spending_account_id = Some(output.account);
+                                }
+                            }
+                            put_received_note_before_migration(wdb.conn.0, output, tx_ref, None)
+                                .unwrap();
+                        }
+                    }
+                }
+
+                Ok(())
+            })
+            .unwrap();
+
+        // Apply the current migration
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+
+        // There should be two rows in the `sapling_received_notes` table with correct scopes.
+        let mut q = db_data
+            .conn
+            .prepare(
+                "SELECT value, recipient_key_scope
+                FROM sapling_received_notes",
+            )
+            .unwrap();
+        let mut rows = q.query([]).unwrap();
+        let mut row_count = 0;
+        while let Some(row) = rows.next().unwrap() {
+            row_count += 1;
+            let value: u64 = row.get(0).unwrap();
+            let scope = parse_scope(row.get(1).unwrap());
+            match dbg!(value) {
+                EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
+                INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
+                _ => {
+                    panic!(
+                        "(Value, Scope) pair {:?} is not expected to exist in the wallet.",
+                        (value, scope),
+                    );
+                }
+            }
+        }
+        assert_eq!(row_count, 2);
+    }
+
+    #[test]
+    fn receiving_key_scopes_migration_non_enhanced() {
+        let params = Network::TestNetwork;
+
+        // Create wallet upgraded to just before the current migration.
+        let data_file = NamedTempFile::new().unwrap();
+        let mut db_data = WalletDb::for_path(data_file.path(), params).unwrap();
+        init_wallet_db_internal(
+            &mut db_data,
+            None,
+            &[
+                wallet_summaries::MIGRATION_ID,
+                shardtree_support::MIGRATION_ID,
+            ],
+        )
+        .unwrap();
+
+        let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
+        let tx = res.transaction();
+
+        let mut compact_tx = CompactTx {
+            hash: tx.txid().as_ref()[..].into(),
+            ..Default::default()
+        };
+        for output in tx.sapling_bundle().unwrap().shielded_outputs() {
+            compact_tx.outputs.push(output.into());
+        }
+        let prev_hash = BlockHash([4; 32]);
+        let mut block = CompactBlock {
+            height: height.into(),
+            hash: vec![7; 32],
+            prev_hash: prev_hash.0[..].into(),
+            ..Default::default()
+        };
+        block.vtx.push(compact_tx);
+        let scanned_block = scan_block(
+            &params,
+            block,
+            &[(&AccountId::ZERO, ufvk0.sapling().unwrap())],
+            &[],
+            Some(&BlockMetadata::from_parts(
+                height - 1,
+                prev_hash,
+                Some(0),
+                #[cfg(feature = "orchard")]
+                Some(0),
+            )),
+        )
+        .unwrap();
+
+        // We can't use `put_blocks` because we haven't migrated yet.
+        // Replicate its relevant innards here.
+        let blocks = [scanned_block];
+        db_data
+            .transactionally(|wdb| {
+                let start_positions = blocks.first().map(|block| {
+                    (
+                        block.height(),
+                        Position::from(
+                            u64::from(block.sapling().final_tree_size())
+                                - u64::try_from(block.sapling().commitments().len()).unwrap(),
+                        ),
+                    )
+                });
+                let mut sapling_commitments = vec![];
+                let mut last_scanned_height = None;
+                let mut note_positions = vec![];
+                for block in blocks.into_iter() {
+                    if last_scanned_height
+                        .iter()
+                        .any(|prev| block.height() != *prev + 1)
+                    {
+                        return Err(SqliteClientError::NonSequentialBlocks);
+                    }
+
+                    // Insert the block into the database.
+                    crate::wallet::put_block(
+                        wdb.conn.0,
+                        block.height(),
+                        block.block_hash(),
+                        block.block_time(),
+                        block.sapling().final_tree_size(),
+                        block.sapling().commitments().len().try_into().unwrap(),
+                    )?;
+
+                    for tx in block.transactions() {
+                        let tx_row = crate::wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
+
+                        for output in &tx.sapling_outputs {
+                            put_received_note_before_migration(wdb.conn.0, output, tx_row, None)?;
+                        }
+                    }
+
+                    note_positions.extend(block.transactions().iter().flat_map(|wtx| {
+                        wtx.sapling_outputs
+                            .iter()
+                            .map(|out| out.note_commitment_tree_position())
+                    }));
+
+                    last_scanned_height = Some(block.height());
+                    let block_commitments = block.into_commitments();
+                    sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
+                }
+
+                // We will have a start position and a last scanned height in all cases where
+                // `blocks` is non-empty.
+                if let Some(((_, start_position), _)) = start_positions.zip(last_scanned_height) {
+                    // Create subtrees from the note commitments in parallel.
+                    const CHUNK_SIZE: usize = 1024;
+                    let subtrees = sapling_commitments
+                        .par_chunks_mut(CHUNK_SIZE)
+                        .enumerate()
+                        .filter_map(|(i, chunk)| {
+                            let start = start_position + (i * CHUNK_SIZE) as u64;
+                            let end = start + chunk.len() as u64;
+
+                            shardtree::LocatedTree::from_iter(
+                                start..end,
+                                SAPLING_SHARD_HEIGHT.into(),
+                                chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                            )
+                        })
+                        .map(|res| (res.subtree, res.checkpoints))
+                        .collect::<Vec<_>>();
+
+                    // Update the Sapling note commitment tree with all newly read note commitments
+                    let mut subtrees = subtrees.into_iter();
+                    wdb.with_sapling_tree_mut::<_, _, SqliteClientError>(move |sapling_tree| {
+                        for (tree, checkpoints) in &mut subtrees {
+                            sapling_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        Ok(())
+                    })?;
+                }
+
+                Ok(())
+            })
+            .unwrap();
+
+        // Apply the current migration
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+
+        // There should be two rows in the `sapling_received_notes` table with correct scopes.
+        let mut q = db_data
+            .conn
+            .prepare(
+                "SELECT value, recipient_key_scope
+                FROM sapling_received_notes",
+            )
+            .unwrap();
+        let mut rows = q.query([]).unwrap();
+        let mut row_count = 0;
+        while let Some(row) = rows.next().unwrap() {
+            row_count += 1;
+            let value: u64 = row.get(0).unwrap();
+            let scope = parse_scope(row.get(1).unwrap());
+            match dbg!(value) {
+                EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
+                INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
+                _ => {
+                    panic!(
+                        "(Value, Scope) pair {:?} is not expected to exist in the wallet.",
+                        (value, scope),
+                    );
+                }
+            }
+        }
+        assert_eq!(row_count, 2);
+    }
+}
