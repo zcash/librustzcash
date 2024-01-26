@@ -5,6 +5,7 @@ use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
+use zcash_keys::keys::UnifiedAddressRequest;
 use zcash_primitives::{consensus, zip32::AccountId};
 
 use crate::wallet::{init::WalletMigrationError, insert_address};
@@ -84,7 +85,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     "Address in accounts table was not a Unified Address.".to_string(),
                 ));
             };
-            let (expected_address, idx) = ufvk.default_address();
+            let (expected_address, idx) =
+                ufvk.default_address(UnifiedAddressRequest::unsafe_new(false, true, true));
             if decoded_address != expected_address {
                 return Err(WalletMigrationError::CorruptedData(format!(
                     "Decoded UA {} does not match the UFVK's default address {} at {:?}.",
@@ -154,7 +156,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 ],
             )?;
 
-            let (address, d_idx) = ufvk.default_address();
+            let (address, d_idx) =
+                ufvk.default_address(UnifiedAddressRequest::unsafe_new(false, true, true));
             insert_address(transaction, &self.params, account, d_idx, &address)?;
         }
 
