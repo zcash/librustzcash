@@ -988,7 +988,7 @@ mod tests {
             // Orchard component.
             let ua_request =
                 UnifiedAddressRequest::unsafe_new_without_expiry(false, true, UA_TRANSPARENT);
-            let address_str = Address::Unified(
+            let address_str = Address::from(
                 ufvk.default_address(ua_request)
                     .expect("A valid default address exists for the UFVK")
                     .0,
@@ -1007,7 +1007,7 @@ mod tests {
             // add a transparent "sent note"
             #[cfg(feature = "transparent-inputs")]
             {
-                let taddr = Address::Transparent(
+                let taddr = Address::from(
                     *ufvk
                         .default_address(ua_request)
                         .expect("A valid default address exists for the UFVK")

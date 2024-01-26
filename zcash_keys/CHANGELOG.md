@@ -78,6 +78,10 @@ and this library adheres to Rust's notion of
   must be enabled for the `keys` module to be accessible.
 - Updated to `zcash_primitives-0.15.0`
 
+### Changed
+- `zcash_keys::address::Address` variants now `Box` their contents to
+  avoid large discrepancies in enum variant sizing.
+
 ### Removed
 - `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
   feature flag. UFVKs should only be produced by derivation from the USK, or
