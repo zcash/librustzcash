@@ -182,7 +182,7 @@ impl UnifiedSpendingKey {
 
         #[cfg(feature = "orchard")]
         let orchard =
-            orchard::keys::SpendingKey::from_zip32_seed(seed, params.coin_type(), account.into())
+            orchard::keys::SpendingKey::from_zip32_seed(seed, params.coin_type(), account)
                 .map_err(DerivationError::Orchard)?;
 
         #[cfg(feature = "transparent-inputs")]
@@ -932,10 +932,7 @@ mod tests {
             }
 
             let ua = ufvk
-                .address(
-                    d_idx,
-                    UnifiedAddressRequest::unsafe_new(false, true, true),
-                )
+                .address(d_idx, UnifiedAddressRequest::unsafe_new(false, true, true))
                 .unwrap_or_else(|err| {
                     panic!(
                         "unified address generation failed for account {}: {:?}",
