@@ -33,7 +33,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra_flags: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
       - name: Run tests
         run: >
           cargo test
