@@ -859,7 +859,7 @@ where
                         .convert_if_network(params.network_type())?;
 
                     let recipient_taddr = match recipient_address {
-                        Address::Transparent(t) => Some(t),
+                        Address::Transparent(t) => Some(t.as_ref()),
                         Address::Unified(uaddr) => uaddr.transparent(),
                         _ => None,
                     }
@@ -1022,7 +1022,7 @@ where
                 let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     sapling_external_ovk,
-                    addr,
+                    *addr,
                     payment.amount(),
                     memo.clone(),
                 )?;
