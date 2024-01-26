@@ -8,7 +8,7 @@ use std::{
 };
 
 use nonempty::NonEmpty;
-use zcash_address::ConversionError;
+use zcash_address::{ConversionError, ZcashAddress};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     transaction::{
@@ -21,7 +21,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::{Address, UnifiedAddress},
+    address::Address,
     data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
@@ -226,7 +226,7 @@ pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     /// An intermediate value overflowed or underflowed the valid monetary range.
     Balance(BalanceError),
     /// A unified address did not contain a supported receiver.
-    UnsupportedAddress(Box<UnifiedAddress>),
+    UnsupportedAddress(ZcashAddress),
     /// Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.
     UnsupportedTexAddress,
     /// An error was encountered in change selection.
@@ -241,10 +241,12 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorErro
                 "A balance calculation violated amount validity bounds: {:?}.",
                 e
             ),
-            GreedyInputSelectorError::UnsupportedAddress(_) => {
-                // we can't encode the UA to its string representation because we
-                // don't have network parameters here
-                write!(f, "Unified address contains no supported receivers.")
+            GreedyInputSelectorError::UnsupportedAddress(addr) => {
+                write!(
+                    f,
+                    "Unified address {} contains no supported receivers.",
+                    addr.encode()
+                )
             }
             GreedyInputSelectorError::UnsupportedTexAddress => {
                 write!(f, "Support for transparent-source-only (TEX) addresses requires the transparent-inputs feature.")
@@ -461,7 +463,9 @@ where
                     }
 
                     return Err(InputSelectorError::Selection(
-                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
+                        GreedyInputSelectorError::UnsupportedAddress(
+                            payment.recipient_address().clone(),
+                        ),
                     ));
                 }
             }
