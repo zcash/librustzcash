@@ -673,7 +673,7 @@ pub fn send_multi_step_proposed_transfer<T: ShieldedPoolTester, DSF>(
 
     assert_matches!(
         ephemeral0,
-        Address::Transparent(TransparentAddress::PublicKeyHash(_))
+        Address::Transparent(ref b) if matches!(*b, TransparentAddress::PublicKeyHash(_))
     );
 
     // Attempting to pay to an ephemeral address should cause an error.

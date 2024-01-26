@@ -1,5 +1,6 @@
 //! Structs for handling supported address types.
 
+use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -392,7 +393,7 @@ pub enum Address {
     /// A [ZIP 316] Unified Address.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    Unified(UnifiedAddress),
+    Unified(Box<UnifiedAddress>),
 
     /// A [ZIP 320] transparent-source-only P2PKH address, or "TEX address".
     ///
@@ -415,7 +416,7 @@ impl From<TransparentAddress> for Address {
 
 impl From<UnifiedAddress> for Address {
     fn from(addr: UnifiedAddress) -> Self {
-        Address::Unified(addr)
+        Address::Unified(Box::new(addr))
     }
 }
 
@@ -475,12 +476,12 @@ impl Address {
         match self {
             #[cfg(feature = "sapling")]
             Address::Sapling(pa) => ZcashAddress::from_sapling(net, pa.to_bytes()),
-            Address::Transparent(addr) => match addr {
+            Address::Transparent(addr) => match *addr {
                 TransparentAddress::PublicKeyHash(data) => {
-                    ZcashAddress::from_transparent_p2pkh(net, *data)
+                    ZcashAddress::from_transparent_p2pkh(net, data)
                 }
                 TransparentAddress::ScriptHash(data) => {
-                    ZcashAddress::from_transparent_p2sh(net, *data)
+                    ZcashAddress::from_transparent_p2sh(net, data)
                 }
             },
             Address::Unified(ua) => ua.to_address(net),
@@ -555,9 +556,9 @@ pub mod testing {
     #[cfg(feature = "sapling")]
     pub fn arb_addr(request: UnifiedAddressRequest) -> impl Strategy<Value = Address> {
         prop_oneof![
-            arb_payment_address().prop_map(Address::Sapling),
-            arb_transparent_addr().prop_map(Address::Transparent),
-            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            arb_payment_address().prop_map(Address::from),
+            arb_transparent_addr().prop_map(Address::from),
+            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::from),
             proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ]
     }
@@ -565,8 +566,8 @@ pub mod testing {
     #[cfg(not(feature = "sapling"))]
     pub fn arb_addr(request: UnifiedAddressRequest) -> impl Strategy<Value = Address> {
         return prop_oneof![
-            arb_transparent_addr().prop_map(Address::Transparent),
-            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            arb_transparent_addr().prop_map(Address::from),
+            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::from),
             proptest::array::uniform20(any::<u8>()).prop_map(Address::Tex),
         ];
     }
@@ -614,7 +615,7 @@ mod tests {
         #[cfg(all(feature = "orchard", not(feature = "sapling")))]
         let ua = UnifiedAddress::new_internal(orchard, transparent, None, None);
 
-        let addr = Address::Unified(ua);
+        let addr = Address::from(ua);
         let addr_str = addr.encode(&MAIN_NETWORK);
         assert_eq!(Address::decode(&MAIN_NETWORK, &addr_str), Some(addr));
     }

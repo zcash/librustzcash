@@ -21,6 +21,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::WalletRead::get_known_ephemeral_addresses`
   now takes a `Range<zcash_transparent::keys::NonHardenedChildIndex>` as its
   argument instead of a `Range<u32>`
+- `zcash_client_backend::data_api::wallet::input_selection::GreedyInputSelectorError::UnsupportedAddress`
+  now contains a `ZcashAddress` instead of a `UnifiedAddress`.
 
 ### Deprecated
 - `zcash_client_backend::address` (use `zcash_keys::address` instead)

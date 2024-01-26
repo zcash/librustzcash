@@ -47,6 +47,8 @@ and this library adheres to Rust's notion of
   receivers.
 - `zcash_keys::keys::UnifiedSpendingKey::default_address` is now failable, and
   now returns a `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`.
+- `zcash_keys::address::Address` variants now `Box` their contents to
+  avoid large discrepancies in enum variant sizing.
 
 ### Removed
 - `zcash_keys::keys::UnifiedAddressRequest::all` (use 
