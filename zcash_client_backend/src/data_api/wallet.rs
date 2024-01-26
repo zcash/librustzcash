@@ -855,7 +855,7 @@ where
                         .expect("Payment step references are checked at construction")
                         .recipient_address
                     {
-                        Address::Transparent(t) => Some(t),
+                        Address::Transparent(t) => Some(t.as_ref()),
                         Address::Unified(uaddr) => uaddr.transparent(),
                         _ => None,
                     }
@@ -1019,11 +1019,15 @@ where
                     .map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     sapling_external_ovk,
-                    *addr,
+                    **addr,
                     payment.amount,
                     memo.clone(),
                 )?;
-                sapling_output_meta.push((Recipient::Sapling(*addr), payment.amount, Some(memo)));
+                sapling_output_meta.push((
+                    Recipient::Sapling(addr.clone()),
+                    payment.amount,
+                    Some(memo),
+                ));
             }
             Address::Transparent(to) => {
                 if payment.memo.is_some() {
@@ -1165,7 +1169,12 @@ where
             .map(|(index, _)| index)
             .expect("An output should exist in the transaction for each transparent payment.");
 
-        SentTransactionOutput::from_parts(output_index, Recipient::Transparent(*addr), value, None)
+        SentTransactionOutput::from_parts(
+            output_index,
+            Recipient::Transparent(addr.clone()),
+            value,
+            None,
+        )
     });
 
     let mut outputs = vec![];

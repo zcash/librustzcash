@@ -380,7 +380,7 @@ where
                     }
 
                     return Err(InputSelectorError::Selection(
-                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+                        GreedyInputSelectorError::UnsupportedAddress(addr.clone()),
                     ));
                 }
             }

@@ -95,6 +95,9 @@ and this library adheres to Rust's notion of
   - Arguments to `ChangeStrategy::compute_balance` have changed.
   - `ChangeError::DustInputs` now has an `orchard` field behind the `orchard`
     feature flag.
+- `zcash_client_backend::wallet`:
+  - The address variants of `Recipient` now `Box` their contents to avoid large
+    discrepancies in enum variant sizing.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
 - `zcash_client_backend::zip321::render::amount_str` now takes a

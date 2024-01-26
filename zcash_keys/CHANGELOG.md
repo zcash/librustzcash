@@ -28,6 +28,10 @@ and this library adheres to Rust's notion of
 - At least one of the `orchard`, `sapling`, or `transparent-inputs` features
   must be enabled for the `keys` module to be accessible.
 
+### Changed
+- `zcash_keys::address::Address` variants now `Box` their contents to
+  avoid large discrepancies in enum variant sizing.
+
 ### Removed
 - `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
   feature flag. UFVKs should only be produced by derivation from the USK, or

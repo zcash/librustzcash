@@ -964,7 +964,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type() == TransferType::Outgoing {
                             //TODO: Recover the UA, if possible.
-                            Recipient::Sapling(output.note().recipient())
+                            Recipient::Sapling(Box::new(output.note().recipient()))
                         } else {
                             Recipient::InternalAccount(
                                 *output.account(),
@@ -1011,11 +1011,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         let recipient = if output.transfer_type() == TransferType::Outgoing {
                             // TODO: Recover the actual UA, if possible.
                             Recipient::Unified(
-                                UnifiedAddress::from_receivers(
+                                Box::new(UnifiedAddress::from_receivers(
                                     Some(output.note().recipient()),
                                     None,
                                     None
-                                ),
+                                )),
                                 PoolType::Shielded(ShieldedProtocol::Orchard)
                             )
                         } else {
@@ -1092,7 +1092,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 account_id,
                                 tx_ref,
                                 output_index,
-                                &Recipient::Transparent(address),
+                                &Recipient::Transparent(Box::new(address)),
                                 txout.value,
                                 None
                             )?;

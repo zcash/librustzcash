@@ -747,7 +747,7 @@ impl UnifiedFullViewingKey {
                     #[cfg(feature = "orchard")]
                     {
                         orchard = Some(
-                            orchard::keys::FullViewingKey::from_bytes(&data)
+                            orchard::keys::FullViewingKey::from_bytes(data)
                                 .ok_or(DecodingError::KeyDataInvalid(Typecode::ORCHARD))?,
                         );
                     }
@@ -759,7 +759,7 @@ impl UnifiedFullViewingKey {
                     #[cfg(feature = "sapling")]
                     {
                         sapling = Some(
-                            sapling::DiversifiableFullViewingKey::from_bytes(&data)
+                            sapling::DiversifiableFullViewingKey::from_bytes(data)
                                 .ok_or(DecodingError::KeyDataInvalid(Typecode::SAPLING))?,
                         );
                     }
@@ -770,7 +770,7 @@ impl UnifiedFullViewingKey {
                     #[cfg(feature = "transparent-inputs")]
                     {
                         transparent = Some(
-                            legacy::AccountPubKey::deserialize(&data)
+                            legacy::AccountPubKey::deserialize(data)
                                 .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH))?,
                         );
                     }

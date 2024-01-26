@@ -308,7 +308,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     // spends the first step's output.
 
     // The first step will deshield to the wallet's default transparent address
-    let to0 = Address::Transparent(usk.default_transparent_address().0);
+    let to0 = Address::from(usk.default_transparent_address().0);
     let request0 = zip321::TransactionRequest::new(vec![Payment {
         recipient_address: to0,
         amount: NonNegativeAmount::const_from_u64(50000),
@@ -344,7 +344,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // We'll use an internal transparent address that hasn't been added to the wallet
     // to simulate an external transparent recipient.
-    let to1 = Address::Transparent(
+    let to1 = Address::from(
         usk.transparent()
             .to_account_pubkey()
             .derive_internal_ivk()

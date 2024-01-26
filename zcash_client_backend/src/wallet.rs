@@ -67,9 +67,9 @@ impl NoteId {
 /// output.
 #[derive(Debug, Clone)]
 pub enum Recipient<AccountId, N> {
-    Transparent(TransparentAddress),
-    Sapling(sapling::PaymentAddress),
-    Unified(UnifiedAddress, PoolType),
+    Transparent(Box<TransparentAddress>),
+    Sapling(Box<sapling::PaymentAddress>),
+    Unified(Box<UnifiedAddress>, PoolType),
     InternalAccount(AccountId, N),
 }
 
