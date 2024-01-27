@@ -16,6 +16,9 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
   - `constants`
 - `zcash_protocol::value::ZatBalance::into_u64`
 - `impl TryFrom<u64> for zcash_protocol::value::Zatoshis`
+- `zcash_protocol::value::MAX_BALANCE` has been added to replace previous
+  instances where `zcash_protocol::value::MAX_MONEY` was used as a signed
+  value.
 
 ### Moved
 - `zcash_primitives::transcation::components::amount` has been moved to
@@ -25,3 +28,10 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
 - `zcash_primitives::transcation::components::amount::Amount` has been renamed 
   to `zcash_protocol::value::ZatBalance`
 
+### Changed
+- `zcash_protocol::value::COIN` has been changed from an `i64` to a `u64`
+- `zcash_protocol::value::MAX_MONEY` has been changed from an `i64` to a `u64`
+- `zcash_primitives::transcation::components::amount::NonNegativeAmount` has
+  been renamed to `zcash_protocol::value::Zatoshis`
+- `zcash_primitives::transcation::components::amount::Amount` has been renamed 
+  to `zcash_protocol::value::ZatBalance`

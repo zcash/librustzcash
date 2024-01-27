@@ -31,6 +31,10 @@ and this library adheres to Rust's notion of
   - `ShieldedProtocol` has a new `Orchard` variant.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
+- `zcash_client_backend::zip321::render::amount_str` now takes a
+  `NonNegativeAmount` rather than a signed `Amount` as its argument.
+- `zcash_client_backend::zip321::parse::parse_amount` now parses a
+  `NonNegativeAmount` rather than a signed `Amount`.
 
 ## [0.11.0-pre-release] Unreleased
 

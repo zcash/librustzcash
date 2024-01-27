@@ -5,8 +5,9 @@ use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
 use memuse::DynamicUsage;
 
-pub const COIN: i64 = 1_0000_0000;
-pub const MAX_MONEY: i64 = 21_000_000 * COIN;
+pub const COIN: u64 = 1_0000_0000;
+pub const MAX_MONEY: u64 = 21_000_000 * COIN;
+pub const MAX_BALANCE: i64 = MAX_MONEY as i64;
 
 /// A type-safe representation of a Zcash value delta, in zatoshis.
 ///
@@ -32,25 +33,25 @@ impl ZatBalance {
 
     /// Creates a constant ZatBalance from an i64.
     ///
-    /// Panics: if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    /// Panics: if the amount is outside the range `{-MAX_BALANCE..MAX_BALANCE}`.
     pub const fn const_from_i64(amount: i64) -> Self {
-        assert!(-MAX_MONEY <= amount && amount <= MAX_MONEY); // contains is not const
+        assert!(-MAX_BALANCE <= amount && amount <= MAX_BALANCE); // contains is not const
         ZatBalance(amount)
     }
 
     /// Creates a constant ZatBalance from a u64.
     ///
-    /// Panics: if the amount is outside the range `{0..MAX_MONEY}`.
-    const fn const_from_u64(amount: u64) -> Self {
-        assert!(amount <= (MAX_MONEY as u64)); // contains is not const
+    /// Panics: if the amount is outside the range `{0..MAX_BALANCE}`.
+    pub const fn const_from_u64(amount: u64) -> Self {
+        assert!(amount <= MAX_MONEY); // contains is not const
         ZatBalance(amount as i64)
     }
 
     /// Creates an ZatBalance from an i64.
     ///
-    /// Returns an error if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    /// Returns an error if the amount is outside the range `{-MAX_BALANCE..MAX_BALANCE}`.
     pub fn from_i64(amount: i64) -> Result<Self, ()> {
-        if (-MAX_MONEY..=MAX_MONEY).contains(&amount) {
+        if (-MAX_BALANCE..=MAX_BALANCE).contains(&amount) {
             Ok(ZatBalance(amount))
         } else {
             Err(())
@@ -59,9 +60,9 @@ impl ZatBalance {
 
     /// Creates a non-negative ZatBalance from an i64.
     ///
-    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    /// Returns an error if the amount is outside the range `{0..MAX_BALANCE}`.
     pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
-        if (0..=MAX_MONEY).contains(&amount) {
+        if (0..=MAX_BALANCE).contains(&amount) {
             Ok(ZatBalance(amount))
         } else {
             Err(())
@@ -72,7 +73,7 @@ impl ZatBalance {
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_u64(amount: u64) -> Result<Self, ()> {
-        if amount <= MAX_MONEY as u64 {
+        if amount <= MAX_MONEY {
             Ok(ZatBalance(amount as i64))
         } else {
             Err(())
@@ -81,7 +82,7 @@ impl ZatBalance {
 
     /// Reads an ZatBalance from a signed 64-bit little-endian integer.
     ///
-    /// Returns an error if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    /// Returns an error if the amount is outside the range `{-MAX_BALANCE..MAX_BALANCE}`.
     pub fn from_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
         let amount = i64::from_le_bytes(bytes);
         ZatBalance::from_i64(amount)
@@ -89,7 +90,7 @@ impl ZatBalance {
 
     /// Reads a non-negative ZatBalance from a signed 64-bit little-endian integer.
     ///
-    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    /// Returns an error if the amount is outside the range `{0..MAX_BALANCE}`.
     pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
         let amount = i64::from_le_bytes(bytes);
         ZatBalance::from_nonnegative_i64(amount)
@@ -97,7 +98,7 @@ impl ZatBalance {
 
     /// Reads an ZatBalance from an unsigned 64-bit little-endian integer.
     ///
-    /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
+    /// Returns an error if the amount is outside the range `{0..MAX_BALANCE}`.
     pub fn from_u64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
         let amount = u64::from_le_bytes(bytes);
         ZatBalance::from_u64(amount)
@@ -237,36 +238,41 @@ impl Mul<usize> for ZatBalance {
 /// A Zatoshis can only be constructed from an integer that is within the valid monetary
 /// range of `{0..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
-pub struct Zatoshis(ZatBalance);
+pub struct Zatoshis(u64);
 
 impl Zatoshis {
     /// Returns the identity `Zatoshis`
-    pub const ZERO: Self = Zatoshis(ZatBalance(0));
+    pub const ZERO: Self = Zatoshis(0);
 
     /// Returns this Zatoshis as a u64.
     pub fn into_u64(self) -> u64 {
-        self.0.try_into().unwrap()
+        self.0
     }
 
     /// Creates a Zatoshis from a u64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_u64(amount: u64) -> Result<Self, ()> {
-        ZatBalance::from_u64(amount).map(Zatoshis)
+        if (0..=MAX_MONEY).contains(&amount) {
+            Ok(Zatoshis(amount))
+        } else {
+            Err(())
+        }
     }
 
     /// Creates a constant Zatoshis from a u64.
     ///
-    /// Panics: if the amount is outside the range `{-MAX_MONEY..MAX_MONEY}`.
+    /// Panics: if the amount is outside the range `{0..MAX_MONEY}`.
     pub const fn const_from_u64(amount: u64) -> Self {
-        Zatoshis(ZatBalance::const_from_u64(amount))
+        assert!(amount <= MAX_MONEY); // contains is not const
+        Zatoshis(amount)
     }
 
     /// Creates a Zatoshis from an i64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
-        ZatBalance::from_nonnegative_i64(amount).map(Zatoshis)
+        u64::try_from(amount).map(Zatoshis).map_err(|_| ())
     }
 
     /// Reads an Zatoshis from an unsigned 64-bit little-endian integer.
@@ -289,7 +295,7 @@ impl Zatoshis {
     /// Returns this Zatoshis encoded as a signed two's complement 64-bit
     /// little-endian value.
     pub fn to_i64_le_bytes(self) -> [u8; 8] {
-        self.0.to_i64_le_bytes()
+        (self.0 as i64).to_le_bytes()
     }
 
     /// Returns whether or not this `Zatoshis` is the zero value.
@@ -305,13 +311,13 @@ impl Zatoshis {
 
 impl From<Zatoshis> for ZatBalance {
     fn from(n: Zatoshis) -> Self {
-        n.0
+        ZatBalance(n.0 as i64)
     }
 }
 
 impl From<&Zatoshis> for ZatBalance {
     fn from(n: &Zatoshis) -> Self {
-        n.0
+        ZatBalance(n.0 as i64)
     }
 }
 
@@ -333,11 +339,7 @@ impl TryFrom<ZatBalance> for Zatoshis {
     type Error = ();
 
     fn try_from(value: ZatBalance) -> Result<Self, Self::Error> {
-        if value.is_negative() {
-            Err(())
-        } else {
-            Ok(Zatoshis(value))
-        }
+        Zatoshis::from_nonnegative_i64(value.0)
     }
 }
 
@@ -345,7 +347,7 @@ impl Add<Zatoshis> for Zatoshis {
     type Output = Option<Zatoshis>;
 
     fn add(self, rhs: Zatoshis) -> Option<Zatoshis> {
-        (self.0 + rhs.0).map(Zatoshis)
+        Self::from_u64(self.0.checked_add(rhs.0)?).ok()
     }
 }
 
@@ -361,7 +363,7 @@ impl Sub<Zatoshis> for Zatoshis {
     type Output = Option<Zatoshis>;
 
     fn sub(self, rhs: Zatoshis) -> Option<Zatoshis> {
-        (self.0 - rhs.0).and_then(|amt| Zatoshis::try_from(amt).ok())
+        Zatoshis::from_u64(self.0.checked_sub(rhs.0)?).ok()
     }
 }
 
@@ -377,7 +379,7 @@ impl Mul<usize> for Zatoshis {
     type Output = Option<Self>;
 
     fn mul(self, rhs: usize) -> Option<Zatoshis> {
-        (self.0 * rhs).and_then(|v| Zatoshis::try_from(v).ok())
+        Zatoshis::from_u64(self.0.checked_mul(u64::try_from(rhs).ok()?)?).ok()
     }
 }
 
@@ -430,30 +432,32 @@ impl From<Infallible> for BalanceError {
 pub mod testing {
     use proptest::prelude::prop_compose;
 
-    use super::{ZatBalance, Zatoshis, MAX_MONEY};
+    use super::{ZatBalance, Zatoshis, MAX_BALANCE, MAX_MONEY};
 
     prop_compose! {
-        pub fn arb_zat_balance()(amt in -MAX_MONEY..MAX_MONEY) -> ZatBalance {
+        pub fn arb_zat_balance()(amt in -MAX_BALANCE..MAX_BALANCE) -> ZatBalance {
             ZatBalance::from_i64(amt).unwrap()
         }
     }
 
     prop_compose! {
-        pub fn arb_positive_zat_balance()(amt in 1i64..MAX_MONEY) -> ZatBalance {
+        pub fn arb_positive_zat_balance()(amt in 1i64..MAX_BALANCE) -> ZatBalance {
             ZatBalance::from_i64(amt).unwrap()
         }
     }
 
     prop_compose! {
-        pub fn arb_zatoshis()(amt in 0i64..MAX_MONEY) -> Zatoshis {
-            Zatoshis::from_u64(amt as u64).unwrap()
+        pub fn arb_zatoshis()(amt in 0u64..MAX_MONEY) -> Zatoshis {
+            Zatoshis::from_u64(amt).unwrap()
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ZatBalance, MAX_MONEY};
+    use crate::value::MAX_BALANCE;
+
+    use super::ZatBalance;
 
     #[test]
     fn amount_in_range() {
@@ -476,15 +480,15 @@ mod tests {
         let max_money = b"\x00\x40\x07\x5a\xf0\x75\x07\x00";
         assert_eq!(
             ZatBalance::from_u64_le_bytes(*max_money).unwrap(),
-            ZatBalance(MAX_MONEY)
+            ZatBalance(MAX_BALANCE)
         );
         assert_eq!(
             ZatBalance::from_nonnegative_i64_le_bytes(*max_money).unwrap(),
-            ZatBalance(MAX_MONEY)
+            ZatBalance(MAX_BALANCE)
         );
         assert_eq!(
             ZatBalance::from_i64_le_bytes(*max_money).unwrap(),
-            ZatBalance(MAX_MONEY)
+            ZatBalance(MAX_BALANCE)
         );
 
         let max_money_p1 = b"\x01\x40\x07\x5a\xf0\x75\x07\x00";
@@ -497,7 +501,7 @@ mod tests {
         assert!(ZatBalance::from_nonnegative_i64_le_bytes(*neg_max_money).is_err());
         assert_eq!(
             ZatBalance::from_i64_le_bytes(*neg_max_money).unwrap(),
-            ZatBalance(-MAX_MONEY)
+            ZatBalance(-MAX_BALANCE)
         );
 
         let neg_max_money_m1 = b"\xff\xbf\xf8\xa5\x0f\x8a\xf8\xff";
@@ -508,27 +512,27 @@ mod tests {
 
     #[test]
     fn add_overflow() {
-        let v = ZatBalance(MAX_MONEY);
+        let v = ZatBalance(MAX_BALANCE);
         assert_eq!(v + ZatBalance(1), None)
     }
 
     #[test]
     #[should_panic]
     fn add_assign_panics_on_overflow() {
-        let mut a = ZatBalance(MAX_MONEY);
+        let mut a = ZatBalance(MAX_BALANCE);
         a += ZatBalance(1);
     }
 
     #[test]
     fn sub_underflow() {
-        let v = ZatBalance(-MAX_MONEY);
+        let v = ZatBalance(-MAX_BALANCE);
         assert_eq!(v - ZatBalance(1), None)
     }
 
     #[test]
     #[should_panic]
     fn sub_assign_panics_on_underflow() {
-        let mut a = ZatBalance(-MAX_MONEY);
+        let mut a = ZatBalance(-MAX_BALANCE);
         a -= ZatBalance(1);
     }
 }
