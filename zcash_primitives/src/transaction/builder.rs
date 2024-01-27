@@ -48,6 +48,7 @@ use crate::{
 };
 
 use super::components::amount::NonNegativeAmount;
+use super::components::sapling::zip212_enforcement;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -352,7 +353,7 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
             .sapling_builder_config()
             .map(|(bundle_type, anchor)| {
                 sapling::builder::Builder::new(
-                    consensus::sapling_zip212_enforcement(&params, target_height),
+                    zip212_enforcement(&params, target_height),
                     bundle_type,
                     anchor,
                 )

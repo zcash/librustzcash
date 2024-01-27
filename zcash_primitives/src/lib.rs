@@ -18,8 +18,8 @@
 #![allow(clippy::single_component_path_imports)]
 
 pub mod block;
-pub mod consensus;
-pub mod constants;
+pub use zcash_protocol::consensus;
+pub use zcash_protocol::constants;
 pub mod legacy;
 pub mod memo;
 pub mod merkle_tree;

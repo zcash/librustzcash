@@ -3198,6 +3198,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",
+ "zcash_protocol",
  "zcash_spec",
  "zip32",
 ]
@@ -3229,6 +3230,13 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.0.0"
+dependencies = [
+ "document-features",
+ "incrementalmerkletree",
+ "memuse",
+ "proptest",
+ "zcash_address",
+]
 
 [[package]]
 name = "zcash_spec"

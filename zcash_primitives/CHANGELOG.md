@@ -126,6 +126,14 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend` changes related to `local-consensus` feature:
   - added tests that verify `zip321` supports Payment URIs with `Local(P)`
   network parameters.
+- `zcash_primitives::consensus` is now a reexport of the
+  `zcash_protocol::consensus` module.
+- `zcash_primitives::constants` is now a reexport of the
+  `zcash_protocol::constants` module.
+
+### Moved
+- `zcash_primitives::consensus::sapling_zip212_enforcement` has been moved to 
+  `zcash_primitives::transaction::components::sapling::zip212_enforcement`.
 
 ### Removed
 - `zcash_primitives::constants`:

@@ -6,7 +6,7 @@ use sapling::note_encryption::{
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::Transaction,
+    transaction::{components::sapling::zip212_enforcement, Transaction},
     zip32::{AccountId, Scope},
 };
 
@@ -53,7 +53,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
     tx: &Transaction,
     ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
 ) -> Vec<DecryptedOutput<sapling::Note>> {
-    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, height);
+    let zip212_enforcement = zip212_enforcement(params, height);
     tx.sapling_bundle()
         .iter()
         .flat_map(|bundle| {

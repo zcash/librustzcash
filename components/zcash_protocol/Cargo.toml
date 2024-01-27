@@ -20,3 +20,29 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+zcash_address.workspace = true
+
+# - Logging and metrics
+memuse.workspace = true
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features.workspace = true
+
+# - Test dependencies
+proptest = { workspace = true, optional = true }
+incrementalmerkletree = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+## Exposes APIs that are useful for testing, such as `proptest` strategies.
+test-dependencies = ["dep:proptest", "incrementalmerkletree/test-dependencies"]
+
+## Exposes the in-development NU6 features.
+unstable-nu6 = []
+
+## Exposes early in-development features that are not yet planned for any network upgrade.
+zfuture = []
