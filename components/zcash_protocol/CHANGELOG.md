@@ -14,17 +14,18 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
   moved to this crate:
   - `consensus`
   - `constants`
-  - `zcash_protocol::value` replaces `zcash_primitives::transcation::components::amount`
-- `zcash_protocol::value::Amount::into_u64`
-- `impl TryFrom<u64> for zcash_protocol::value::NonNegativeAmount`
+  - `zcash_protocol::value` replaces `zcash_primitives::transaction::components::amount`
 - Added in `zcash_protocol::value`:
-  - `NonNegativeAmount::into_u64`
-  - `TryFrom<u64> for NonNegativeAmount`
+  - `Zatoshis`
+  - `ZatBalance`
 
 ### Removed
-- The following conversions have been removed from `zcash_protocol::value`, as
-  `zcash_protocol` does not depend on the `orchard` or `sapling-crypto` crates.
-  - `From<NonNegativeAmount> for orchard::NoteValue>`
-  - `TryFrom<orchard::ValueSum> for Amount`
-  - `From<NonNegativeAmount> for sapling::value::NoteValue>`
-  - `TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+- From `zcash_protocol::value`:
+  - `NonNegativeAmount` (use `Zatoshis` instead.)
+  - `Amount` (use `ZatBalance` instead.)
+  - The following conversions have been removed relative to `zcash_primitives-0.14.0`,
+    as `zcash_protocol` does not depend on the `orchard` or `sapling-crypto` crates.
+    - `From<NonNegativeAmount> for orchard::NoteValue>`
+    - `TryFrom<orchard::ValueSum> for Amount`
+    - `From<NonNegativeAmount> for sapling::value::NoteValue>`
+    - `TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
