@@ -118,6 +118,7 @@ temporary-zcashd = []
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
+    "zcash_protocol/test-dependencies",
     "orchard/test-dependencies",
     "sapling/test-dependencies",
 ]

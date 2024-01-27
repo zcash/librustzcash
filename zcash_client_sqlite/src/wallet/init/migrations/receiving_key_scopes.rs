@@ -244,7 +244,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     &mut commitment_tree,
                     dfvk,
                     &diversifier,
-                    &note_value.try_into().unwrap(),
+                    &sapling::value::NoteValue::from_raw(note_value.into_u64()),
                     &rseed,
                     note_commitment_tree_position,
                 )?;

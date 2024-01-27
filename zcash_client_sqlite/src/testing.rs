@@ -785,7 +785,7 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
     // Create a fake Note for the account
     let mut rng = OsRng;
     let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
-    let note = Note::from_parts(to, NoteValue::from(value), rseed);
+    let note = Note::from_parts(to, NoteValue::from_raw(value.into_u64()), rseed);
     let encryptor = sapling_note_encryption(
         Some(dfvk.fvk().ovk),
         note.clone(),
@@ -894,7 +894,11 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
 
     // Create a fake Note for the payment
     ctx.outputs.push({
-        let note = Note::from_parts(to, NoteValue::from(value), rseed);
+        let note = Note::from_parts(
+            to,
+            sapling::value::NoteValue::from_raw(value.into_u64()),
+            rseed,
+        );
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -918,7 +922,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
         let note = Note::from_parts(
             change_addr,
-            NoteValue::from((in_value - value).unwrap()),
+            NoteValue::from_raw((in_value - value).unwrap().into_u64()),
             rseed,
         );
         let encryptor = sapling_note_encryption(

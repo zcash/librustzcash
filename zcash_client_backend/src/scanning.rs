@@ -1217,7 +1217,7 @@ mod tests {
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
-        let note = sapling::Note::from_parts(to, NoteValue::from(value), rseed);
+        let note = sapling::Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),

@@ -15,10 +15,18 @@ and this library adheres to Rust's notion of
   `zcash_protocol::consensus` module.
 - `zcash_primitives::constants` is now a reexport of the
   `zcash_protocol::constants` module.
+- `zcash_primitives::transaction::components::amount` is now a reexport of the
+  `zcash_protocol::value` module.
 
 ### Removed
 - `zcash_primitives::consensus::sapling_zip212_enforcement` instead use
   `zcash_primitives::transaction::components::sapling::zip212_enforcement`.
+- From `zcash_primitive::components::transaction`:
+  - `impl From<Amount> for u64`
+  - `impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+  - `impl From<NonNegativeAmount> for sapling::value::NoteValue`
+  - `impl TryFrom<orchard::ValueSum> for Amount`
+  - `impl From<NonNegativeAmount> for orchard::NoteValue`
 
 ## [0.14.0] - 2024-03-01
 ### Added

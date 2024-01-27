@@ -1,6 +1,6 @@
 //! Structs representing the components within Zcash transactions.
 
-pub mod amount;
+pub use zcash_protocol::value as amount;
 pub mod orchard;
 pub mod sapling;
 pub mod sprout;
