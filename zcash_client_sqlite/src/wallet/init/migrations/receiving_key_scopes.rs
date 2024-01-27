@@ -18,8 +18,11 @@ use sapling::{
 };
 use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullViewingKey};
 use zcash_primitives::{
-    consensus::{self, sapling_zip212_enforcement, BlockHeight, BranchId},
-    transaction::{components::amount::NonNegativeAmount, Transaction},
+    consensus::{self, BlockHeight, BranchId},
+    transaction::{
+        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+        Transaction,
+    },
     zip32::Scope,
 };
 
@@ -165,7 +168,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     // be mined under ZIP 212 enforcement rules, so we default to `On`
                     Zip212Enforcement::On
                 },
-                |h| sapling_zip212_enforcement(&self.params, h),
+                |h| zip212_enforcement(&self.params, h),
             );
 
             let ufvk_str: String = row.get(5)?;

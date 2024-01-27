@@ -7,6 +7,19 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::components::sapling::zip212_enforcement`
+
+### Changed
+- `zcash_primitives::consensus` is now a reexport of the
+  `zcash_protocol::consensus` module.
+- `zcash_primitives::constants` is now a reexport of the
+  `zcash_protocol::constants` module.
+
+### Removed
+- `zcash_primitives::consensus::sapling_zip212_enforcement` instead use
+  `zcash_primitives::transaction::components::sapling::zip212_enforcement`.
+
 ## [0.14.0] - 2024-03-01
 ### Added
 - Dependency on `bellman 0.14`, `sapling-crypto 0.1`.

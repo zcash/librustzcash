@@ -22,6 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 equihash.workspace = true
 zcash_address.workspace = true
 zcash_encoding.workspace = true
+zcash_protocol.workspace = true
 zip32.workspace = true
 
 # Dependencies exposed in a public API:
@@ -127,10 +128,10 @@ test-dependencies = [
 #! consensus rules!
 
 ## Exposes the in-development NU6 features.
-unstable-nu6 = []
+unstable-nu6 = ["zcash_protocol/unstable-nu6"]
 
 ## Exposes early in-development features that are not yet planned for any network upgrade.
-zfuture = []
+zfuture = ["zcash_protocol/zfuture"]
 
 ## Exposes support for working with a local consensus (e.g. regtest
 local-consensus = []

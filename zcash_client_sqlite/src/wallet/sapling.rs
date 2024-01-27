@@ -484,11 +484,11 @@ pub(crate) mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{sapling_zip212_enforcement, BranchId},
+        consensus::BranchId,
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
         transaction::{
-            components::{amount::NonNegativeAmount, Amount},
+            components::{amount::NonNegativeAmount, sapling::zip212_enforcement, Amount},
             fees::{
                 fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
             },
@@ -1261,7 +1261,7 @@ pub(crate) mod tests {
                 let result = try_sapling_output_recovery(
                     &dfvk.to_ovk(Scope::External),
                     output,
-                    sapling_zip212_enforcement(&st.network(), h1),
+                    zip212_enforcement(&st.network(), h1),
                 );
 
                 if result.is_some() {

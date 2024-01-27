@@ -54,7 +54,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     transaction::{
-        components::amount::NonNegativeAmount,
+        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
@@ -784,10 +784,7 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(
-        consensus::sapling_zip212_enforcement(params, height),
-        &mut rng,
-    );
+    let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
     let note = Note::from_parts(to, NoteValue::from(value), rseed);
     let encryptor = sapling_note_encryption(
         Some(dfvk.fvk().ovk),
@@ -883,7 +880,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
-    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, height);
+    let zip212_enforcement = zip212_enforcement(params, height);
     let mut rng = OsRng;
     let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
 
