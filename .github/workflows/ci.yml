@@ -27,6 +27,7 @@ jobs:
             extra_flags: zfuture
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
 
     steps:
       - uses: actions/checkout@v4
