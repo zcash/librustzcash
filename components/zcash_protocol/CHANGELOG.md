@@ -14,10 +14,14 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
   moved to this crate: 
   - `consensus`
   - `constants`
-- `zcash_protocol::value::Amount::into_u64`
-- `impl TryFrom<u64> for zcash_protocol::value::NonNegativeAmount`
+- `zcash_protocol::value::ZatBalance::into_u64`
+- `impl TryFrom<u64> for zcash_protocol::value::Zatoshis`
 
 ### Moved
 - `zcash_primitives::transcation::components::amount` has been moved to
   `zcash_protocol::value`
+- `zcash_primitives::transcation::components::amount::NonNegativeAmount` has
+  been renamed to `zcash_protocol::value::Zatoshis`
+- `zcash_primitives::transcation::components::amount::Amount` has been renamed 
+  to `zcash_protocol::value::ZatBalance`
 
