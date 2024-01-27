@@ -811,7 +811,8 @@ mod tests {
 
         #[cfg(feature = "orchard")]
         let orchard = {
-            let sk = orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, 0).unwrap();
+            let sk =
+                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
             Some(orchard::keys::FullViewingKey::from(&sk))
         };
 
