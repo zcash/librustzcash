@@ -249,7 +249,7 @@ pub enum Note {
 impl Note {
     pub fn value(&self) -> NonNegativeAmount {
         match self {
-            Note::Sapling(n) => n.value().try_into().expect(
+            Note::Sapling(n) => n.value().inner().try_into().expect(
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
@@ -349,6 +349,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling
     fn value(&self) -> NonNegativeAmount {
         self.note
             .value()
+            .inner()
             .try_into()
             .expect("Sapling note values are indirectly checked by consensus.")
     }
@@ -363,6 +364,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
     fn value(&self) -> NonNegativeAmount {
         self.note
             .value()
+            .inner()
             .try_into()
             .expect("Orchard note values are indirectly checked by consensus.")
     }

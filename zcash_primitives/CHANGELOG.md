@@ -130,6 +130,8 @@ and this library adheres to Rust's notion of
   `zcash_protocol::consensus` module.
 - `zcash_primitives::constants` is now a reexport of the
   `zcash_protocol::constants` module.
+- `zcash_primitives::transaction::components::amount` is now a reexport of the
+  `zcash_protocol::value` module.
 
 ### Moved
 - `zcash_primitives::consensus::sapling_zip212_enforcement` has been moved to 
@@ -163,12 +165,16 @@ and this library adheres to Rust's notion of
     `Bundle::<InProgress<Proven, Unsigned>>::apply_signatures` instead).
   - The `fees` module was removed. Its contents were unused in this crate,
     are now instead made available by `zcash_client_backend::fees::sapling`.
-- `impl From<zcash_primitive::components::transaction::Amount> for u64`
 - `zcash_primitives::zip32`:
   - `sapling` module (moved to `sapling_crypto::zip32`).
   - `ChildIndex::Hardened` (use `ChildIndex::hardened` instead).
   - `ChildIndex::NonHardened`
   - `sapling::ExtendedFullViewingKey::derive_child`
+- `impl From<zcash_primitive::components::transaction::Amount> for u64`
+- `impl TryFrom<sapling::value::NoteValue> for zcash_primitives::components::transaction::NonNegativeAmount`
+- `impl From<zcash_primitive::components::transaction::NonNegativeAmount> for sapling::value::NoteValue`
+- `impl TryFrom<orchard::ValueSum> for zcash_primitives::components::transaction::Amount`
+- `impl From<zcash_primitive::components::transaction::NonNegativeAmount> for orchard::NoteValue`
 
 ### Fixed
 - `zcash_primitives::keys::ExpandedSpendingKey::from_spending_key` now panics if the

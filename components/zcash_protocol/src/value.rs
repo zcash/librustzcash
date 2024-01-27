@@ -4,9 +4,6 @@ use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
 use memuse::DynamicUsage;
-use orchard::value as orchard;
-
-use crate::sapling;
 
 pub const COIN: i64 = 1_0000_0000;
 pub const MAX_MONEY: i64 = 21_000_000 * COIN;
@@ -235,14 +232,6 @@ impl Mul<usize> for Amount {
     }
 }
 
-impl TryFrom<orchard::ValueSum> for Amount {
-    type Error = ();
-
-    fn try_from(v: orchard::ValueSum) -> Result<Amount, Self::Error> {
-        i64::try_from(v).map_err(|_| ()).and_then(Amount::try_from)
-    }
-}
-
 /// A type-safe representation of some nonnegative amount of Zcash.
 ///
 /// A NonNegativeAmount can only be constructed from an integer that is within the valid monetary
@@ -253,6 +242,11 @@ pub struct NonNegativeAmount(Amount);
 impl NonNegativeAmount {
     /// Returns the identity `NonNegativeAmount`
     pub const ZERO: Self = NonNegativeAmount(Amount(0));
+
+    /// Returns this NonNegativeAmount as a u64.
+    pub fn into_u64(self) -> u64 {
+        self.0.try_into().unwrap()
+    }
 
     /// Creates a NonNegativeAmount from a u64.
     ///
@@ -323,35 +317,15 @@ impl From<&NonNegativeAmount> for Amount {
 
 impl From<NonNegativeAmount> for u64 {
     fn from(n: NonNegativeAmount) -> Self {
-        n.0.try_into().unwrap()
+        n.into_u64()
     }
 }
 
-impl From<NonNegativeAmount> for sapling::value::NoteValue {
-    fn from(n: NonNegativeAmount) -> Self {
-        sapling::value::NoteValue::from_raw(n.into())
-    }
-}
-
-impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount {
+impl TryFrom<u64> for NonNegativeAmount {
     type Error = ();
 
-    fn try_from(value: sapling::value::NoteValue) -> Result<Self, Self::Error> {
-        Self::from_u64(value.inner())
-    }
-}
-
-impl From<NonNegativeAmount> for orchard::NoteValue {
-    fn from(n: NonNegativeAmount) -> Self {
-        orchard::NoteValue::from_raw(n.into())
-    }
-}
-
-impl TryFrom<orchard::NoteValue> for NonNegativeAmount {
-    type Error = ();
-
-    fn try_from(value: orchard::NoteValue) -> Result<Self, Self::Error> {
-        Self::from_u64(value.inner())
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        NonNegativeAmount::from_u64(value)
     }
 }
 
