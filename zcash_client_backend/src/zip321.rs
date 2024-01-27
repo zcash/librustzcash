@@ -358,9 +358,8 @@ mod render {
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 
     use zcash_primitives::{
-        consensus,
+        consensus, transaction::components::amount::NonNegativeAmount,
         transaction::components::amount::COIN,
-        transaction::components::{amount::NonNegativeAmount, Amount},
     };
 
     use super::{memo_to_base64, Address, MemoBytes};
@@ -413,10 +412,10 @@ mod render {
 
     /// Converts an [`Amount`] value to a correctly formatted decimal ZEC
     /// value for inclusion in a ZIP 321 URI.
-    pub fn amount_str(amount: Amount) -> Option<String> {
+    pub fn amount_str(amount: NonNegativeAmount) -> Option<String> {
         if amount.is_positive() {
-            let coins = i64::from(amount) / COIN;
-            let zats = i64::from(amount) % COIN;
+            let coins = u64::from(amount) / COIN;
+            let zats = u64::from(amount) % COIN;
             Some(if zats == 0 {
                 format!("{}", coins)
             } else {
@@ -432,7 +431,7 @@ mod render {
     /// Constructs an "amount" key/value pair containing the encoded ZEC amount
     /// at the specified parameter index.
     pub fn amount_param(amount: NonNegativeAmount, idx: Option<usize>) -> Option<String> {
-        amount_str(amount.into()).map(|s| format!("amount{}={}", param_index(idx), s))
+        amount_str(amount).map(|s| format!("amount{}={}", param_index(idx), s))
     }
 
     /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
@@ -465,9 +464,8 @@ mod parse {
     };
     use percent_encoding::percent_decode;
     use zcash_primitives::{
-        consensus,
+        consensus, transaction::components::amount::NonNegativeAmount,
         transaction::components::amount::COIN,
-        transaction::components::{amount::NonNegativeAmount, Amount},
     };
 
     use crate::address::Address;
@@ -641,7 +639,7 @@ mod parse {
     }
 
     /// Parses a value in decimal ZEC.
-    pub fn parse_amount(input: &str) -> IResult<&str, Amount> {
+    pub fn parse_amount(input: &str) -> IResult<&str, NonNegativeAmount> {
         map_res(
             tuple((
                 digit1,
@@ -651,29 +649,24 @@ mod parse {
                 )),
             )),
             |(whole_s, decimal_s): (&str, Option<&str>)| {
-                let coins: i64 = whole_s
+                let coins: u64 = whole_s
                     .to_string()
-                    .parse::<i64>()
+                    .parse::<u64>()
                     .map_err(|e| e.to_string())?;
 
-                let zats: i64 = match decimal_s {
+                let zats: u64 = match decimal_s {
                     Some(d) => format!("{:0<8}", d)
-                        .parse::<i64>()
+                        .parse::<u64>()
                         .map_err(|e| e.to_string())?,
                     None => 0,
                 };
 
-                if coins >= 21000000 && (coins > 21000000 || zats > 0) {
-                    return Err(format!(
-                        "{} coins exceeds the maximum possible Zcash value.",
-                        coins
-                    ));
-                }
-
-                let amt = coins * COIN + zats;
-
-                Amount::from_nonnegative_i64(amt)
-                    .map_err(|_| format!("Not a valid zat amount: {}", amt))
+                coins
+                    .checked_mul(COIN)
+                    .and_then(|coin_zats| coin_zats.checked_add(zats))
+                    .ok_or(())
+                    .and_then(NonNegativeAmount::from_u64)
+                    .map_err(|_| format!("Not a valid zat amount: {}.{}", coins, zats))
             },
         )(input)
     }
@@ -693,11 +686,7 @@ mod parse {
 
             "amount" => parse_amount(value)
                 .map_err(|e| e.to_string())
-                .and_then(|(_, a)| {
-                    NonNegativeAmount::try_from(a)
-                        .map_err(|_| "Payment amount must be nonnegative.".to_owned())
-                })
-                .map(Param::Amount),
+                .map(|(_, amt)| Param::Amount(amt)),
 
             "label" => percent_decode(value.as_bytes())
                 .decode_utf8()
@@ -832,9 +821,7 @@ mod tests {
     use zcash_primitives::{
         consensus::{Parameters, TEST_NETWORK},
         memo::Memo,
-        transaction::components::amount::{
-            testing::arb_nonnegative_amount, Amount, NonNegativeAmount,
-        },
+        transaction::components::amount::{testing::arb_nonnegative_amount, NonNegativeAmount},
     };
 
     #[cfg(feature = "local-consensus")]
@@ -861,7 +848,7 @@ mod tests {
         let amounts = vec![1u64, 1000u64, 100000u64, 100000000u64, 100000000000u64];
 
         for amt_u64 in amounts {
-            let amt = Amount::from_u64(amt_u64).unwrap();
+            let amt = NonNegativeAmount::from_u64(amt_u64).unwrap();
             let amt_str = amount_str(amt).unwrap();
             assert_eq!(amt, parse_amount(&amt_str).unwrap().1);
         }
@@ -1106,8 +1093,7 @@ mod tests {
         }
 
         #[test]
-        fn prop_zip321_roundtrip_amount(nn_amt in arb_nonnegative_amount()) {
-            let amt = Amount::from(nn_amt);
+        fn prop_zip321_roundtrip_amount(amt in arb_nonnegative_amount()) {
             let amt_str = amount_str(amt).unwrap();
             assert_eq!(amt, parse_amount(&amt_str).unwrap().1);
         }

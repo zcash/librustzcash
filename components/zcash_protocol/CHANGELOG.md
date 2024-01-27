@@ -18,6 +18,12 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
 - Added in `zcash_protocol::value`:
   - `Zatoshis`
   - `ZatBalance`
+  - `MAX_BALANCE` has been added to replace previous instances where
+    `zcash_protocol::value::MAX_MONEY` was used as a signed value.
+
+### Changed
+- `zcash_protocol::value::COIN` has been changed from an `i64` to a `u64`
+- `zcash_protocol::value::MAX_MONEY` has been changed from an `i64` to a `u64`
 
 ### Removed
 - From `zcash_protocol::value`:
