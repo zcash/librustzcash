@@ -285,7 +285,8 @@ mod tests {
     fn ua_round_trip() {
         #[cfg(feature = "orchard")]
         let orchard = {
-            let sk = orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, 0).unwrap();
+            let sk =
+                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
             let fvk = orchard::keys::FullViewingKey::from(&sk);
             Some(fvk.address_at(0u32, orchard::keys::Scope::External))
         };

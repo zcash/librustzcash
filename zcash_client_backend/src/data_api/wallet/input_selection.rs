@@ -26,7 +26,7 @@ use crate::{
     ShieldedProtocol,
 };
 
-#[cfg(any(feature = "transparent-inputs", feature = "orchard"))]
+#[cfg(any(feature = "transparent-inputs"))]
 use std::convert::Infallible;
 
 #[cfg(feature = "transparent-inputs")]

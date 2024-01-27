@@ -27,13 +27,14 @@ jobs:
             extra_flags: zfuture
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
 
     steps:
       - uses: actions/checkout@v4
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra_flags: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
       - name: Run tests
         run: >
           cargo test
