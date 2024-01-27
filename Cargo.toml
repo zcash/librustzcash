@@ -4,6 +4,7 @@ members = [
     "components/f4jumble",
     "components/zcash_address",
     "components/zcash_encoding",
+    "components/zcash_protocol",
     "zcash_client_backend",
     "zcash_client_sqlite",
     "zcash_extensions",
@@ -32,6 +33,8 @@ zcash_address = { version = "0.3", path = "components/zcash_address" }
 zcash_client_backend = { version = "0.11", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
 zcash_keys = { version = "0.1", path = "zcash_keys" }
+zcash_protocol = { version = "0.0", path = "components/zcash_protocol" }
+
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.14", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.14", path = "zcash_proofs", default-features = false }
