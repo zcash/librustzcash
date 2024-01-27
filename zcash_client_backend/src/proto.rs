@@ -12,7 +12,7 @@ use nonempty::NonEmpty;
 use sapling::{self, note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
-    consensus::{self, BlockHeight, Parameters},
+    consensus::BlockHeight,
     memo::{self, MemoBytes},
     merkle_tree::read_commitment_tree,
     transaction::{components::amount::NonNegativeAmount, fees::StandardFeeRule, TxId},
@@ -346,11 +346,8 @@ impl From<ShieldedProtocol> for proposal::ValuePool {
 impl proposal::Proposal {
     /// Serializes a [`Proposal`] based upon a supported [`StandardFeeRule`] to its protobuf
     /// representation.
-    pub fn from_standard_proposal<P: Parameters, NoteRef>(
-        params: &P,
-        value: &Proposal<StandardFeeRule, NoteRef>,
-    ) -> Self {
-        let transaction_request = value.transaction_request().to_uri(params);
+    pub fn from_standard_proposal<NoteRef>(value: &Proposal<StandardFeeRule, NoteRef>) -> Self {
+        let transaction_request = value.transaction_request().to_uri();
 
         let anchor_height = value
             .shielded_inputs()
@@ -411,9 +408,8 @@ impl proposal::Proposal {
 
     /// Attempts to parse a [`Proposal`] based upon a supported [`StandardFeeRule`] from its
     /// protobuf representation.
-    pub fn try_into_standard_proposal<P: consensus::Parameters, DbT, DbError>(
+    pub fn try_into_standard_proposal<DbT, DbError>(
         &self,
-        params: &P,
         wallet_db: &DbT,
     ) -> Result<Proposal<StandardFeeRule, DbT::NoteRef>, ProposalDecodingError<DbError>>
     where
@@ -431,8 +427,7 @@ impl proposal::Proposal {
                     }
                 };
 
-                let transaction_request =
-                    TransactionRequest::from_uri(params, &self.transaction_request)?;
+                let transaction_request = TransactionRequest::from_uri(&self.transaction_request)?;
 
                 #[cfg(not(feature = "transparent-inputs"))]
                 let transparent_inputs = vec![];

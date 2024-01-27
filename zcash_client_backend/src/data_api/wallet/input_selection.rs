@@ -4,6 +4,7 @@ use core::marker::PhantomData;
 use std::fmt::{self, Debug, Display};
 
 use nonempty::NonEmpty;
+use zcash_address::ConversionError;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     legacy::TransparentAddress,
@@ -41,6 +42,8 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     DataSource(DbErrT),
     /// An error occurred specific to the provided input selector's selection rules.
     Selection(SelectorErrT),
+    /// An error occurred parsing the address from a payment request.
+    Address(ConversionError<&'static str>),
     /// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
     InsufficientFunds {
@@ -50,6 +53,12 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     /// The data source does not have enough information to choose an expiry height
     /// for the transaction.
     SyncRequired,
+}
+
+impl<E, S> From<ConversionError<&'static str>> for InputSelectorError<E, S> {
+    fn from(value: ConversionError<&'static str>) -> Self {
+        InputSelectorError::Address(value)
+    }
 }
 
 impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE, SE> {
@@ -64,6 +73,13 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
             }
             InputSelectorError::Selection(e) => {
                 write!(f, "Note selection encountered the following error: {}", e)
+            }
+            InputSelectorError::Address(e) => {
+                write!(
+                    f,
+                    "An error occurred decoding the address from a payment request: {}.",
+                    e
+                )
             }
             InputSelectorError::InsufficientFunds {
                 available,
@@ -540,9 +556,13 @@ where
                 orchard_outputs.push(OrchardPayment(payment.amount));
             };
 
-            match &payment.recipient_address {
+            let recipient_address = payment
+                .recipient_address
+                .clone()
+                .convert_if_network::<Address>(params.network_type())?;
+            match recipient_address {
                 Address::Transparent(addr) => {
-                    push_transparent(*addr);
+                    push_transparent(addr);
                 }
                 Address::Sapling(_) => {
                     push_sapling();

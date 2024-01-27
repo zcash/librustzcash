@@ -447,7 +447,7 @@ where
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to.clone(),
+        recipient_address: to.to_zcash_address(params),
         amount,
         memo,
         label: None,
@@ -667,7 +667,11 @@ where
     let mut sapling_output_meta = vec![];
     let mut transparent_output_meta = vec![];
     for payment in proposal.transaction_request().payments() {
-        match &payment.recipient_address {
+        let recipient_address = payment
+            .recipient_address
+            .clone()
+            .convert_if_network::<Address>(params.network_type())?;
+        match recipient_address {
             Address::Unified(ua) => {
                 let memo = payment
                     .memo
@@ -706,16 +710,16 @@ where
                     .memo
                     .as_ref()
                     .map_or_else(MemoBytes::empty, |m| m.clone());
-                builder.add_sapling_output(external_ovk, *addr, payment.amount, memo.clone())?;
-                sapling_output_meta.push((Recipient::Sapling(*addr), payment.amount, Some(memo)));
+                builder.add_sapling_output(external_ovk, addr, payment.amount, memo.clone())?;
+                sapling_output_meta.push((Recipient::Sapling(addr), payment.amount, Some(memo)));
             }
             Address::Transparent(to) => {
                 if payment.memo.is_some() {
                     return Err(Error::MemoForbidden);
                 } else {
-                    builder.add_transparent_output(to, payment.amount)?;
+                    builder.add_transparent_output(&to, payment.amount)?;
                 }
-                transparent_output_meta.push((*to, payment.amount));
+                transparent_output_meta.push((to, payment.amount));
             }
         }
     }
