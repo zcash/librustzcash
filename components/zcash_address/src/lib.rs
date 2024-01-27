@@ -142,6 +142,7 @@ pub use convert::{
 pub use encoding::ParseError;
 pub use kind::unified;
 pub use zcash_protocol::consensus::NetworkType as Network;
+use zcash_protocol::{PoolType, ShieldedProtocol};
 
 /// A Zcash address.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -264,6 +265,18 @@ impl ZcashAddress {
                 expected: net,
                 actual: self.net,
             }),
+        }
+    }
+
+    /// Returns whether this address has the ability to receive transfers of the given pool type.
+    pub fn can_receive_as(&self, pool_type: PoolType) -> bool {
+        match &self.kind {
+            AddressKind::Sprout(_) => false,
+            AddressKind::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
+            AddressKind::Unified(addr) => addr.has_receiver(pool_type),
+            AddressKind::P2pkh(_) => pool_type == PoolType::Transparent,
+            AddressKind::P2sh(_) => pool_type == PoolType::Transparent,
+            AddressKind::Tex(_) => pool_type == PoolType::Transparent,
         }
     }
 

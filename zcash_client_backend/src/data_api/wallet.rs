@@ -498,7 +498,7 @@ where
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to.clone(),
+        recipient_address: to.to_zcash_address(params),
         amount,
         memo,
         label: None,
@@ -848,13 +848,16 @@ where
                     // the transaction in payment index order, so we can use dead reckoning to
                     // figure out which output it ended up being.
                     let (prior_step, result) = &prior_step_results[input_ref.step_index()];
-                    let recipient_address = match &prior_step
+                    let recipient_address = &prior_step
                         .transaction_request()
                         .payments()
                         .get(&i)
                         .expect("Payment step references are checked at construction")
                         .recipient_address
-                    {
+                        .clone()
+                        .convert_if_network(params.network_type())?;
+
+                    let recipient_taddr = match recipient_address {
                         Address::Transparent(t) => Some(t),
                         Address::Unified(uaddr) => uaddr.transparent(),
                         _ => None,
@@ -879,7 +882,7 @@ where
                         .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?
                         .vout[outpoint.n() as usize];
 
-                    add_transparent_input(recipient_address, outpoint, utxo.clone())?;
+                    add_transparent_input(recipient_taddr, outpoint, utxo.clone())?;
                 }
                 proposal::StepOutputIndex::Change(_) => unreachable!(),
             }
@@ -953,7 +956,11 @@ where
             (payment, output_pool)
         })
     {
-        match &payment.recipient_address {
+        let recipient_address = payment
+            .recipient_address
+            .clone()
+            .convert_if_network::<Address>(params.network_type())?;
+        match recipient_address {
             Address::Unified(ua) => {
                 let memo = payment
                     .memo
@@ -1019,17 +1026,17 @@ where
                     .map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     sapling_external_ovk,
-                    *addr,
+                    addr,
                     payment.amount,
                     memo.clone(),
                 )?;
-                sapling_output_meta.push((Recipient::Sapling(*addr), payment.amount, Some(memo)));
+                sapling_output_meta.push((Recipient::Sapling(addr), payment.amount, Some(memo)));
             }
             Address::Transparent(to) => {
                 if payment.memo.is_some() {
                     return Err(Error::MemoForbidden);
                 } else {
-                    builder.add_transparent_output(to, payment.amount)?;
+                    builder.add_transparent_output(&to, payment.amount)?;
                 }
                 transparent_output_meta.push((to, payment.amount));
             }
@@ -1167,7 +1174,7 @@ where
             .map(|(index, _)| index)
             .expect("An output should exist in the transaction for each transparent payment.");
 
-        SentTransactionOutput::from_parts(output_index, Recipient::Transparent(*addr), value, None)
+        SentTransactionOutput::from_parts(output_index, Recipient::Transparent(addr), value, None)
     });
 
     let mut outputs = vec![];

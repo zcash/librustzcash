@@ -169,7 +169,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let to_extsk = T::sk(&[0xf5; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
     let request = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to,
+        recipient_address: to.to_zcash_address(&st.network()),
         amount: NonNegativeAmount::const_from_u64(10000),
         memo: None, // this should result in the creation of an empty memo
         label: None,
@@ -338,7 +338,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     // The first step will deshield to the wallet's default transparent address
     let to0 = Address::Transparent(account.usk().default_transparent_address().0);
     let request0 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to0,
+        recipient_address: to0.to_zcash_address(&st.network()),
         amount: NonNegativeAmount::const_from_u64(50000),
         memo: None,
         label: None,
@@ -383,7 +383,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             .0,
     );
     let request1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to1,
+        recipient_address: to1.to_zcash_address(&st.network()),
         amount: NonNegativeAmount::const_from_u64(40000),
         memo: None,
         label: None,
@@ -1043,7 +1043,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     let req = TransactionRequest::new(vec![
         // payment to an external recipient
         Payment {
-            recipient_address: addr2,
+            recipient_address: addr2.to_zcash_address(&st.network()),
             amount: amount_sent,
             memo: None,
             label: None,
@@ -1052,7 +1052,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
         },
         // payment back to the originating wallet, simulating legacy change
         Payment {
-            recipient_address: addr,
+            recipient_address: addr.to_zcash_address(&st.network()),
             amount: amount_legacy_change,
             memo: None,
             label: None,
@@ -1152,7 +1152,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
 
     // This first request will fail due to insufficient non-dust funds
     let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk),
+        recipient_address: T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
         amount: NonNegativeAmount::const_from_u64(50000),
         memo: None,
         label: None,
@@ -1177,7 +1177,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     // This request will succeed, spending a single dust input to pay the 10000
     // ZAT fee in addition to the 41000 ZAT output to the recipient
     let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk),
+        recipient_address: T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
         amount: NonNegativeAmount::const_from_u64(41000),
         memo: None,
         label: None,
@@ -1480,7 +1480,7 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: p1_to,
+        recipient_address: p1_to.to_zcash_address(&st.network()),
         amount: transfer_amount,
         memo: None,
         label: None,
@@ -1571,7 +1571,7 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: p1_to,
+        recipient_address: p1_to.to_zcash_address(&st.network()),
         amount: transfer_amount,
         memo: None,
         label: None,
@@ -1662,7 +1662,7 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: Address::Transparent(p1_to),
+        recipient_address: Address::Transparent(p1_to).to_zcash_address(&st.network()),
         amount: transfer_amount,
         memo: None,
         label: None,
@@ -1777,7 +1777,7 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     // First, send funds just to P0
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_transfer = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        P0::random_address(&mut st.rng),
+        P0::random_address(&mut st.rng).to_zcash_address(&st.network()),
         transfer_amount,
     )])
     .unwrap();
@@ -1802,8 +1802,14 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
 
     // In the next block, send funds to both P0 and P1
     let both_transfer = zip321::TransactionRequest::new(vec![
-        Payment::without_memo(P0::random_address(&mut st.rng), transfer_amount),
-        Payment::without_memo(P1::random_address(&mut st.rng), transfer_amount),
+        Payment::without_memo(
+            P0::random_address(&mut st.rng).to_zcash_address(&st.network()),
+            transfer_amount,
+        ),
+        Payment::without_memo(
+            P1::random_address(&mut st.rng).to_zcash_address(&st.network()),
+            transfer_amount,
+        ),
     ])
     .unwrap();
     let res = st
@@ -2110,7 +2116,7 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
 
     // We can spend the received notes
     let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk),
+        recipient_address: T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
         amount: NonNegativeAmount::const_from_u64(110_000),
         memo: None,
         label: None,

@@ -8,8 +8,8 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
-- `zcash_address::ZcashAddress::can_receive_memo`
-- `zcash_address::unified::Address::can_receive_memo`
+- `zcash_address::ZcashAddress::{can_receive_memo, can_receive_as}`
+- `zcash_address::unified::Address::{can_receive_memo, has_receiver}`
 - Module `zcash_address::testing` under the `test-dependencies` feature.
 - Module `zcash_address::unified::address::testing` under the 
   `test-dependencies` feature.

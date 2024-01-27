@@ -1,3 +1,5 @@
+use zcash_protocol::{PoolType, ShieldedProtocol};
+
 use super::{private::SealedItem, ParseError, Typecode};
 
 use std::convert::{TryFrom, TryInto};
@@ -102,6 +104,17 @@ impl SealedItem for Receiver {
 pub struct Address(pub(crate) Vec<Receiver>);
 
 impl Address {
+    /// Returns whether this address has the ability to receive transfers of the given pool type.
+    pub fn has_receiver(&self, pool_type: PoolType) -> bool {
+        self.0.iter().any(|r| match r {
+            Receiver::Orchard(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Orchard),
+            Receiver::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
+            Receiver::P2pkh(_) => pool_type == PoolType::Transparent,
+            Receiver::P2sh(_) => pool_type == PoolType::Transparent,
+            Receiver::Unknown { .. } => false,
+        })
+    }
+
     /// Returns whether this address can receive a memo.
     pub fn can_receive_memo(&self) -> bool {
         self.0

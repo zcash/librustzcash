@@ -377,7 +377,7 @@ impl<NoteRef> Step<NoteRef> {
                 .payments()
                 .get(idx)
                 .iter()
-                .any(|payment| payment.recipient_address.has_receiver(*pool))
+                .any(|payment| payment.recipient_address.can_receive_as(*pool))
             {
                 return Err(ProposalError::PaymentPoolsMismatch);
             }

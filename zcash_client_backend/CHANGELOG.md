@@ -19,6 +19,12 @@ and this library adheres to Rust's notion of
   of the root module of the `zip321` crate. Several of the APIs of this module
   have changed as a consequence of this extraction; please see the `zip321`
   CHANGELOG for details.
+- `zcash_client_backend::data_api`:
+  - `error::Error` has a new `Address` variant.
+  - `wallet::input_selection::InputSelectorError` has a new `Address` variant.
+- `zcash_client_backend::proto::proposal::Proposal::{from_standard_proposal, 
+  try_into_standard_proposal}` each no longer require a `consensus::Parameters` 
+  argument.
 
 ## [0.12.1] - 2024-03-27
 

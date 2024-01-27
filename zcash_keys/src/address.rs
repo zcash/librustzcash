@@ -295,7 +295,7 @@ impl Address {
         addr.convert_if_network(params.network_type()).ok()
     }
 
-    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+    pub fn to_zcash_address<P: consensus::Parameters>(&self, params: &P) -> ZcashAddress {
         let net = params.network_type();
 
         match self {
@@ -311,7 +311,10 @@ impl Address {
             },
             Address::Unified(ua) => ua.to_address(net),
         }
-        .to_string()
+    }
+
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        self.to_zcash_address(params).to_string()
     }
 
     pub fn has_receiver(&self, pool_type: PoolType) -> bool {
