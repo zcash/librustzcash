@@ -10,10 +10,14 @@ The entries below are relative to the `zcash_client_backend` crate as of
 `zcash_client_backend-0.10.0`.
 
 ### Added
+- `zip321::Payment::new`
 - `impl From<zcash_address:ConversionError<E>> for Zip321Error`
 
 ### Changed
-- `zip321::Payment::recipient_address` has type `zcash_address::ZcashAddress`
+- Fields of `zip321::Payment` are now private. Accessors have been provided for
+  the fields that are no longer public, and `Payment::new` has been added to
+  serve the needs of payment construction.
+- `zip321::Payment::recipient_address()` returns `zcash_address::ZcashAddress`
 - `zip321::Payment::without_memo` now takes a `zcash_address::ZcashAddress` for
   its `recipient_address` argument.
 - Uses of `zcash_primitives::transaction::components::amount::NonNegartiveAmount`

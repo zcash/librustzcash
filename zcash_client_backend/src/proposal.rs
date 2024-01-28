@@ -377,7 +377,7 @@ impl<NoteRef> Step<NoteRef> {
                 .payments()
                 .get(idx)
                 .iter()
-                .any(|payment| payment.recipient_address.can_receive_as(*pool))
+                .any(|payment| payment.recipient_address().can_receive_as(*pool))
             {
                 return Err(ProposalError::PaymentPoolsMismatch);
             }
@@ -404,13 +404,12 @@ impl<NoteRef> Step<NoteRef> {
                     .get(s_ref.step_index)
                     .ok_or(ProposalError::ReferenceError(*s_ref))?;
                 Ok(match s_ref.output_index {
-                    StepOutputIndex::Payment(i) => {
-                        step.transaction_request
-                            .payments()
-                            .get(&i)
-                            .ok_or(ProposalError::ReferenceError(*s_ref))?
-                            .amount
-                    }
+                    StepOutputIndex::Payment(i) => step
+                        .transaction_request
+                        .payments()
+                        .get(&i)
+                        .ok_or(ProposalError::ReferenceError(*s_ref))?
+                        .amount(),
                     StepOutputIndex::Change(i) => step
                         .balance
                         .proposed_change()

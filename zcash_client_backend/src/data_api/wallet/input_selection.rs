@@ -360,40 +360,41 @@ where
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
         for (idx, payment) in transaction_request.payments() {
-            let recipient_address = payment
-                .recipient_address
+            let recipient_address: Address = payment
+                .recipient_address()
                 .clone()
-                .convert_if_network::<Address>(params.network_type())?;
+                .convert_if_network(params.network_type())?;
+
             match recipient_address {
                 Address::Transparent(addr) => {
                     payment_pools.insert(*idx, PoolType::Transparent);
                     transparent_outputs.push(TxOut {
-                        value: payment.amount,
+                        value: payment.amount(),
                         script_pubkey: addr.script(),
                     });
                 }
                 Address::Sapling(_) => {
                     payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
-                    sapling_outputs.push(SaplingPayment(payment.amount));
+                    sapling_outputs.push(SaplingPayment(payment.amount()));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
                     if addr.orchard().is_some() {
                         payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
-                        orchard_outputs.push(OrchardPayment(payment.amount));
+                        orchard_outputs.push(OrchardPayment(payment.amount()));
                         continue;
                     }
 
                     if addr.sapling().is_some() {
                         payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
-                        sapling_outputs.push(SaplingPayment(payment.amount));
+                        sapling_outputs.push(SaplingPayment(payment.amount()));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
                         payment_pools.insert(*idx, PoolType::Transparent);
                         transparent_outputs.push(TxOut {
-                            value: payment.amount,
+                            value: payment.amount(),
                             script_pubkey: addr.script(),
                         });
                         continue;

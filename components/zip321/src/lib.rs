@@ -116,27 +116,41 @@ pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
 /// A single payment being requested.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
-    /// The payment address to which the payment should be sent.
-    pub recipient_address: ZcashAddress,
-    /// The value of the payment that is being requested, in zatoshis.
-    pub amount: Zatoshis,
-    /// A memo that, if included, must be provided with the payment.
-    /// If a memo is present and [`recipient_address`] is not a shielded
-    /// address, the wallet should report an error.
-    ///
-    /// [`recipient_address`]: #structfield.recipient_address
-    pub memo: Option<MemoBytes>,
-    /// A human-readable label for this payment within the larger structure
-    /// of the transaction request.
-    pub label: Option<String>,
-    /// A human-readable message to be displayed to the user describing the
-    /// purpose of this payment.
-    pub message: Option<String>,
-    /// A list of other arbitrary key/value pairs associated with this payment.
-    pub other_params: Vec<(String, String)>,
+    recipient_address: ZcashAddress,
+    amount: Zatoshis,
+    memo: Option<MemoBytes>,
+    label: Option<String>,
+    message: Option<String>,
+    other_params: Vec<(String, String)>,
 }
 
 impl Payment {
+    /// Constructs a new [`Payment`] from its constituent parts.
+    ///
+    /// Returns `None` if the payment requests that a memo be sent to a recipient that cannot
+    /// receive a memo.
+    pub fn new(
+        recipient_address: ZcashAddress,
+        amount: Zatoshis,
+        memo: Option<MemoBytes>,
+        label: Option<String>,
+        message: Option<String>,
+        other_params: Vec<(String, String)>,
+    ) -> Option<Self> {
+        if memo.is_none() || recipient_address.can_receive_memo() {
+            Some(Self {
+                recipient_address,
+                amount,
+                memo,
+                label,
+                message,
+                other_params,
+            })
+        } else {
+            None
+        }
+    }
+
     /// Constructs a new [`Payment`] paying the given address the specified amount.
     pub fn without_memo(recipient_address: ZcashAddress, amount: Zatoshis) -> Self {
         Self {
@@ -147,6 +161,38 @@ impl Payment {
             message: None,
             other_params: vec![],
         }
+    }
+
+    /// Returns the payment address to which the payment should be sent.
+    pub fn recipient_address(&self) -> &ZcashAddress {
+        &self.recipient_address
+    }
+
+    /// Returns the value of the payment that is being requested, in zatoshis.
+    pub fn amount(&self) -> Zatoshis {
+        self.amount
+    }
+
+    /// Returns the memo that, if included, must be provided with the payment.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
+    }
+
+    /// A human-readable label for this payment within the larger structure
+    /// of the transaction request.
+    pub fn label(&self) -> Option<&String> {
+        self.label.as_ref()
+    }
+
+    /// A human-readable message to be displayed to the user describing the
+    /// purpose of this payment.
+    pub fn message(&self) -> Option<&String> {
+        self.message.as_ref()
+    }
+
+    /// A list of other arbitrary key/value pairs associated with this payment.
+    pub fn other_params(&self) -> &[(String, String)] {
+        self.other_params.as_ref()
     }
 
     /// A utility for use in tests to help check round-trip serialization properties.

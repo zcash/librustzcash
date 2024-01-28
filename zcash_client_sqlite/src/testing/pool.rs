@@ -168,14 +168,10 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let to_extsk = T::sk(&[0xf5; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
-    let request = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to.to_zcash_address(&st.network()),
-        amount: NonNegativeAmount::const_from_u64(10000),
-        memo: None, // this should result in the creation of an empty memo
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(10000),
+    )])
     .unwrap();
 
     // TODO: This test was originally written to use the pre-zip-313 fee rule
@@ -337,14 +333,10 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // The first step will deshield to the wallet's default transparent address
     let to0 = Address::Transparent(account.usk().default_transparent_address().0);
-    let request0 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to0.to_zcash_address(&st.network()),
-        amount: NonNegativeAmount::const_from_u64(50000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let request0 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to0.to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(50000),
+    )])
     .unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -382,14 +374,10 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             .default_address()
             .0,
     );
-    let request1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to1.to_zcash_address(&st.network()),
-        amount: NonNegativeAmount::const_from_u64(40000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let request1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to1.to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(40000),
+    )])
     .unwrap();
 
     let step1 = Step::from_parts(
@@ -1042,23 +1030,9 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     let addr2 = T::fvk_default_address(&dfvk2);
     let req = TransactionRequest::new(vec![
         // payment to an external recipient
-        Payment {
-            recipient_address: addr2.to_zcash_address(&st.network()),
-            amount: amount_sent,
-            memo: None,
-            label: None,
-            message: None,
-            other_params: vec![],
-        },
+        Payment::without_memo(addr2.to_zcash_address(&st.network()), amount_sent),
         // payment back to the originating wallet, simulating legacy change
-        Payment {
-            recipient_address: addr.to_zcash_address(&st.network()),
-            amount: amount_legacy_change,
-            memo: None,
-            label: None,
-            message: None,
-            other_params: vec![],
-        },
+        Payment::without_memo(addr.to_zcash_address(&st.network()), amount_legacy_change),
     ])
     .unwrap();
 
@@ -1151,14 +1125,10 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let input_selector = input_selector(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
     // This first request will fail due to insufficient non-dust funds
-    let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
-        amount: NonNegativeAmount::const_from_u64(50000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(50000),
+    )])
     .unwrap();
 
     assert_matches!(
@@ -1176,14 +1146,10 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
 
     // This request will succeed, spending a single dust input to pay the 10000
     // ZAT fee in addition to the 41000 ZAT output to the recipient
-    let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
-        amount: NonNegativeAmount::const_from_u64(41000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(41000),
+    )])
     .unwrap();
 
     let txid = st
@@ -1479,14 +1445,10 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     );
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
-    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: p1_to.to_zcash_address(&st.network()),
-        amount: transfer_amount,
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        p1_to.to_zcash_address(&st.network()),
+        transfer_amount,
+    )])
     .unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -1570,14 +1532,10 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     );
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
-    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: p1_to.to_zcash_address(&st.network()),
-        amount: transfer_amount,
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        p1_to.to_zcash_address(&st.network()),
+        transfer_amount,
+    )])
     .unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -1661,14 +1619,10 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     );
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
-    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: Address::Transparent(p1_to).to_zcash_address(&st.network()),
-        amount: transfer_amount,
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        Address::Transparent(p1_to).to_zcash_address(&st.network()),
+        transfer_amount,
+    )])
     .unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -2115,14 +2069,10 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
     );
 
     // We can spend the received notes
-    let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
-        amount: NonNegativeAmount::const_from_u64(110_000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(110_000),
+    )])
     .unwrap();
 
     #[allow(deprecated)]

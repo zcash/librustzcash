@@ -497,14 +497,15 @@ where
     >,
     DbT::NoteRef: Copy + Eq + Ord,
 {
-    let request = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to.to_zcash_address(params),
+    let request = zip321::TransactionRequest::new(vec![Payment::new(
+        to.to_zcash_address(params),
         amount,
         memo,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+        None,
+        None,
+        vec![],
+    )
+    .ok_or(Error::MemoForbidden)?])
     .expect(
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
@@ -853,7 +854,7 @@ where
                         .payments()
                         .get(&i)
                         .expect("Payment step references are checked at construction")
-                        .recipient_address
+                        .recipient_address()
                         .clone()
                         .convert_if_network(params.network_type())?;
 
@@ -956,16 +957,14 @@ where
             (payment, output_pool)
         })
     {
-        let recipient_address = payment
-            .recipient_address
+        let recipient_address: Address = payment
+            .recipient_address()
             .clone()
-            .convert_if_network::<Address>(params.network_type())?;
+            .convert_if_network(params.network_type())?;
+
         match recipient_address {
             Address::Unified(ua) => {
-                let memo = payment
-                    .memo
-                    .as_ref()
-                    .map_or_else(MemoBytes::empty, |m| m.clone());
+                let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
 
                 match output_pool {
                     #[cfg(not(feature = "orchard"))]
@@ -977,7 +976,7 @@ where
                         builder.add_orchard_output(
                             orchard_external_ovk.clone(),
                             *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction"),
-                            payment.amount.into(),
+                            payment.amount().into(),
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
@@ -985,7 +984,7 @@ where
                                 ua.clone(),
                                 PoolType::Shielded(ShieldedProtocol::Orchard),
                             ),
-                            payment.amount,
+                            payment.amount(),
                             Some(memo),
                         ));
                     }
@@ -994,7 +993,7 @@ where
                         builder.add_sapling_output(
                             sapling_external_ovk,
                             *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction"),
-                            payment.amount,
+                            payment.amount(),
                             memo.clone(),
                         )?;
                         sapling_output_meta.push((
@@ -1002,43 +1001,40 @@ where
                                 ua.clone(),
                                 PoolType::Shielded(ShieldedProtocol::Sapling),
                             ),
-                            payment.amount,
+                            payment.amount(),
                             Some(memo),
                         ));
                     }
 
                     PoolType::Transparent => {
-                        if payment.memo.is_some() {
+                        if payment.memo().is_some() {
                             return Err(Error::MemoForbidden);
                         } else {
                             builder.add_transparent_output(
                                 ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction."),
-                                payment.amount
+                                payment.amount()
                             )?;
                         }
                     }
                 }
             }
             Address::Sapling(addr) => {
-                let memo = payment
-                    .memo
-                    .as_ref()
-                    .map_or_else(MemoBytes::empty, |m| m.clone());
+                let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     sapling_external_ovk,
                     addr,
-                    payment.amount,
+                    payment.amount(),
                     memo.clone(),
                 )?;
-                sapling_output_meta.push((Recipient::Sapling(addr), payment.amount, Some(memo)));
+                sapling_output_meta.push((Recipient::Sapling(addr), payment.amount(), Some(memo)));
             }
             Address::Transparent(to) => {
-                if payment.memo.is_some() {
+                if payment.memo().is_some() {
                     return Err(Error::MemoForbidden);
                 } else {
-                    builder.add_transparent_output(&to, payment.amount)?;
+                    builder.add_transparent_output(&to, payment.amount())?;
                 }
-                transparent_output_meta.push((to, payment.amount));
+                transparent_output_meta.push((to, payment.amount()));
             }
         }
     }
