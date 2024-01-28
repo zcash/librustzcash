@@ -2,21 +2,18 @@
 
 use std::fmt;
 
-use rusqlite::{self};
+use rusqlite;
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
-use zcash_primitives::{
-    consensus::{self},
-    transaction::components::amount::BalanceError,
-};
+use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
 
 use crate::WalletDb;
 
-use super::commitment_tree::{self};
+use super::commitment_tree;
 
 mod migrations;
 

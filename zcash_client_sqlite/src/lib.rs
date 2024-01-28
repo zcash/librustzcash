@@ -45,6 +45,7 @@ use std::{
 
 use incrementalmerkletree::Position;
 use shardtree::{error::ShardTreeError, ShardTree};
+use zcash_keys::address::Address;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -93,7 +94,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    SubtreeScanProgress,
+    Receiver, SubtreeScanProgress,
 };
 
 #[cfg(test)]
@@ -597,9 +598,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.note.recipient())
+                            let receiver = Receiver::Sapling(output.note.recipient());
+                            let wallet_address = wallet::select_receiving_address(&wdb.params, wdb.conn.0,output.account, &receiver)?.unwrap_or_else(||
+                                Address::Sapling(output.note.recipient()).to_zcash_address(&wdb.params)
+                            );
+                            Recipient::External(wallet_address, PoolType::SAPLING)
                         } else {
-                            Recipient::InternalAccount(
+                            Recipient::Internal(
                                 output.account,
                                 PoolType::Shielded(ShieldedProtocol::Sapling)
                             )
@@ -607,7 +612,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::put_sent_output(
                             wdb.conn.0,
-                            &wdb.params,
                             output.account,
                             tx_ref,
                             output.index,
@@ -620,7 +624,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             Some(&output.memo),
                         )?;
 
-                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                        if matches!(recipient, Recipient::Internal(_, _)) {
                             wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                         }
                     }
@@ -660,13 +664,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
+                            let recipient_zaddr = Address::Transparent(address).to_zcash_address(&wdb.params);
                             wallet::put_sent_output(
                                 wdb.conn.0,
-                                &wdb.params,
                                 *account_id,
                                 tx_ref,
                                 output_index,
-                                &Recipient::Transparent(address),
+                                &Recipient::External(recipient_zaddr, PoolType::TRANSPARENT),
                                 txout.value,
                                 None
                             )?;
@@ -712,13 +716,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             for output in &sent_tx.outputs {
-                wallet::insert_sent_output(
-                    wdb.conn.0,
-                    &wdb.params,
-                    tx_ref,
-                    sent_tx.account,
-                    output,
-                )?;
+                wallet::insert_sent_output(wdb.conn.0, tx_ref, sent_tx.account, output)?;
 
                 if let Some((account, note)) = output.sapling_change_to() {
                     wallet::sapling::put_received_note(

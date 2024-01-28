@@ -21,6 +21,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::fees::ChangeValue::orchard`
 - `zcash_client_backend::wallet`:
   - `Note::Orchard`
+- `zcash_client_backend::PoolType::{TRANSPARENT, SAPLING, ORCHARD}` constants
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -43,6 +44,10 @@ and this library adheres to Rust's notion of
   CHANGELOG for details.
 - `zcash_client_backend::proto::proposal::Proposal::{from_standard_proposal, try_into_standard_proposal`
   each no longer require a `consensus::Parameters` argument.
+- `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
+  wrapping protocol-address types, the `Recipient` type now wraps a
+  `zcash_address::ZcashAddress`. This simplifies the process of tracking the
+  original address to which value was sent.
 
 ## [0.11.0-pre-release] Unreleased
 

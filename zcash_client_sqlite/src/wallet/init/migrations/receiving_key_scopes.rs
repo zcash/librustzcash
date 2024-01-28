@@ -291,6 +291,7 @@ mod tests {
         wallet::Recipient,
         PoolType, ShieldedProtocol, TransferType,
     };
+    use zcash_keys::address::Address;
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::{
         block::BlockHash,
@@ -501,16 +502,18 @@ mod tests {
                     match output.transfer_type {
                         TransferType::Outgoing | TransferType::WalletInternal => {
                             let recipient = if output.transfer_type == TransferType::Outgoing {
-                                Recipient::Sapling(output.note.recipient())
+                                let address = Address::Sapling(output.note.recipient())
+                                    .to_zcash_address(&params);
+                                Recipient::External(address, PoolType::SAPLING)
                             } else {
-                                Recipient::InternalAccount(
+                                Recipient::Internal(
                                     output.account,
                                     PoolType::Shielded(ShieldedProtocol::Sapling),
                                 )
                             };
 
                             // Don't need to bother with sent outputs for this test.
-                            if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            if matches!(recipient, Recipient::Internal(_, _)) {
                                 put_received_note_before_migration(
                                     wdb.conn.0, output, tx_ref, None,
                                 )

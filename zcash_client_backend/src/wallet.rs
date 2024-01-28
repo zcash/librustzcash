@@ -2,6 +2,7 @@
 //! light client.
 
 use incrementalmerkletree::Position;
+use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
@@ -17,7 +18,7 @@ use zcash_primitives::{
     zip32::{AccountId, Scope},
 };
 
-use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
+use crate::{fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
@@ -63,10 +64,8 @@ impl NoteId {
 /// output.
 #[derive(Debug, Clone)]
 pub enum Recipient {
-    Transparent(TransparentAddress),
-    Sapling(sapling::PaymentAddress),
-    Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, PoolType),
+    External(ZcashAddress, PoolType),
+    Internal(AccountId, PoolType),
 }
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.

@@ -251,8 +251,14 @@ impl TryFromRawAddress for Address {
 
 impl Address {
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
-        let addr = ZcashAddress::try_from_encoded(s).ok()?;
-        addr.convert_if_network(params.network_type()).ok()
+        Self::try_from_zcash_address(params, s.parse::<ZcashAddress>().ok()?).ok()
+    }
+
+    pub fn try_from_zcash_address<P: consensus::Parameters>(
+        params: &P,
+        zaddr: ZcashAddress,
+    ) -> Result<Self, ConversionError<&'static str>> {
+        zaddr.convert_if_network(params.network_type())
     }
 
     pub fn to_zcash_address<P: consensus::Parameters>(&self, params: &P) -> ZcashAddress {
