@@ -233,6 +233,54 @@ impl UnifiedAddress {
     }
 }
 
+/// An enumeration of protocol-level receiver types. While these correspond to unified address
+/// receiver
+pub enum Receiver {
+    #[cfg(feature = "orchard")]
+    Orchard(orchard::Address),
+    #[cfg(feature = "sapling")]
+    Sapling(PaymentAddress),
+    Transparent(TransparentAddress),
+}
+
+impl Receiver {
+    /// Converts this receiver to a [`ZcashAddress`] for the given network.
+    ///
+    /// This conversion function selects the least-capable address format possible; this means that
+    /// Orchard receivers will be rendered as Unified addresses, Sapling receivers will be rendered
+    /// as bare Sapling addresses, and Transparent receivers will be rendered as taddrs.
+    pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
+        match self {
+            Receiver::Orchard(addr) => {
+                let receiver = unified::Receiver::Orchard(addr.to_raw_address_bytes());
+                let ua = unified::Address::try_from_items(vec![receiver])
+                    .expect("A unified address may contain a single Orchard receiver.");
+                ZcashAddress::from_unified(net, ua)
+            }
+            Receiver::Sapling(addr) => ZcashAddress::from_sapling(net, addr.to_bytes()),
+            Receiver::Transparent(TransparentAddress::PublicKeyHash(data)) => {
+                ZcashAddress::from_transparent_p2pkh(net, *data)
+            }
+            Receiver::Transparent(TransparentAddress::ScriptHash(data)) => {
+                ZcashAddress::from_transparent_p2sh(net, *data)
+            }
+        }
+    }
+
+    pub fn corresponds(&self, addr: &ZcashAddress) -> bool {
+        addr.matches_receiver(&match self {
+            Receiver::Orchard(addr) => unified::Receiver::Orchard(addr.to_raw_address_bytes()),
+            Receiver::Sapling(addr) => unified::Receiver::Sapling(addr.to_bytes()),
+            Receiver::Transparent(TransparentAddress::PublicKeyHash(data)) => {
+                unified::Receiver::P2pkh(*data)
+            }
+            Receiver::Transparent(TransparentAddress::ScriptHash(data)) => {
+                unified::Receiver::P2sh(*data)
+            }
+        })
+    }
+}
+
 /// An address that funds can be sent to.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Address {
@@ -291,8 +339,14 @@ impl TryFromRawAddress for Address {
 
 impl Address {
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
-        let addr = ZcashAddress::try_from_encoded(s).ok()?;
-        addr.convert_if_network(params.network_type()).ok()
+        Self::try_from_zcash_address(params, s.parse::<ZcashAddress>().ok()?).ok()
+    }
+
+    pub fn try_from_zcash_address<P: consensus::Parameters>(
+        params: &P,
+        zaddr: ZcashAddress,
+    ) -> Result<Self, ConversionError<&'static str>> {
+        zaddr.convert_if_network(params.network_type())
     }
 
     pub fn to_zcash_address<P: consensus::Parameters>(&self, params: &P) -> ZcashAddress {

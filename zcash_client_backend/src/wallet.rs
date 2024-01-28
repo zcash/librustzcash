@@ -2,7 +2,7 @@
 //! light client.
 
 use incrementalmerkletree::Position;
-use zcash_keys::address::Address;
+use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
@@ -19,7 +19,7 @@ use zcash_primitives::{
 };
 use zcash_protocol::value::BalanceError;
 
-use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
+use crate::{fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
@@ -68,12 +68,10 @@ impl NoteId {
 /// output.
 #[derive(Debug, Clone)]
 pub enum Recipient<AccountId, N> {
-    Transparent(TransparentAddress),
-    Sapling(sapling::PaymentAddress),
-    Unified(UnifiedAddress, PoolType),
+    External(ZcashAddress, PoolType),
     InternalAccount {
         receiving_account: AccountId,
-        external_address: Option<Address>,
+        external_address: Option<ZcashAddress>,
         note: N,
     },
 }
@@ -81,9 +79,7 @@ pub enum Recipient<AccountId, N> {
 impl<AccountId, N> Recipient<AccountId, N> {
     pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<AccountId, B> {
         match self {
-            Recipient::Transparent(t) => Recipient::Transparent(t),
-            Recipient::Sapling(s) => Recipient::Sapling(s),
-            Recipient::Unified(u, p) => Recipient::Unified(u, p),
+            Recipient::External(addr, pool) => Recipient::External(addr, pool),
             Recipient::InternalAccount {
                 receiving_account,
                 external_address,
@@ -100,9 +96,7 @@ impl<AccountId, N> Recipient<AccountId, N> {
 impl<AccountId, N> Recipient<AccountId, Option<N>> {
     pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N>> {
         match self {
-            Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
-            Recipient::Sapling(s) => Some(Recipient::Sapling(s)),
-            Recipient::Unified(u, p) => Some(Recipient::Unified(u, p)),
+            Recipient::External(addr, pool) => Some(Recipient::External(addr, pool)),
             Recipient::InternalAccount {
                 receiving_account,
                 external_address,

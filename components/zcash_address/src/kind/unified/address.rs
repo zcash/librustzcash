@@ -105,7 +105,7 @@ pub struct Address(pub(crate) Vec<Receiver>);
 
 impl Address {
     /// Returns whether this address has the ability to receive transfers of the given pool type.
-    pub fn has_receiver(&self, pool_type: PoolType) -> bool {
+    pub fn has_receiver_of_type(&self, pool_type: PoolType) -> bool {
         self.0.iter().any(|r| match r {
             Receiver::Orchard(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Orchard),
             Receiver::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
@@ -113,6 +113,11 @@ impl Address {
             Receiver::P2sh(_) => pool_type == PoolType::Transparent,
             Receiver::Unknown { .. } => false,
         })
+    }
+
+    /// Returns whether this address contains the given receiver.
+    pub fn contains_receiver(&self, receiver: &Receiver) -> bool {
+        self.0.contains(receiver)
     }
 
     /// Returns whether this address can receive a memo.

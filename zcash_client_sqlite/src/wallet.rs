@@ -76,12 +76,9 @@ use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_keys::keys::{
-    AddressGenerationError, UnifiedAddressRequest, UnifiedIncomingViewingKey, UnifiedSpendingKey,
-};
 
+use zcash_address::ZcashAddress;
 use zcash_client_backend::{
-    address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
         AccountBalance, AccountBirthday, AccountSource, BlockMetadata, Ratio,
@@ -92,6 +89,13 @@ use zcash_client_backend::{
     wallet::{Note, NoteId, Recipient, WalletTx},
     PoolType, ShieldedProtocol,
 };
+use zcash_keys::{
+    address::{Address, Receiver, UnifiedAddress},
+    keys::{
+        AddressGenerationError, UnifiedAddressRequest, UnifiedIncomingViewingKey,
+        UnifiedSpendingKey,
+    },
+};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
@@ -101,8 +105,8 @@ use zcash_primitives::{
         components::{amount::NonNegativeAmount, Amount},
         Transaction, TransactionData, TxId,
     },
-    zip32::{self, DiversifierIndex, Scope},
 };
+use zip32::{self, DiversifierIndex, Scope};
 
 use crate::{
     error::SqliteClientError,
@@ -2366,6 +2370,49 @@ pub(crate) fn put_tx_meta(
         .map_err(SqliteClientError::from)
 }
 
+/// Returns the most likely wallet address that corresponds to the protocol-level receiver of a
+/// note or UTXO.
+pub(crate) fn select_receiving_address<P: consensus::Parameters>(
+    params: &P,
+    conn: &rusqlite::Connection,
+    account: AccountId,
+    receiver: &Receiver,
+) -> Result<Option<ZcashAddress>, SqliteClientError> {
+    match receiver {
+        #[cfg(feature = "transparent-inputs")]
+        Receiver::Transparent(taddr) => conn
+            .query_row(
+                "SELECT address
+                 FROM addresses
+                 WHERE cached_transparent_receiver_address = :taddr",
+                named_params! {
+                    ":taddr": Address::Transparent(*taddr).encode(params)
+                },
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|addr_str| addr_str.parse::<ZcashAddress>())
+            .transpose()
+            .map_err(SqliteClientError::from),
+        receiver => {
+            // at present,
+            let mut stmt =
+                conn.prepare_cached("SELECT address FROM addresses WHERE account_id = :account")?;
+
+            let mut result = stmt.query(named_params! { ":account": account.0 })?;
+            while let Some(row) = result.next()? {
+                let addr_str = row.get::<_, String>(0)?;
+                let decoded = addr_str.parse::<ZcashAddress>()?;
+                if receiver.corresponds(&decoded) {
+                    return Ok(Some(decoded));
+                }
+            }
+
+            Ok(None)
+        }
+    }
+}
+
 /// Inserts full transaction data into the database.
 pub(crate) fn put_tx_data(
     conn: &rusqlite::Connection,
@@ -2515,24 +2562,17 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
 
 // A utility function for creation of parameters for use in `insert_sent_output`
 // and `put_sent_output`
-fn recipient_params<P: consensus::Parameters>(
-    params: &P,
+fn recipient_params(
     to: &Recipient<AccountId, Note>,
 ) -> (Option<String>, Option<AccountId>, PoolType) {
     match to {
-        Recipient::Transparent(addr) => (Some(addr.encode(params)), None, PoolType::Transparent),
-        Recipient::Sapling(addr) => (
-            Some(addr.encode(params)),
-            None,
-            PoolType::Shielded(ShieldedProtocol::Sapling),
-        ),
-        Recipient::Unified(addr, pool) => (Some(addr.encode(params)), None, *pool),
+        Recipient::External(addr, pool) => (Some(addr.encode()), None, *pool),
         Recipient::InternalAccount {
             receiving_account,
             external_address,
             note,
         } => (
-            external_address.as_ref().map(|a| a.encode(params)),
+            external_address.as_ref().map(|a| a.encode()),
             Some(*receiving_account),
             PoolType::Shielded(note.protocol()),
         ),
@@ -2540,9 +2580,8 @@ fn recipient_params<P: consensus::Parameters>(
 }
 
 /// Records information about a transaction output that your wallet created.
-pub(crate) fn insert_sent_output<P: consensus::Parameters>(
+pub(crate) fn insert_sent_output(
     conn: &rusqlite::Connection,
-    params: &P,
     tx_ref: i64,
     from_account: AccountId,
     output: &SentTransactionOutput<AccountId>,
@@ -2556,7 +2595,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
             :to_address, :to_account_id, :value, :memo)",
     )?;
 
-    let (to_address, to_account_id, pool_type) = recipient_params(params, output.recipient());
+    let (to_address, to_account_id, pool_type) = recipient_params(output.recipient());
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_pool": &pool_code(pool_type),
@@ -2585,9 +2624,8 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 /// - If `recipient` is an internal account, `output_index` is an index into the Sapling outputs of
 ///   the transaction.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn put_sent_output<P: consensus::Parameters>(
+pub(crate) fn put_sent_output(
     conn: &rusqlite::Connection,
-    params: &P,
     from_account: AccountId,
     tx_ref: i64,
     output_index: usize,
@@ -2610,7 +2648,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
             memo = IFNULL(:memo, memo)",
     )?;
 
-    let (to_address, to_account_id, pool_type) = recipient_params(params, recipient);
+    let (to_address, to_account_id, pool_type) = recipient_params(recipient);
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_pool": &pool_code(pool_type),

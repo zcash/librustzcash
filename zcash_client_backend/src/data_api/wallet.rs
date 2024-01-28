@@ -980,8 +980,8 @@ where
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
+                            Recipient::External(
+                                payment.recipient_address().clone(),
                                 PoolType::Shielded(ShieldedProtocol::Orchard),
                             ),
                             payment.amount(),
@@ -997,8 +997,8 @@ where
                             memo.clone(),
                         )?;
                         sapling_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
+                            Recipient::External(
+                                payment.recipient_address().clone(),
                                 PoolType::Shielded(ShieldedProtocol::Sapling),
                             ),
                             payment.amount(),
@@ -1026,7 +1026,11 @@ where
                     payment.amount(),
                     memo.clone(),
                 )?;
-                sapling_output_meta.push((Recipient::Sapling(addr), payment.amount(), Some(memo)));
+                sapling_output_meta.push((
+                    Recipient::External(payment.recipient_address().clone(), PoolType::SAPLING),
+                    payment.amount(),
+                    Some(memo),
+                ));
             }
             Address::Transparent(to) => {
                 if payment.memo().is_some() {
@@ -1034,7 +1038,11 @@ where
                 } else {
                     builder.add_transparent_output(&to, payment.amount())?;
                 }
-                transparent_output_meta.push((to, payment.amount()));
+                transparent_output_meta.push((
+                    Recipient::External(payment.recipient_address().clone(), PoolType::TRANSPARENT),
+                    to,
+                    payment.amount(),
+                ));
             }
         }
     }
@@ -1156,22 +1164,27 @@ where
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo)
             });
 
-    let transparent_outputs = transparent_output_meta.into_iter().map(|(addr, value)| {
-        let script = addr.script();
-        let output_index = build_result
-            .transaction()
-            .transparent_bundle()
-            .and_then(|b| {
-                b.vout
-                    .iter()
-                    .enumerate()
-                    .find(|(_, tx_out)| tx_out.script_pubkey == script)
-            })
-            .map(|(index, _)| index)
-            .expect("An output should exist in the transaction for each transparent payment.");
+    let transparent_outputs =
+        transparent_output_meta
+            .into_iter()
+            .map(|(recipient, addr, value)| {
+                let script = addr.script();
+                let output_index = build_result
+                    .transaction()
+                    .transparent_bundle()
+                    .and_then(|b| {
+                        b.vout
+                            .iter()
+                            .enumerate()
+                            .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                    })
+                    .map(|(index, _)| index)
+                    .expect(
+                        "An output should exist in the transaction for each transparent payment.",
+                    );
 
-        SentTransactionOutput::from_parts(output_index, Recipient::Transparent(addr), value, None)
-    });
+                SentTransactionOutput::from_parts(output_index, recipient, value, None)
+            });
 
     let mut outputs = vec![];
     #[cfg(feature = "orchard")]

@@ -5,6 +5,9 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_keys::address::Address::try_from_zcash_address`
+- `zcash_keys::address::Receiver`
 
 ## [0.2.0] - 2024-03-25
 

@@ -141,6 +141,7 @@ pub use convert::{
 };
 pub use encoding::ParseError;
 pub use kind::unified;
+use kind::unified::Receiver;
 pub use zcash_protocol::consensus::NetworkType as Network;
 use zcash_protocol::{PoolType, ShieldedProtocol};
 
@@ -273,7 +274,7 @@ impl ZcashAddress {
         match &self.kind {
             AddressKind::Sprout(_) => false,
             AddressKind::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
-            AddressKind::Unified(addr) => addr.has_receiver(pool_type),
+            AddressKind::Unified(addr) => addr.has_receiver_of_type(pool_type),
             AddressKind::P2pkh(_) => pool_type == PoolType::Transparent,
             AddressKind::P2sh(_) => pool_type == PoolType::Transparent,
             AddressKind::Tex(_) => pool_type == PoolType::Transparent,
@@ -289,6 +290,19 @@ impl ZcashAddress {
             AddressKind::P2pkh(_) => false,
             AddressKind::P2sh(_) => false,
             AddressKind::Tex(_) => false,
+        }
+    }
+
+    /// Returns whether or not this address contains or corresponds to the given unified address
+    /// receiver.
+    pub fn matches_receiver(&self, receiver: &Receiver) -> bool {
+        match (receiver, &self.kind) {
+            (r, AddressKind::Unified(ua)) => ua.contains_receiver(r),
+            (Receiver::Sapling(r), AddressKind::Sapling(d)) => r == d,
+            (Receiver::P2pkh(r), AddressKind::P2pkh(d)) => r == d,
+            (Receiver::P2pkh(r), AddressKind::Tex(d)) => r == d,
+            (Receiver::P2sh(r), AddressKind::P2sh(d)) => r == d,
+            _ => false,
         }
     }
 }

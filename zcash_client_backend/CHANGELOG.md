@@ -25,6 +25,10 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::proto::proposal::Proposal::{from_standard_proposal, 
   try_into_standard_proposal}` each no longer require a `consensus::Parameters` 
   argument.
+- `zcash_client_backend::wallet::Recipient` variants have changed. Instead of
+  wrapping protocol-address types, the `Recipient` type now wraps a
+  `zcash_address::ZcashAddress`. This simplifies the process of tracking the
+  original address to which value was sent.
 
 ## [0.12.1] - 2024-03-27
 
