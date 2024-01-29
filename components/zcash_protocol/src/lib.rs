@@ -17,4 +17,6 @@
 
 pub mod consensus;
 pub mod constants;
+#[cfg(feature = "local-consensus")]
+pub mod local_consensus;
 pub mod value;

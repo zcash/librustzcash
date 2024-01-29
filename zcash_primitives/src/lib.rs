@@ -28,6 +28,4 @@ pub mod transaction;
 pub use zip32;
 #[cfg(feature = "zfuture")]
 pub mod extensions;
-#[cfg(feature = "local-consensus")]
-pub mod local_consensus;
 pub mod zip339;
