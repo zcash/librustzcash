@@ -743,40 +743,16 @@ pub mod testing {
     use proptest::collection::btree_map;
     use proptest::collection::vec;
     use proptest::option;
-    use proptest::prelude::{any, prop_compose, prop_oneof};
-    use proptest::strategy::Strategy;
-    use sapling::testing::arb_payment_address;
+    use proptest::prelude::{any, prop_compose};
+    use zcash_keys::address::testing::arb_addr;
+    use zcash_keys::keys::UnifiedAddressRequest;
     use zcash_primitives::{
-        consensus::TEST_NETWORK, legacy::testing::arb_transparent_addr,
-        transaction::components::amount::testing::arb_nonnegative_amount,
+        consensus::TEST_NETWORK, transaction::components::amount::testing::arb_nonnegative_amount,
     };
 
-    use crate::address::{Address, UnifiedAddress};
+    use crate::address::Address;
 
     use super::{MemoBytes, Payment, TransactionRequest};
-
-    prop_compose! {
-        fn arb_unified_addr()(
-            sapling in arb_payment_address(),
-            transparent in option::of(arb_transparent_addr()),
-        ) -> UnifiedAddress {
-            UnifiedAddress::from_receivers(
-                #[cfg(feature = "orchard")]
-                None,
-                Some(sapling),
-                transparent
-            ).unwrap()
-        }
-    }
-
-    pub fn arb_addr() -> impl Strategy<Value = Address> {
-        prop_oneof![
-            arb_payment_address().prop_map(Address::Sapling),
-            arb_transparent_addr().prop_map(Address::Transparent),
-            arb_unified_addr().prop_map(Address::Unified),
-        ]
-    }
-
     pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
 
     prop_compose! {
@@ -787,7 +763,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_zip321_payment()(
-            recipient_address in arb_addr(),
+            recipient_address in arb_addr(UnifiedAddressRequest::unsafe_new(false, true, true)),
             amount in arb_nonnegative_amount(),
             memo in option::of(arb_valid_memo()),
             message in option::of(any::<String>()),
@@ -826,8 +802,10 @@ pub mod testing {
     }
 
     prop_compose! {
-        pub fn arb_addr_str()(addr in arb_addr()) -> String {
-            addr.encode(&TEST_NETWORK)
+        pub fn arb_addr_str()(
+            recipient_address in arb_addr(UnifiedAddressRequest::unsafe_new(false, true, true))
+        ) -> String {
+            recipient_address.encode(&TEST_NETWORK)
         }
     }
 }
@@ -835,6 +813,7 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use zcash_keys::{address::testing::arb_addr, keys::UnifiedAddressRequest};
     use zcash_primitives::{
         consensus::{Parameters, TEST_NETWORK},
         memo::Memo,
@@ -863,7 +842,7 @@ mod tests {
     #[cfg(all(test, feature = "test-dependencies"))]
     use super::{
         render::{memo_param, str_param},
-        testing::{arb_addr, arb_addr_str, arb_valid_memo, arb_zip321_request, arb_zip321_uri},
+        testing::{arb_addr_str, arb_valid_memo, arb_zip321_request, arb_zip321_uri},
     };
 
     fn check_roundtrip(req: TransactionRequest) {
@@ -1101,7 +1080,7 @@ mod tests {
     #[cfg(all(test, feature = "test-dependencies"))]
     proptest! {
         #[test]
-        fn prop_zip321_roundtrip_address(addr in arb_addr()) {
+        fn prop_zip321_roundtrip_address(addr in arb_addr(UnifiedAddressRequest::unsafe_new(false, true, true))) {
             let a = addr.encode(&TEST_NETWORK);
             assert_eq!(Address::decode(&TEST_NETWORK, &a), Some(addr));
         }

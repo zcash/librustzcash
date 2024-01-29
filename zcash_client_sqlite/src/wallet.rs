@@ -99,6 +99,7 @@ use zcash_client_backend::{
 };
 
 use crate::wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore};
+use crate::DEFAULT_UA_REQUEST;
 use crate::{
     error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
     SAPLING_TABLES_PREFIX,
@@ -260,7 +261,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     // Always derive the default Unified Address for the account.
-    let (address, d_idx) = key.default_address();
+    let (address, d_idx) = key.default_address(DEFAULT_UA_REQUEST);
     insert_address(conn, params, account, d_idx, &address)?;
 
     Ok(())

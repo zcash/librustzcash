@@ -107,6 +107,9 @@ pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
+pub const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
+    UnifiedAddressRequest::unsafe_new(false, true, true);
+
 /// A newtype wrapper for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReceivedNoteId(pub(crate) i64);
@@ -1116,12 +1119,9 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
-    use zcash_client_backend::{
-        data_api::{AccountBirthday, WalletRead, WalletWrite},
-        keys::UnifiedAddressRequest,
-    };
+    use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
 
-    use crate::{testing::TestBuilder, AccountId};
+    use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
 
     #[cfg(feature = "unstable")]
     use {
@@ -1145,7 +1145,7 @@ mod tests {
         // TODO: Add Orchard
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account, UnifiedAddressRequest::DEFAULT)
+            .get_next_available_address(account, DEFAULT_UA_REQUEST)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
@@ -1173,7 +1173,12 @@ mod tests {
             .unwrap();
 
         // The receiver for the default UA should be in the set.
-        assert!(receivers.contains_key(ufvk.default_address().0.transparent().unwrap()));
+        assert!(receivers.contains_key(
+            ufvk.default_address(DEFAULT_UA_REQUEST)
+                .0
+                .transparent()
+                .unwrap()
+        ));
 
         // The default t-addr should be in the set.
         assert!(receivers.contains_key(&taddr));

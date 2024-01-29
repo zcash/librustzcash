@@ -10,6 +10,7 @@ use uuid::Uuid;
 use zcash_client_backend::{
     address::Address, keys::UnifiedSpendingKey, PoolType, ShieldedProtocol,
 };
+use zcash_keys::keys::UnifiedAddressRequest;
 use zcash_primitives::{consensus, zip32::AccountId};
 
 #[cfg(feature = "transparent-inputs")]
@@ -64,6 +65,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut stmt_fetch_accounts =
             transaction.prepare("SELECT account, address FROM accounts")?;
 
+        let ua_request = UnifiedAddressRequest::new(false, true, true)
+            .expect("A shielded receiver type is requested.");
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             // We only need to check for the presence of the seed if we have keys that
@@ -105,7 +108,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             "Address field value decoded to a transparent address; should have been Sapling or unified.".to_string()));
                     }
                     Address::Unified(decoded_address) => {
-                        let (expected_address, idx) = ufvk.default_address();
+                        let (expected_address, idx) = ufvk.default_address(ua_request);
                         if decoded_address != expected_address {
                             return Err(WalletMigrationError::CorruptedData(
                                 format!("Decoded unified address {} does not match the ufvk's default address {} at {:?}.",
@@ -117,7 +120,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 }
 
                 let ufvk_str: String = ufvk.encode(&self.params);
-                let address_str: String = ufvk.default_address().0.encode(&self.params);
+                let address_str: String = ufvk.default_address(ua_request).0.encode(&self.params);
 
                 // This migration, and the wallet behaviour before it, stored the default
                 // transparent address in the `accounts` table. This does not necessarily
