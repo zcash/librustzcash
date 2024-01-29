@@ -133,9 +133,6 @@ unstable-nu6 = ["zcash_protocol/unstable-nu6"]
 
 ## Exposes early in-development features that are not yet planned for any network upgrade.
 zfuture = ["zcash_protocol/zfuture"]
-
-## Exposes support for working with a local consensus (e.g. regtest
-local-consensus = []
 [lib]
 bench = false
 

@@ -46,3 +46,6 @@ unstable-nu6 = []
 
 ## Exposes early in-development features that are not yet planned for any network upgrade.
 zfuture = []
+
+## Exposes support for working with a local consensus (e.g. regtest
+local-consensus = []
