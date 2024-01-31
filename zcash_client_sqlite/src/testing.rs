@@ -1069,9 +1069,6 @@ pub(crate) fn check_proposal_serialization_roundtrip(
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
     let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);
-    assert_matches!(proposal_proto, Some(_));
-    let deserialized_proposal = proposal_proto
-        .unwrap()
-        .try_into_standard_proposal(&db_data.params, db_data);
+    let deserialized_proposal = proposal_proto.try_into_standard_proposal(&db_data.params, db_data);
     assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }

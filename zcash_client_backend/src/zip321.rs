@@ -189,7 +189,7 @@ impl TransactionRequest {
             // It doesn't matter what params we use here, as none of the validity
             // requirements depend on them.
             let params = consensus::MAIN_NETWORK;
-            TransactionRequest::from_uri(&params, &request.to_uri(&params).unwrap())?;
+            TransactionRequest::from_uri(&params, &request.to_uri(&params))?;
         }
 
         Ok(request)
@@ -242,7 +242,7 @@ impl TransactionRequest {
     /// Convert this request to a URI string.
     ///
     /// Returns None if the payment request is empty.
-    pub fn to_uri<P: consensus::Parameters>(&self, params: &P) -> Option<String> {
+    pub fn to_uri<P: consensus::Parameters>(&self, params: &P) -> String {
         fn payment_params(
             payment: &Payment,
             payment_index: Option<usize>,
@@ -276,17 +276,18 @@ impl TransactionRequest {
         }
 
         match &self.payments[..] {
-            [] => None,
+            [] => "zcash:".to_string(),
             [payment] => {
                 let query_params = payment_params(payment, None)
                     .into_iter()
                     .collect::<Vec<String>>();
 
-                Some(format!(
-                    "zcash:{}?{}",
+                format!(
+                    "zcash:{}{}{}",
                     payment.recipient_address.encode(params),
+                    if query_params.is_empty() { "" } else { "?" },
                     query_params.join("&")
-                ))
+                )
             }
             _ => {
                 let query_params = self
@@ -301,7 +302,7 @@ impl TransactionRequest {
                     })
                     .collect::<Vec<String>>();
 
-                Some(format!("zcash:?{}", query_params.join("&")))
+                format!("zcash:?{}", query_params.join("&"))
             }
         }
     }
@@ -797,7 +798,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_zip321_uri()(req in arb_zip321_request()) -> String {
-            req.to_uri(&TEST_NETWORK).unwrap()
+            req.to_uri(&TEST_NETWORK)
         }
     }
 
@@ -846,12 +847,9 @@ mod tests {
     };
 
     fn check_roundtrip(req: TransactionRequest) {
-        if let Some(req_uri) = req.to_uri(&TEST_NETWORK) {
-            let parsed = TransactionRequest::from_uri(&TEST_NETWORK, &req_uri).unwrap();
-            assert_eq!(parsed, req);
-        } else {
-            panic!("Generated invalid payment request: {:?}", req);
-        }
+        let req_uri = req.to_uri(&TEST_NETWORK);
+        let parsed = TransactionRequest::from_uri(&TEST_NETWORK, &req_uri).unwrap();
+        assert_eq!(parsed, req);
     }
 
     #[test]
@@ -954,6 +952,14 @@ mod tests {
 
     #[test]
     fn test_zip321_spec_valid_examples() {
+        let valid_0 = "zcash:";
+        let v0r = TransactionRequest::from_uri(&TEST_NETWORK, valid_0).unwrap();
+        assert!(v0r.payments.is_empty());
+
+        let valid_0 = "zcash:?";
+        let v0r = TransactionRequest::from_uri(&TEST_NETWORK, valid_0).unwrap();
+        assert!(v0r.payments.is_empty());
+
         let valid_1 = "zcash:ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez?amount=1&memo=VGhpcyBpcyBhIHNpbXBsZSBtZW1vLg&message=Thank%20you%20for%20your%20purchase";
         let v1r = TransactionRequest::from_uri(&TEST_NETWORK, valid_1).unwrap();
         assert_eq!(
@@ -1015,6 +1021,11 @@ mod tests {
 
     #[test]
     fn test_zip321_spec_invalid_examples() {
+        // invalid; empty string
+        let invalid_0 = "";
+        let i0r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_0);
+        assert!(i0r.is_err());
+
         // invalid; missing `address=`
         let invalid_1 = "zcash:?amount=3491405.05201255&address.1=ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez&amount.1=5740296.87793245";
         let i1r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_1);
@@ -1120,12 +1131,9 @@ mod tests {
 
         #[test]
         fn prop_zip321_roundtrip_request(mut req in arb_zip321_request()) {
-            if let Some(req_uri) = req.to_uri(&TEST_NETWORK) {
-                let mut parsed = TransactionRequest::from_uri(&TEST_NETWORK, &req_uri).unwrap();
-                assert!(TransactionRequest::normalize_and_eq(&TEST_NETWORK, &mut parsed, &mut req));
-            } else {
-                panic!("Generated invalid payment request: {:?}", req);
-            }
+            let req_uri = req.to_uri(&TEST_NETWORK);
+            let mut parsed = TransactionRequest::from_uri(&TEST_NETWORK, &req_uri).unwrap();
+            assert!(TransactionRequest::normalize_and_eq(&TEST_NETWORK, &mut parsed, &mut req));
         }
 
         #[test]
@@ -1133,7 +1141,7 @@ mod tests {
             let mut parsed = TransactionRequest::from_uri(&TEST_NETWORK, &uri).unwrap();
             parsed.normalize(&TEST_NETWORK);
             let serialized = parsed.to_uri(&TEST_NETWORK);
-            assert_eq!(serialized, Some(uri))
+            assert_eq!(serialized, uri)
         }
     }
 }

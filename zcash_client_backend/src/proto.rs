@@ -350,8 +350,8 @@ impl proposal::Proposal {
     pub fn from_standard_proposal<P: Parameters, NoteRef>(
         params: &P,
         value: &Proposal<StandardFeeRule, NoteRef>,
-    ) -> Option<Self> {
-        let transaction_request = value.transaction_request().to_uri(params)?;
+    ) -> Self {
+        let transaction_request = value.transaction_request().to_uri(params);
 
         let anchor_height = value
             .shielded_inputs()
@@ -393,7 +393,7 @@ impl proposal::Proposal {
         });
 
         #[allow(deprecated)]
-        Some(proposal::Proposal {
+        proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             transaction_request,
             anchor_height,
@@ -407,7 +407,7 @@ impl proposal::Proposal {
             .into(),
             min_target_height: value.min_target_height().into(),
             is_shielding: value.is_shielding(),
-        })
+        }
     }
 
     /// Attempts to parse a [`Proposal`] based upon a supported [`StandardFeeRule`] from its
