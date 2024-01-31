@@ -18,7 +18,7 @@ and this library adheres to Rust's notion of
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
 - `zcash_client_backend::fees::orchard`
-- `zcash_client_backend::fees::ChangeValue::orchard` 
+- `zcash_client_backend::fees::ChangeValue::orchard`
 - `zcash_client_backend::wallet`:
   - `Note::Orchard`
 
@@ -74,6 +74,8 @@ and this library adheres to Rust's notion of
      wallet::{ReceivedSaplingNote, WalletTransparentOutput},
      wallet::input_selection::{Proposal, SaplingInputs},
    }`
+- `zcash_client_backend::zip321::to_uri` now returns a `String` rather than an
+  `Option<String>` and provides canonical serialization for the empty proposal.
 
 ### Moved
 - `zcash_client_backend::data_api::{PoolType, ShieldedProtocol}` have
@@ -102,7 +104,7 @@ and this library adheres to Rust's notion of
     as the previously-public fields.
   - `WalletSummary::new` now takes an additional `next_sapling_subtree_index`
     argument.
-  - `WalletWrite::get_next_available_address` now takes an additional 
+  - `WalletWrite::get_next_available_address` now takes an additional
     `UnifiedAddressRequest` argument.
   - `chain::scan_cached_blocks` now returns a `ScanSummary` containing metadata
     about the scanned blocks on success.
