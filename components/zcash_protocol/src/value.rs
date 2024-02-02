@@ -19,7 +19,7 @@ pub const MAX_BALANCE: i64 = MAX_MONEY as i64;
 /// particular, a [`Transaction`] containing serialized invalid ZatBalances will be rejected
 /// by the network consensus rules.
 ///
-/// [`Transaction`]: crate::transaction::Transaction
+/// [`Transaction`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/transaction/struct.Transaction.html
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct ZatBalance(i64);
 

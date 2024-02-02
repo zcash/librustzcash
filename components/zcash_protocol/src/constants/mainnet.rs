@@ -9,7 +9,7 @@ pub const COIN_TYPE: u32 = 133;
 ///
 /// Defined in [ZIP 32].
 ///
-/// [`ExtendedSpendingKey`]: crate::sapling::zip32::ExtendedSpendingKey
+/// [`ExtendedSpendingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedSpendingKey.html
 /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
 pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-main";
 
@@ -17,7 +17,7 @@ pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-main";
 ///
 /// Defined in [ZIP 32].
 ///
-/// [`ExtendedFullViewingKey`]: crate::sapling::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedFullViewingKey.html#
 /// [ZIP 32]: https://github.com/zcash/zips/blob/master/zip-0032.rst
 pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviews";
 
@@ -25,16 +25,16 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviews";
 ///
 /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
 ///
-/// [`PaymentAddress`]: crate::sapling::PaymentAddress
+/// [`PaymentAddress`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/struct.PaymentAddress.html
 /// [Zcash Protocol Specification]: https://github.com/zcash/zips/blob/master/protocol/protocol.pdf
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zs";
 
 /// The prefix for a Base58Check-encoded mainnet [`PublicKeyHash`].
 ///
-/// [`PublicKeyHash`]: crate::legacy::TransparentAddress::PublicKeyHash
+/// [`PublicKeyHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
 pub const B58_PUBKEY_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xb8];
 
 /// The prefix for a Base58Check-encoded mainnet [`ScriptHash`].
 ///
-/// [`ScriptHash`]: crate::legacy::TransparentAddress::ScriptHash
+/// [`ScriptHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
 pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xbd];
