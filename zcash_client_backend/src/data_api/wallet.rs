@@ -741,7 +741,6 @@ where
                     Some(memo),
                 ))
             }
-            #[cfg(zcash_unstable = "orchard")]
             ShieldedProtocol::Orchard => {
                 #[cfg(not(feature = "orchard"))]
                 return Err(Error::UnsupportedPoolType(PoolType::Shielded(
