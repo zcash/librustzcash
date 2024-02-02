@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::address::Address::has_receiver`
+
 ## [0.1.1] - 2024-03-04
 
 ### Added

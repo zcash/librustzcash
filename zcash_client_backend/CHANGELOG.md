@@ -58,6 +58,10 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a
   `NonNegativeAmount` rather than a signed `Amount`.
 
+### Removed
+- `zcash_client_backend::PoolType::is_receiver` use 
+  `zcash_keys::Address::has_receiver` instead.
+
 ## [0.11.0] - 2024-03-01
 
 ### Added

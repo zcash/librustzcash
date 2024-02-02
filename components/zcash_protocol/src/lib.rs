@@ -15,8 +15,38 @@
 // Temporary until we have addressed all Result<T, ()> cases.
 #![allow(clippy::result_unit_err)]
 
+use core::fmt;
+
 pub mod consensus;
 pub mod constants;
 #[cfg(feature = "local-consensus")]
 pub mod local_consensus;
 pub mod value;
+
+/// A Zcash shielded transfer protocol.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ShieldedProtocol {
+    /// The Sapling protocol
+    Sapling,
+    /// The Orchard protocol
+    Orchard,
+}
+
+/// A value pool in the Zcash protocol.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PoolType {
+    /// The transparent value pool
+    Transparent,
+    /// A shielded value pool.
+    Shielded(ShieldedProtocol),
+}
+
+impl fmt::Display for PoolType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PoolType::Transparent => f.write_str("Transparent"),
+            PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
+            PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
+        }
+    }
+}

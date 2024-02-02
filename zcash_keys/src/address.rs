@@ -8,6 +8,7 @@ use zcash_primitives::{consensus, legacy::TransparentAddress};
 
 #[cfg(feature = "sapling")]
 use sapling::PaymentAddress;
+use zcash_protocol::{PoolType, ShieldedProtocol};
 
 /// A Unified Address.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -312,6 +313,33 @@ impl Address {
             Address::Unified(ua) => ua.to_address(net),
         }
         .to_string()
+    }
+
+    pub fn has_receiver(&self, pool_type: PoolType) -> bool {
+        match self {
+            #[cfg(feature = "sapling")]
+            Address::Sapling(_) => {
+                matches!(pool_type, PoolType::Shielded(ShieldedProtocol::Sapling))
+            }
+            Address::Transparent(_) => matches!(pool_type, PoolType::Transparent),
+            Address::Unified(ua) => match pool_type {
+                PoolType::Transparent => ua.transparent().is_some(),
+                PoolType::Shielded(ShieldedProtocol::Sapling) => {
+                    #[cfg(feature = "sapling")]
+                    return ua.sapling().is_some();
+
+                    #[cfg(not(feature = "sapling"))]
+                    return false;
+                }
+                PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                    #[cfg(feature = "orchard")]
+                    return ua.orchard().is_some();
+
+                    #[cfg(not(feature = "orchard"))]
+                    return false;
+                }
+            },
+        }
     }
 }
 
