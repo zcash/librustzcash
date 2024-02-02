@@ -13,7 +13,7 @@ pub const COIN_TYPE: u32 = 1;
 ///
 /// It is defined in [the `zcashd` codebase].
 ///
-/// [`ExtendedSpendingKey`]: crate::sapling::zip32::ExtendedSpendingKey
+/// [`ExtendedSpendingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedSpendingKey.html
 /// [the `zcashd` codebase]: <https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L496>
 pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-regtest";
 
@@ -21,7 +21,7 @@ pub const HRP_SAPLING_EXTENDED_SPENDING_KEY: &str = "secret-extended-key-regtest
 ///
 /// It is defined in [the `zcashd` codebase].
 ///
-/// [`ExtendedFullViewingKey`]: crate::sapling::zip32::ExtendedFullViewingKey
+/// [`ExtendedFullViewingKey`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/zip32/struct.ExtendedFullViewingKey.html#
 /// [the `zcashd` codebase]: <https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L494>
 pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewregtestsapling";
 
@@ -29,18 +29,18 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewregtestsapling";
 ///
 /// It is defined in [the `zcashd` codebase].
 ///
-/// [`PaymentAddress`]: crate::sapling::PaymentAddress
+/// [`PaymentAddress`]: https://docs.rs/sapling-crypto/latest/sapling_crypto/struct.PaymentAddress.html
 /// [the `zcashd` codebase]: <https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L493>
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zregtestsapling";
 
 /// The prefix for a Base58Check-encoded regtest transparent [`PublicKeyHash`].
 /// Same as the testnet prefix.
 ///
-/// [`PublicKeyHash`]: crate::legacy::TransparentAddress::PublicKeyHash
+/// [`PublicKeyHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
 pub const B58_PUBKEY_ADDRESS_PREFIX: [u8; 2] = [0x1d, 0x25];
 
 /// The prefix for a Base58Check-encoded regtest transparent [`ScriptHash`].
 /// Same as the testnet prefix.
 ///
-/// [`ScriptHash`]: crate::legacy::TransparentAddress::ScriptHash
+/// [`ScriptHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
 pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xba];

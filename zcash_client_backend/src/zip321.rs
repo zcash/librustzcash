@@ -410,7 +410,7 @@ mod render {
         format!("address{}={}", param_index(idx), addr.encode(params))
     }
 
-    /// Converts an [`Amount`] value to a correctly formatted decimal ZEC
+    /// Converts an [`NonNegativeAmount`] value to a correctly formatted decimal ZEC
     /// value for inclusion in a ZIP 321 URI.
     pub fn amount_str(amount: NonNegativeAmount) -> Option<String> {
         if amount.is_positive() {
