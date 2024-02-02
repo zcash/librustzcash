@@ -330,14 +330,14 @@ impl Script {
         {
             let mut hash = [0; 20];
             hash.copy_from_slice(&self.0[3..23]);
-            Some(TransparentAddress::PublicKey(hash))
+            Some(TransparentAddress::PublicKeyHash(hash))
         } else if self.0.len() == 23
             && self.0[0..2] == [OpCode::Hash160 as u8, 0x14]
             && self.0[22] == OpCode::Equal as u8
         {
             let mut hash = [0; 20];
             hash.copy_from_slice(&self.0[2..22]);
-            Some(TransparentAddress::Script(hash))
+            Some(TransparentAddress::ScriptHash(hash))
         } else {
             None
         }
@@ -377,15 +377,15 @@ impl Shl<&[u8]> for Script {
 /// A transparent address corresponding to either a public key or a `Script`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TransparentAddress {
-    PublicKey([u8; 20]), // TODO: Rename to PublicKeyHash
-    Script([u8; 20]),    // TODO: Rename to ScriptHash
+    PublicKeyHash([u8; 20]),
+    ScriptHash([u8; 20]),
 }
 
 impl TransparentAddress {
     /// Generate the `scriptPubKey` corresponding to this address.
     pub fn script(&self) -> Script {
         match self {
-            TransparentAddress::PublicKey(key_id) => {
+            TransparentAddress::PublicKeyHash(key_id) => {
                 // P2PKH script
                 Script::default()
                     << OpCode::Dup
@@ -394,7 +394,7 @@ impl TransparentAddress {
                     << OpCode::EqualVerify
                     << OpCode::CheckSig
             }
-            TransparentAddress::Script(script_id) => {
+            TransparentAddress::ScriptHash(script_id) => {
                 // P2SH script
                 Script::default() << OpCode::Hash160 << &script_id[..] << OpCode::Equal
             }
@@ -410,7 +410,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_transparent_addr()(v in proptest::array::uniform20(any::<u8>())) -> TransparentAddress {
-            TransparentAddress::PublicKey(v)
+            TransparentAddress::PublicKeyHash(v)
         }
     }
 }
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn p2pkh() {
-        let addr = TransparentAddress::PublicKey([4; 20]);
+        let addr = TransparentAddress::PublicKeyHash([4; 20]);
         assert_eq!(
             &addr.script().0,
             &[
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn p2sh() {
-        let addr = TransparentAddress::Script([7; 20]);
+        let addr = TransparentAddress::ScriptHash([7; 20]);
         assert_eq!(
             &addr.script().0,
             &[

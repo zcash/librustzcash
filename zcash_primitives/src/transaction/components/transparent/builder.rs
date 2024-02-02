@@ -117,7 +117,7 @@ impl TransparentBuilder {
         // output may be spent.
         let pubkey = secp256k1::PublicKey::from_secret_key(&self.secp, &sk).serialize();
         match coin.script_pubkey.address() {
-            Some(TransparentAddress::PublicKey(hash)) => {
+            Some(TransparentAddress::PublicKeyHash(hash)) => {
                 use ripemd::Ripemd160;
                 use sha2::Sha256;
 

@@ -156,7 +156,7 @@ impl super::FeeRule for FeeRule {
         let non_p2pkh_inputs: Vec<_> = transparent_inputs
             .iter()
             .filter_map(|t_in| match t_in.coin().script_pubkey.address() {
-                Some(TransparentAddress::PublicKey(_)) => None,
+                Some(TransparentAddress::PublicKeyHash(_)) => None,
                 _ => Some(t_in.outpoint()),
             })
             .cloned()
