@@ -1,9 +1,7 @@
 //! Helper functions for managing light client key material.
 use zcash_address::unified::{self, Container, Encoding, Typecode};
-use zcash_primitives::{
-    consensus,
-    zip32::{AccountId, DiversifierIndex},
-};
+use zcash_protocol::consensus::{self, NetworkConstants};
+use zip32::{AccountId, DiversifierIndex};
 
 use crate::address::UnifiedAddress;
 
@@ -190,11 +188,11 @@ impl UnifiedSpendingKey {
             transparent: legacy::AccountPrivKey::from_seed(_params, seed, _account)
                 .map_err(DerivationError::Transparent)?,
             #[cfg(feature = "sapling")]
-            sapling: sapling::spending_key(seed, _params.coin_type(), _account),
+            sapling: sapling::spending_key(seed, _params.network_type().coin_type(), _account),
             #[cfg(feature = "orchard")]
             orchard: orchard::keys::SpendingKey::from_zip32_seed(
                 seed,
-                _params.coin_type(),
+                _params.network_type().coin_type(),
                 _account,
             )
             .map_err(DerivationError::Orchard)?,
@@ -554,7 +552,7 @@ impl UnifiedFullViewingKey {
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
         let (net, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
-        let expected_net = params.address_network().expect("Unrecognized network");
+        let expected_net = params.network_type();
         if net != expected_net {
             return Err(format!(
                 "UFVK is for network {:?} but we expected {:?}",
@@ -663,7 +661,7 @@ impl UnifiedFullViewingKey {
 
         let ufvk = unified::Ufvk::try_from_items(items.collect())
             .expect("UnifiedFullViewingKey should only be constructed safely");
-        ufvk.encode(&params.address_network().expect("Unrecognized network"))
+        ufvk.encode(&params.network_type())
     }
 
     /// Returns the transparent component of the unified key at the

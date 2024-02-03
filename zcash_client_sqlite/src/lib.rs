@@ -1330,6 +1330,8 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
+        use zcash_primitives::consensus::NetworkConstants;
+
         let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.
@@ -1338,7 +1340,11 @@ mod tests {
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let account = AccountId::ZERO;
-        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
+        let extsk = sapling::spending_key(
+            &seed,
+            st.wallet().params.network_type().coin_type(),
+            account,
+        );
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,

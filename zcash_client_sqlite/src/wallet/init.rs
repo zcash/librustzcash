@@ -176,7 +176,9 @@ mod tests {
 
     use ::sapling::zip32::ExtendedFullViewingKey;
     use zcash_primitives::{
-        consensus::{self, BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        consensus::{
+            self, BlockHeight, BranchId, Network, NetworkConstants, NetworkUpgrade, Parameters,
+        },
         transaction::{TransactionData, TxVersion},
         zip32::AccountId,
     };
@@ -698,11 +700,13 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                wdb.params.hrp_sapling_payment_address(),
+                wdb.params.network_type().hrp_sapling_payment_address(),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                wdb.params
+                    .network_type()
+                    .hrp_sapling_extended_full_viewing_key(),
                 extfvk,
             );
             wdb.conn.execute(
@@ -723,7 +727,8 @@ mod tests {
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
-        let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        let secret_key =
+            sapling::spending_key(&seed, db_data.params.network_type().coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
@@ -835,11 +840,13 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                wdb.params.hrp_sapling_payment_address(),
+                wdb.params.network_type().hrp_sapling_payment_address(),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                wdb.params
+                    .network_type()
+                    .hrp_sapling_extended_full_viewing_key(),
                 extfvk,
             );
             wdb.conn.execute(
@@ -894,7 +901,8 @@ mod tests {
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
-        let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        let secret_key =
+            sapling::spending_key(&seed, db_data.params.network_type().coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_autoshielding(&mut db_data, &extfvk, account).unwrap();

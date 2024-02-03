@@ -141,26 +141,13 @@ pub use convert::{
 };
 pub use encoding::ParseError;
 pub use kind::unified;
+pub use zcash_protocol::consensus::NetworkType as Network;
 
 /// A Zcash address.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ZcashAddress {
     net: Network,
     kind: AddressKind,
-}
-
-/// The Zcash network for which an address is encoded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Network {
-    /// Zcash Mainnet.
-    Main,
-    /// Zcash Testnet.
-    Test,
-    /// Private integration / regression testing, used in `zcashd`.
-    ///
-    /// For some address types there is no distinction between test and regtest encodings;
-    /// those will always be parsed as `Network::Test`.
-    Regtest,
 }
 
 /// Known kinds of Zcash addresses.

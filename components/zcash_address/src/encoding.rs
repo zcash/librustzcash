@@ -1,9 +1,11 @@
 use std::{convert::TryInto, error::Error, fmt, str::FromStr};
 
 use bech32::{self, FromBase32, ToBase32, Variant};
+use zcash_protocol::consensus::{NetworkConstants, NetworkType};
+use zcash_protocol::constants::{mainnet, regtest, testnet};
 
 use crate::kind::unified::Encoding;
-use crate::{kind::*, AddressKind, Network, ZcashAddress};
+use crate::{kind::*, AddressKind, ZcashAddress};
 
 /// An error while attempting to parse a string as a Zcash address.
 #[derive(Debug, PartialEq, Eq)]
@@ -68,9 +70,9 @@ impl FromStr for ZcashAddress {
             let data = Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
 
             let net = match hrp.as_str() {
-                sapling::MAINNET => Network::Main,
-                sapling::TESTNET => Network::Test,
-                sapling::REGTEST => Network::Regtest,
+                mainnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Main,
+                testnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Test,
+                regtest::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Regtest,
                 // We will not define new Bech32 address encodings.
                 _ => {
                     return Err(ParseError::NotZcash);
@@ -86,23 +88,33 @@ impl FromStr for ZcashAddress {
 
         // The rest use Base58Check.
         if let Ok(decoded) = bs58::decode(s).with_check(None).into_vec() {
-            let net = match decoded[..2].try_into().unwrap() {
-                sprout::MAINNET | p2pkh::MAINNET | p2sh::MAINNET => Network::Main,
-                sprout::TESTNET | p2pkh::TESTNET | p2sh::TESTNET => Network::Test,
-                // We will not define new Base58Check address encodings.
-                _ => return Err(ParseError::NotZcash),
-            };
+            if decoded.len() >= 2 {
+                let (prefix, net) = match decoded[..2].try_into().unwrap() {
+                    prefix @ (mainnet::B58_PUBKEY_ADDRESS_PREFIX
+                    | mainnet::B58_SCRIPT_ADDRESS_PREFIX
+                    | mainnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Main),
+                    prefix @ (testnet::B58_PUBKEY_ADDRESS_PREFIX
+                    | testnet::B58_SCRIPT_ADDRESS_PREFIX
+                    | testnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Test),
+                    // We will not define new Base58Check address encodings.
+                    _ => return Err(ParseError::NotZcash),
+                };
 
-            return match decoded[..2].try_into().unwrap() {
-                sprout::MAINNET | sprout::TESTNET => {
-                    decoded[2..].try_into().map(AddressKind::Sprout)
+                return match prefix {
+                    mainnet::B58_SPROUT_ADDRESS_PREFIX | testnet::B58_SPROUT_ADDRESS_PREFIX => {
+                        decoded[2..].try_into().map(AddressKind::Sprout)
+                    }
+                    mainnet::B58_PUBKEY_ADDRESS_PREFIX | testnet::B58_PUBKEY_ADDRESS_PREFIX => {
+                        decoded[2..].try_into().map(AddressKind::P2pkh)
+                    }
+                    mainnet::B58_SCRIPT_ADDRESS_PREFIX | testnet::B58_SCRIPT_ADDRESS_PREFIX => {
+                        decoded[2..].try_into().map(AddressKind::P2sh)
+                    }
+                    _ => unreachable!(),
                 }
-                p2pkh::MAINNET | p2pkh::TESTNET => decoded[2..].try_into().map(AddressKind::P2pkh),
-                p2sh::MAINNET | p2sh::TESTNET => decoded[2..].try_into().map(AddressKind::P2sh),
-                _ => unreachable!(),
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { kind, net });
             }
-            .map_err(|_| ParseError::InvalidEncoding)
-            .map(|kind| ZcashAddress { kind, net });
         };
 
         // If it's not valid Bech32, Bech32m, or Base58Check, it's not a Zcash address.
@@ -124,36 +136,13 @@ fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
 impl fmt::Display for ZcashAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let encoded = match &self.kind {
-            AddressKind::Sprout(data) => encode_b58(
-                match self.net {
-                    Network::Main => sprout::MAINNET,
-                    Network::Test | Network::Regtest => sprout::TESTNET,
-                },
-                data,
-            ),
-            AddressKind::Sapling(data) => encode_bech32(
-                match self.net {
-                    Network::Main => sapling::MAINNET,
-                    Network::Test => sapling::TESTNET,
-                    Network::Regtest => sapling::REGTEST,
-                },
-                data,
-            ),
+            AddressKind::Sprout(data) => encode_b58(self.net.b58_sprout_address_prefix(), data),
+            AddressKind::Sapling(data) => {
+                encode_bech32(self.net.hrp_sapling_payment_address(), data)
+            }
             AddressKind::Unified(addr) => addr.encode(&self.net),
-            AddressKind::P2pkh(data) => encode_b58(
-                match self.net {
-                    Network::Main => p2pkh::MAINNET,
-                    Network::Test | Network::Regtest => p2pkh::TESTNET,
-                },
-                data,
-            ),
-            AddressKind::P2sh(data) => encode_b58(
-                match self.net {
-                    Network::Main => p2sh::MAINNET,
-                    Network::Test | Network::Regtest => p2sh::TESTNET,
-                },
-                data,
-            ),
+            AddressKind::P2pkh(data) => encode_b58(self.net.b58_pubkey_address_prefix(), data),
+            AddressKind::P2sh(data) => encode_b58(self.net.b58_script_address_prefix(), data),
         };
         write!(f, "{}", encoded)
     }
@@ -162,7 +151,7 @@ impl fmt::Display for ZcashAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kind::unified;
+    use crate::{kind::unified, Network};
 
     fn encoding(encoded: &str, decoded: ZcashAddress) {
         assert_eq!(decoded.to_string(), encoded);

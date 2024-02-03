@@ -2,9 +2,10 @@
 
 use zcash_address::{
     unified::{self, Container, Encoding, Typecode},
-    ConversionError, Network, ToAddress, TryFromRawAddress, ZcashAddress,
+    ConversionError, ToAddress, TryFromRawAddress, ZcashAddress,
 };
-use zcash_primitives::{consensus, legacy::TransparentAddress};
+use zcash_primitives::legacy::TransparentAddress;
+use zcash_protocol::consensus::{self, NetworkType};
 
 #[cfg(feature = "sapling")]
 use sapling::PaymentAddress;
@@ -172,7 +173,7 @@ impl UnifiedAddress {
         &self.unknown
     }
 
-    fn to_address(&self, net: Network) -> ZcashAddress {
+    fn to_address(&self, net: NetworkType) -> ZcashAddress {
         let items = self
             .unknown
             .iter()
@@ -209,8 +210,7 @@ impl UnifiedAddress {
 
     /// Returns the string encoding of this `UnifiedAddress` for the given network.
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
-        self.to_address(params.address_network().expect("Unrecognized network"))
-            .to_string()
+        self.to_address(params.network_type()).to_string()
     }
 
     /// Returns the set of receiver typecodes.
@@ -292,12 +292,11 @@ impl TryFromRawAddress for Address {
 impl Address {
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
         let addr = ZcashAddress::try_from_encoded(s).ok()?;
-        addr.convert_if_network(params.address_network().expect("Unrecognized network"))
-            .ok()
+        addr.convert_if_network(params.network_type()).ok()
     }
 
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
-        let net = params.address_network().expect("Unrecognized network");
+        let net = params.network_type();
 
         match self {
             #[cfg(feature = "sapling")]

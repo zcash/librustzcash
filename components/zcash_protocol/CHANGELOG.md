@@ -15,6 +15,11 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
   - `consensus`
   - `constants`
   - `zcash_protocol::value` replaces `zcash_primitives::transaction::components::amount`
+- `zcash_protocol::consensus`:
+  - `NetworkConstants` has been extracted from the `Parameters` trait.
+  - `NetworkType`
+  - `Parameters::b58_sprout_address_prefix`
+- `zcash_protocol::constants::{mainnet, testnet}::B58_SPROUT_ADDRESS_PREFIX`
 - Added in `zcash_protocol::value`:
   - `Zatoshis`
   - `ZatBalance`
@@ -35,3 +40,7 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
     - `TryFrom<orchard::ValueSum> for Amount`
     - `From<NonNegativeAmount> for sapling::value::NoteValue>`
     - `TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+- `zcash_protocol::consensus::Parameters` has been split into two traits, with
+  the `NetworkConstants` trait providing all network constant accessors. Also,
+  the `address_network` method has been replaced with a new `network_type`
+  method that serves the same purpose.

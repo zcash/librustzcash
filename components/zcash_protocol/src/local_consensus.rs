@@ -1,7 +1,4 @@
-use crate::{
-    consensus::{BlockHeight, NetworkUpgrade, Parameters},
-    constants,
-};
+use crate::consensus::{BlockHeight, NetworkType, NetworkUpgrade, Parameters};
 
 /// a `LocalNetwork` setup should define the activation heights
 /// of network upgrades. `None` is considered as "not activated"
@@ -36,7 +33,7 @@ use crate::{
 ///         };
 ///     ```
 ///     
-#[derive(Clone, PartialEq, Eq, Copy, Debug)]
+#[derive(Clone, PartialEq, Eq, Copy, Debug, Hash)]
 pub struct LocalNetwork {
     pub overwinter: Option<BlockHeight>,
     pub sapling: Option<BlockHeight>,
@@ -44,18 +41,18 @@ pub struct LocalNetwork {
     pub heartwood: Option<BlockHeight>,
     pub canopy: Option<BlockHeight>,
     pub nu5: Option<BlockHeight>,
+    #[cfg(feature = "unstable-nu6")]
     pub nu6: Option<BlockHeight>,
     #[cfg(feature = "zfuture")]
     pub z_future: Option<BlockHeight>,
 }
 
-/// Parameters default implementation for `LocalNetwork`
-/// Important note:
-/// The functions `coin_type()`, `address_network()`,  
-/// `hrp_sapling_extended_spending_key()`, `hrp_sapling_extended_full_viewing_key()`,
-/// `hrp_sapling_payment_address()`, `b58_script_address_prefix()` return
-/// `constants::regtest` values
+/// Parameters implementation for `LocalNetwork`
 impl Parameters for LocalNetwork {
+    fn network_type(&self) -> NetworkType {
+        NetworkType::Regtest
+    }
+
     fn activation_height(&self, nu: NetworkUpgrade) -> Option<BlockHeight> {
         match nu {
             NetworkUpgrade::Overwinter => self.overwinter,
@@ -70,44 +67,12 @@ impl Parameters for LocalNetwork {
             NetworkUpgrade::ZFuture => self.z_future,
         }
     }
-
-    fn coin_type(&self) -> u32 {
-        constants::regtest::COIN_TYPE
-    }
-
-    fn address_network(&self) -> Option<zcash_address::Network> {
-        Some(zcash_address::Network::Regtest)
-    }
-
-    fn hrp_sapling_extended_spending_key(&self) -> &str {
-        constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY
-    }
-
-    fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
-        constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-    }
-
-    fn hrp_sapling_payment_address(&self) -> &str {
-        constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS
-    }
-
-    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        constants::regtest::B58_PUBKEY_ADDRESS_PREFIX
-    }
-
-    fn b58_script_address_prefix(&self) -> [u8; 2] {
-        constants::regtest::B58_SCRIPT_ADDRESS_PREFIX
-    }
-
-    fn is_nu_active(&self, nu: NetworkUpgrade, height: BlockHeight) -> bool {
-        self.activation_height(nu).map_or(false, |h| h <= height)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        consensus::{BlockHeight, NetworkUpgrade, Parameters},
+        consensus::{BlockHeight, NetworkConstants, NetworkUpgrade, Parameters},
         constants,
         local_consensus::LocalNetwork,
     };
@@ -148,24 +113,6 @@ mod tests {
         assert!(regtest.is_nu_active(NetworkUpgrade::Nu6, expected_nu6));
         #[cfg(feature = "zfuture")]
         assert!(!regtest.is_nu_active(NetworkUpgrade::ZFuture, expected_nu5));
-
-        assert_eq!(regtest.coin_type(), constants::regtest::COIN_TYPE);
-        assert_eq!(
-            regtest.hrp_sapling_extended_spending_key(),
-            constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY
-        );
-        assert_eq!(
-            regtest.hrp_sapling_extended_full_viewing_key(),
-            constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-        );
-        assert_eq!(
-            regtest.hrp_sapling_payment_address(),
-            constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS
-        );
-        assert_eq!(
-            regtest.b58_pubkey_address_prefix(),
-            constants::regtest::B58_PUBKEY_ADDRESS_PREFIX
-        );
     }
 
     #[test]
@@ -251,25 +198,30 @@ mod tests {
             z_future: Some(expected_z_future),
         };
 
-        assert_eq!(regtest.coin_type(), constants::regtest::COIN_TYPE);
         assert_eq!(
-            regtest.hrp_sapling_extended_spending_key(),
+            regtest.network_type().coin_type(),
+            constants::regtest::COIN_TYPE
+        );
+        assert_eq!(
+            regtest.network_type().hrp_sapling_extended_spending_key(),
             constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY
         );
         assert_eq!(
-            regtest.hrp_sapling_extended_full_viewing_key(),
+            regtest
+                .network_type()
+                .hrp_sapling_extended_full_viewing_key(),
             constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
         );
         assert_eq!(
-            regtest.hrp_sapling_payment_address(),
+            regtest.network_type().hrp_sapling_payment_address(),
             constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS
         );
         assert_eq!(
-            regtest.b58_pubkey_address_prefix(),
+            regtest.network_type().b58_pubkey_address_prefix(),
             constants::regtest::B58_PUBKEY_ADDRESS_PREFIX
         );
         assert_eq!(
-            regtest.b58_script_address_prefix(),
+            regtest.network_type().b58_script_address_prefix(),
             constants::regtest::B58_SCRIPT_ADDRESS_PREFIX
         );
     }

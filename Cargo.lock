@@ -3002,6 +3002,7 @@ dependencies = [
  "f4jumble",
  "proptest",
  "zcash_encoding",
+ "zcash_protocol",
 ]
 
 [[package]]
@@ -3239,7 +3240,6 @@ dependencies = [
  "incrementalmerkletree",
  "memuse",
  "proptest",
- "zcash_address",
 ]
 
 [[package]]

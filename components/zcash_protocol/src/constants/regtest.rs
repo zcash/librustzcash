@@ -33,6 +33,14 @@ pub const HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY: &str = "zxviewregtestsapling";
 /// [the `zcashd` codebase]: <https://github.com/zcash/zcash/blob/128d863fb8be39ee294fda397c1ce3ba3b889cb2/src/chainparams.cpp#L493>
 pub const HRP_SAPLING_PAYMENT_ADDRESS: &str = "zregtestsapling";
 
+/// The prefix for a Base58Check-encoded regtest Sprout address
+///
+/// Defined in the [Zcash Protocol Specification section 5.6.3][sproutpaymentaddrencoding].
+/// Same as the testnet prefix.
+///
+/// [sproutpaymentaddrencoding]: https://zips.z.cash/protocol/protocol.pdf#sproutpaymentaddrencoding
+pub const B58_SPROUT_ADDRESS_PREFIX: [u8; 2] = [0x16, 0xb6];
+
 /// The prefix for a Base58Check-encoded regtest transparent [`PublicKeyHash`].
 /// Same as the testnet prefix.
 ///
