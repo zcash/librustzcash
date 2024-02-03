@@ -19,6 +19,11 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
 - `zcash_protocol::value::MAX_BALANCE` has been added to replace previous
   instances where `zcash_protocol::value::MAX_MONEY` was used as a signed
   value.
+- `zcash_protocol::consensus::NetworkConstants` has been extracted from
+  the `Parameters` trait in the same module.
+- `zcash_protocol::consensus::NetworkType`
+- `zcash_protocol::consensus::Parameters::b58_sprout_address_prefix`
+- `zcash_protocol::constants::{mainnet, testnet}::B58_SPROUT_ADDRESS_PREFIX`
 
 ### Moved
 - `zcash_primitives::transcation::components::amount` has been moved to
@@ -35,3 +40,7 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
   been renamed to `zcash_protocol::value::Zatoshis`
 - `zcash_primitives::transcation::components::amount::Amount` has been renamed 
   to `zcash_protocol::value::ZatBalance`
+- `zcash_protocol::consensus::Parameters` has been split into two traits, with
+  the `NetworkConstants` trait providing all network constant accessors. Also,
+  the `address_network` method has been replaced with a new `network_type`
+  method that serves the same purpose.

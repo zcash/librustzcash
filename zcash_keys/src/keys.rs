@@ -1,7 +1,7 @@
 //! Helper functions for managing light client key material.
 use zcash_address::unified::{self, Container, Encoding, Typecode};
 use zcash_primitives::{
-    consensus,
+    consensus::{self, NetworkConstants},
     zip32::{AccountId, DiversifierIndex},
 };
 
@@ -181,9 +181,12 @@ impl UnifiedSpendingKey {
         }
 
         #[cfg(feature = "orchard")]
-        let orchard =
-            orchard::keys::SpendingKey::from_zip32_seed(seed, params.coin_type(), account)
-                .map_err(DerivationError::Orchard)?;
+        let orchard = orchard::keys::SpendingKey::from_zip32_seed(
+            seed,
+            params.network_type().coin_type(),
+            account,
+        )
+        .map_err(DerivationError::Orchard)?;
 
         #[cfg(feature = "transparent-inputs")]
         let transparent = legacy::AccountPrivKey::from_seed(params, seed, account)
@@ -192,7 +195,7 @@ impl UnifiedSpendingKey {
         Ok(UnifiedSpendingKey {
             #[cfg(feature = "transparent-inputs")]
             transparent,
-            sapling: sapling::spending_key(seed, params.coin_type(), account),
+            sapling: sapling::spending_key(seed, params.network_type().coin_type(), account),
             #[cfg(feature = "orchard")]
             orchard,
         })
@@ -497,7 +500,7 @@ impl UnifiedFullViewingKey {
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
         let (net, ufvk) = unified::Ufvk::decode(encoding).map_err(|e| e.to_string())?;
-        let expected_net = params.address_network().expect("Unrecognized network");
+        let expected_net = params.network_type();
         if net != expected_net {
             return Err(format!(
                 "UFVK is for network {:?} but we expected {:?}",
@@ -598,7 +601,7 @@ impl UnifiedFullViewingKey {
 
         let ufvk = unified::Ufvk::try_from_items(items.collect())
             .expect("UnifiedFullViewingKey should only be constructed safely");
-        ufvk.encode(&params.address_network().expect("Unrecognized network"))
+        ufvk.encode(&params.network_type())
     }
 
     /// Returns the transparent component of the unified key at the

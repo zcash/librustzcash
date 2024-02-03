@@ -6,6 +6,7 @@ use hdwallet::{
 };
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
+use zcash_protocol::consensus::NetworkConstants;
 use zcash_spec::PrfExpand;
 
 use crate::{consensus, zip32::AccountId};
@@ -33,7 +34,9 @@ impl AccountPrivKey {
     ) -> Result<AccountPrivKey, hdwallet::error::Error> {
         ExtendedPrivKey::with_seed(seed)?
             .derive_private_key(KeyIndex::hardened_from_normalize_index(44)?)?
-            .derive_private_key(KeyIndex::hardened_from_normalize_index(params.coin_type())?)?
+            .derive_private_key(KeyIndex::hardened_from_normalize_index(
+                params.network_type().coin_type(),
+            )?)?
             .derive_private_key(KeyIndex::hardened_from_normalize_index(account.into())?)
             .map(AccountPrivKey)
     }

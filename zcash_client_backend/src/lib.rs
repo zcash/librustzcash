@@ -77,7 +77,7 @@ pub mod zip321;
 pub mod serialization;
 
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
-pub use zcash_protocol::{ShieldedProtocol, PoolType};
+pub use zcash_protocol::{PoolType, ShieldedProtocol};
 
 #[cfg(test)]
 #[macro_use]
