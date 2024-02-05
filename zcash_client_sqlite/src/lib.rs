@@ -42,6 +42,7 @@ use std::{
     borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
     path::Path,
 };
+use zcash_keys::keys::AddressGenerationError;
 
 use incrementalmerkletree::Position;
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -443,6 +444,63 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 None => Ok(None),
             },
         )
+    }
+
+    fn insert_address_with_diversifier_index(
+        &mut self,
+        account: AccountId,
+        diversifier_index: DiversifierIndex,
+    ) -> Result<UnifiedAddress, SqliteClientError> {
+        self.transactionally(|wdb| {
+            let keys = wdb.get_unified_full_viewing_keys()?;
+            let ufvk = keys
+                .get(&account)
+                .ok_or(SqliteClientError::AccountUnknown(account))?;
+
+            let has_orchard = true;
+            let mut has_sapling = true;
+            let mut has_transparent = true;
+
+            // Get the most comprehensive UA available for the given diversifier index.
+            // We may have to drop the sapling and/or the transparent receiver if the diversifier index is invalid or out of range.
+            let addr = loop {
+                if let Some(addr) = match ufvk.address(
+                    diversifier_index,
+                    UnifiedAddressRequest::unsafe_new(has_orchard, has_sapling, has_transparent),
+                ) {
+                    Ok(addr) => Some(addr),
+                    Err(AddressGenerationError::InvalidSaplingDiversifierIndex(_)) => {
+                        has_sapling = false;
+                        None
+                    }
+                    Err(AddressGenerationError::InvalidTransparentChildIndex(_)) => {
+                        has_transparent = false;
+                        None
+                    }
+                    Err(_) => return Err(SqliteClientError::DiversifierIndexOutOfRange),
+                } {
+                    break addr;
+                }
+            };
+
+            return match wallet::insert_address(
+                wdb.conn.0,
+                &wdb.params,
+                account,
+                diversifier_index,
+                &addr,
+            ) {
+                Ok(_) => Ok(addr),
+                Err(rusqlite::Error::SqliteFailure(
+                    libsqlite3_sys::Error {
+                        code: libsqlite3_sys::ErrorCode::ConstraintViolation,
+                        ..
+                    },
+                    _,
+                )) => Ok(addr), // conflicts are ignorable
+                Err(e) => Err(e.into()),
+            };
+        })
     }
 
     #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height()))))]

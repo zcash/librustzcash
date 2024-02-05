@@ -22,6 +22,7 @@ use zcash_primitives::{
     },
     zip32::{AccountId, Scope},
 };
+use zip32::DiversifierIndex;
 
 use crate::{
     address::{AddressMetadata, UnifiedAddress},
@@ -1019,6 +1020,27 @@ pub trait WalletWrite: WalletRead {
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
+    /// Generates and persists a new address for the specified account, with the specified
+    /// diversifier index.
+    ///
+    /// Returns the new address, or an error if the account identifier does not correspond to a
+    /// known account.
+    /// A conflict with an existing row in the database is considered acceptable and no error is returned.
+    /// If the diversifier index cannot produce a valid Sapling address, no sapling receiver will
+    /// be included in the returned address.
+    /// If the diversifier is outside the range for transparent addresses, no transparent receiver
+    /// will be included in the returned address.
+    ///
+    /// This supports a more advanced use case than `get_next_available_address` where the caller
+    /// simply gets the next diversified address sequentially. Mixing use of the two functions
+    /// is not recommended because `get_next_available_address` will return the next address
+    /// after the highest diversifier index in the database, which may leave gaps in the sequence.
+    fn insert_address_with_diversifier_index(
+        &mut self,
+        account: AccountId,
+        diversifier_index: DiversifierIndex,
+    ) -> Result<UnifiedAddress, Self::Error>;
+
     /// Updates the state of the wallet database by persisting the provided block information,
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
@@ -1105,6 +1127,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
+    use zip32::DiversifierIndex;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1321,6 +1344,14 @@ pub mod testing {
             _request: UnifiedAddressRequest,
         ) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
+        }
+
+        fn insert_address_with_diversifier_index(
+            &mut self,
+            _account: AccountId,
+            _diversifier_index: DiversifierIndex,
+        ) -> Result<UnifiedAddress, Self::Error> {
+            todo!()
         }
 
         #[allow(clippy::type_complexity)]

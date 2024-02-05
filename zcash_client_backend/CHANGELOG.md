@@ -21,6 +21,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::fees::ChangeValue::orchard`
 - `zcash_client_backend::wallet`:
   - `Note::Orchard`
+- `WalletWrite::insert_address_with_diversifier_index`
 
 ### Changed
 - `zcash_client_backend::data_api`:
