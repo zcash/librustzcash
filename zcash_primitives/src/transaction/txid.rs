@@ -372,6 +372,7 @@ pub(crate) fn to_hash(
     sapling_digest: Option<Blake2bHash>,
     orchard_digest: Option<Blake2bHash>,
     #[cfg(feature = "zfuture")] tze_digests: Option<&TzeDigests<Blake2bHash>>,
+    #[cfg(feature = "unstable-txv6")] zsf_deposit: Option<Amount>,
 ) -> Blake2bHash {
     let mut personal = [0; 16];
     personal[..12].copy_from_slice(ZCASH_TX_PERSONALIZATION_PREFIX);
@@ -395,6 +396,11 @@ pub(crate) fn to_hash(
     )
     .unwrap();
 
+    #[cfg(feature = "unstable-txv6")]
+    if let Some(zsf_deposit) = zsf_deposit {
+        h.write_i64::<LittleEndian>(zsf_deposit.into()).unwrap();
+    }
+
     #[cfg(feature = "zfuture")]
     if _txversion.has_tze() {
         h.write_all(hash_tze_txid_data(tze_digests).as_bytes())
@@ -408,6 +414,7 @@ pub fn to_txid(
     txversion: TxVersion,
     consensus_branch_id: BranchId,
     digests: &TxDigests<Blake2bHash>,
+    zsf_deposit: Option<Amount>,
 ) -> TxId {
     let txid_digest = to_hash(
         txversion,
@@ -418,6 +425,7 @@ pub fn to_txid(
         digests.orchard_digest,
         #[cfg(feature = "zfuture")]
         digests.tze_digests.as_ref(),
+        zsf_deposit,
     );
 
     TxId(<[u8; 32]>::try_from(txid_digest.as_bytes()).unwrap())

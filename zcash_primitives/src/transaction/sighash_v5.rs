@@ -203,5 +203,6 @@ pub fn v5_signature_hash<
             .zip(txid_parts.tze_digests.as_ref())
             .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))
             .as_ref(),
+        tx.zsf_deposit,
     )
 }

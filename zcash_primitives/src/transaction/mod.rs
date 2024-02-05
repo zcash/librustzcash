@@ -49,6 +49,11 @@ const SAPLING_TX_VERSION: u32 = 4;
 const V5_TX_VERSION: u32 = 5;
 const V5_VERSION_GROUP_ID: u32 = 0x26A7270A;
 
+#[cfg(feature = "unstable-txv6")]
+const V6_TX_VERSION: u32 = 6;
+#[cfg(feature = "unstable-txv6")]
+const V6_VERSION_GROUP_ID: u32 = 0x51E0E2B6;
+
 /// These versions are used exclusively for in-development transaction
 /// serialization, and will never be active under the consensus rules.
 /// When new consensus transaction versions are added, all call sites
@@ -131,6 +136,8 @@ pub enum TxVersion {
     Overwinter,
     Sapling,
     Zip225,
+    #[cfg(feature = "unstable-txv6")]
+    TxV6,
     #[cfg(feature = "zfuture")]
     ZFuture,
 }
@@ -146,6 +153,8 @@ impl TxVersion {
                 (OVERWINTER_TX_VERSION, OVERWINTER_VERSION_GROUP_ID) => Ok(TxVersion::Overwinter),
                 (SAPLING_TX_VERSION, SAPLING_VERSION_GROUP_ID) => Ok(TxVersion::Sapling),
                 (V5_TX_VERSION, V5_VERSION_GROUP_ID) => Ok(TxVersion::Zip225),
+                #[cfg(feature = "unstable-txv6")]
+                (V6_TX_VERSION, V6_VERSION_GROUP_ID) => Ok(TxVersion::TxV6),
                 #[cfg(feature = "zfuture")]
                 (ZFUTURE_TX_VERSION, ZFUTURE_VERSION_GROUP_ID) => Ok(TxVersion::ZFuture),
                 _ => Err(io::Error::new(
@@ -176,6 +185,8 @@ impl TxVersion {
                 TxVersion::Overwinter => OVERWINTER_TX_VERSION,
                 TxVersion::Sapling => SAPLING_TX_VERSION,
                 TxVersion::Zip225 => V5_TX_VERSION,
+                #[cfg(feature = "unstable-txv6")]
+                TxVersion::TxV6 => V6_TX_VERSION,
                 #[cfg(feature = "zfuture")]
                 TxVersion::ZFuture => ZFUTURE_TX_VERSION,
             }
@@ -187,6 +198,8 @@ impl TxVersion {
             TxVersion::Overwinter => OVERWINTER_VERSION_GROUP_ID,
             TxVersion::Sapling => SAPLING_VERSION_GROUP_ID,
             TxVersion::Zip225 => V5_VERSION_GROUP_ID,
+            #[cfg(feature = "unstable-txv6")]
+            TxVersion::TxV6 => V6_VERSION_GROUP_ID,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => ZFUTURE_VERSION_GROUP_ID,
         }
@@ -206,6 +219,8 @@ impl TxVersion {
             TxVersion::Sprout(v) => *v >= 2u32,
             TxVersion::Overwinter | TxVersion::Sapling => true,
             TxVersion::Zip225 => false,
+            #[cfg(feature = "unstable-txv6")]
+            TxVersion::TxV6 => false,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -221,6 +236,8 @@ impl TxVersion {
             TxVersion::Sprout(_) | TxVersion::Overwinter => false,
             TxVersion::Sapling => true,
             TxVersion::Zip225 => true,
+            #[cfg(feature = "unstable-txv6")]
+            TxVersion::TxV6 => true,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -231,6 +248,8 @@ impl TxVersion {
         match self {
             TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => false,
             TxVersion::Zip225 => true,
+            #[cfg(feature = "unstable-txv6")]
+            TxVersion::TxV6 => true,
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => true,
         }
@@ -251,7 +270,7 @@ impl TxVersion {
             }
             BranchId::Nu5 => TxVersion::Zip225,
             #[cfg(feature = "unstable-nu6")]
-            BranchId::Nu6 => TxVersion::Zip225,
+            BranchId::Nu6 => TxVersion::TxV6,
             #[cfg(feature = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
         }
@@ -330,6 +349,8 @@ pub struct TransactionData<A: Authorization> {
     sprout_bundle: Option<sprout::Bundle>,
     sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
+    #[cfg(feature = "unstable-txv6")]
+    zsf_deposit: Option<Amount>,
     #[cfg(feature = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
 }
@@ -346,6 +367,7 @@ impl<A: Authorization> TransactionData<A> {
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
+        #[cfg(feature = "unstable-txv6")] zsf_deposit: Option<Amount>,
     ) -> Self {
         TransactionData {
             version,
@@ -358,6 +380,8 @@ impl<A: Authorization> TransactionData<A> {
             orchard_bundle,
             #[cfg(feature = "zfuture")]
             tze_bundle: None,
+            #[cfg(feature = "unstable-txv6")]
+            zsf_deposit,
         }
     }
 
@@ -375,6 +399,7 @@ impl<A: Authorization> TransactionData<A> {
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
         tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+        #[cfg(feature = "unstable-txv6")] zsf_deposit: Option<Amount>,
     ) -> Self {
         TransactionData {
             version,
@@ -386,6 +411,8 @@ impl<A: Authorization> TransactionData<A> {
             sapling_bundle,
             orchard_bundle,
             tze_bundle,
+            #[cfg(feature = "unstable-txv6")]
+            zsf_deposit,
         }
     }
 
@@ -566,6 +593,8 @@ impl Transaction {
                 Self::from_data_v4(data)
             }
             TxVersion::Zip225 => Ok(Self::from_data_v5(data)),
+            #[cfg(feature = "unstable-txv6")]
+            TxVersion::TxV6 => Ok(Self::from_data_v6(data)),
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => Ok(Self::from_data_v5(data)),
         }
@@ -739,6 +768,8 @@ impl Transaction {
             orchard_bundle,
             #[cfg(feature = "zfuture")]
             tze_bundle,
+            #[cfg(feature = "unstable-txv6")]
+            zsf_deposit: None,
         };
 
         Ok(Self::from_data_v5(data))
@@ -786,6 +817,8 @@ impl Transaction {
                 self.write_v4(writer)
             }
             TxVersion::Zip225 => self.write_v5(writer),
+            #[cfg(feature = "unstable-txv6")]
+            TxVersion::TxV6 => self.write_v6(writer),
             #[cfg(feature = "zfuture")]
             TxVersion::ZFuture => self.write_v5(writer),
         }

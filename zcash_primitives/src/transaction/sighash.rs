@@ -92,6 +92,9 @@ pub fn signature_hash<
 
         TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
 
+        #[cfg(feature = "unstable-txv6")]
+        TxVersion::TxV6 => v5_signature_hash(tx, signable_input, txid_parts),
+
         #[cfg(feature = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
     })
