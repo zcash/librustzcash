@@ -756,6 +756,14 @@ pub mod testing {
     use super::{MemoBytes, Payment, TransactionRequest};
     pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
 
+    #[cfg(feature = "transparent-inputs")]
+    const TRANSPARENT_INPUTS_ENABLED: bool = true;
+    #[cfg(not(feature = "transparent-inputs"))]
+    const TRANSPARENT_INPUTS_ENABLED: bool = false;
+
+    pub(crate) const UA_REQUEST: UnifiedAddressRequest =
+        UnifiedAddressRequest::unsafe_new(false, true, TRANSPARENT_INPUTS_ENABLED);
+
     prop_compose! {
         pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> MemoBytes {
             MemoBytes::from_bytes(&bytes).unwrap()
@@ -764,7 +772,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_zip321_payment()(
-            recipient_address in arb_addr(UnifiedAddressRequest::unsafe_new(false, true, true)),
+            recipient_address in arb_addr(UA_REQUEST),
             amount in arb_nonnegative_amount(),
             memo in option::of(arb_valid_memo()),
             message in option::of(any::<String>()),
@@ -804,7 +812,7 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_addr_str()(
-            recipient_address in arb_addr(UnifiedAddressRequest::unsafe_new(false, true, true))
+            recipient_address in arb_addr(UA_REQUEST)
         ) -> String {
             recipient_address.encode(&TEST_NETWORK)
         }
@@ -814,17 +822,17 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-    use zcash_keys::{address::testing::arb_addr, keys::UnifiedAddressRequest};
+    use zcash_keys::address::testing::arb_addr;
     use zcash_primitives::{
         consensus::{Parameters, TEST_NETWORK},
         memo::Memo,
-        transaction::components::{amount::NonNegativeAmount, Amount},
+        transaction::components::amount::{Amount, NonNegativeAmount},
     };
 
     #[cfg(feature = "local-consensus")]
     use zcash_primitives::{local_consensus::LocalNetwork, BlockHeight};
 
-    use crate::address::Address;
+    use crate::{address::Address, encoding::decode_payment_address, zip321::testing::UA_REQUEST};
 
     use super::{
         memo_from_base64, memo_to_base64,
@@ -832,7 +840,6 @@ mod tests {
         render::amount_str,
         MemoBytes, Payment, TransactionRequest,
     };
-    use crate::encoding::decode_payment_address;
 
     #[cfg(all(test, feature = "test-dependencies"))]
     use proptest::prelude::{any, proptest};
@@ -1091,7 +1098,7 @@ mod tests {
     #[cfg(all(test, feature = "test-dependencies"))]
     proptest! {
         #[test]
-        fn prop_zip321_roundtrip_address(addr in arb_addr(UnifiedAddressRequest::unsafe_new(false, true, true))) {
+        fn prop_zip321_roundtrip_address(addr in arb_addr(UA_REQUEST)) {
             let a = addr.encode(&TEST_NETWORK);
             assert_eq!(Address::decode(&TEST_NETWORK, &a), Some(addr));
         }
