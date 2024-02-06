@@ -348,7 +348,7 @@ pub fn decode_payment_address(
 ///     encode_transparent_address(
 ///         &TEST_NETWORK.b58_pubkey_address_prefix(),
 ///         &TEST_NETWORK.b58_script_address_prefix(),
-///         &TransparentAddress::PublicKey([0; 20]),
+///         &TransparentAddress::PublicKeyHash([0; 20]),
 ///     ),
 ///     "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
 /// );
@@ -357,7 +357,7 @@ pub fn decode_payment_address(
 ///     encode_transparent_address(
 ///         &TEST_NETWORK.b58_pubkey_address_prefix(),
 ///         &TEST_NETWORK.b58_script_address_prefix(),
-///         &TransparentAddress::Script([0; 20]),
+///         &TransparentAddress::ScriptHash([0; 20]),
 ///     ),
 ///     "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
 /// );
@@ -369,13 +369,13 @@ pub fn encode_transparent_address(
     addr: &TransparentAddress,
 ) -> String {
     let decoded = match addr {
-        TransparentAddress::PublicKey(key_id) => {
+        TransparentAddress::PublicKeyHash(key_id) => {
             let mut decoded = vec![0; pubkey_version.len() + 20];
             decoded[..pubkey_version.len()].copy_from_slice(pubkey_version);
             decoded[pubkey_version.len()..].copy_from_slice(key_id);
             decoded
         }
-        TransparentAddress::Script(script_id) => {
+        TransparentAddress::ScriptHash(script_id) => {
             let mut decoded = vec![0; script_version.len() + 20];
             decoded[..script_version.len()].copy_from_slice(script_version);
             decoded[script_version.len()..].copy_from_slice(script_id);
@@ -418,7 +418,7 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
 ///     ),
-///     Ok(Some(TransparentAddress::PublicKey([0; 20]))),
+///     Ok(Some(TransparentAddress::PublicKeyHash([0; 20]))),
 /// );
 ///
 /// assert_eq!(
@@ -427,7 +427,7 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
 ///     ),
-///     Ok(Some(TransparentAddress::Script([0; 20]))),
+///     Ok(Some(TransparentAddress::ScriptHash([0; 20]))),
 /// );
 /// ```
 /// [`TransparentAddress`]: zcash_primitives::legacy::TransparentAddress
@@ -441,12 +441,12 @@ pub fn decode_transparent_address(
             decoded[pubkey_version.len()..]
                 .try_into()
                 .ok()
-                .map(TransparentAddress::PublicKey)
+                .map(TransparentAddress::PublicKeyHash)
         } else if decoded.starts_with(script_version) {
             decoded[script_version.len()..]
                 .try_into()
                 .ok()
-                .map(TransparentAddress::Script)
+                .map(TransparentAddress::ScriptHash)
         } else {
             None
         }

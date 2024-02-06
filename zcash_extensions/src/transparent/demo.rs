@@ -890,7 +890,7 @@ mod tests {
 
         builder_c
             .add_transparent_output(
-                &TransparentAddress::PublicKey([0; 20]),
+                &TransparentAddress::PublicKeyHash([0; 20]),
                 (value_xfr - fee_rule.fixed_fee()).unwrap(),
             )
             .unwrap();

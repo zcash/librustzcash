@@ -82,11 +82,11 @@ impl TryFrom<unified::Address> for UnifiedAddress {
                     })
                     .transpose(),
                 unified::Receiver::P2pkh(data) => {
-                    transparent = Some(TransparentAddress::PublicKey(*data));
+                    transparent = Some(TransparentAddress::PublicKeyHash(*data));
                     None
                 }
                 unified::Receiver::P2sh(data) => {
-                    transparent = Some(TransparentAddress::Script(*data));
+                    transparent = Some(TransparentAddress::ScriptHash(*data));
                     None
                 }
                 unified::Receiver::Unknown { typecode, data } => {
@@ -173,8 +173,8 @@ impl UnifiedAddress {
                     data: data.clone(),
                 })
                 .chain(self.transparent.as_ref().map(|taddr| match taddr {
-                    TransparentAddress::PublicKey(data) => unified::Receiver::P2pkh(*data),
-                    TransparentAddress::Script(data) => unified::Receiver::P2sh(*data),
+                    TransparentAddress::PublicKeyHash(data) => unified::Receiver::P2pkh(*data),
+                    TransparentAddress::ScriptHash(data) => unified::Receiver::P2sh(*data),
                 }))
                 .chain(
                     self.sapling
@@ -241,11 +241,11 @@ impl TryFromRawAddress for Address {
     fn try_from_raw_transparent_p2pkh(
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
-        Ok(TransparentAddress::PublicKey(data).into())
+        Ok(TransparentAddress::PublicKeyHash(data).into())
     }
 
     fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
-        Ok(TransparentAddress::Script(data).into())
+        Ok(TransparentAddress::ScriptHash(data).into())
     }
 }
 
@@ -262,10 +262,12 @@ impl Address {
         match self {
             Address::Sapling(pa) => ZcashAddress::from_sapling(net, pa.to_bytes()),
             Address::Transparent(addr) => match addr {
-                TransparentAddress::PublicKey(data) => {
+                TransparentAddress::PublicKeyHash(data) => {
                     ZcashAddress::from_transparent_p2pkh(net, *data)
                 }
-                TransparentAddress::Script(data) => ZcashAddress::from_transparent_p2sh(net, *data),
+                TransparentAddress::ScriptHash(data) => {
+                    ZcashAddress::from_transparent_p2sh(net, *data)
+                }
             },
             Address::Unified(ua) => ua.to_address(net),
         }
