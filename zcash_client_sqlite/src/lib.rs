@@ -67,7 +67,9 @@ use zcash_client_backend::{
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+    },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
@@ -418,17 +420,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     let search_from =
                         match wallet::get_current_address(wdb.conn.0, &wdb.params, account)? {
                             Some((_, mut last_diversifier_index)) => {
-                                last_diversifier_index
-                                    .increment()
-                                    .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
+                                last_diversifier_index.increment().map_err(|_| {
+                                    AddressGenerationError::DiversifierSpaceExhausted
+                                })?;
                                 last_diversifier_index
                             }
                             None => DiversifierIndex::default(),
                         };
 
-                    let (addr, diversifier_index) = ufvk
-                        .find_address(search_from, request)
-                        .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
+                    let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
 
                     wallet::insert_address(
                         wdb.conn.0,
@@ -1175,6 +1175,7 @@ mod tests {
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
             ufvk.default_address(DEFAULT_UA_REQUEST)
+                .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()
                 .unwrap()
