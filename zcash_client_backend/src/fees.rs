@@ -205,7 +205,7 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
             ChangeError::BundleError(err) => {
                 write!(
                     f,
-                    "The proposed transaction structure violates bundle type constrints: {}",
+                    "The proposed transaction structure violates bundle type constraints: {}",
                     err
                 )
             }
