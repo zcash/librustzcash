@@ -1015,8 +1015,12 @@ mod tests {
             )?;
 
             let ufvk_str = ufvk.encode(&wdb.params);
-            let address_str =
-                Address::Unified(ufvk.default_address(DEFAULT_UA_REQUEST).0).encode(&wdb.params);
+            let address_str = Address::Unified(
+                ufvk.default_address(DEFAULT_UA_REQUEST)
+                    .expect("A valid default address exists for the UFVK")
+                    .0,
+            )
+            .encode(&wdb.params);
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1033,6 +1037,7 @@ mod tests {
                 let taddr = Address::Transparent(
                     *ufvk
                         .default_address(DEFAULT_UA_REQUEST)
+                        .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
                         .unwrap(),

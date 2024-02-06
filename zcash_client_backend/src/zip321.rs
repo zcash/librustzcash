@@ -306,8 +306,8 @@ impl TransactionRequest {
     /// Parse the provided URI to a payment request value.
     pub fn from_uri<P: consensus::Parameters>(params: &P, uri: &str) -> Result<Self, Zip321Error> {
         // Parse the leading zcash:<address>
-        let (rest, primary_addr_param) =
-            parse::lead_addr(params)(uri).map_err(|e| Zip321Error::ParseError(e.to_string()))?;
+        let (rest, primary_addr_param) = parse::lead_addr(params)(uri)
+            .map_err(|e| Zip321Error::ParseError(format!("Error parsing lead address: {}", e)))?;
 
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = if rest.is_empty() {
@@ -317,7 +317,9 @@ impl TransactionRequest {
                 char('?'),
                 separated_list0(char('&'), parse::zcashparam(params)),
             ))(rest)
-            .map_err(|e| Zip321Error::ParseError(e.to_string()))?
+            .map_err(|e| {
+                Zip321Error::ParseError(format!("Error parsing query parameters: {}", e))
+            })?
         };
 
         // Construct sets of payment parameters, keyed by the payment index.

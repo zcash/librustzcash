@@ -1,4 +1,6 @@
 //! Helper functions for managing light client key material.
+use std::{error, fmt};
+
 use zcash_address::unified::{self, Container, Encoding, Typecode};
 use zcash_protocol::consensus::{self, NetworkConstants};
 use zip32::{AccountId, DiversifierIndex};
@@ -402,7 +404,9 @@ impl UnifiedSpendingKey {
         &self,
         request: UnifiedAddressRequest,
     ) -> (UnifiedAddress, DiversifierIndex) {
-        self.to_unified_full_viewing_key().default_address(request)
+        self.to_unified_full_viewing_key()
+            .default_address(request)
+            .unwrap()
     }
 
     #[cfg(all(
@@ -428,6 +432,8 @@ pub enum AddressGenerationError {
     /// The diversifier index could not be mapped to a valid Sapling diversifier.
     #[cfg(feature = "sapling")]
     InvalidSaplingDiversifierIndex(DiversifierIndex),
+    /// The space of available diversifier indices has been exhausted.
+    DiversifierSpaceExhausted,
     /// A requested address typecode was not recognized, so we are unable to generate the address
     /// as requested.
     ReceiverTypeNotSupported(Typecode),
@@ -438,6 +444,52 @@ pub enum AddressGenerationError {
     /// included.
     ShieldedReceiverRequired,
 }
+
+impl fmt::Display for AddressGenerationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            AddressGenerationError::InvalidTransparentChildIndex(i) => {
+                write!(
+                    f,
+                    "Child index {:?} does not generate a valid transparent receiver",
+                    i
+                )
+            }
+            AddressGenerationError::InvalidSaplingDiversifierIndex(i) => {
+                write!(
+                    f,
+                    "Child index {:?} does not generate a valid Sapling receiver",
+                    i
+                )
+            }
+            AddressGenerationError::DiversifierSpaceExhausted => {
+                write!(
+                    f,
+                    "Exhausted the space of diversifier indices without finding an address."
+                )
+            }
+            AddressGenerationError::ReceiverTypeNotSupported(t) => {
+                write!(
+                    f,
+                    "Unified Address generation does not yet support receivers of type {:?}.",
+                    t
+                )
+            }
+            AddressGenerationError::KeyNotAvailable(t) => {
+                write!(
+                    f,
+                    "The Unified Viewing Key does not contain a key for typecode {:?}.",
+                    t
+                )
+            }
+            AddressGenerationError::ShieldedReceiverRequired => {
+                write!(f, "A Unified Address requires at least one shielded (Sapling or Orchard) receiver.")
+            }
+        }
+    }
+}
+
+impl error::Error for AddressGenerationError {}
 
 /// Specification for how a unified address should be generated from a unified viewing key.
 #[derive(Clone, Copy, Debug)]
@@ -780,13 +832,16 @@ impl UnifiedFullViewingKey {
         &self,
         mut j: DiversifierIndex,
         request: UnifiedAddressRequest,
-    ) -> Option<(UnifiedAddress, DiversifierIndex)> {
+    ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         // If we need to generate a transparent receiver, check that the user has not
         // specified an invalid transparent child index, from which we can never search to
         // find a valid index.
         #[cfg(feature = "transparent-inputs")]
-        if self.transparent.is_some() && to_transparent_child_index(j).is_none() {
-            return None;
+        if request.has_p2pkh
+            && self.transparent.is_some()
+            && to_transparent_child_index(j).is_none()
+        {
+            return Err(AddressGenerationError::InvalidTransparentChildIndex(j));
         }
 
         // Find a working diversifier and construct the associated address.
@@ -794,16 +849,16 @@ impl UnifiedFullViewingKey {
             let res = self.address(j, request);
             match res {
                 Ok(ua) => {
-                    break Some((ua, j));
+                    return Ok((ua, j));
                 }
                 #[cfg(feature = "sapling")]
                 Err(AddressGenerationError::InvalidSaplingDiversifierIndex(_)) => {
                     if j.increment().is_err() {
-                        break None;
+                        return Err(AddressGenerationError::DiversifierSpaceExhausted);
                     }
                 }
-                Err(_) => {
-                    break None;
+                Err(other) => {
+                    return Err(other);
                 }
             }
         }
@@ -814,9 +869,8 @@ impl UnifiedFullViewingKey {
     pub fn default_address(
         &self,
         request: UnifiedAddressRequest,
-    ) -> (UnifiedAddress, DiversifierIndex) {
+    ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         self.find_address(DiversifierIndex::new(), request)
-            .expect("UFVK should have at least one valid diversifier")
     }
 }
 

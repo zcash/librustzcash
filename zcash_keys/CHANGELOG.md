@@ -8,6 +8,15 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_keys::address::Address::has_receiver`
+- `impl Display for zcash_keys::keys::AddressGenerationError`
+- `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
+
+### Changed
+- `zcash_keys::keys::AddressGenerationError` has a new variant
+  `DiversifierSpaceExhausted`
+- `zcash_keys::keys::UnifiedFullViewingKey::{find_address, default_address}` 
+  now return `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`
+  instead of `Option<(UnifiedAddress, DiversifierIndex)>`
 
 ## [0.1.1] - 2024-03-04
 
