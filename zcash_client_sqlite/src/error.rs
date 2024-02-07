@@ -4,10 +4,9 @@ use std::error;
 use std::fmt;
 
 use shardtree::error::ShardTreeError;
-use zcash_client_backend::{
-    encoding::{Bech32DecodeError, TransparentCodecError},
-    PoolType,
-};
+use zcash_address::ParseError;
+use zcash_client_backend::keys::AddressGenerationError;
+use zcash_client_backend::PoolType;
 use zcash_primitives::{
     consensus::BlockHeight, transaction::components::amount::BalanceError, zip32::AccountId,
 };
@@ -16,7 +15,10 @@ use crate::wallet::commitment_tree;
 use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::TransparentAddress;
+use {
+    zcash_client_backend::encoding::TransparentCodecError,
+    zcash_primitives::legacy::TransparentAddress,
+};
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
@@ -37,8 +39,8 @@ pub enum SqliteClientError {
     /// Illegal attempt to reinitialize an already-initialized wallet database.
     TableNotEmpty,
 
-    /// A Bech32-encoded key or address decoding error
-    Bech32DecodeError(Bech32DecodeError),
+    /// A Zcash key or address decoding error
+    DecodingError(ParseError),
 
     /// An error produced in legacy transparent address derivation
     #[cfg(feature = "transparent-inputs")]
@@ -46,6 +48,7 @@ pub enum SqliteClientError {
 
     /// An error encountered in decoding a transparent address from its
     /// serialized form.
+    #[cfg(feature = "transparent-inputs")]
     TransparentAddress(TransparentCodecError),
 
     /// Wrapper for rusqlite errors.
@@ -68,8 +71,8 @@ pub enum SqliteClientError {
     /// this error is (safe rewind height, requested height).
     RequestedRewindInvalid(BlockHeight, BlockHeight),
 
-    /// The space of allocatable diversifier indices has been exhausted for the given account.
-    DiversifierIndexOutOfRange,
+    /// An error occurred in generating a Zcash address.
+    AddressGeneration(AddressGenerationError),
 
     /// The account for which information was requested does not belong to the wallet.
     AccountUnknown(AccountId),
@@ -115,10 +118,10 @@ impl error::Error for SqliteClientError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             SqliteClientError::InvalidMemo(e) => Some(e),
-            SqliteClientError::Bech32DecodeError(Bech32DecodeError::Bech32Error(e)) => Some(e),
             SqliteClientError::DbError(e) => Some(e),
             SqliteClientError::Io(e) => Some(e),
             SqliteClientError::BalanceError(e) => Some(e),
+            SqliteClientError::AddressGeneration(e) => Some(e),
             _ => None,
         }
     }
@@ -136,9 +139,10 @@ impl fmt::Display for SqliteClientError {
                 write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::RequestedRewindInvalid(h, r) =>
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
-            SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),
+            SqliteClientError::DecodingError(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),
+            #[cfg(feature = "transparent-inputs")]
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
             SqliteClientError::DbError(e) => write!(f, "{}", e),
@@ -146,7 +150,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
-            SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
+            SqliteClientError::AddressGeneration(e) => write!(f, "{}", e),
             SqliteClientError::AccountUnknown(acct_id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*acct_id)),
 
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
@@ -174,10 +178,9 @@ impl From<std::io::Error> for SqliteClientError {
         SqliteClientError::Io(e)
     }
 }
-
-impl From<Bech32DecodeError> for SqliteClientError {
-    fn from(e: Bech32DecodeError) -> Self {
-        SqliteClientError::Bech32DecodeError(e)
+impl From<ParseError> for SqliteClientError {
+    fn from(e: ParseError) -> Self {
+        SqliteClientError::DecodingError(e)
     }
 }
 
@@ -194,6 +197,7 @@ impl From<hdwallet::error::Error> for SqliteClientError {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
 impl From<TransparentCodecError> for SqliteClientError {
     fn from(e: TransparentCodecError) -> Self {
         SqliteClientError::TransparentAddress(e)
@@ -215,5 +219,11 @@ impl From<ShardTreeError<commitment_tree::Error>> for SqliteClientError {
 impl From<BalanceError> for SqliteClientError {
     fn from(e: BalanceError) -> Self {
         SqliteClientError::BalanceError(e)
+    }
+}
+
+impl From<AddressGenerationError> for SqliteClientError {
+    fn from(e: AddressGenerationError) -> Self {
+        SqliteClientError::AddressGeneration(e)
     }
 }

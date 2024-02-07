@@ -51,7 +51,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     transaction::{
-        components::amount::NonNegativeAmount,
+        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
@@ -761,11 +761,8 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(
-        consensus::sapling_zip212_enforcement(params, height),
-        &mut rng,
-    );
-    let note = Note::from_parts(to, NoteValue::from(value), rseed);
+    let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
+    let note = Note::from_parts(to, NoteValue::from_raw(value.into_u64()), rseed);
     let encryptor = sapling_note_encryption(
         Some(dfvk.fvk().ovk),
         note.clone(),
@@ -860,7 +857,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
-    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, height);
+    let zip212_enforcement = zip212_enforcement(params, height);
     let mut rng = OsRng;
     let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
 
@@ -874,7 +871,11 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
 
     // Create a fake Note for the payment
     ctx.outputs.push({
-        let note = Note::from_parts(to, NoteValue::from(value), rseed);
+        let note = Note::from_parts(
+            to,
+            sapling::value::NoteValue::from_raw(value.into_u64()),
+            rseed,
+        );
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -898,7 +899,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
         let note = Note::from_parts(
             change_addr,
-            NoteValue::from((in_value - value).unwrap()),
+            NoteValue::from_raw((in_value - value).unwrap().into_u64()),
             rseed,
         );
         let encryptor = sapling_note_encryption(
@@ -1068,7 +1069,7 @@ pub(crate) fn check_proposal_serialization_roundtrip(
     db_data: &WalletDb<rusqlite::Connection, Network>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
-    let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);
-    let deserialized_proposal = proposal_proto.try_into_standard_proposal(&db_data.params, db_data);
+    let proposal_proto = proposal::Proposal::from_standard_proposal(proposal);
+    let deserialized_proposal = proposal_proto.try_into_standard_proposal(db_data);
     assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }

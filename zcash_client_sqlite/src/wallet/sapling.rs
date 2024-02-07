@@ -9,10 +9,7 @@ use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{
-        components::{amount::NonNegativeAmount, Amount},
-        TxId,
-    },
+    transaction::{components::Amount, TxId},
     zip32::{AccountId, Scope},
 };
 
@@ -116,7 +113,7 @@ fn to_spendable_note<P: consensus::Parameters>(
         Diversifier(tmp)
     };
 
-    let note_value = NonNegativeAmount::from_nonnegative_i64(row.get(4)?).map_err(|_e| {
+    let note_value: u64 = row.get::<_, i64>(4)?.try_into().map_err(|_e| {
         SqliteClientError::CorruptedData("Note values must be nonnegative".to_string())
     })?;
 
@@ -165,7 +162,7 @@ fn to_spendable_note<P: consensus::Parameters>(
         output_index,
         Note::Sapling(sapling::Note::from_parts(
             recipient,
-            note_value.into(),
+            sapling::value::NoteValue::from_raw(note_value),
             rseed,
         )),
         spending_key_scope,
@@ -479,11 +476,11 @@ pub(crate) mod tests {
     };
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{sapling_zip212_enforcement, BranchId},
+        consensus::BranchId,
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
         transaction::{
-            components::{amount::NonNegativeAmount, Amount},
+            components::{amount::NonNegativeAmount, sapling::zip212_enforcement, Amount},
             fees::{
                 fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
             },
@@ -559,7 +556,7 @@ pub(crate) mod tests {
         let to_extsk = ExtendedSpendingKey::master(&[]);
         let to: Address = to_extsk.default_address().1.into();
         let request = zip321::TransactionRequest::new(vec![Payment {
-            recipient_address: to,
+            recipient_address: to.to_zcash_address(&st.network()),
             amount: NonNegativeAmount::const_from_u64(10000),
             memo: None, // this should result in the creation of an empty memo
             label: None,
@@ -1086,7 +1083,7 @@ pub(crate) mod tests {
                 let result = try_sapling_output_recovery(
                     &dfvk.to_ovk(Scope::External),
                     output,
-                    sapling_zip212_enforcement(&st.network(), h1),
+                    zip212_enforcement(&st.network(), h1),
                 );
 
                 if result.is_some() {
@@ -1276,7 +1273,7 @@ pub(crate) mod tests {
         let req = TransactionRequest::new(vec![
             // payment to an external recipient
             Payment {
-                recipient_address: Address::Sapling(addr2),
+                recipient_address: Address::Sapling(addr2).to_zcash_address(&st.network()),
                 amount: amount_sent,
                 memo: None,
                 label: None,
@@ -1285,7 +1282,7 @@ pub(crate) mod tests {
             },
             // payment back to the originating wallet, simulating legacy change
             Payment {
-                recipient_address: Address::Sapling(addr),
+                recipient_address: Address::Sapling(addr).to_zcash_address(&st.network()),
                 amount: amount_legacy_change,
                 memo: None,
                 label: None,
@@ -1399,7 +1396,8 @@ pub(crate) mod tests {
 
         // This first request will fail due to insufficient non-dust funds
         let req = TransactionRequest::new(vec![Payment {
-            recipient_address: Address::Sapling(dfvk.default_address().1),
+            recipient_address: Address::Sapling(dfvk.default_address().1)
+                .to_zcash_address(&st.network()),
             amount: NonNegativeAmount::const_from_u64(50000),
             memo: None,
             label: None,
@@ -1424,7 +1422,8 @@ pub(crate) mod tests {
         // This request will succeed, spending a single dust input to pay the 10000
         // ZAT fee in addition to the 41000 ZAT output to the recipient
         let req = TransactionRequest::new(vec![Payment {
-            recipient_address: Address::Sapling(dfvk.default_address().1),
+            recipient_address: Address::Sapling(dfvk.default_address().1)
+                .to_zcash_address(&st.network()),
             amount: NonNegativeAmount::const_from_u64(41000),
             memo: None,
             label: None,

@@ -22,7 +22,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 bech32 = "0.9"
 bs58 = { version = "0.5", features = ["check"] }
 f4jumble = { version = "0.1", path = "../f4jumble" }
-zcash_encoding = { version = "0.2", path = "../zcash_encoding" }
+zcash_protocol.workspace = true
+zcash_encoding.workspace = true
 
 [dev-dependencies]
 assert_matches = "1.3.0"

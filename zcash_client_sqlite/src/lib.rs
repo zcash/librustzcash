@@ -45,6 +45,7 @@ use std::{
 
 use incrementalmerkletree::Position;
 use shardtree::{error::ShardTreeError, ShardTree};
+use zcash_keys::address::Address;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -67,7 +68,9 @@ use zcash_client_backend::{
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+    },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
@@ -91,7 +94,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    SubtreeScanProgress,
+    Receiver, SubtreeScanProgress,
 };
 
 #[cfg(test)]
@@ -418,17 +421,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     let search_from =
                         match wallet::get_current_address(wdb.conn.0, &wdb.params, account)? {
                             Some((_, mut last_diversifier_index)) => {
-                                last_diversifier_index
-                                    .increment()
-                                    .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
+                                last_diversifier_index.increment().map_err(|_| {
+                                    AddressGenerationError::DiversifierSpaceExhausted
+                                })?;
                                 last_diversifier_index
                             }
                             None => DiversifierIndex::default(),
                         };
 
-                    let (addr, diversifier_index) = ufvk
-                        .find_address(search_from, request)
-                        .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
+                    let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
 
                     wallet::insert_address(
                         wdb.conn.0,
@@ -597,9 +598,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
                         let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.note.recipient())
+                            let receiver = Receiver::Sapling(output.note.recipient());
+                            let wallet_address = wallet::select_receiving_address(&wdb.params, wdb.conn.0,output.account, &receiver)?.unwrap_or_else(||
+                                Address::Sapling(output.note.recipient()).to_zcash_address(&wdb.params)
+                            );
+                            Recipient::External(wallet_address, PoolType::SAPLING)
                         } else {
-                            Recipient::InternalAccount(
+                            Recipient::Internal(
                                 output.account,
                                 PoolType::Shielded(ShieldedProtocol::Sapling)
                             )
@@ -607,7 +612,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::put_sent_output(
                             wdb.conn.0,
-                            &wdb.params,
                             output.account,
                             tx_ref,
                             output.index,
@@ -620,7 +624,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             Some(&output.memo),
                         )?;
 
-                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                        if matches!(recipient, Recipient::Internal(_, _)) {
                             wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                         }
                     }
@@ -660,13 +664,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 ) {
                     for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
+                            let recipient_zaddr = Address::Transparent(address).to_zcash_address(&wdb.params);
                             wallet::put_sent_output(
                                 wdb.conn.0,
-                                &wdb.params,
                                 *account_id,
                                 tx_ref,
                                 output_index,
-                                &Recipient::Transparent(address),
+                                &Recipient::External(recipient_zaddr, PoolType::TRANSPARENT),
                                 txout.value,
                                 None
                             )?;
@@ -712,13 +716,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             for output in &sent_tx.outputs {
-                wallet::insert_sent_output(
-                    wdb.conn.0,
-                    &wdb.params,
-                    tx_ref,
-                    sent_tx.account,
-                    output,
-                )?;
+                wallet::insert_sent_output(wdb.conn.0, tx_ref, sent_tx.account, output)?;
 
                 if let Some((account, note)) = output.sapling_change_to() {
                     wallet::sapling::put_received_note(
@@ -1175,6 +1173,7 @@ mod tests {
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
             ufvk.default_address(DEFAULT_UA_REQUEST)
+                .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()
                 .unwrap()
@@ -1187,6 +1186,8 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
+        use zcash_primitives::consensus::NetworkConstants;
+
         let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.
@@ -1195,7 +1196,11 @@ mod tests {
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let account = AccountId::ZERO;
-        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
+        let extsk = sapling::spending_key(
+            &seed,
+            st.wallet().params.network_type().coin_type(),
+            account,
+        );
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,

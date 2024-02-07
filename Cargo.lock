@@ -3002,6 +3002,7 @@ dependencies = [
  "f4jumble",
  "proptest",
  "zcash_encoding",
+ "zcash_protocol",
 ]
 
 [[package]]
@@ -3046,7 +3047,9 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
+ "zcash_protocol",
  "zip32",
+ "zip321",
 ]
 
 [[package]]
@@ -3144,6 +3147,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_primitives",
+ "zcash_protocol",
  "zip32",
 ]
 
@@ -3198,6 +3202,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",
+ "zcash_protocol",
  "zcash_spec",
  "zip32",
 ]
@@ -3224,6 +3229,16 @@ dependencies = [
  "wagyu-zcash-parameters",
  "xdg",
  "zcash_primitives",
+]
+
+[[package]]
+name = "zcash_protocol"
+version = "0.0.0"
+dependencies = [
+ "document-features",
+ "incrementalmerkletree",
+ "memuse",
+ "proptest",
 ]
 
 [[package]]
@@ -3284,4 +3299,15 @@ dependencies = [
  "blake2b_simd",
  "memuse",
  "subtle",
+]
+
+[[package]]
+name = "zip321"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "nom",
+ "percent-encoding",
+ "zcash_address",
+ "zcash_protocol",
 ]

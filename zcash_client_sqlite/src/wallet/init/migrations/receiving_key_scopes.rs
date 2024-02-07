@@ -18,8 +18,11 @@ use sapling::{
 };
 use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullViewingKey};
 use zcash_primitives::{
-    consensus::{self, sapling_zip212_enforcement, BlockHeight, BranchId},
-    transaction::{components::amount::NonNegativeAmount, Transaction},
+    consensus::{self, BlockHeight, BranchId},
+    transaction::{
+        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+        Transaction,
+    },
     zip32::Scope,
 };
 
@@ -165,7 +168,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     // be mined under ZIP 212 enforcement rules, so we default to `On`
                     Zip212Enforcement::On
                 },
-                |h| sapling_zip212_enforcement(&self.params, h),
+                |h| zip212_enforcement(&self.params, h),
             );
 
             let ufvk_str: String = row.get(5)?;
@@ -241,7 +244,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     &mut commitment_tree,
                     dfvk,
                     &diversifier,
-                    &note_value.try_into().unwrap(),
+                    &sapling::value::NoteValue::from_raw(note_value.into_u64()),
                     &rseed,
                     note_commitment_tree_position,
                 )?;
@@ -288,6 +291,7 @@ mod tests {
         wallet::Recipient,
         PoolType, ShieldedProtocol, TransferType,
     };
+    use zcash_keys::address::Address;
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::{
         block::BlockHash,
@@ -498,16 +502,18 @@ mod tests {
                     match output.transfer_type {
                         TransferType::Outgoing | TransferType::WalletInternal => {
                             let recipient = if output.transfer_type == TransferType::Outgoing {
-                                Recipient::Sapling(output.note.recipient())
+                                let address = Address::Sapling(output.note.recipient())
+                                    .to_zcash_address(&params);
+                                Recipient::External(address, PoolType::SAPLING)
                             } else {
-                                Recipient::InternalAccount(
+                                Recipient::Internal(
                                     output.account,
                                     PoolType::Shielded(ShieldedProtocol::Sapling),
                                 )
                             };
 
                             // Don't need to bother with sent outputs for this test.
-                            if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            if matches!(recipient, Recipient::Internal(_, _)) {
                                 put_received_note_before_migration(
                                     wdb.conn.0, output, tx_ref, None,
                                 )

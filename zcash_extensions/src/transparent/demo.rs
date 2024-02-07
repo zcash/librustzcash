@@ -484,8 +484,7 @@ mod tests {
 
     use sapling::{zip32::ExtendedSpendingKey, Node, Rseed};
     use zcash_primitives::{
-        consensus::{BlockHeight, BranchId, NetworkUpgrade, Parameters},
-        constants,
+        consensus::{BlockHeight, BranchId, NetworkType, NetworkUpgrade, Parameters},
         extensions::transparent::{self as tze, Extension, FromPayload, ToPayload},
         legacy::TransparentAddress,
         transaction::{
@@ -520,34 +519,11 @@ mod tests {
             }
         }
 
-        fn address_network(&self) -> Option<zcash_address::Network> {
-            None
-        }
-
-        fn coin_type(&self) -> u32 {
-            constants::testnet::COIN_TYPE
-        }
-
-        fn hrp_sapling_extended_spending_key(&self) -> &str {
-            constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
-        }
-
-        fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
-            constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-        }
-
-        fn hrp_sapling_payment_address(&self) -> &str {
-            constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
-        }
-
-        fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-            constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
-        }
-
-        fn b58_script_address_prefix(&self) -> [u8; 2] {
-            constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+        fn network_type(&self) -> NetworkType {
+            NetworkType::Test
         }
     }
+
     fn demo_hashes(preimage_1: &[u8; 32], preimage_2: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
         let hash_2 = {
             let mut hash = [0; 32];

@@ -2,21 +2,18 @@
 
 use std::fmt;
 
-use rusqlite::{self};
+use rusqlite;
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
-use zcash_primitives::{
-    consensus::{self},
-    transaction::components::amount::BalanceError,
-};
+use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
 
 use crate::WalletDb;
 
-use super::commitment_tree::{self};
+use super::commitment_tree;
 
 mod migrations;
 
@@ -176,7 +173,9 @@ mod tests {
 
     use ::sapling::zip32::ExtendedFullViewingKey;
     use zcash_primitives::{
-        consensus::{self, BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        consensus::{
+            self, BlockHeight, BranchId, Network, NetworkConstants, NetworkUpgrade, Parameters,
+        },
         transaction::{TransactionData, TxVersion},
         zip32::AccountId,
     };
@@ -698,11 +697,13 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                wdb.params.hrp_sapling_payment_address(),
+                wdb.params.network_type().hrp_sapling_payment_address(),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                wdb.params
+                    .network_type()
+                    .hrp_sapling_extended_full_viewing_key(),
                 extfvk,
             );
             wdb.conn.execute(
@@ -723,7 +724,8 @@ mod tests {
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
-        let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        let secret_key =
+            sapling::spending_key(&seed, db_data.params.network_type().coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
@@ -835,11 +837,13 @@ mod tests {
             )?;
 
             let address = encode_payment_address(
-                wdb.params.hrp_sapling_payment_address(),
+                wdb.params.network_type().hrp_sapling_payment_address(),
                 &extfvk.default_address().1,
             );
             let extfvk = encode_extended_full_viewing_key(
-                wdb.params.hrp_sapling_extended_full_viewing_key(),
+                wdb.params
+                    .network_type()
+                    .hrp_sapling_extended_full_viewing_key(),
                 extfvk,
             );
             wdb.conn.execute(
@@ -894,7 +898,8 @@ mod tests {
 
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
-        let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        let secret_key =
+            sapling::spending_key(&seed, db_data.params.network_type().coin_type(), account);
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_autoshielding(&mut db_data, &extfvk, account).unwrap();
@@ -1007,8 +1012,12 @@ mod tests {
             )?;
 
             let ufvk_str = ufvk.encode(&wdb.params);
-            let address_str =
-                Address::Unified(ufvk.default_address(DEFAULT_UA_REQUEST).0).encode(&wdb.params);
+            let address_str = Address::Unified(
+                ufvk.default_address(DEFAULT_UA_REQUEST)
+                    .expect("A valid default address exists for the UFVK")
+                    .0,
+            )
+            .encode(&wdb.params);
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1025,6 +1034,7 @@ mod tests {
                 let taddr = Address::Transparent(
                     *ufvk
                         .default_address(DEFAULT_UA_REQUEST)
+                        .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
                         .unwrap(),

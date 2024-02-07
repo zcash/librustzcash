@@ -30,7 +30,9 @@ zcash_encoding.workspace = true
 zcash_keys.workspace = true
 zcash_note_encryption.workspace = true
 zcash_primitives.workspace = true
+zcash_protocol.workspace = true
 zip32.workspace = true
+zip321.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
@@ -126,6 +128,7 @@ orchard = ["dep:orchard", "zcash_keys/orchard"]
 test-dependencies = [
     "dep:proptest",
     "orchard?/test-dependencies",
+    "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
     "incrementalmerkletree/test-dependencies",
 ]

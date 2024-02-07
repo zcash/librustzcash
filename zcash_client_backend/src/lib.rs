@@ -71,14 +71,13 @@ pub mod proto;
 pub mod scan;
 pub mod scanning;
 pub mod wallet;
-pub mod zip321;
+pub use zip321;
 
 #[cfg(feature = "unstable-serialization")]
 pub mod serialization;
 
-use std::fmt;
-
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
+pub use zcash_protocol::{PoolType, ShieldedProtocol};
 
 #[cfg(test)]
 #[macro_use]
@@ -88,33 +87,3 @@ extern crate assert_matches;
 core::compile_error!(
     "The `orchard` feature flag requires the `zcash_unstable=\"orchard\"` RUSTFLAG."
 );
-
-/// A shielded transfer protocol known to the wallet.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ShieldedProtocol {
-    /// The Sapling protocol
-    Sapling,
-    /// The Orchard protocol
-    #[cfg(zcash_unstable = "orchard")]
-    Orchard,
-}
-
-/// A value pool to which the wallet supports sending transaction outputs.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PoolType {
-    /// The transparent value pool
-    Transparent,
-    /// A shielded value pool.
-    Shielded(ShieldedProtocol),
-}
-
-impl fmt::Display for PoolType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PoolType::Transparent => f.write_str("Transparent"),
-            PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
-            #[cfg(zcash_unstable = "orchard")]
-            PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
-        }
-    }
-}

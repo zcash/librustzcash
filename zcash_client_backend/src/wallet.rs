@@ -2,6 +2,7 @@
 //! light client.
 
 use incrementalmerkletree::Position;
+use zcash_address::ZcashAddress;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
@@ -17,7 +18,7 @@ use zcash_primitives::{
     zip32::{AccountId, Scope},
 };
 
-use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
+use crate::{fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
@@ -63,10 +64,8 @@ impl NoteId {
 /// output.
 #[derive(Debug, Clone)]
 pub enum Recipient {
-    Transparent(TransparentAddress),
-    Sapling(sapling::PaymentAddress),
-    Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, PoolType),
+    External(ZcashAddress, PoolType),
+    Internal(AccountId, PoolType),
 }
 
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
@@ -249,7 +248,7 @@ pub enum Note {
 impl Note {
     pub fn value(&self) -> NonNegativeAmount {
         match self {
-            Note::Sapling(n) => n.value().try_into().expect(
+            Note::Sapling(n) => n.value().inner().try_into().expect(
                 "Sapling notes must have values in the range of valid non-negative ZEC values.",
             ),
             #[cfg(feature = "orchard")]
@@ -349,6 +348,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling
     fn value(&self) -> NonNegativeAmount {
         self.note
             .value()
+            .inner()
             .try_into()
             .expect("Sapling note values are indirectly checked by consensus.")
     }
@@ -363,6 +363,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
     fn value(&self) -> NonNegativeAmount {
         self.note
             .value()
+            .inner()
             .try_into()
             .expect("Orchard note values are indirectly checked by consensus.")
     }

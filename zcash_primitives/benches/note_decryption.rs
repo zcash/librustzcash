@@ -15,8 +15,8 @@ use sapling::{
 };
 use zcash_note_encryption::batch;
 use zcash_primitives::{
-    consensus::{sapling_zip212_enforcement, NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
-    transaction::components::Amount,
+    consensus::{NetworkUpgrade::Canopy, Parameters, TEST_NETWORK},
+    transaction::components::{sapling::zip212_enforcement, Amount},
 };
 
 #[cfg(unix)]
@@ -25,7 +25,7 @@ use pprof::criterion::{Output, PProfProfiler};
 fn bench_note_decryption(c: &mut Criterion) {
     let mut rng = OsRng;
     let height = TEST_NETWORK.activation_height(Canopy).unwrap();
-    let zip212_enforcement = sapling_zip212_enforcement(&TEST_NETWORK, height);
+    let zip212_enforcement = zip212_enforcement(&TEST_NETWORK, height);
 
     let valid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));
     let invalid_ivk = SaplingIvk(jubjub::Fr::random(&mut rng));

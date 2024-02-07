@@ -520,7 +520,8 @@ mod tests {
 
         // We can spend the received notes
         let req = TransactionRequest::new(vec![Payment {
-            recipient_address: Address::Sapling(dfvk.default_address().1),
+            recipient_address: Address::Sapling(dfvk.default_address().1)
+                .to_zcash_address(&st.network()),
             amount: NonNegativeAmount::const_from_u64(110_000),
             memo: None,
             label: None,

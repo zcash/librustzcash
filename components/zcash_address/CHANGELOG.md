@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Removed
+- `zcash_address::kind::p2pkh` - use constants from `zcash_protocol` instead.
+- `zcash_address::kind::p2sh` - use constants from `zcash_protocol` instead.
+- `zcash_address::kind::sapling` - use constants from `zcash_protocol` instead.
+- `zcash_address::kind::sprout` - use constants from `zcash_protocol` instead.
+
 ## [0.3.1] - 2024-01-12
 ### Fixed
 - Stubs for `zcash_address::convert` traits that are created by `rust-analyzer`
