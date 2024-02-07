@@ -19,9 +19,12 @@ use zcash_primitives::legacy::keys::IncomingViewingKey;
 #[cfg(feature = "transparent-inputs")]
 use zcash_client_backend::encoding::AddressCodec;
 
-use crate::wallet::{
-    init::{migrations::initial_setup, WalletMigrationError},
-    pool_code,
+use crate::{
+    wallet::{
+        init::{migrations::initial_setup, WalletMigrationError},
+        pool_code,
+    },
+    UA_TRANSPARENT,
 };
 
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_678dafcf9754);
@@ -65,7 +68,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut stmt_fetch_accounts =
             transaction.prepare("SELECT account, address FROM accounts")?;
 
-        let ua_request = UnifiedAddressRequest::new(false, true, true)
+        let ua_request = UnifiedAddressRequest::new(false, true, UA_TRANSPARENT)
             .expect("A shielded receiver type is requested.");
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {

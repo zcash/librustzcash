@@ -107,8 +107,13 @@ pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 
-pub const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(false, true, true);
+#[cfg(not(feature = "transparent-inputs"))]
+pub(crate) const UA_TRANSPARENT: bool = false;
+#[cfg(feature = "transparent-inputs")]
+pub(crate) const UA_TRANSPARENT: bool = true;
+
+pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
+    UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
 
 /// A newtype wrapper for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
