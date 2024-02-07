@@ -524,9 +524,9 @@ where
     /// batch, or the all-zeros hash to indicate that no block triggered it (i.e. it was a
     /// mempool change).
     ///
-    /// If after adding the given outputs, the accumulated batch size is at least
-    /// `BATCH_SIZE_THRESHOLD`, `Self::flush` is called. Subsequent calls to
-    /// `Self::add_outputs` will be accumulated into a new batch.
+    /// If after adding the given outputs, the accumulated batch size is at least the size
+    /// threshold that was set via `Self::new`, `Self::flush` is called. Subsequent calls
+    /// to `Self::add_outputs` will be accumulated into a new batch.
     pub(crate) fn add_outputs(
         &mut self,
         block_tag: BlockHash,
