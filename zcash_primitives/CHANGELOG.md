@@ -17,6 +17,7 @@ and this library adheres to Rust's notion of
   `zcash_protocol::constants` module.
 - `zcash_primitives::transaction::components::amount` is now a reexport of the
   `zcash_protocol::value` module.
+- `zcash_primitives::memo` is now a reexport of the `zcash_protocol::memo` module.
 
 ### Removed
 - `zcash_primitives::consensus::sapling_zip212_enforcement` instead use
