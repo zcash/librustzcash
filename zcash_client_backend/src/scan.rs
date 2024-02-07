@@ -12,28 +12,31 @@ use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_
 use zcash_primitives::{block::BlockHash, transaction::TxId};
 
 /// A decrypted transaction output.
-pub(crate) struct DecryptedOutput<A, D: Domain> {
+pub(crate) struct DecryptedOutput<A, D: Domain, M> {
     /// The tag corresponding to the incoming viewing key used to decrypt the note.
     pub(crate) ivk_tag: A,
     /// The recipient of the note.
     pub(crate) recipient: D::Recipient,
     /// The note!
     pub(crate) note: D::Note,
+    /// The memo field, or `()` if this is a decrypted compact output.
+    pub(crate) memo: M,
 }
 
-impl<A, D: Domain> fmt::Debug for DecryptedOutput<A, D>
+impl<A, D: Domain, M> fmt::Debug for DecryptedOutput<A, D, M>
 where
     A: fmt::Debug,
     D::IncomingViewingKey: fmt::Debug,
     D::Recipient: fmt::Debug,
     D::Note: fmt::Debug,
-    D::Memo: fmt::Debug,
+    M: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DecryptedOutput")
             .field("ivk_tag", &self.ivk_tag)
             .field("recipient", &self.recipient)
             .field("note", &self.note)
+            .field("memo", &self.memo)
             .finish()
     }
 }
@@ -46,12 +49,12 @@ struct OutputIndex<V> {
     value: V,
 }
 
-type OutputItem<A, D> = OutputIndex<DecryptedOutput<A, D>>;
+type OutputItem<A, D, M> = OutputIndex<DecryptedOutput<A, D, M>>;
 
 /// The sender for the result of batch scanning a specific transaction output.
-struct OutputReplier<A, D: Domain>(OutputIndex<channel::Sender<OutputItem<A, D>>>);
+struct OutputReplier<A, D: Domain, M>(OutputIndex<channel::Sender<OutputItem<A, D, M>>>);
 
-impl<A, D: Domain> DynamicUsage for OutputReplier<A, D> {
+impl<A, D: Domain, M> DynamicUsage for OutputReplier<A, D, M> {
     #[inline(always)]
     fn dynamic_usage(&self) -> usize {
         // We count the memory usage of items in the channel on the receiver side.
@@ -65,9 +68,9 @@ impl<A, D: Domain> DynamicUsage for OutputReplier<A, D> {
 }
 
 /// The receiver for the result of batch scanning a specific transaction.
-struct BatchReceiver<A, D: Domain>(channel::Receiver<OutputItem<A, D>>);
+struct BatchReceiver<A, D: Domain, M>(channel::Receiver<OutputItem<A, D, M>>);
 
-impl<A, D: Domain> DynamicUsage for BatchReceiver<A, D> {
+impl<A, D: Domain, M> DynamicUsage for BatchReceiver<A, D, M> {
     fn dynamic_usage(&self) -> usize {
         // We count the memory usage of items in the channel on the receiver side.
         let num_items = self.0.len();
@@ -84,7 +87,7 @@ impl<A, D: Domain> DynamicUsage for BatchReceiver<A, D> {
         //   - Space for an item.
         //   - The state of the slot, stored as an AtomicUsize.
         const PTR_SIZE: usize = std::mem::size_of::<usize>();
-        let item_size = std::mem::size_of::<OutputItem<A, D>>();
+        let item_size = std::mem::size_of::<OutputItem<A, D, M>>();
         const ATOMIC_USIZE_SIZE: usize = std::mem::size_of::<AtomicUsize>();
         let block_size = PTR_SIZE + ITEMS_PER_BLOCK * (item_size + ATOMIC_USIZE_SIZE);
 
@@ -219,7 +222,7 @@ pub(crate) struct Batch<A, D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOT
     /// all be part of the same struct, which would also track the output index
     /// (that is captured in the outer `OutputIndex` of each `OutputReplier`).
     outputs: Vec<(D, Output)>,
-    repliers: Vec<OutputReplier<A, D>>,
+    repliers: Vec<OutputReplier<A, D, ()>>,
 }
 
 impl<A, D, Output> DynamicUsage for Batch<A, D, Output>
@@ -311,6 +314,7 @@ where
                         ivk_tag: tags[ivk_idx].clone(),
                         recipient,
                         note,
+                        memo: (),
                     },
                 };
 
@@ -331,7 +335,7 @@ impl<A, D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE> + Clone> Ba
         &mut self,
         domain: impl Fn() -> D,
         outputs: &[Output],
-        replier: channel::Sender<OutputItem<A, D>>,
+        replier: channel::Sender<OutputItem<A, D, ()>>,
     ) {
         self.outputs
             .extend(outputs.iter().cloned().map(|output| (domain(), output)));
@@ -373,7 +377,7 @@ where
     // The running batches.
     running_tasks: T,
     // Receivers for the results of the running batches.
-    pending_results: HashMap<ResultKey, BatchReceiver<A, D>>,
+    pending_results: HashMap<ResultKey, BatchReceiver<A, D, ()>>,
 }
 
 impl<A, D, Output, T> DynamicUsage for BatchRunner<A, D, Output, T>
@@ -487,7 +491,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-    ) -> HashMap<(TxId, usize), DecryptedOutput<A, D>> {
+    ) -> HashMap<(TxId, usize), DecryptedOutput<A, D, ()>> {
         self.pending_results
             .remove(&ResultKey(block_tag, txid))
             // We won't have a pending result if the transaction didn't have outputs of
