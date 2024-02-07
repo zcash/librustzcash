@@ -21,7 +21,7 @@ use zcash_primitives::{
 use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBundles};
 use crate::{
     proto::compact_formats::CompactBlock,
-    scan::{Batch, BatchRunner, Tasks},
+    scan::{Batch, BatchRunner, CompactDecryptor, Tasks},
     wallet::{WalletSaplingOutput, WalletSaplingSpend, WalletTx},
     ShieldedProtocol,
 };
@@ -268,9 +268,10 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
-type TaggedBatch<S> = Batch<(AccountId, S), SaplingDomain, CompactOutputDescription>;
+type TaggedBatch<S> =
+    Batch<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor>;
 type TaggedBatchRunner<S, T> =
-    BatchRunner<(AccountId, S), SaplingDomain, CompactOutputDescription, T>;
+    BatchRunner<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor, T>;
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
 pub(crate) fn add_block_to_runner<P, S, T>(
@@ -834,7 +835,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 2);
 
             let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::<_, _, _, ()>::new(
+                let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
                     dfvk.to_sapling_keys()
                         .iter()
@@ -921,7 +922,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 3);
 
             let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::<_, _, _, ()>::new(
+                let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
                     dfvk.to_sapling_keys()
                         .iter()
