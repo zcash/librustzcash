@@ -21,6 +21,7 @@ pub mod consensus;
 pub mod constants;
 #[cfg(feature = "local-consensus")]
 pub mod local_consensus;
+pub mod memo;
 pub mod value;
 
 /// A Zcash shielded transfer protocol.
