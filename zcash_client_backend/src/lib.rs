@@ -97,7 +97,6 @@ pub enum ShieldedProtocol {
     /// The Sapling protocol
     Sapling,
     /// The Orchard protocol
-    #[cfg(zcash_unstable = "orchard")]
     Orchard,
 }
 
@@ -118,7 +117,6 @@ impl PoolType {
             Address::Unified(ua) => match self {
                 PoolType::Transparent => ua.transparent().is_some(),
                 PoolType::Shielded(ShieldedProtocol::Sapling) => ua.sapling().is_some(),
-                #[cfg(zcash_unstable = "orchard")]
                 PoolType::Shielded(ShieldedProtocol::Orchard) => {
                     #[cfg(feature = "orchard")]
                     return ua.orchard().is_some();
@@ -136,7 +134,6 @@ impl fmt::Display for PoolType {
         match self {
             PoolType::Transparent => f.write_str("Transparent"),
             PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
-            #[cfg(zcash_unstable = "orchard")]
             PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
         }
     }

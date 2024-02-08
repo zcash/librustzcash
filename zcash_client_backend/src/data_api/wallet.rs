@@ -27,8 +27,7 @@ use crate::{
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
     keys::UnifiedSpendingKey,
-    proposal::ProposalError,
-    proposal::{self, Proposal},
+    proposal::{self, Proposal, ProposalError},
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
@@ -210,6 +209,7 @@ pub fn create_spend_to_address<DbT, ParamsT>(
     ovk_policy: OvkPolicy,
     min_confirmations: NonZeroU32,
     change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
 ) -> Result<
     NonEmpty<TxId>,
     Error<
@@ -240,6 +240,7 @@ where
         amount,
         memo,
         change_memo,
+        fallback_change_pool,
     )?;
 
     create_proposed_transactions(
@@ -423,6 +424,8 @@ where
 /// * `amount`: The amount to send.
 /// * `memo`: A memo to be included in the output to the recipient.
 /// * `change_memo`: A memo to be included in any change output that is created.
+/// * `fallback_change_pool`: The shielded pool to which change should be sent if
+///   automatic change pool determination fails.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
@@ -435,6 +438,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     amount: NonNegativeAmount,
     memo: Option<MemoBytes>,
     change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
 ) -> Result<
     Proposal<StandardFeeRule, DbT::NoteRef>,
     Error<
@@ -461,7 +465,11 @@ where
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
 
-    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(fee_rule, change_memo);
+    let change_strategy = fees::standard::SingleOutputChangeStrategy::new(
+        fee_rule,
+        change_memo,
+        fallback_change_pool,
+    );
     let input_selector =
         GreedyInputSelector::<DbT, _>::new(change_strategy, DustOutputPolicy::default());
 
@@ -644,73 +652,83 @@ where
         .map_err(Error::DataSource)?
         .ok_or(Error::KeyNotRecognized)?;
 
-    let (sapling_anchor, sapling_inputs) = proposal_step.shielded_inputs().map_or_else(
-        || Ok((sapling::Anchor::empty_tree(), vec![])),
-        |inputs| {
-            wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
-                let anchor = sapling_tree
-                    .root_at_checkpoint_id(&inputs.anchor_height())?
-                    .into();
+    let (sapling_anchor, sapling_inputs) =
+        if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Sapling)) {
+            proposal_step.shielded_inputs().map_or_else(
+                || Ok((Some(sapling::Anchor::empty_tree()), vec![])),
+                |inputs| {
+                    wallet_db.with_sapling_tree_mut::<_, _, Error<_, _, _, _>>(|sapling_tree| {
+                        let anchor = sapling_tree
+                            .root_at_checkpoint_id(&inputs.anchor_height())?
+                            .into();
 
-                let sapling_inputs = inputs
-                    .notes()
-                    .iter()
-                    .filter_map(|selected| match selected.note() {
-                        Note::Sapling(note) => {
-                            let key = match selected.spending_key_scope() {
-                                Scope::External => usk.sapling().clone(),
-                                Scope::Internal => usk.sapling().derive_internal(),
-                            };
+                        let sapling_inputs = inputs
+                            .notes()
+                            .iter()
+                            .filter_map(|selected| match selected.note() {
+                                Note::Sapling(note) => {
+                                    let key = match selected.spending_key_scope() {
+                                        Scope::External => usk.sapling().clone(),
+                                        Scope::Internal => usk.sapling().derive_internal(),
+                                    };
 
-                            sapling_tree
-                                .witness_at_checkpoint_id_caching(
-                                    selected.note_commitment_tree_position(),
-                                    &inputs.anchor_height(),
-                                )
-                                .map(|merkle_path| Some((key, note, merkle_path)))
-                                .map_err(Error::from)
-                                .transpose()
-                        }
-                        #[cfg(feature = "orchard")]
-                        Note::Orchard(_) => None,
+                                    sapling_tree
+                                        .witness_at_checkpoint_id_caching(
+                                            selected.note_commitment_tree_position(),
+                                            &inputs.anchor_height(),
+                                        )
+                                        .map(|merkle_path| Some((key, note, merkle_path)))
+                                        .map_err(Error::from)
+                                        .transpose()
+                                }
+                                #[cfg(feature = "orchard")]
+                                Note::Orchard(_) => None,
+                            })
+                            .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
+
+                        Ok((Some(anchor), sapling_inputs))
                     })
-                    .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
-
-                Ok((anchor, sapling_inputs))
-            })
-        },
-    )?;
+                },
+            )?
+        } else {
+            (None, vec![])
+        };
 
     #[cfg(feature = "orchard")]
-    let (orchard_anchor, orchard_inputs) = proposal_step.shielded_inputs().map_or_else(
-        || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
-        |inputs| {
-            wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _>>(|orchard_tree| {
-                let anchor = orchard_tree
-                    .root_at_checkpoint_id(&inputs.anchor_height())?
-                    .into();
+    let (orchard_anchor, orchard_inputs) =
+        if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Orchard)) {
+            proposal_step.shielded_inputs().map_or_else(
+                || Ok((Some(orchard::Anchor::empty_tree()), vec![])),
+                |inputs| {
+                    wallet_db.with_orchard_tree_mut::<_, _, Error<_, _, _, _>>(|orchard_tree| {
+                        let anchor = orchard_tree
+                            .root_at_checkpoint_id(&inputs.anchor_height())?
+                            .into();
 
-                let orchard_inputs = inputs
-                    .notes()
-                    .iter()
-                    .filter_map(|selected| match selected.note() {
-                        #[cfg(feature = "orchard")]
-                        Note::Orchard(note) => orchard_tree
-                            .witness_at_checkpoint_id_caching(
-                                selected.note_commitment_tree_position(),
-                                &inputs.anchor_height(),
-                            )
-                            .map(|merkle_path| Some((note, merkle_path)))
-                            .map_err(Error::from)
-                            .transpose(),
-                        Note::Sapling(_) => None,
+                        let orchard_inputs = inputs
+                            .notes()
+                            .iter()
+                            .filter_map(|selected| match selected.note() {
+                                #[cfg(feature = "orchard")]
+                                Note::Orchard(note) => orchard_tree
+                                    .witness_at_checkpoint_id_caching(
+                                        selected.note_commitment_tree_position(),
+                                        &inputs.anchor_height(),
+                                    )
+                                    .map(|merkle_path| Some((note, merkle_path)))
+                                    .map_err(Error::from)
+                                    .transpose(),
+                                Note::Sapling(_) => None,
+                            })
+                            .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
+
+                        Ok((Some(anchor), orchard_inputs))
                     })
-                    .collect::<Result<Vec<_>, Error<_, _, _, _>>>()?;
-
-                Ok((Some(anchor), orchard_inputs))
-            })
-        },
-    )?;
+                },
+            )?
+        } else {
+            (None, vec![])
+        };
     #[cfg(not(feature = "orchard"))]
     let orchard_anchor = None;
 
@@ -720,7 +738,7 @@ where
         params.clone(),
         min_target_height,
         BuildConfig::Standard {
-            sapling_anchor: Some(sapling_anchor),
+            sapling_anchor,
             orchard_anchor,
         },
     );
@@ -984,7 +1002,6 @@ where
                     Some(memo),
                 ))
             }
-            #[cfg(zcash_unstable = "orchard")]
             ShieldedProtocol::Orchard => {
                 #[cfg(not(feature = "orchard"))]
                 return Err(Error::UnsupportedChangeType(PoolType::Shielded(

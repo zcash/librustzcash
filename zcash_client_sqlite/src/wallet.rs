@@ -137,7 +137,6 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     match pool_type {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
-        #[cfg(zcash_unstable = "orchard")]
         PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
     }
 }
@@ -818,7 +817,6 @@ pub(crate) fn get_received_memo(
             )
             .optional()?
             .flatten(),
-        #[cfg(zcash_unstable = "orchard")]
         _ => {
             return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
                 note_id.protocol(),
@@ -2232,6 +2230,8 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_balance_across_shielding() {
+        use zcash_client_backend::ShieldedProtocol;
+
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -2316,6 +2316,7 @@ mod tests {
             fixed::SingleOutputChangeStrategy::new(
                 FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
                 None,
+                ShieldedProtocol::Sapling,
             ),
             DustOutputPolicy::default(),
         );

@@ -108,15 +108,35 @@ impl UnifiedAddress {
         }
     }
 
+    /// Returns whether this address has an Orchard receiver.
+    ///
+    /// This method is available irrespective of whether the `orchard` feature flag is enabled.
+    pub fn has_orchard(&self) -> bool {
+        #[cfg(not(feature = "orchard"))]
+        return false;
+        #[cfg(feature = "orchard")]
+        return self.orchard.is_some();
+    }
+
     /// Returns the Orchard receiver within this Unified Address, if any.
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> Option<&orchard::Address> {
         self.orchard.as_ref()
     }
 
+    /// Returns whether this address has a Sapling receiver.
+    pub fn has_sapling(&self) -> bool {
+        self.sapling.is_some()
+    }
+
     /// Returns the Sapling receiver within this Unified Address, if any.
     pub fn sapling(&self) -> Option<&PaymentAddress> {
         self.sapling.as_ref()
+    }
+
+    /// Returns whether this address has a Transparent receiver.
+    pub fn has_transparent(&self) -> bool {
+        self.transparent.is_some()
     }
 
     /// Returns the transparent receiver within this Unified Address, if any.

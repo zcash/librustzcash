@@ -579,8 +579,11 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::PreZip313;
 
         let change_memo = "Test change memo".parse::<Memo>().unwrap();
-        let change_strategy =
-            standard::SingleOutputChangeStrategy::new(fee_rule, Some(change_memo.clone().into()));
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.clone().into()),
+            ShieldedProtocol::Sapling,
+        );
         let input_selector =
             &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
 
@@ -731,7 +734,7 @@ pub(crate) mod tests {
 
         let fee_rule = StandardFeeRule::Zip317;
         let input_selector = GreedyInputSelector::new(
-            standard::SingleOutputChangeStrategy::new(fee_rule, None),
+            standard::SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling),
             DustOutputPolicy::default(),
         );
         let proposal0 = st
@@ -1455,7 +1458,7 @@ pub(crate) mod tests {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
         let input_selector = GreedyInputSelector::new(
-            fixed::SingleOutputChangeStrategy::new(fee_rule, None),
+            fixed::SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling),
             DustOutputPolicy::default(),
         );
 
@@ -1657,7 +1660,7 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::PreZip313;
 
         let input_selector = GreedyInputSelector::new(
-            standard::SingleOutputChangeStrategy::new(fee_rule, None),
+            standard::SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling),
             DustOutputPolicy::default(),
         );
 

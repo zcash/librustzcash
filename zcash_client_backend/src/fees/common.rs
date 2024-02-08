@@ -34,6 +34,7 @@ pub(crate) fn single_change_output_balance<
     dust_output_policy: &DustOutputPolicy,
     default_dust_threshold: NonNegativeAmount,
     change_memo: Option<MemoBytes>,
+    _fallback_change_pool: ShieldedProtocol,
 ) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
@@ -86,7 +87,6 @@ where
 
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
     #[cfg(feature = "orchard")]
-    #[allow(clippy::if_same_then_else)]
     let (change_pool, sapling_change, orchard_change) =
         if orchard_in.is_positive() || orchard_out.is_positive() {
             // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs
@@ -96,8 +96,12 @@ where
             // Sapling outputs, so that we avoid pool-crossing.
             (ShieldedProtocol::Sapling, 1, 0)
         } else {
-            // For all other transactions, send change to Orchard.
-            (ShieldedProtocol::Orchard, 0, 1)
+            // This is a fully-transparent transaction, so the caller gets to decide
+            // where to shield change.
+            match _fallback_change_pool {
+                ShieldedProtocol::Orchard => (_fallback_change_pool, 0, 1),
+                ShieldedProtocol::Sapling => (_fallback_change_pool, 1, 0),
+            }
         };
     #[cfg(not(feature = "orchard"))]
     let (change_pool, sapling_change) = (ShieldedProtocol::Sapling, 1);

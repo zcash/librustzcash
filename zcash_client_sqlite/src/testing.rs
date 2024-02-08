@@ -22,7 +22,6 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier, PaymentAddress,
 };
-use zcash_client_backend::fees::{standard, DustOutputPolicy};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
@@ -44,6 +43,10 @@ use zcash_client_backend::{
     proto::proposal,
     wallet::OvkPolicy,
     zip321,
+};
+use zcash_client_backend::{
+    fees::{standard, DustOutputPolicy},
+    ShieldedProtocol,
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -465,6 +468,7 @@ impl<Cache> TestState<Cache> {
             ovk_policy,
             min_confirmations,
             change_memo,
+            ShieldedProtocol::Sapling,
         )
     }
 
@@ -567,6 +571,7 @@ impl<Cache> TestState<Cache> {
             amount,
             memo,
             change_memo,
+            ShieldedProtocol::Sapling,
         );
 
         if let Ok(proposal) = &result {
@@ -1058,7 +1063,8 @@ pub(crate) fn input_selector(
     standard::SingleOutputChangeStrategy,
 > {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
-    let change_strategy = standard::SingleOutputChangeStrategy::new(fee_rule, change_memo);
+    let change_strategy =
+        standard::SingleOutputChangeStrategy::new(fee_rule, change_memo, ShieldedProtocol::Sapling);
     GreedyInputSelector::new(change_strategy, DustOutputPolicy::default())
 }
 

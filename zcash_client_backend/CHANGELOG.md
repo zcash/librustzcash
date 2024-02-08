@@ -154,8 +154,9 @@ and this library adheres to Rust's notion of
       the database identifiers for its contained notes by universally quantifying
       the `NoteRef` type parameter.
     - It returns a `NonEmpty<TxId>` instead of a single `TxId` value.
-  - `wallet::create_spend_to_address` now takes an additional `change_memo`
-    argument. It also returns its result as a `NonEmpty<TxId>` instead of a
+  - `wallet::create_spend_to_address` now takes additional `change_memo` and
+    `fallback_change_pool` arguments. It also returns its result as a
+    `NonEmpty<TxId>` instead of a
     single `TxId`.
   - `wallet::spend` returns its result as a `NonEmpty<TxId>` instead of a
     single `TxId`.
@@ -226,9 +227,10 @@ and this library adheres to Rust's notion of
     now also provides the output pool to which change should be sent and an
     optional memo to be associated with the change output.
   - `ChangeError` has a new `BundleError` variant.
-  - `fixed::SingleOutputChangeStrategy::new` and
-    `zip317::SingleOutputChangeStrategy::new` each now accept an additional
-    `change_memo` argument.
+  - `fixed::SingleOutputChangeStrategy::new`,
+    `zip317::SingleOutputChangeStrategy::new`, and
+    `standard::SingleOutputChangeStrategy::new` each now accept additional
+    `change_memo` and `fallback_change_pool` arguments.
 - `zcash_client_backend::wallet`:
   - The fields of `ReceivedSaplingNote` are now private. Use
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods

@@ -9,6 +9,8 @@ use zcash_primitives::{
     },
 };
 
+use crate::ShieldedProtocol;
+
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
     DustOutputPolicy, TransactionBalance,
@@ -22,15 +24,21 @@ use super::orchard as orchard_fees;
 pub struct SingleOutputChangeStrategy {
     fee_rule: FixedFeeRule,
     change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
 }
 
 impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified fee rule
     /// and change memo.
-    pub fn new(fee_rule: FixedFeeRule, change_memo: Option<MemoBytes>) -> Self {
+    pub fn new(
+        fee_rule: FixedFeeRule,
+        change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
+    ) -> Self {
         Self {
             fee_rule,
             change_memo,
+            fallback_change_pool,
         }
     }
 }
@@ -65,6 +73,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             dust_output_policy,
             self.fee_rule().fixed_fee(),
             self.change_memo.clone(),
+            self.fallback_change_pool,
         )
     }
 }
@@ -89,13 +98,15 @@ mod tests {
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
         },
+        ShieldedProtocol,
     };
 
     #[test]
     fn change_without_dust() {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
-        let change_strategy = SingleOutputChangeStrategy::new(fee_rule, None);
+        let change_strategy =
+            SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -136,7 +147,8 @@ mod tests {
     fn dust_change() {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
-        let change_strategy = SingleOutputChangeStrategy::new(fee_rule, None);
+        let change_strategy =
+            SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling);
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(

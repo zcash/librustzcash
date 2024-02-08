@@ -319,7 +319,6 @@ fn pool_type<T>(pool_id: i32) -> Result<PoolType, ProposalDecodingError<T>> {
     match proposal::ValuePool::try_from(pool_id) {
         Ok(proposal::ValuePool::Transparent) => Ok(PoolType::Transparent),
         Ok(proposal::ValuePool::Sapling) => Ok(PoolType::Shielded(ShieldedProtocol::Sapling)),
-        #[cfg(zcash_unstable = "orchard")]
         Ok(proposal::ValuePool::Orchard) => Ok(PoolType::Shielded(ShieldedProtocol::Orchard)),
         _ => Err(ProposalDecodingError::ValuePoolNotSupported(pool_id)),
     }
@@ -354,7 +353,6 @@ impl From<ShieldedProtocol> for proposal::ValuePool {
     fn from(value: ShieldedProtocol) -> Self {
         match value {
             ShieldedProtocol::Sapling => proposal::ValuePool::Sapling,
-            #[cfg(zcash_unstable = "orchard")]
             ShieldedProtocol::Orchard => proposal::ValuePool::Orchard,
         }
     }
