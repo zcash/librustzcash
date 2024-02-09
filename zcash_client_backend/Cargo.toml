@@ -68,6 +68,11 @@ group.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Sync engine
+anyhow = { version = "1", optional = true }
+futures-util = { version = "0.3", optional = true }
+tokio = { version = "1.21.0", optional = true, features = ["fs", "macros"] }
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree.workspace = true
@@ -121,6 +126,14 @@ transparent-inputs = [
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "zcash_keys/orchard"]
+
+## Exposes a wallet synchronization function that implements the necessary state machine.
+sync = [
+    "lightwalletd-tonic",
+    "dep:anyhow",
+    "dep:futures-util",
+    "dep:tokio",
+]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
