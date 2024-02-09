@@ -68,8 +68,8 @@ impl From<Insert> for Dominance {
 // `Verify`, this replaces any existing priority. Otherwise, if the current priority is
 // `Scanned`, it remains as `Scanned`; and if the new priority is `Scanned`, it
 // overrides any existing priority.
-fn dominance(current: &ScanPriority, inserted: &ScanPriority, insert: Insert) -> Dominance {
-    match (current.cmp(inserted), (current, inserted)) {
+fn dominance(current: &ScanRange, inserted: &ScanRange, insert: Insert) -> Dominance {
+    match (current.priority().cmp(inserted.priority()), (current.priority(), inserted.priority())) {
         (Ordering::Equal, _) => Dominance::Equal,
         (_, (_, ScanPriority::Verify | ScanPriority::Scanned)) => Dominance::from(insert),
         (_, (ScanPriority::Scanned, _)) if !insert.force_rescan => Dominance::from(!insert),
@@ -165,8 +165,8 @@ fn insert(current: ScanRange, to_insert: ScanRange, force_rescans: bool) -> Join
 
         // recompute the range dominance based upon the queue entry priorities
         let dominance = match insert.on {
-            InsertOn::Left => dominance(&right.priority(), &left.priority(), insert),
-            InsertOn::Right => dominance(&left.priority(), &right.priority(), insert),
+            InsertOn::Left => dominance(&right, &left, insert),
+            InsertOn::Right => dominance(&left, &right, insert),
         };
 
         let pre_overlap = left.truncate_end(right.block_range().start);
@@ -224,11 +224,12 @@ fn insert(current: ScanRange, to_insert: ScanRange, force_rescans: bool) -> Join
                     Dominance::Left | Dominance::Equal => current.priority(),
                     Dominance::Right => to_insert.priority(),
                 },
-                match dom {
-                    Dominance::Left => current.flags(),
-                    Dominance::Equal => to_insert.flags() | current.flags(),
-                    Dominance::Right => to_insert.flags(),
-                },
+                if to_insert.priority() <= ScanPriority::Scanned {
+                    // The inserted range is either scanned or ignored, so unset all flags.
+                    ScanFlags::empty()
+                } else {
+                    to_insert.flags() | current.flags()
+                }
             ))
         }
         RightFirstOverlap | LeftContained => {
