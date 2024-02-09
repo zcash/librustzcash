@@ -66,7 +66,7 @@ tracing.workspace = true
 # - Protobuf interfaces and gRPC bindings
 hex.workspace = true
 prost.workspace = true
-tonic = { workspace = true, optional = true, features = ["prost", "codegen"]}
+tonic = { workspace = true, optional = true, features = ["prost", "codegen"] }
 
 # - Secret management
 secrecy.workspace = true
@@ -78,6 +78,10 @@ group.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Sync engine
+async-trait = { version = "0.1", optional = true }
+futures-util = { version = "0.3", optional = true }
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree.workspace = true
@@ -88,9 +92,6 @@ jubjub = { workspace = true, optional = true }
 
 # - ZIP 321
 nom = "7"
-
-# - Asychronous
-async-trait = "0.1.78"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -106,7 +107,7 @@ crossbeam-channel.workspace = true
 rayon.workspace = true
 
 [build-dependencies]
-tonic-build = { workspace = true, features = ["prost"]}
+tonic-build = { workspace = true, features = ["prost"] }
 which = "4"
 
 [dev-dependencies]
@@ -140,6 +141,13 @@ transparent-inputs = [
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "zcash_keys/orchard"]
+
+## Exposes a wallet synchronization function that implements the necessary state machine.
+sync = [
+    "lightwalletd-tonic",
+    "dep:async-trait",
+    "dep:futures-util",
+]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
