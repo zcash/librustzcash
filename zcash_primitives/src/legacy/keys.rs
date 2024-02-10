@@ -1,3 +1,5 @@
+//! Transparent key components.
+
 use hdwallet::{
     traits::{Deserialize, Serialize},
     ExtendedPrivKey, ExtendedPubKey, KeyIndex,
@@ -12,13 +14,14 @@ use super::TransparentAddress;
 
 const MAX_TRANSPARENT_CHILD_INDEX: u32 = 0x7FFFFFFF;
 
-/// A type representing a BIP-44 private key at the account path level
-/// `m/44'/<coin_type>'/<account>'
+/// A [BIP44] private key at the account path level `m/44'/<coin_type>'/<account>'`.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct AccountPrivKey(ExtendedPrivKey);
 
 impl AccountPrivKey {
-    /// Performs derivation of the extended private key for the BIP-44 path:
+    /// Performs derivation of the extended private key for the BIP44 path:
     /// `m/44'/<coin_type>'/<account>'`.
     ///
     /// This produces the root of the derivation tree for transparent
@@ -43,7 +46,7 @@ impl AccountPrivKey {
         AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
     }
 
-    /// Derives the BIP-44 private spending key for the external (incoming payment) child path
+    /// Derives the BIP44 private spending key for the external (incoming payment) child path
     /// `m/44'/<coin_type>'/<account>'/0/<child_index>`.
     pub fn derive_external_secret_key(
         &self,
@@ -55,7 +58,7 @@ impl AccountPrivKey {
             .map(|k| k.private_key)
     }
 
-    /// Derives the BIP-44 private spending key for the internal (change) child path
+    /// Derives the BIP44 private spending key for the internal (change) child path
     /// `m/44'/<coin_type>'/<account>'/1/<child_index>`.
     pub fn derive_internal_secret_key(
         &self,
@@ -82,16 +85,17 @@ impl AccountPrivKey {
     }
 }
 
-/// A type representing a BIP-44 public key at the account path level
-/// `m/44'/<coin_type>'/<account>'`.
+/// A [BIP44] public key at the account path level `m/44'/<coin_type>'/<account>'`.
 ///
 /// This provides the necessary derivation capability for the transparent component of a unified
 /// full viewing key.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct AccountPubKey(ExtendedPubKey);
 
 impl AccountPubKey {
-    /// Derives the BIP-44 public key at the external "change level" path
+    /// Derives the BIP44 public key at the external "change level" path
     /// `m/44'/<coin_type>'/<account>'/0`.
     pub fn derive_external_ivk(&self) -> Result<ExternalIvk, hdwallet::error::Error> {
         self.0
@@ -99,7 +103,7 @@ impl AccountPubKey {
             .map(ExternalIvk)
     }
 
-    /// Derives the BIP-44 public key at the internal "change level" path
+    /// Derives the BIP44 public key at the internal "change level" path
     /// `m/44'/<coin_type>'/<account>'/1`.
     pub fn derive_internal_ivk(&self) -> Result<InternalIvk, hdwallet::error::Error> {
         self.0
@@ -149,7 +153,7 @@ impl AccountPubKey {
 /// Derives the P2PKH transparent address corresponding to the given pubkey.
 #[deprecated(note = "This function will be removed from the public API in an upcoming refactor.")]
 pub fn pubkey_to_address(pubkey: &secp256k1::PublicKey) -> TransparentAddress {
-    TransparentAddress::PublicKey(
+    TransparentAddress::PublicKeyHash(
         *ripemd::Ripemd160::digest(Sha256::digest(pubkey.serialize())).as_ref(),
     )
 }
@@ -162,6 +166,21 @@ pub(crate) mod private {
     }
 }
 
+/// Trait representing a transparent "incoming viewing key".
+///
+/// Unlike the Sapling and Orchard shielded protocols (which have viewing keys built into
+/// their key trees and bound to specific spending keys), the transparent protocol has no
+/// "viewing key" concept. Transparent viewing keys are instead emulated by making two
+/// observations:
+///
+/// - [BIP32] hierarchical derivation is structured as a tree.
+/// - The [BIP44] key paths use non-hardened derivation below the account level.
+///
+/// A transparent viewing key for an account is thus defined as the root of a specific
+/// non-hardened subtree underneath the account's path.
+///
+/// [BIP32]: https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized {
     /// Derives a transparent address at the provided child index.
     #[allow(deprecated)]
@@ -210,9 +229,12 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
     }
 }
 
-/// A type representing an incoming viewing key at the BIP-44 "external"
-/// path `m/44'/<coin_type>'/<account>'/0`. This allows derivation
-/// of child addresses that may be provided to external parties.
+/// An incoming viewing key at the [BIP44] "external" path
+/// `m/44'/<coin_type>'/<account>'/0`.
+///
+/// This allows derivation of child addresses that may be provided to external parties.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct ExternalIvk(ExtendedPubKey);
 
@@ -228,10 +250,13 @@ impl private::SealedChangeLevelKey for ExternalIvk {
 
 impl IncomingViewingKey for ExternalIvk {}
 
-/// A type representing an incoming viewing key at the BIP-44 "internal"
-/// path `m/44'/<coin_type>'/<account>'/1`. This allows derivation
-/// of change addresses for use within the wallet, but which should
+/// An incoming viewing key at the [BIP44] "internal" path
+/// `m/44'/<coin_type>'/<account>'/1`.
+///
+/// This allows derivation of change addresses for use within the wallet, but which should
 /// not be shared with external parties.
+///
+/// [BIP44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
 #[derive(Clone, Debug)]
 pub struct InternalIvk(ExtendedPubKey);
 
@@ -247,7 +272,7 @@ impl private::SealedChangeLevelKey for InternalIvk {
 
 impl IncomingViewingKey for InternalIvk {}
 
-/// Internal ovk used for autoshielding.
+/// Internal outgoing viewing key used for autoshielding.
 pub struct InternalOvk([u8; 32]);
 
 impl InternalOvk {
@@ -256,7 +281,7 @@ impl InternalOvk {
     }
 }
 
-/// External ovk used by zcashd for transparent -> shielded spends to
+/// External outgoing viewing key used by `zcashd` for transparent-to-shielded spends to
 /// external receivers.
 pub struct ExternalOvk([u8; 32]);
 

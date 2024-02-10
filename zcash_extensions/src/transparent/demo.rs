@@ -846,37 +846,43 @@ mod tests {
             .demo_open(value.into(), h1)
             .map_err(|e| format!("open failure: {:?}", e))
             .unwrap();
-        let (tx_a, _) = builder_a
+        let res_a = builder_a
             .txn_builder
             .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_a = tx_a.tze_bundle().unwrap();
+        let tze_a = res_a.transaction().tze_bundle().unwrap();
 
         //
         // Transfer
         //
 
         let mut builder_b = demo_builder(tx_height + 1, sapling::Anchor::empty_tree());
-        let prevout_a = (OutPoint::new(tx_a.txid(), 0), tze_a.vout[0].clone());
+        let prevout_a = (
+            OutPoint::new(res_a.transaction().txid(), 0),
+            tze_a.vout[0].clone(),
+        );
         let value_xfr = (value - fee_rule.fixed_fee()).unwrap();
         builder_b
             .demo_transfer_to_close(prevout_a, value_xfr.into(), preimage_1, h2)
             .map_err(|e| format!("transfer failure: {:?}", e))
             .unwrap();
-        let (tx_b, _) = builder_b
+        let res_b = builder_b
             .txn_builder
             .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_b = tx_b.tze_bundle().unwrap();
+        let tze_b = res_b.transaction().tze_bundle().unwrap();
 
         //
         // Closing transaction
         //
 
         let mut builder_c = demo_builder(tx_height + 2, sapling::Anchor::empty_tree());
-        let prevout_b = (OutPoint::new(tx_a.txid(), 0), tze_b.vout[0].clone());
+        let prevout_b = (
+            OutPoint::new(res_a.transaction().txid(), 0),
+            tze_b.vout[0].clone(),
+        );
         builder_c
             .demo_close(prevout_b, preimage_2)
             .map_err(|e| format!("close failure: {:?}", e))
@@ -884,27 +890,31 @@ mod tests {
 
         builder_c
             .add_transparent_output(
-                &TransparentAddress::PublicKey([0; 20]),
+                &TransparentAddress::PublicKeyHash([0; 20]),
                 (value_xfr - fee_rule.fixed_fee()).unwrap(),
             )
             .unwrap();
 
-        let (tx_c, _) = builder_c
+        let res_c = builder_c
             .txn_builder
             .build_zfuture(OsRng, &prover, &prover, &fee_rule)
             .map_err(|e| format!("build failure: {:?}", e))
             .unwrap();
-        let tze_c = tx_c.tze_bundle().unwrap();
+        let tze_c = res_c.transaction().tze_bundle().unwrap();
 
         // Verify tx_b
-        let ctx0 = Ctx { tx: &tx_b };
+        let ctx0 = Ctx {
+            tx: res_b.transaction(),
+        };
         assert_eq!(
             Program.verify(&tze_a.vout[0].precondition, &tze_b.vin[0].witness, &ctx0),
             Ok(())
         );
 
         // Verify tx_c
-        let ctx1 = Ctx { tx: &tx_c };
+        let ctx1 = Ctx {
+            tx: res_c.transaction(),
+        };
         assert_eq!(
             Program.verify(&tze_b.vout[0].precondition, &tze_c.vin[0].witness, &ctx1),
             Ok(())

@@ -22,7 +22,7 @@ use zcash_primitives::{
 use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBundles};
 use crate::{
     proto::compact_formats::CompactBlock,
-    scan::{Batch, BatchRunner, Tasks},
+    scan::{Batch, BatchRunner, CompactDecryptor, Tasks},
     wallet::{WalletSaplingOutput, WalletSaplingSpend, WalletTx},
     ShieldedProtocol,
 };
@@ -269,9 +269,10 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey, A: 
     )
 }
 
-type TaggedBatch<A, S> = Batch<(A, S), SaplingDomain, CompactOutputDescription>;
-type TaggedBatchRunner<A, S, T> =
-    BatchRunner<(A, S), SaplingDomain, CompactOutputDescription, T>;
+type TaggedBatch<S> =
+    Batch<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor>;
+type TaggedBatchRunner<S, T> =
+    BatchRunner<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor, T>;
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
 pub(crate) fn add_block_to_runner<P, S, T, A>(
@@ -527,13 +528,13 @@ pub(crate) fn scan_block_with_runner<
                 let mut decrypted = runner.collect_results(cur_hash, txid);
                 (0..decoded.len())
                     .map(|i| {
-                        decrypted.remove(&(txid, i)).map(|d_note| {
-                            let a = d_note.ivk_tag.0;
-                            let nk = vks.get(&d_note.ivk_tag).expect(
+                        decrypted.remove(&(txid, i)).map(|d_out| {
+                            let a = d_out.ivk_tag.0;
+                            let nk = vks.get(&d_out.ivk_tag).expect(
                                 "The batch runner and scan_block must use the same set of IVKs.",
                             );
 
-                            (d_note.note, a, d_note.ivk_tag.1, (*nk).clone())
+                            (d_out.note, a, d_out.ivk_tag.1, (*nk).clone())
                         })
                     })
                     .collect()
@@ -837,7 +838,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 2);
 
             let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::<_, _, _, ()>::new(
+                let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
                     dfvk.to_sapling_keys()
                         .iter()
@@ -924,7 +925,7 @@ mod tests {
             assert_eq!(cb.vtx.len(), 3);
 
             let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::<_, _, _, ()>::new(
+                let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
                     dfvk.to_sapling_keys()
                         .iter()

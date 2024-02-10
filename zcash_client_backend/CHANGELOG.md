@@ -8,30 +8,52 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- A new `orchard` feature flag has been added to make it possible to
+  build client code without `orchard` dependendencies. Additions and
+  changes related to `Orchard` below are introduced under this feature
+  flag.
 - `zcash_client_backend::data_api`:
-  - `BlockMetadata::orchard_tree_size` (when the `orchard` feature is enabled).
+  - `AccountBalance::with_orchard_balance_mut`
+  - `BlockMetadata::orchard_tree_size`
+  - `ScannedBlock::orchard`
+  - `ScannedBlockCommitments::orchard`
+- `zcash_client_backend::fees::orchard`
+- `zcash_client_backend::fees::ChangeValue::orchard`
+- `zcash_client_backend::wallet`:
+  - `Note::Orchard`
+
+### Changed
+- `zcash_client_backend::data_api`:
+  - Arguments to `BlockMetadata::from_parts` have changed.
+  - Arguments to `ScannedBlock::from_parts` have changed.
+  - Changes to the `WalletRead` trait:
+    - Added `get_orchard_nullifiers`
+  - `ShieldedProtocol` has a new `Orchard` variant.
+- `zcash_client_backend::fees`:
+  - Arguments to `ChangeStrategy::compute_balance` have changed.
+
+## [0.11.0-pre-release] Unreleased
+
+### Added
+- `zcash_client_backend::data_api`:
   - `InputSource`
   - `ScannedBlock::{into_commitments, sapling}`
-  - `ScannedBlock::orchard` (when the `orchard` feature is enabled.)
   - `ScannedBundles`
   - `ScannedBlockCommitments`
   - `Balance::{add_spendable_value, add_pending_change_value, add_pending_spendable_value}`
   - `AccountBalance::{
       with_sapling_balance_mut,
-      with_orchard_balance_mut,
       add_unshielded_value
     }`
+  - `WalletSummary::next_sapling_subtree_index`
   - `wallet::propose_standard_transfer_to_address`
   - `wallet::input_selection::Proposal::{from_parts, shielded_inputs}`
   - `wallet::input_selection::ShieldedInputs`
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
     functionality and move it behind the `transparent-inputs` feature flag.
-- `zcash_client_backend::fees::{standard, orchard, sapling}`
-- `zcash_client_backend::fees::ChangeValue::{new, orchard}`
-- `zcash_client_backend::keys`:
-  - `AddressGenerationError`
-  - `UnifiedAddressRequest`
+- `zcash_client_backend::fees::{standard, sapling}`
+- `zcash_client_backend::fees::ChangeValue::new`
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
@@ -40,7 +62,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::zip321::parse::Param::name`
 - `zcash_client_backend::proto::`
   - `PROPOSAL_SER_V1`
-  - `ProposalError`
+  - `ProposalDecodingError`
   - `proposal` module, for parsing and serializing transaction proposals.
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
@@ -52,8 +74,8 @@ and this library adheres to Rust's notion of
      wallet::{ReceivedSaplingNote, WalletTransparentOutput},
      wallet::input_selection::{Proposal, SaplingInputs},
    }`
-- A new `orchard` feature flag has been added to make it possible to
-  build client code without `orchard` dependendencies.
+- `zcash_client_backend::zip321::to_uri` now returns a `String` rather than an
+  `Option<String>` and provides canonical serialization for the empty proposal.
 
 ### Moved
 - `zcash_client_backend::data_api::{PoolType, ShieldedProtocol}` have
@@ -66,9 +88,8 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_client_backend::data_api`:
-  - Arguments to `BlockMetadata::from_parts` have changed to include Orchard.
   - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
-    a `u32` for consistency with Orchard.
+    a `u32` for future consistency with Orchard.
   - `WalletShieldedOutput` has an additional type parameter which is used for
     key scope. `WalletShieldedOutput::from_parts` now takes an additional
     argument of this type.
@@ -78,13 +99,12 @@ and this library adheres to Rust's notion of
     `WalletTx` change.
   - `ScannedBlock::metadata` has been renamed to `to_block_metadata` and now
     returns an owned value rather than a reference.
-  - `ShieldedProtocol` has a new variant for `Orchard`, allowing for better
-    reporting to callers trying to perform actions using `Orchard` before it is
-    fully supported.
   - Fields of `Balance` and `AccountBalance` have been made private and the values
     of these fields have been made available via methods having the same names
     as the previously-public fields.
-  - `WalletWrite::get_next_available_address` now takes an additional 
+  - `WalletSummary::new` now takes an additional `next_sapling_subtree_index`
+    argument.
+  - `WalletWrite::get_next_available_address` now takes an additional
     `UnifiedAddressRequest` argument.
   - `chain::scan_cached_blocks` now returns a `ScanSummary` containing metadata
     about the scanned blocks on success.
@@ -93,6 +113,7 @@ and this library adheres to Rust's notion of
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
     - A new variant `UnsupportedPoolType` has been added.
+    - A new variant `NoSupportedReceivers` has been added.
   - `wallet::shield_transparent_funds` no longer takes a `memo` argument;
     instead, memos to be associated with the shielded outputs should be
     specified in the construction of the value of the `input_selector`
@@ -131,7 +152,6 @@ and this library adheres to Rust's notion of
     arguments. This helps to minimize the set of capabilities that the
     `data_api::InputSource` must expose.
   - Changes to the `WalletRead` trait:
-    - Added `get_orchard_nullifiers` (under the `orchard` feature flag.)
     - `get_checkpoint_depth` has been removed without replacement. This
       is no longer needed given the change to use the stored anchor height for transaction
       proposal execution.
@@ -194,29 +214,6 @@ and this library adheres to Rust's notion of
     - `ReceivedSaplingNote::value`
     - `WalletTransparentOutput::value`
 
-- `zcash_client_backend::address`:
-  - `RecipientAddress` has been renamed to `Address`
-  - `Address::Shielded` has been renamed to `Address::Sapling`
-  - `UnifiedAddress::from_receivers` no longer takes an Orchard receiver
-    argument unless the `orchard` feature is enabled.
-  - `UnifiedAddress::orchard` is now only available when the `orchard` feature
-    is enabled.
-
-- `zcash_client_backend::keys`:
-  - `DerivationError::Orchard` is now only available when the `orchard` feature
-    is enabled.
-  - `UnifiedSpendingKey::address` now takes an argument that specifies the
-    receivers to be generated in the resulting address. Also, it now returns
-    `Result<UnifiedAddress, AddressGenerationError>` instead of
-    `Option<UnifiedAddress>` so that we may better report to the user how
-    address generation has failed.
-  - `UnifiedSpendingKey::orchard` is now only available when the `orchard`
-    feature is enabled.
-  - `UnifiedSpendingKey::transparent` is now only available when the
-    `transparent-inputs` feature is enabled.
-  - `UnifiedFullViewingKey::new` no longer takes an Orchard full viewing key
-    argument unless the `orchard` feature is enabled.
-
 ### Removed
 - `zcash_client_backend::wallet::ReceivedSaplingNote` has been replaced by
   `zcash_client_backend::ReceivedNote`.
@@ -225,8 +222,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`
 - `zcash_client_backend::data_api::ScannedBlock::from_parts` has been made crate-private.
 - `zcash_client_backend::data_api::ScannedBlock::into_sapling_commitments` has been
-  replaced by `into_commitments` which returns both Sapling and Orchard note commitments
-  and associated note commitment retention information for the block.
+  replaced by `into_commitments` which returns a `ScannedBlockCommitments` value.
 
 ## [0.10.0] - 2023-09-25
 

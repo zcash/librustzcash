@@ -1154,7 +1154,7 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::PreZip313;
 
         // TODO: generate_next_block_from_tx does not currently support transparent outputs.
-        let to = TransparentAddress::PublicKey([7; 20]).into();
+        let to = TransparentAddress::PublicKeyHash([7; 20]).into();
         let min_confirmations = NonZeroU32::new(1).unwrap();
         let proposal = st
             .propose_standard_transfer::<Infallible>(
@@ -1216,7 +1216,7 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::PreZip313;
 
         // TODO: generate_next_block_from_tx does not currently support transparent outputs.
-        let to = TransparentAddress::PublicKey([7; 20]).into();
+        let to = TransparentAddress::PublicKeyHash([7; 20]).into();
         let min_confirmations = NonZeroU32::new(1).unwrap();
         let proposal = st
             .propose_standard_transfer::<Infallible>(

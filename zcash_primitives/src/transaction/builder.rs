@@ -239,6 +239,35 @@ impl BuildConfig {
     }
 }
 
+/// The result of a transaction build operation, which includes the resulting transaction along
+/// with metadata describing how spends and outputs were shuffled in creating the transaction's
+/// shielded bundles.
+#[derive(Debug)]
+pub struct BuildResult {
+    transaction: Transaction,
+    sapling_meta: SaplingMetadata,
+    orchard_meta: orchard::builder::BundleMetadata,
+}
+
+impl BuildResult {
+    /// Returns the transaction that was constructed by the builder.
+    pub fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    /// Returns the mapping from Sapling inputs and outputs to their randomized positions in the
+    /// Sapling bundle in the newly constructed transaction.
+    pub fn sapling_meta(&self) -> &SaplingMetadata {
+        &self.sapling_meta
+    }
+
+    /// Returns the mapping from Orchard inputs and outputs to the randomized positions of the
+    /// Actions that contain them in the Orchard bundle in the newly constructed transaction.
+    pub fn orchard_meta(&self) -> &orchard::builder::BundleMetadata {
+        &self.orchard_meta
+    }
+}
+
 /// Generates a [`Transaction`] from its inputs and outputs.
 pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     params: P,
@@ -602,7 +631,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
-    ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
+    ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee(fee_rule).map_err(Error::Fee)?;
         self.build_internal(rng, spend_prover, output_prover, fee)
     }
@@ -623,7 +652,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         spend_prover: &SP,
         output_prover: &OP,
         fee_rule: &FR,
-    ) -> Result<(Transaction, SaplingMetadata), Error<FR::Error>> {
+    ) -> Result<BuildResult, Error<FR::Error>> {
         let fee = self.get_fee_zfuture(fee_rule).map_err(Error::Fee)?;
         self.build_internal(rng, spend_prover, output_prover, fee)
     }
@@ -634,7 +663,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         spend_prover: &SP,
         output_prover: &OP,
         fee: NonNegativeAmount,
-    ) -> Result<(Transaction, SaplingMetadata), Error<FE>> {
+    ) -> Result<BuildResult, Error<FE>> {
         let consensus_branch_id = BranchId::for_height(&self.params, self.target_height);
 
         // determine transaction version
@@ -660,7 +689,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
 
         let transparent_bundle = self.transparent_builder.build();
 
-        let (sapling_bundle, tx_metadata) = match self
+        let (sapling_bundle, sapling_meta) = match self
             .sapling_builder
             .and_then(|builder| {
                 builder
@@ -668,7 +697,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                     .map_err(Error::SaplingBuild)
                     .transpose()
                     .map(|res| {
-                        res.map(|(bundle, tx_metadata)| {
+                        res.map(|(bundle, sapling_meta)| {
                             // We need to create proofs before signatures, because we still support
                             // creating V4 transactions, which commit to the Sapling proofs in the
                             // transaction digest.
@@ -679,7 +708,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                                     &mut rng,
                                     self.progress_notifier,
                                 ),
-                                tx_metadata,
+                                sapling_meta,
                             )
                         })
                     })
@@ -690,7 +719,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             None => (None, SaplingMetadata::empty()),
         };
 
-        let orchard_bundle: Option<orchard::Bundle<_, Amount>> = self
+        let (orchard_bundle, orchard_meta) = match self
             .orchard_builder
             .and_then(|builder| {
                 builder
@@ -698,7 +727,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                     .map_err(Error::OrchardBuild)
                     .transpose()
             })
-            .transpose()?;
+            .transpose()?
+        {
+            Some((bundle, meta)) => (Some(bundle), meta),
+            None => (None, orchard::builder::BundleMetadata::empty()),
+        };
 
         #[cfg(feature = "zfuture")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
@@ -786,7 +819,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
 
         // The unwrap() here is safe because the txid hashing
         // of freeze() should be infalliable.
-        Ok((authorized_tx.freeze().unwrap(), tx_metadata))
+        Ok(BuildResult {
+            transaction: authorized_tx.freeze().unwrap(),
+            sapling_meta,
+            orchard_meta,
+        })
     }
 }
 
@@ -829,7 +866,7 @@ mod testing {
     use rand_core::CryptoRng;
     use std::convert::Infallible;
 
-    use super::{Builder, Error, SaplingMetadata};
+    use super::{BuildResult, Builder, Error};
     use crate::{
         consensus,
         sapling::{
@@ -837,16 +874,12 @@ mod testing {
             prover::mock::{MockOutputProver, MockSpendProver},
         },
         transaction::fees::fixed,
-        transaction::Transaction,
     };
 
     impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
         /// Build the transaction using mocked randomness and proving capabilities.
         /// DO NOT USE EXCEPT FOR UNIT TESTING.
-        pub fn mock_build<R: RngCore>(
-            self,
-            rng: R,
-        ) -> Result<(Transaction, SaplingMetadata), Error<Infallible>> {
+        pub fn mock_build<R: RngCore>(self, rng: R) -> Result<BuildResult, Error<Infallible>> {
             struct FakeCryptoRng<R: RngCore>(R);
             impl<R: RngCore> CryptoRng for FakeCryptoRng<R> {}
             impl<R: RngCore> RngCore for FakeCryptoRng<R> {
@@ -966,14 +999,14 @@ mod tests {
         // Create a tx with only t output. No binding_sig should be present
         builder
             .add_transparent_output(
-                &TransparentAddress::PublicKey([0; 20]),
+                &TransparentAddress::PublicKeyHash([0; 20]),
                 NonNegativeAmount::const_from_u64(40000),
             )
             .unwrap();
 
-        let (tx, _) = builder.mock_build(OsRng).unwrap();
+        let res = builder.mock_build(OsRng).unwrap();
         // No binding signature, because only t input and outputs
-        assert!(tx.sapling_bundle.is_none());
+        assert!(res.transaction().sapling_bundle.is_none());
     }
 
     #[test]
@@ -1010,14 +1043,14 @@ mod tests {
 
         builder
             .add_transparent_output(
-                &TransparentAddress::PublicKey([0; 20]),
+                &TransparentAddress::PublicKeyHash([0; 20]),
                 NonNegativeAmount::const_from_u64(40000),
             )
             .unwrap();
 
         // A binding signature (and bundle) is present because there is a Sapling spend.
-        let (tx, _) = builder.mock_build(OsRng).unwrap();
-        assert!(tx.sapling_bundle().is_some());
+        let res = builder.mock_build(OsRng).unwrap();
+        assert!(res.transaction().sapling_bundle().is_some());
     }
 
     #[test]
@@ -1083,7 +1116,7 @@ mod tests {
             let mut builder = Builder::new(TEST_NETWORK, tx_height, build_config);
             builder
                 .add_transparent_output(
-                    &TransparentAddress::PublicKey([0; 20]),
+                    &TransparentAddress::PublicKeyHash([0; 20]),
                     NonNegativeAmount::const_from_u64(50000),
                 )
                 .unwrap();
@@ -1124,7 +1157,7 @@ mod tests {
                 .unwrap();
             builder
                 .add_transparent_output(
-                    &TransparentAddress::PublicKey([0; 20]),
+                    &TransparentAddress::PublicKeyHash([0; 20]),
                     NonNegativeAmount::const_from_u64(20000),
                 )
                 .unwrap();
@@ -1167,13 +1200,13 @@ mod tests {
                 .unwrap();
             builder
                 .add_transparent_output(
-                    &TransparentAddress::PublicKey([0; 20]),
+                    &TransparentAddress::PublicKeyHash([0; 20]),
                     NonNegativeAmount::const_from_u64(20000),
                 )
                 .unwrap();
             assert_matches!(
                 builder.mock_build(OsRng),
-                Ok((tx, _)) if tx.fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
+                Ok(res) if res.transaction().fee_paid(|_| Err(BalanceError::Overflow)).unwrap() == Amount::const_from_i64(10_000)
             );
         }
     }

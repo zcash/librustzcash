@@ -27,6 +27,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
+zcash_keys.workspace = true
 zcash_note_encryption.workspace = true
 zcash_primitives.workspace = true
 zip32.workspace = true
@@ -112,15 +113,20 @@ time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 lightwalletd-tonic = ["dep:tonic"]
 
 ## Enables receiving transparent funds and shielding them.
-transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
+transparent-inputs = [
+    "dep:hdwallet",
+    "zcash_keys/transparent-inputs",
+    "zcash_primitives/transparent-inputs",
+]
 
 ## Enables receiving and spending Orchard funds.
-orchard = ["dep:orchard"]
+orchard = ["dep:orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
     "orchard?/test-dependencies",
+    "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
     "incrementalmerkletree/test-dependencies",
 ]
@@ -128,7 +134,7 @@ test-dependencies = [
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
-unstable = ["dep:byteorder"]
+unstable = ["dep:byteorder", "zcash_keys/unstable"]
 
 ## Exposes APIs for unstable serialization formats. These may change at any time.
 unstable-serialization = ["dep:byteorder"]

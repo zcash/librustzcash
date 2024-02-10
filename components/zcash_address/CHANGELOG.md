@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.3.1] - 2024-01-12
+### Fixed
+- Stubs for `zcash_address::convert` traits that are created by `rust-analyzer`
+  and similar LSPs no longer reference crate-private type aliases.
+
 ## [0.3.0] - 2023-06-06
 ### Changed
 - Bumped bs58 dependency to `0.5`.

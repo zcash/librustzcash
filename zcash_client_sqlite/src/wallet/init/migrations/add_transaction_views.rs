@@ -395,7 +395,10 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
+        use zcash_client_backend::keys::UnifiedAddressRequest;
         use zcash_primitives::transaction::components::amount::NonNegativeAmount;
+
+        use crate::UA_TRANSPARENT;
 
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -437,7 +440,11 @@ mod tests {
 
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
-        let (ua, _) = ufvk.default_address();
+        let (ua, _) = ufvk.default_address(UnifiedAddressRequest::unsafe_new(
+            false,
+            true,
+            UA_TRANSPARENT,
+        ));
         let taddr = ufvk
             .transparent()
             .and_then(|k| {

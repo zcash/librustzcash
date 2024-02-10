@@ -1,9 +1,7 @@
 //! Encoding and decoding functions for Zcash key and address structs.
 //!
 //! Human-Readable Prefixes (HRPs) for Bech32 encodings are located in the
-//! [zcash_primitives::constants][constants] module.
-//!
-//! [constants]: zcash_primitives::constants
+//! [zcash_primitives::constants] module.
 
 use crate::address::UnifiedAddress;
 use bech32::{self, Error, FromBase32, ToBase32, Variant};
@@ -76,13 +74,24 @@ where
     }
 }
 
+/// A trait for encoding and decoding Zcash addresses.
 pub trait AddressCodec<P>
 where
     Self: std::marker::Sized,
 {
     type Error;
 
+    /// Encode a Zcash address.
+    ///
+    /// # Arguments
+    /// * `params` - The network the address is to be used on.
     fn encode(&self, params: &P) -> String;
+
+    /// Decodes a Zcash address from its string representation.
+    ///
+    /// # Arguments
+    /// * `params` - The network the address is to be used on.
+    /// * `address` - The string representation of the address.
     fn decode(params: &P, address: &str) -> Result<Self, Self::Error>;
 }
 
@@ -175,7 +184,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_SPENDING_KEY},
 ///     zip32::AccountId,
 /// };
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_extended_spending_key,
 ///     keys::sapling,
 /// };
@@ -208,7 +217,7 @@ pub fn decode_extended_spending_key(
 ///     constants::testnet::{COIN_TYPE, HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY},
 ///     zip32::AccountId,
 /// };
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_extended_full_viewing_key,
 ///     keys::sapling,
 /// };
@@ -239,7 +248,7 @@ pub fn decode_extended_full_viewing_key(
 /// ```
 /// use group::Group;
 /// use sapling::{Diversifier, PaymentAddress};
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_payment_address,
 /// };
 /// use zcash_primitives::{
@@ -283,7 +292,7 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 /// ```
 /// use group::Group;
 /// use sapling::{Diversifier, PaymentAddress};
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::decode_payment_address,
 /// };
 /// use zcash_primitives::{
@@ -327,7 +336,7 @@ pub fn decode_payment_address(
 /// # Examples
 ///
 /// ```
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::encode_transparent_address,
 /// };
 /// use zcash_primitives::{
@@ -339,7 +348,7 @@ pub fn decode_payment_address(
 ///     encode_transparent_address(
 ///         &TEST_NETWORK.b58_pubkey_address_prefix(),
 ///         &TEST_NETWORK.b58_script_address_prefix(),
-///         &TransparentAddress::PublicKey([0; 20]),
+///         &TransparentAddress::PublicKeyHash([0; 20]),
 ///     ),
 ///     "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
 /// );
@@ -348,7 +357,7 @@ pub fn decode_payment_address(
 ///     encode_transparent_address(
 ///         &TEST_NETWORK.b58_pubkey_address_prefix(),
 ///         &TEST_NETWORK.b58_script_address_prefix(),
-///         &TransparentAddress::Script([0; 20]),
+///         &TransparentAddress::ScriptHash([0; 20]),
 ///     ),
 ///     "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
 /// );
@@ -360,13 +369,13 @@ pub fn encode_transparent_address(
     addr: &TransparentAddress,
 ) -> String {
     let decoded = match addr {
-        TransparentAddress::PublicKey(key_id) => {
+        TransparentAddress::PublicKeyHash(key_id) => {
             let mut decoded = vec![0; pubkey_version.len() + 20];
             decoded[..pubkey_version.len()].copy_from_slice(pubkey_version);
             decoded[pubkey_version.len()..].copy_from_slice(key_id);
             decoded
         }
-        TransparentAddress::Script(script_id) => {
+        TransparentAddress::ScriptHash(script_id) => {
             let mut decoded = vec![0; script_version.len() + 20];
             decoded[..script_version.len()].copy_from_slice(script_version);
             decoded[script_version.len()..].copy_from_slice(script_id);
@@ -398,7 +407,7 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 /// use zcash_primitives::{
 ///     consensus::{TEST_NETWORK, Parameters},
 /// };
-/// use zcash_client_backend::{
+/// use zcash_keys::{
 ///     encoding::decode_transparent_address,
 /// };
 /// use zcash_primitives::legacy::TransparentAddress;
@@ -409,7 +418,7 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         "tm9iMLAuYMzJ6jtFLcA7rzUmfreGuKvr7Ma",
 ///     ),
-///     Ok(Some(TransparentAddress::PublicKey([0; 20]))),
+///     Ok(Some(TransparentAddress::PublicKeyHash([0; 20]))),
 /// );
 ///
 /// assert_eq!(
@@ -418,7 +427,7 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///         &TEST_NETWORK.b58_script_address_prefix(),
 ///         "t26YoyZ1iPgiMEWL4zGUm74eVWfhyDMXzY2",
 ///     ),
-///     Ok(Some(TransparentAddress::Script([0; 20]))),
+///     Ok(Some(TransparentAddress::ScriptHash([0; 20]))),
 /// );
 /// ```
 /// [`TransparentAddress`]: zcash_primitives::legacy::TransparentAddress
@@ -432,12 +441,12 @@ pub fn decode_transparent_address(
             decoded[pubkey_version.len()..]
                 .try_into()
                 .ok()
-                .map(TransparentAddress::PublicKey)
+                .map(TransparentAddress::PublicKeyHash)
         } else if decoded.starts_with(script_version) {
             decoded[script_version.len()..]
                 .try_into()
                 .ok()
-                .map(TransparentAddress::Script)
+                .map(TransparentAddress::ScriptHash)
         } else {
             None
         }
@@ -502,7 +511,7 @@ mod tests {
 
         let encoded_main = "zxviews1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjsxmansf";
         let encoded_test = "zxviewtestsapling1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjs8evfkz";
-
+        let encoded_regtest = "zxviewregtestsapling1qqqqqqqqqqqqqq8n3zjjmvhhr854uy3qhpda3ml34haf0x388z5r7h4st4kpsf6qy3zw4wc246aw9rlfyg5ndlwvne7mwdq0qe6vxl42pqmcf8pvmmd5slmjxduqa9evgej6wa3th2505xq4nggrxdm93rxk4rpdjt5nmq2vn44e2uhm7h0hsagfvkk4n7n6nfer6u57v9cac84t7nl2zth0xpyfeg0w2p2wv2yn6jn923aaz0vdaml07l60ahapk6efchyxwysrvjskjkzax";
         assert_eq!(
             encode_extended_full_viewing_key(
                 constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
@@ -526,10 +535,19 @@ mod tests {
             ),
             encoded_test
         );
+
+        assert_eq!(
+            encode_extended_full_viewing_key(
+                constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                &extfvk
+            ),
+            encoded_regtest
+        );
+
         assert_eq!(
             decode_extended_full_viewing_key(
-                constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-                encoded_test
+                constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
+                encoded_regtest
             )
             .unwrap(),
             extfvk
@@ -550,11 +568,14 @@ mod tests {
             "zs1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75c8v35z";
         let encoded_test =
             "ztestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle75ss7jnk";
+        let encoded_regtest =
+            "zregtestsapling1qqqqqqqqqqqqqqqqqqcguyvaw2vjk4sdyeg0lc970u659lvhqq7t0np6hlup5lusxle7505hlz3";
 
         assert_eq!(
             encode_payment_address(constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr),
             encoded_main
         );
+
         assert_eq!(
             decode_payment_address(
                 constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
@@ -568,10 +589,25 @@ mod tests {
             encode_payment_address(constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS, &addr),
             encoded_test
         );
+
+        assert_eq!(
+            encode_payment_address(constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS, &addr),
+            encoded_regtest
+        );
+
         assert_eq!(
             decode_payment_address(
                 constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS,
                 encoded_test
+            )
+            .unwrap(),
+            addr
+        );
+
+        assert_eq!(
+            decode_payment_address(
+                constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
+                encoded_regtest
             )
             .unwrap(),
             addr

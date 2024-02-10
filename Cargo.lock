@@ -1475,8 +1475,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "orchard"
-version = "0.6.0"
-source = "git+https://github.com/zcash/orchard.git?rev=189257391a5726d7f3f2568d547a5ef8603c7156#189257391a5726d7f3f2568d547a5ef8603c7156"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92c801aeaccd19bb6916d71f25694b62d223061872900e8022221c1ad8dcad2d"
 dependencies = [
  "aes",
  "bitvec",
@@ -1499,6 +1500,8 @@ dependencies = [
  "subtle",
  "tracing",
  "zcash_note_encryption",
+ "zcash_spec",
+ "zip32",
 ]
 
 [[package]]
@@ -2101,8 +2104,9 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.0.1"
-source = "git+https://github.com/zcash/sapling-crypto.git?rev=4ec6a48daab0af1fe6cb930f6a150030ce91d0e9#4ec6a48daab0af1fe6cb930f6a150030ce91d0e9"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f5de898a7cdb7f6d9c8fb888341b6ae6e2aeae88227b7f435f1dda49ecf9e62"
 dependencies = [
  "aes",
  "bellman",
@@ -2474,9 +2478,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.33.0"
+version = "1.35.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f38200e3ef7995e5ef13baec2f432a6da0aa9ac495b2c0e8f3b7eec2c92d653"
+checksum = "c89b4efa943be685f629b149f53829423f8f5531ea21249408e8e2f8671ec104"
 dependencies = [
  "backtrace",
  "bytes",
@@ -2990,7 +2994,7 @@ checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
 
 [[package]]
 name = "zcash_address"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -3038,6 +3042,7 @@ dependencies = [
  "which",
  "zcash_address",
  "zcash_encoding",
+ "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
@@ -3075,6 +3080,7 @@ dependencies = [
  "zcash_address",
  "zcash_client_backend",
  "zcash_encoding",
+ "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
@@ -3112,6 +3118,33 @@ dependencies = [
  "byteorder",
  "primitive-types",
  "proptest",
+]
+
+[[package]]
+name = "zcash_keys"
+version = "0.0.0"
+dependencies = [
+ "bech32",
+ "bls12_381",
+ "bs58",
+ "byteorder",
+ "document-features",
+ "group",
+ "hdwallet",
+ "hex",
+ "jubjub",
+ "memuse",
+ "nonempty",
+ "orchard",
+ "proptest",
+ "rand_core",
+ "sapling-crypto",
+ "subtle",
+ "tracing",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_primitives",
+ "zip32",
 ]
 
 [[package]]

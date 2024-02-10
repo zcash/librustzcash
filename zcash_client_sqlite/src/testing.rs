@@ -683,15 +683,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
         f: F,
     ) -> T {
-        let binding = get_wallet_summary(
-            &self.wallet().conn,
-            &self.wallet().params,
-            min_confirmations,
-            &SubtreeScanProgress,
-        )
-        .unwrap()
-        .unwrap();
-
+        let binding = self.get_wallet_summary(min_confirmations).unwrap();
         f(binding.account_balances().get(&account).unwrap())
     }
 
@@ -734,7 +726,7 @@ impl<Cache> TestState<Cache> {
 
     pub(crate) fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary> {
         get_wallet_summary(
-            &self.wallet().conn,
+            &self.wallet().conn.unchecked_transaction().unwrap(),
             &self.wallet().params,
             min_confirmations,
             &SubtreeScanProgress,
@@ -1077,9 +1069,6 @@ pub(crate) fn check_proposal_serialization_roundtrip(
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
     let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);
-    assert_matches!(proposal_proto, Some(_));
-    let deserialized_proposal = proposal_proto
-        .unwrap()
-        .try_into_standard_proposal(&db_data.params, db_data);
+    let deserialized_proposal = proposal_proto.try_into_standard_proposal(&db_data.params, db_data);
     assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }

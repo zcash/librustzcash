@@ -181,7 +181,9 @@ mod tests {
         zip32::AccountId,
     };
 
-    use crate::{testing::TestBuilder, wallet::scanning::priority_code, WalletDb};
+    use crate::{
+        testing::TestBuilder, wallet::scanning::priority_code, WalletDb, DEFAULT_UA_REQUEST,
+    };
 
     use super::init_wallet_db;
 
@@ -1005,7 +1007,8 @@ mod tests {
             )?;
 
             let ufvk_str = ufvk.encode(&wdb.params);
-            let address_str = Address::Unified(ufvk.default_address().0).encode(&wdb.params);
+            let address_str =
+                Address::Unified(ufvk.default_address(DEFAULT_UA_REQUEST).0).encode(&wdb.params);
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1019,8 +1022,14 @@ mod tests {
             // add a transparent "sent note"
             #[cfg(feature = "transparent-inputs")]
             {
-                let taddr = Address::Transparent(*ufvk.default_address().0.transparent().unwrap())
-                    .encode(&wdb.params);
+                let taddr = Address::Transparent(
+                    *ufvk
+                        .default_address(DEFAULT_UA_REQUEST)
+                        .0
+                        .transparent()
+                        .unwrap(),
+                )
+                .encode(&wdb.params);
                 wdb.conn.execute(
                     "INSERT INTO blocks (height, hash, time, sapling_tree) VALUES (0, 0, 0, x'000000')",
                     [],
@@ -1060,7 +1069,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::{data_api::AccountBirthday, keys::UnifiedAddressRequest};
+        use zcash_client_backend::data_api::AccountBirthday;
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1090,7 +1099,7 @@ mod tests {
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 db_data
-                    .get_next_available_address(account, UnifiedAddressRequest::DEFAULT)
+                    .get_next_available_address(account, DEFAULT_UA_REQUEST)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

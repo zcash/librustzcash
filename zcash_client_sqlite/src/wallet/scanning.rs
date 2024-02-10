@@ -636,6 +636,16 @@ pub(crate) mod tests {
                 scan_range((sap_active + 300)..(sap_active + 310), ChainTip)
             ]
         );
+
+        // The wallet summary should be requesting the second-to-last root, as the last
+        // shard is incomplete.
+        assert_eq!(
+            st.wallet()
+                .get_wallet_summary(0)
+                .unwrap()
+                .map(|s| s.next_sapling_subtree_index()),
+            Some(2),
+        );
     }
 
     pub(crate) fn test_with_canopy_birthday() -> (
@@ -970,6 +980,10 @@ pub(crate) mod tests {
         // We have scanned a block, so we now have a starting tree position, 500 blocks above the
         // wallet birthday but before the end of the shard.
         let summary = st.get_wallet_summary(1);
+        assert_eq!(
+            summary.as_ref().map(|s| s.next_sapling_subtree_index()),
+            Some(0),
+        );
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
             Some(Ratio::new(1, 0x1 << SAPLING_SHARD_HEIGHT))

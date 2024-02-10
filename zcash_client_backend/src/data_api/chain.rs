@@ -306,7 +306,7 @@ where
         .get_sapling_nullifiers(NullifierQuery::Unspent)
         .map_err(Error::Wallet)?;
 
-    let mut batch_runner = BatchRunner::<_, _, _, ()>::new(
+    let mut batch_runner = BatchRunner::<_, _, _, _, ()>::new(
         100,
         dfvks
             .iter()

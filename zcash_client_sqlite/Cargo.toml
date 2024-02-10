@@ -22,6 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
 zcash_encoding.workspace = true
+zcash_keys = { workspace = true, features = ["orchard"] }
 zcash_primitives.workspace = true
 
 # Dependencies exposed in a public API:
@@ -51,6 +52,9 @@ incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
+# Warning: One of the downstream consumers requires that SQLite be available through
+# CocoaPods, due to being bound to React Native. We need to ensure that the SQLite
+# version required for `rusqlite` is a version that is available through CocoaPods.
 rusqlite = { version = "0.29.0", features = ["bundled", "time", "array"] }
 schemer = "0.2"
 schemer-rusqlite = "0.2.2"
@@ -70,6 +74,7 @@ proptest.workspace = true
 rand_core.workspace = true
 regex = "1.4"
 tempfile = "3.5.0"
+zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zcash_primitives = { workspace = true, features = ["test-dependencies"] }

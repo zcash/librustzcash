@@ -8,6 +8,7 @@ members = [
     "zcash_client_sqlite",
     "zcash_extensions",
     "zcash_history",
+    "zcash_keys",
     "zcash_primitives",
     "zcash_proofs",
 ]
@@ -30,6 +31,7 @@ equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.3", path = "components/zcash_address" }
 zcash_client_backend = { version = "0.10", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
+zcash_keys = { version = "0.0", path = "zcash_keys" }
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.13", path = "zcash_primitives", default-features = false }
 zcash_proofs = { version = "0.13", path = "zcash_proofs", default-features = false }
@@ -47,11 +49,11 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
-sapling = { package = "sapling-crypto", version = "0.0" }
+sapling = { package = "sapling-crypto", version = "0.1" }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.6", default-features = false }
+orchard = { version = "0.7", default-features = false }
 
 # - Transparent
 hdwallet = "0.4"
@@ -113,7 +115,3 @@ zip32 = "0.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
-
-[patch.crates-io]
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "4ec6a48daab0af1fe6cb930f6a150030ce91d0e9" }
-orchard = { git = "https://github.com/zcash/orchard.git", rev = "189257391a5726d7f3f2568d547a5ef8603c7156" }

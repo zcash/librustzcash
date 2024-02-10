@@ -66,7 +66,7 @@
 
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, OptionalExtension};
-use shardtree::ShardTree;
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
@@ -99,12 +99,13 @@ use zcash_client_backend::{
 };
 
 use crate::wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore};
+use crate::DEFAULT_UA_REQUEST;
 use crate::{
     error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
     SAPLING_TABLES_PREFIX,
 };
 
-use self::scanning::{parse_priority_code, replace_queue_entries};
+use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -132,6 +133,7 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     match pool_type {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
+        #[cfg(zcash_unstable = "orchard")]
         PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
     }
 }
@@ -259,7 +261,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     // Always derive the default Unified Address for the account.
-    let (address, d_idx) = key.default_address();
+    let (address, d_idx) = key.default_address(DEFAULT_UA_REQUEST);
     insert_address(conn, params, account, d_idx, &address)?;
 
     Ok(())
@@ -486,9 +488,11 @@ pub(crate) trait ScanProgress {
     ) -> Result<Option<Ratio<u64>>, SqliteClientError>;
 }
 
+#[derive(Debug)]
 pub(crate) struct SubtreeScanProgress;
 
 impl ScanProgress for SubtreeScanProgress {
+    #[tracing::instrument(skip(conn))]
     fn sapling_scan_progress(
         &self,
         conn: &rusqlite::Connection,
@@ -572,13 +576,14 @@ impl ScanProgress for SubtreeScanProgress {
 ///
 /// `min_confirmations` can be 0, but that case is currently treated identically to
 /// `min_confirmations == 1` for shielded notes. This behaviour may change in the future.
+#[tracing::instrument(skip(tx, params, progress))]
 pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
-    conn: &rusqlite::Connection,
+    tx: &rusqlite::Transaction,
     params: &P,
     min_confirmations: u32,
     progress: &impl ScanProgress,
 ) -> Result<Option<WalletSummary>, SqliteClientError> {
-    let chain_tip_height = match scan_queue_extrema(conn)? {
+    let chain_tip_height = match scan_queue_extrema(tx)? {
         Some(range) => *range.end(),
         None => {
             return Ok(None);
@@ -586,14 +591,14 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     };
 
     let birthday_height =
-        wallet_birthday(conn)?.expect("If a scan range exists, we know the wallet birthday.");
+        wallet_birthday(tx)?.expect("If a scan range exists, we know the wallet birthday.");
 
     let fully_scanned_height =
-        block_fully_scanned(conn, params)?.map_or(birthday_height - 1, |m| m.block_height());
+        block_fully_scanned(tx, params)?.map_or(birthday_height - 1, |m| m.block_height());
     let summary_height = (chain_tip_height + 1).saturating_sub(std::cmp::max(min_confirmations, 1));
 
     let sapling_scan_progress = progress.sapling_scan_progress(
-        conn,
+        tx,
         birthday_height,
         fully_scanned_height,
         chain_tip_height,
@@ -601,19 +606,27 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     // If the shard containing the summary height contains any unscanned ranges that start below or
     // including that height, none of our balance is currently spendable.
-    let any_spendable = conn.query_row(
-        "SELECT NOT EXISTS(
-             SELECT 1 FROM v_sapling_shard_unscanned_ranges
-             WHERE :summary_height
-                BETWEEN subtree_start_height
-                AND IFNULL(subtree_end_height, :summary_height)
-             AND block_range_start <= :summary_height
-         )",
-        named_params![":summary_height": u32::from(summary_height)],
-        |row| row.get::<_, bool>(0),
-    )?;
+    #[tracing::instrument(skip_all)]
+    fn is_any_spendable(
+        conn: &rusqlite::Connection,
+        summary_height: BlockHeight,
+    ) -> Result<bool, SqliteClientError> {
+        conn.query_row(
+            "SELECT NOT EXISTS(
+                 SELECT 1 FROM v_sapling_shard_unscanned_ranges
+                 WHERE :summary_height
+                    BETWEEN subtree_start_height
+                    AND IFNULL(subtree_end_height, :summary_height)
+                 AND block_range_start <= :summary_height
+             )",
+            named_params![":summary_height": u32::from(summary_height)],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|e| e.into())
+    }
+    let any_spendable = is_any_spendable(tx, summary_height)?;
 
-    let mut stmt_accounts = conn.prepare_cached("SELECT account FROM accounts")?;
+    let mut stmt_accounts = tx.prepare_cached("SELECT account FROM accounts")?;
     let mut account_balances = stmt_accounts
         .query([])?
         .and_then(|row| {
@@ -623,7 +636,8 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         })
         .collect::<Result<BTreeMap<AccountId, AccountBalance>, _>>()?;
 
-    let mut stmt_select_notes = conn.prepare_cached(
+    let sapling_trace = tracing::info_span!("stmt_select_notes").entered();
+    let mut stmt_select_notes = tx.prepare_cached(
         "SELECT n.account, n.value, n.is_change, scan_state.max_priority, t.block
          FROM sapling_received_notes n
          JOIN transactions t ON t.id_tx = n.tx
@@ -695,13 +709,15 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             })?;
         }
     }
+    drop(sapling_trace);
 
     #[cfg(feature = "transparent-inputs")]
     {
+        let transparent_trace = tracing::info_span!("stmt_transparent_balances").entered();
         let zero_conf_height = (chain_tip_height + 1).saturating_sub(min_confirmations);
         let stable_height = chain_tip_height.saturating_sub(PRUNING_DEPTH);
 
-        let mut stmt_transparent_balances = conn.prepare(
+        let mut stmt_transparent_balances = tx.prepare(
             "SELECT u.received_by_account, SUM(u.value_zat)
              FROM utxos u
              LEFT OUTER JOIN transactions tx
@@ -727,13 +743,34 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 balances.add_unshielded_value(value)?;
             }
         }
+        drop(transparent_trace);
     }
+
+    let next_sapling_subtree_index = {
+        let shard_store =
+            SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
+                tx,
+                SAPLING_TABLES_PREFIX,
+            )?;
+
+        // The last shard will be incomplete, and we want the next range to overlap with
+        // the last complete shard, so return the index of the second-to-last shard root.
+        shard_store
+            .get_shard_roots()
+            .map_err(ShardTreeError::Storage)?
+            .iter()
+            .rev()
+            .nth(1)
+            .map(|addr| addr.index())
+            .unwrap_or(0)
+    };
 
     let summary = WalletSummary::new(
         account_balances,
         chain_tip_height,
         fully_scanned_height,
         sapling_scan_progress,
+        next_sapling_subtree_index,
     );
 
     Ok(Some(summary))
@@ -759,6 +796,7 @@ pub(crate) fn get_received_memo(
             )
             .optional()?
             .flatten(),
+        #[cfg(zcash_unstable = "orchard")]
         _ => {
             return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
                 note_id.protocol(),
@@ -1011,6 +1049,7 @@ fn parse_block_metadata<P: consensus::Parameters>(
     ))
 }
 
+#[tracing::instrument(skip(conn, params))]
 pub(crate) fn block_metadata<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1041,6 +1080,7 @@ pub(crate) fn block_metadata<P: consensus::Parameters>(
     .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
 }
 
+#[tracing::instrument(skip_all)]
 pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
@@ -1052,42 +1092,46 @@ pub(crate) fn block_fully_scanned<P: consensus::Parameters>(
         // `put_block`, and the effective combination of intra-range linear scanning and the nullifier
         // map ensures that we discover all wallet-related information within the contiguous range.
         //
-        // The fully-scanned height is therefore the greatest height in the first contiguous range of
-        // block rows, which is a combined case of the "gaps and islands" and "greatest N per group"
+        // We also assume that every contiguous range of block heights in the `blocks` table has a
+        // single matching entry in the `scan_queue` table with priority "Scanned". This requires no
+        // bugs in the scan queue update logic, which we have had before. However, a bug here would
+        // mean that we return a more conservative fully-scanned height, which likely just causes a
+        // performance regression.
+        //
+        // The fully-scanned height is therefore the last height that falls within the first range in
+        // the scan queue with priority "Scanned".
         // SQL query problems.
-        conn.query_row(
-            "SELECT height, hash, sapling_commitment_tree_size, sapling_tree, orchard_commitment_tree_size
-            FROM blocks
-            INNER JOIN (
-                WITH contiguous AS (
-                    SELECT height, ROW_NUMBER() OVER (ORDER BY height) - height AS grp
-                    FROM blocks
-                )
-                SELECT MIN(height) AS group_min_height, MAX(height) AS group_max_height
-                FROM contiguous
-                GROUP BY grp
-                HAVING :birthday_height BETWEEN group_min_height AND group_max_height
+        let fully_scanned_height = match conn
+            .query_row(
+                "SELECT block_range_start, block_range_end
+                FROM scan_queue
+                WHERE priority = :priority
+                ORDER BY block_range_start ASC
+                LIMIT 1",
+                named_params![":priority": priority_code(&ScanPriority::Scanned)],
+                |row| {
+                    let block_range_start = BlockHeight::from_u32(row.get(0)?);
+                    let block_range_end = BlockHeight::from_u32(row.get(1)?);
+
+                    // If the start of the earliest scanned range is greater than
+                    // the birthday height, then there is an unscanned range between
+                    // the wallet birthday and that range, so there is no fully
+                    // scanned height.
+                    Ok(if block_range_start <= birthday_height {
+                        // Scan ranges are end-exclusive.
+                        Some(block_range_end - 1)
+                    } else {
+                        None
+                    })
+                },
             )
-            ON height = group_max_height",
-            named_params![":birthday_height": u32::from(birthday_height)],
-            |row| {
-                let height: u32 = row.get(0)?;
-                let block_hash: Vec<u8> = row.get(1)?;
-                let sapling_tree_size: Option<u32> = row.get(2)?;
-                let sapling_tree: Vec<u8> = row.get(3)?;
-                let orchard_tree_size: Option<u32> = row.get(4)?;
-                Ok((
-                    BlockHeight::from(height),
-                    block_hash,
-                    sapling_tree_size,
-                    sapling_tree,
-                    orchard_tree_size
-                ))
-            },
-        )
-        .optional()
-        .map_err(SqliteClientError::from)
-        .and_then(|meta_row| meta_row.map(|r| parse_block_metadata(params, r)).transpose())
+            .optional()?
+        {
+            Some(Some(h)) => h,
+            _ => return Ok(None),
+        };
+
+        block_metadata(conn, params, fully_scanned_height)
     } else {
         Ok(None)
     }
@@ -1997,17 +2041,18 @@ pub(crate) fn prune_nullifier_map(
 mod tests {
     use std::num::NonZeroU32;
 
+    use sapling::zip32::ExtendedSpendingKey;
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead};
+    use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
-    use crate::{testing::TestBuilder, AccountId};
+    use crate::{
+        testing::{AddressType, BlockCache, TestBuilder, TestState},
+        AccountId,
+    };
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{
-            testing::{AddressType, TestState},
-            PRUNING_DEPTH,
-        },
-        sapling::zip32::ExtendedSpendingKey,
+        crate::PRUNING_DEPTH,
         zcash_client_backend::{
             data_api::{wallet::input_selection::GreedyInputSelector, InputSource, WalletWrite},
             encoding::AddressCodec,
@@ -2017,7 +2062,7 @@ mod tests {
         zcash_primitives::{
             consensus::BlockHeight,
             transaction::{
-                components::{amount::NonNegativeAmount, Amount, OutPoint, TxOut},
+                components::{Amount, OutPoint, TxOut},
                 fees::fixed::FeeRule as FixedFeeRule,
             },
         },
@@ -2299,5 +2344,65 @@ mod tests {
         check_balance(&st, 0, value);
         check_balance(&st, 1, value);
         check_balance(&st, 2, value);
+    }
+
+    #[test]
+    fn block_fully_scanned() {
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+
+        let block_fully_scanned = |st: &TestState<BlockCache>| {
+            st.wallet()
+                .block_fully_scanned()
+                .unwrap()
+                .map(|meta| meta.block_height())
+        };
+
+        // A fresh wallet should have no fully-scanned block.
+        assert_eq!(block_fully_scanned(&st), None);
+
+        // Scan a block above the wallet's birthday height.
+        let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
+        let not_our_value = NonNegativeAmount::const_from_u64(10000);
+        let end_height = st.sapling_activation_height() + 2;
+        let _ = st.generate_block_at(
+            end_height,
+            BlockHash([37; 32]),
+            &not_our_key,
+            AddressType::DefaultExternal,
+            not_our_value,
+            17,
+        );
+        st.scan_cached_blocks(end_height, 1);
+
+        // The wallet should still have no fully-scanned block, as no scanned block range
+        // overlaps the wallet's birthday.
+        assert_eq!(block_fully_scanned(&st), None);
+
+        // Scan the block at the wallet's birthday height.
+        let start_height = st.sapling_activation_height();
+        let _ = st.generate_block_at(
+            start_height,
+            BlockHash([0; 32]),
+            &not_our_key,
+            AddressType::DefaultExternal,
+            not_our_value,
+            0,
+        );
+        st.scan_cached_blocks(start_height, 1);
+
+        // The fully-scanned height should now be that of the scanned block.
+        assert_eq!(block_fully_scanned(&st), Some(start_height));
+
+        // Scan the block in between the two previous blocks.
+        let (h, _, _) =
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        st.scan_cached_blocks(h, 1);
+
+        // The fully-scanned height should now be the latest block, as the two disjoint
+        // ranges have been connected.
+        assert_eq!(block_fully_scanned(&st), Some(end_height));
     }
 }

@@ -82,11 +82,11 @@ impl TryFrom<unified::Address> for UnifiedAddress {
                     })
                     .transpose(),
                 unified::Receiver::P2pkh(data) => {
-                    transparent = Some(TransparentAddress::PublicKey(*data));
+                    transparent = Some(TransparentAddress::PublicKeyHash(*data));
                     None
                 }
                 unified::Receiver::P2sh(data) => {
-                    transparent = Some(TransparentAddress::Script(*data));
+                    transparent = Some(TransparentAddress::ScriptHash(*data));
                     None
                 }
                 unified::Receiver::Unknown { typecode, data } => {
@@ -150,6 +150,11 @@ impl UnifiedAddress {
         self.transparent.as_ref()
     }
 
+    /// Returns the set of unknown receivers of the unified address.
+    pub fn unknown(&self) -> &[(u32, Vec<u8>)] {
+        &self.unknown
+    }
+
     fn to_address(&self, net: Network) -> ZcashAddress {
         #[cfg(feature = "orchard")]
         let orchard_receiver = self
@@ -168,8 +173,8 @@ impl UnifiedAddress {
                     data: data.clone(),
                 })
                 .chain(self.transparent.as_ref().map(|taddr| match taddr {
-                    TransparentAddress::PublicKey(data) => unified::Receiver::P2pkh(*data),
-                    TransparentAddress::Script(data) => unified::Receiver::P2sh(*data),
+                    TransparentAddress::PublicKeyHash(data) => unified::Receiver::P2pkh(*data),
+                    TransparentAddress::ScriptHash(data) => unified::Receiver::P2sh(*data),
                 }))
                 .chain(
                     self.sapling
@@ -236,11 +241,11 @@ impl TryFromRawAddress for Address {
     fn try_from_raw_transparent_p2pkh(
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
-        Ok(TransparentAddress::PublicKey(data).into())
+        Ok(TransparentAddress::PublicKeyHash(data).into())
     }
 
     fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
-        Ok(TransparentAddress::Script(data).into())
+        Ok(TransparentAddress::ScriptHash(data).into())
     }
 }
 
@@ -257,14 +262,42 @@ impl Address {
         match self {
             Address::Sapling(pa) => ZcashAddress::from_sapling(net, pa.to_bytes()),
             Address::Transparent(addr) => match addr {
-                TransparentAddress::PublicKey(data) => {
+                TransparentAddress::PublicKeyHash(data) => {
                     ZcashAddress::from_transparent_p2pkh(net, *data)
                 }
-                TransparentAddress::Script(data) => ZcashAddress::from_transparent_p2sh(net, *data),
+                TransparentAddress::ScriptHash(data) => {
+                    ZcashAddress::from_transparent_p2sh(net, *data)
+                }
             },
             Address::Unified(ua) => ua.to_address(net),
         }
         .to_string()
+    }
+}
+
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
+    use proptest::prelude::*;
+    use sapling::testing::arb_payment_address;
+    use zcash_primitives::{consensus::Network, legacy::testing::arb_transparent_addr};
+
+    use crate::keys::{testing::arb_unified_spending_key, UnifiedAddressRequest};
+
+    use super::{Address, UnifiedAddress};
+
+    pub fn arb_unified_addr(
+        params: Network,
+        request: UnifiedAddressRequest,
+    ) -> impl Strategy<Value = UnifiedAddress> {
+        arb_unified_spending_key(params).prop_map(move |k| k.default_address(request).0)
+    }
+
+    pub fn arb_addr(request: UnifiedAddressRequest) -> impl Strategy<Value = Address> {
+        prop_oneof![
+            arb_payment_address().prop_map(Address::Sapling),
+            arb_transparent_addr().prop_map(Address::Transparent),
+            arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+        ]
     }
 }
 
@@ -280,7 +313,8 @@ mod tests {
     fn ua_round_trip() {
         #[cfg(feature = "orchard")]
         let orchard = {
-            let sk = orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, 0).unwrap();
+            let sk =
+                orchard::keys::SpendingKey::from_zip32_seed(&[0; 32], 0, AccountId::ZERO).unwrap();
             let fvk = orchard::keys::FullViewingKey::from(&sk);
             Some(fvk.address_at(0u32, orchard::keys::Scope::External))
         };

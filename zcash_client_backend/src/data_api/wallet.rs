@@ -693,9 +693,9 @@ where
                         builder.add_transparent_output(taddr, payment.amount)?;
                     }
                 } else {
-                    return Err(Error::UnsupportedPoolType(PoolType::Shielded(
-                        ShieldedProtocol::Orchard,
-                    )));
+                    return Err(Error::NoSupportedReceivers(
+                        ua.unknown().iter().map(|(tc, _)| *tc).collect(),
+                    ));
                 }
             }
             Address::Sapling(addr) => {
@@ -738,6 +738,7 @@ where
                     Some(memo),
                 ))
             }
+            #[cfg(zcash_unstable = "orchard")]
             ShieldedProtocol::Orchard => {
                 #[cfg(not(feature = "orchard"))]
                 return Err(Error::UnsupportedPoolType(PoolType::Shielded(
@@ -751,8 +752,7 @@ where
     }
 
     // Build the transaction with the specified fee rule
-    let (tx, sapling_build_meta) =
-        builder.build(OsRng, spend_prover, output_prover, proposal.fee_rule())?;
+    let build_result = builder.build(OsRng, spend_prover, output_prover, proposal.fee_rule())?;
 
     let internal_ivk = PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::Internal));
     let sapling_outputs =
@@ -760,26 +760,30 @@ where
             .into_iter()
             .enumerate()
             .map(|(i, (recipient, value, memo))| {
-                let output_index = sapling_build_meta
+                let output_index = build_result
+                    .sapling_meta()
                     .output_index(i)
-                    .expect("An output should exist in the transaction for each shielded payment.");
+                    .expect("An output should exist in the transaction for each Sapling payment.");
 
                 let received_as = if let Recipient::InternalAccount(
                     account,
                     PoolType::Shielded(ShieldedProtocol::Sapling),
                 ) = recipient
                 {
-                    tx.sapling_bundle().and_then(|bundle| {
-                        try_sapling_note_decryption(
-                            &internal_ivk,
-                            &bundle.shielded_outputs()[output_index],
-                            consensus::sapling_zip212_enforcement(
-                                params,
-                                proposal.min_target_height(),
-                            ),
-                        )
-                        .map(|(note, _, _)| (account, note))
-                    })
+                    build_result
+                        .transaction()
+                        .sapling_bundle()
+                        .and_then(|bundle| {
+                            try_sapling_note_decryption(
+                                &internal_ivk,
+                                &bundle.shielded_outputs()[output_index],
+                                consensus::sapling_zip212_enforcement(
+                                    params,
+                                    proposal.min_target_height(),
+                                ),
+                            )
+                            .map(|(note, _, _)| (account, note))
+                        })
                 } else {
                     None
                 };
@@ -789,7 +793,8 @@ where
 
     let transparent_outputs = transparent_output_meta.into_iter().map(|(addr, value)| {
         let script = addr.script();
-        let output_index = tx
+        let output_index = build_result
+            .transaction()
             .transparent_bundle()
             .and_then(|b| {
                 b.vout
@@ -811,7 +816,7 @@ where
 
     wallet_db
         .store_sent_tx(&SentTransaction {
-            tx: &tx,
+            tx: build_result.transaction(),
             created: time::OffsetDateTime::now_utc(),
             account,
             outputs: sapling_outputs.chain(transparent_outputs).collect(),
@@ -821,7 +826,7 @@ where
         })
         .map_err(Error::DataSource)?;
 
-    Ok(tx.txid())
+    Ok(build_result.transaction().txid())
 }
 
 /// Constructs a transaction that consumes available transparent UTXOs belonging to

@@ -1,6 +1,7 @@
-# zcash_primitives
+# zcash_keys
 
-This library contains Rust implementations of the Zcash primitives.
+This library contains Rust structs and traits for Zcash key and address parsing
+and encoding.
 
 ## License
 
