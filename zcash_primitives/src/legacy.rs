@@ -478,6 +478,8 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::{NonHardenedChildIndex, OpCode, Script, TransparentAddress};
+    use hdwallet::KeyIndex;
+    use subtle::ConstantTimeEq;
 
     #[test]
     fn script_opcode() {
@@ -560,5 +562,39 @@ mod tests {
     fn hardened_indexes_rejected() {
         assert!(NonHardenedChildIndex::from_index(0x80000000).is_none());
         assert!(NonHardenedChildIndex::from_index(0xffffffff).is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_next() {
+        assert_eq!(1, NonHardenedChildIndex::ZERO.next().unwrap().index());
+        assert!(NonHardenedChildIndex::from_index(0x7fffffff)
+            .unwrap()
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_ct_eq() {
+        assert!(check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO
+        ));
+        assert!(!check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO.next().unwrap()
+        ));
+
+        fn check<T: ConstantTimeEq>(v1: T, v2: T) -> bool {
+            v1.ct_eq(&v2).unwrap_u8() == 1
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn nonhardened_index_tryfrom_keyindex() {
+        let nh: NonHardenedChildIndex = KeyIndex::Normal(0).try_into().unwrap();
+        assert_eq!(nh.index(), 0);
+
+        assert!(NonHardenedChildIndex::try_from(KeyIndex::Hardened(0)).is_err());
     }
 }
