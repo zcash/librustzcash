@@ -6,6 +6,7 @@ use hdwallet::{
 };
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
+use subtle::{Choice, ConstantTimeEq};
 use zcash_spec::PrfExpand;
 
 use crate::{consensus, zip32::AccountId};
@@ -291,9 +292,39 @@ impl ExternalOvk {
     }
 }
 
+/// A child index for a derived transparent address.
+///
+/// Only NON-hardened derivation is supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonHardenedChildIndex(u32);
+
+impl ConstantTimeEq for NonHardenedChildIndex {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl NonHardenedChildIndex {
+    /// Parses the given ZIP 32 child index.
+    ///
+    /// Returns `None` if the hardened bit is set.
+    pub fn from_index(i: u32) -> Option<Self> {
+        if i < (1 << 31) {
+            Some(NonHardenedChildIndex(i))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the index as a 32-bit integer.
+    pub fn index(&self) -> u32 {
+        self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::AccountPubKey;
+    use super::{AccountPubKey, NonHardenedChildIndex};
 
     #[test]
     fn check_ovk_test_vectors() {
@@ -539,5 +570,22 @@ mod tests {
             assert_eq!(tv.internal_ovk, internal.as_bytes());
             assert_eq!(tv.external_ovk, external.as_bytes());
         }
+    }
+
+    #[test]
+    fn nonhardened_indexes_accepted() {
+        assert_eq!(0, NonHardenedChildIndex::from_index(0).unwrap().index());
+        assert_eq!(
+            0x7fffffff,
+            NonHardenedChildIndex::from_index(0x7fffffff)
+                .unwrap()
+                .index()
+        );
+    }
+
+    #[test]
+    fn hardened_indexes_rejected() {
+        assert!(NonHardenedChildIndex::from_index(0x80000000).is_none());
+        assert!(NonHardenedChildIndex::from_index(0xffffffff).is_none());
     }
 }
