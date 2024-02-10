@@ -48,7 +48,7 @@ use shardtree::{error::ShardTreeError, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
+    legacy::{NonHardenedChildIndex, TransparentAddress},
     memo::{Memo, MemoBytes},
     transaction::{
         components::amount::{Amount, NonNegativeAmount},
@@ -58,7 +58,7 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::{AddressMetadata, UnifiedAddress},
+    address::UnifiedAddress,
     data_api::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
@@ -346,7 +346,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_transparent_receivers(
         &self,
         _account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return wallet::get_transparent_receivers(self.conn.borrow(), &self.params, _account);
 

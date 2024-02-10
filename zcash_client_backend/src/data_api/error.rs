@@ -17,7 +17,7 @@ use crate::data_api::wallet::input_selection::InputSelectorError;
 use crate::PoolType;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};
+use zcash_primitives::legacy::TransparentAddress;
 
 use crate::wallet::NoteId;
 
@@ -70,9 +70,6 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
 
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
-
-    #[cfg(feature = "transparent-inputs")]
-    ChildIndexOutOfRange(DiversifierIndex),
 }
 
 impl<DE, CE, SE, FE> fmt::Display for Error<DE, CE, SE, FE>
@@ -127,14 +124,6 @@ where
             #[cfg(feature = "transparent-inputs")]
             Error::AddressNotRecognized(_) => {
                 write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
-            }
-            #[cfg(feature = "transparent-inputs")]
-            Error::ChildIndexOutOfRange(i) => {
-                write!(
-                    f,
-                    "The diversifier index {:?} is out of range for transparent addresses.",
-                    i
-                )
             }
         }
     }

@@ -639,17 +639,13 @@ where
         for utxo in proposal.transparent_inputs() {
             utxos.push(utxo.clone());
 
-            let diversifier_index = known_addrs
+            let child_index = known_addrs
                 .get(utxo.recipient_address())
-                .ok_or_else(|| Error::AddressNotRecognized(*utxo.recipient_address()))?
-                .diversifier_index();
-
-            let child_index = u32::try_from(*diversifier_index)
-                .map_err(|_| Error::ChildIndexOutOfRange(*diversifier_index))?;
+                .ok_or_else(|| Error::AddressNotRecognized(*utxo.recipient_address()))?;
 
             let secret_key = usk
                 .transparent()
-                .derive_external_secret_key(child_index)
+                .derive_external_secret_key(*child_index)
                 .unwrap();
 
             builder.add_transparent_input(

@@ -86,6 +86,9 @@ use zcash_primitives::{
     zip32::{AccountId, DiversifierIndex},
 };
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::legacy::NonHardenedChildIndex;
+
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
@@ -112,7 +115,7 @@ use {
     crate::UtxoId,
     rusqlite::Row,
     std::collections::BTreeSet,
-    zcash_client_backend::{address::AddressMetadata, wallet::WalletTransparentOutput},
+    zcash_client_backend::wallet::WalletTransparentOutput,
     zcash_primitives::{
         legacy::{keys::IncomingViewingKey, Script, TransparentAddress},
         transaction::components::{OutPoint, TxOut},
@@ -349,7 +352,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountId,
-) -> Result<HashMap<TransparentAddress, AddressMetadata>, SqliteClientError> {
+) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, SqliteClientError> {
     let mut ret = HashMap::new();
 
     // Get all UAs derived
@@ -360,12 +363,12 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
         let di_vec: Vec<u8> = row.get(1)?;
-        let mut di_be: [u8; 11] = di_vec.try_into().map_err(|_| {
+        let mut di: [u8; 11] = di_vec.try_into().map_err(|_| {
             SqliteClientError::CorruptedData(
                 "Diverisifier index is not an 11-byte value".to_owned(),
             )
         })?;
-        di_be.reverse();
+        di.reverse(); // BE -> LE conversion
 
         let ua = Address::decode(params, &ua_str)
             .ok_or_else(|| {
@@ -380,16 +383,17 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             })?;
 
         if let Some(taddr) = ua.transparent() {
-            ret.insert(
-                *taddr,
-                AddressMetadata::new(account, DiversifierIndex::from(di_be)),
-            );
+            let di_short = DiversifierIndex::from(di).try_into();
+            if let Ok(di_short) = di_short {
+                if let Some(index) = NonHardenedChildIndex::from_index(di_short) {
+                    ret.insert(*taddr, index);
+                }
+            }
         }
     }
 
-    if let Some((taddr, diversifier_index)) = get_legacy_transparent_address(params, conn, account)?
-    {
-        ret.insert(taddr, AddressMetadata::new(account, diversifier_index));
+    if let Some((taddr, child_index)) = get_legacy_transparent_address(params, conn, account)? {
+        ret.insert(taddr, child_index);
     }
 
     Ok(ret)
@@ -400,7 +404,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
     params: &P,
     conn: &rusqlite::Connection,
     account: AccountId,
-) -> Result<Option<(TransparentAddress, DiversifierIndex)>, SqliteClientError> {
+) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
     // Get the UFVK for the account.
     let ufvk_str: Option<String> = conn
         .query_row(
@@ -418,10 +422,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
         ufvk.transparent()
             .map(|tfvk| {
                 tfvk.derive_external_ivk()
-                    .map(|tivk| {
-                        let (taddr, child_index) = tivk.default_address();
-                        (taddr, DiversifierIndex::from(child_index))
-                    })
+                    .map(|tivk| tivk.default_address())
                     .map_err(SqliteClientError::HdwalletError)
             })
             .transpose()

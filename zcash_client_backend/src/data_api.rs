@@ -14,7 +14,7 @@ use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
-    legacy::TransparentAddress,
+    legacy::{NonHardenedChildIndex, TransparentAddress},
     memo::{Memo, MemoBytes},
     transaction::{
         components::amount::{Amount, BalanceError, NonNegativeAmount},
@@ -24,7 +24,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::{AddressMetadata, UnifiedAddress},
+    address::UnifiedAddress,
     decrypt::DecryptedOutput,
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
@@ -560,7 +560,7 @@ pub trait WalletRead {
     fn get_transparent_receivers(
         &self,
         account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error>;
+    ) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, Self::Error>;
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
     /// for each address associated with a nonzero balance.
@@ -1109,14 +1109,14 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},
-        legacy::TransparentAddress,
+        legacy::{NonHardenedChildIndex, TransparentAddress},
         memo::Memo,
         transaction::{components::Amount, Transaction, TxId},
         zip32::{AccountId, Scope},
     };
 
     use crate::{
-        address::{AddressMetadata, UnifiedAddress},
+        address::UnifiedAddress,
         keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
         wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
         ShieldedProtocol,
@@ -1284,7 +1284,7 @@ pub mod testing {
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
-        ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
+        ) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, Self::Error> {
             Ok(HashMap::new())
         }
 

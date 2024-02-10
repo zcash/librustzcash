@@ -28,6 +28,7 @@ and this library adheres to Rust's notion of
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
+    - Changed `get_transparent_receivers` return type.
   - `ShieldedProtocol` has a new `Orchard` variant.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
