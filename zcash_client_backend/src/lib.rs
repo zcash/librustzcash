@@ -67,6 +67,7 @@ mod decrypt;
 pub use zcash_keys::encoding;
 pub mod fees;
 pub use zcash_keys::keys;
+pub mod proposal;
 pub mod proto;
 pub mod scan;
 pub mod scanning;

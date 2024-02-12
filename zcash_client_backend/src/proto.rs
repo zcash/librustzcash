@@ -22,11 +22,9 @@ use zcash_primitives::{
 use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
 use crate::{
-    data_api::{
-        wallet::input_selection::{Proposal, ProposalError, ShieldedInputs},
-        InputSource,
-    },
+    data_api::InputSource,
     fees::{ChangeValue, TransactionBalance},
+    proposal::{Proposal, ProposalError, ShieldedInputs},
     zip321::{TransactionRequest, Zip321Error},
     PoolType, ShieldedProtocol,
 };

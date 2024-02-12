@@ -20,12 +20,13 @@ use zcash_primitives::{
 use crate::{
     address::Address,
     data_api::{
-        error::Error, wallet::input_selection::Proposal, DecryptedTransaction, SentTransaction,
-        SentTransactionOutput, WalletCommitmentTrees, WalletRead, WalletWrite,
+        error::Error, DecryptedTransaction, SentTransaction, SentTransactionOutput,
+        WalletCommitmentTrees, WalletRead, WalletWrite,
     },
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
     keys::UnifiedSpendingKey,
+    proposal::Proposal,
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
@@ -710,7 +711,7 @@ where
                 } else {
                     builder.add_transparent_output(to, payment.amount)?;
                 }
-                transparent_output_meta.push((*to, payment.amount));
+                transparent_output_meta.push((to, payment.amount));
             }
         }
     }
@@ -805,7 +806,7 @@ where
 
         SentTransactionOutput::from_parts(
             output_index,
-            Recipient::Transparent(addr),
+            Recipient::Transparent(*addr),
             value,
             None,
             None,

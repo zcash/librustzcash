@@ -30,14 +30,13 @@ use zcash_client_backend::{
         chain::{scan_cached_blocks, BlockSource, ScanSummary},
         wallet::{
             create_proposed_transaction, create_spend_to_address,
-            input_selection::{
-                GreedyInputSelector, GreedyInputSelectorError, InputSelector, Proposal,
-            },
+            input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector},
             propose_standard_transfer_to_address, propose_transfer, spend,
         },
         AccountBalance, AccountBirthday, WalletRead, WalletSummary, WalletWrite,
     },
     keys::UnifiedSpendingKey,
+    proposal::Proposal,
     proto::compact_formats::{
         self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
