@@ -661,7 +661,7 @@ where
 
     let mut sapling_output_meta = vec![];
     let mut transparent_output_meta = vec![];
-    for payment in proposal.transaction_request().payments() {
+    for payment in proposal.transaction_request().payments().values() {
         match &payment.recipient_address {
             Address::Unified(ua) => {
                 let memo = payment

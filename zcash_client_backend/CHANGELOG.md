@@ -47,7 +47,7 @@ and this library adheres to Rust's notion of
     }`
   - `WalletSummary::next_sapling_subtree_index`
   - `wallet::propose_standard_transfer_to_address`
-  - `wallet::input_selection::Proposal::{from_parts, shielded_inputs}`
+  - `wallet::input_selection::Proposal::{from_parts, shielded_inputs, payment_pools}`
   - `wallet::input_selection::ShieldedInputs`
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
@@ -59,8 +59,6 @@ and this library adheres to Rust's notion of
   - `ReceivedNote`
   - `WalletSaplingOutput::recipient_key_scope`
   - `wallet::TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
-- `zcash_client_backend::zip321::TransactionRequest::total`
-- `zcash_client_backend::zip321::parse::Param::name`
 - `zcash_client_backend::proto::`
   - `PROPOSAL_SER_V1`
   - `ProposalDecodingError`
@@ -75,8 +73,9 @@ and this library adheres to Rust's notion of
      wallet::{ReceivedSaplingNote, WalletTransparentOutput},
      wallet::input_selection::{Proposal, SaplingInputs},
    }`
-- `zcash_client_backend::zip321::to_uri` now returns a `String` rather than an
-  `Option<String>` and provides canonical serialization for the empty proposal.
+- `zcash_client_backend::zip321
+  ` `TransactionRequest::{total, from_indexed}`
+  - `parse::Param::name`
 
 ### Moved
 - `zcash_client_backend::data_api::{PoolType, ShieldedProtocol}` have
@@ -196,6 +195,11 @@ and this library adheres to Rust's notion of
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
     are provided for each previously public field.
 - `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
+- `zcash_client_backend::zip321::TransactionRequest::payments` now returns a
+  `BTreeMap<usize, Payment>` instead of `&[Payment]` so that parameter
+  indices may be preserved.
+- `zcash_client_backend::zip321::to_uri` now returns a `String` rather than an
+  `Option<String>` and provides canonical serialization for the empty proposal.
 - The following fields now have type `NonNegativeAmount` instead of `Amount`:
   - `zcash_client_backend::data_api`:
     - `error::Error::InsufficientFunds.{available, required}`

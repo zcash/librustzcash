@@ -8,31 +8,46 @@ pub struct Proposal {
     /// ZIP 321 serialized transaction request
     #[prost(string, tag = "2")]
     pub transaction_request: ::prost::alloc::string::String,
+    /// The vector of selected payment index / output pool mappings. Payment index
+    /// 0 corresponds to the payment with no explicit index.
+    #[prost(message, repeated, tag = "3")]
+    pub payment_output_pools: ::prost::alloc::vec::Vec<PaymentOutputPool>,
     /// The anchor height to be used in creating the transaction, if any.
     /// Setting the anchor height to zero will disallow the use of any shielded
     /// inputs.
-    #[prost(uint32, tag = "3")]
+    #[prost(uint32, tag = "4")]
     pub anchor_height: u32,
     /// The inputs to be used in creating the transaction.
-    #[prost(message, repeated, tag = "4")]
+    #[prost(message, repeated, tag = "5")]
     pub inputs: ::prost::alloc::vec::Vec<ProposedInput>,
     /// The total value, fee value, and change outputs of the proposed
     /// transaction
-    #[prost(message, optional, tag = "5")]
+    #[prost(message, optional, tag = "6")]
     pub balance: ::core::option::Option<TransactionBalance>,
     /// The fee rule used in constructing this proposal
-    #[prost(enumeration = "FeeRule", tag = "6")]
+    #[prost(enumeration = "FeeRule", tag = "7")]
     pub fee_rule: i32,
     /// The target height for which the proposal was constructed
     ///
     /// The chain must contain at least this many blocks in order for the proposal to
     /// be executed.
-    #[prost(uint32, tag = "7")]
+    #[prost(uint32, tag = "8")]
     pub min_target_height: u32,
     /// A flag indicating whether the proposal is for a shielding transaction,
     /// used for determining which OVK to select for wallet-internal outputs.
-    #[prost(bool, tag = "8")]
+    #[prost(bool, tag = "9")]
     pub is_shielding: bool,
+}
+/// A mapping from ZIP 321 payment index to the output pool that has been chosen
+/// for that payment, based upon the payment address and the selected inputs to
+/// the transaction.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PaymentOutputPool {
+    #[prost(uint32, tag = "1")]
+    pub payment_index: u32,
+    #[prost(enumeration = "ValuePool", tag = "2")]
+    pub value_pool: i32,
 }
 /// The unique identifier and value for each proposed input.
 #[allow(clippy::derive_partial_eq_without_eq)]

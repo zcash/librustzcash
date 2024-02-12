@@ -2,6 +2,7 @@
 
 use std::{
     array::TryFromSliceError,
+    collections::BTreeMap,
     fmt::{self, Display},
     io,
 };
@@ -334,6 +335,15 @@ impl proposal::ChangeValue {
     }
 }
 
+impl From<PoolType> for proposal::ValuePool {
+    fn from(value: PoolType) -> Self {
+        match value {
+            PoolType::Transparent => proposal::ValuePool::Transparent,
+            PoolType::Shielded(p) => p.into(),
+        }
+    }
+}
+
 impl From<ShieldedProtocol> for proposal::ValuePool {
     fn from(value: ShieldedProtocol) -> Self {
         match value {
@@ -376,6 +386,15 @@ impl proposal::Proposal {
             }))
             .collect();
 
+        let payment_output_pools = value
+            .payment_pools()
+            .iter()
+            .map(|(idx, pool_type)| proposal::PaymentOutputPool {
+                payment_index: u32::try_from(*idx).expect("Payment index fits into a u32"),
+                value_pool: proposal::ValuePool::from(*pool_type).into(),
+            })
+            .collect();
+
         let balance = Some(proposal::TransactionBalance {
             proposed_change: value
                 .balance()
@@ -396,6 +415,7 @@ impl proposal::Proposal {
         proposal::Proposal {
             proto_version: PROPOSAL_SER_V1,
             transaction_request,
+            payment_output_pools,
             anchor_height,
             inputs,
             balance,
@@ -434,6 +454,19 @@ impl proposal::Proposal {
 
                 let transaction_request =
                     TransactionRequest::from_uri(params, &self.transaction_request)?;
+
+                let payment_pools = self
+                    .payment_output_pools
+                    .iter()
+                    .map(|pop| {
+                        Ok((
+                            usize::try_from(pop.payment_index)
+                                .expect("Payment index fits into a usize"),
+                            pool_type(pop.value_pool)?,
+                        ))
+                    })
+                    .collect::<Result<BTreeMap<usize, PoolType>, ProposalDecodingError<DbError>>>(
+                    )?;
 
                 #[cfg(not(feature = "transparent-inputs"))]
                 let transparent_inputs = vec![];
@@ -522,6 +555,7 @@ impl proposal::Proposal {
 
                 Proposal::from_parts(
                     transaction_request,
+                    payment_pools,
                     transparent_inputs,
                     shielded_inputs,
                     balance,

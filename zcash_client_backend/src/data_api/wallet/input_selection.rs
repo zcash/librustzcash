@@ -1,7 +1,10 @@
 //! Types related to the process of selecting inputs to be spent given a transaction request.
 
 use core::marker::PhantomData;
-use std::fmt::{self, Debug, Display};
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Debug, Display},
+};
 
 use nonempty::NonEmpty;
 use zcash_primitives::{
@@ -23,7 +26,7 @@ use crate::{
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy, TransactionBalance},
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
     zip321::TransactionRequest,
-    ShieldedProtocol,
+    PoolType, ShieldedProtocol,
 };
 
 #[cfg(any(feature = "transparent-inputs"))]
@@ -85,6 +88,7 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
 #[derive(Clone, PartialEq, Eq)]
 pub struct Proposal<FeeRuleT, NoteRef> {
     transaction_request: TransactionRequest,
+    payment_pools: BTreeMap<usize, PoolType>,
     transparent_inputs: Vec<WalletTransparentOutput>,
     shielded_inputs: Option<ShieldedInputs<NoteRef>>,
     balance: TransactionBalance,
@@ -150,9 +154,22 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     ///
     /// This operation validates the proposal for balance consistency and agreement between
     /// the `is_shielding` flag and the structure of the proposal.
+    ///
+    /// Parameters:
+    /// * `transaction_request`: The ZIP 321 transaction request describing the payments
+    ///   to be made.
+    /// * `payment_pools`: A map from payment index to pool type.
+    /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
+    /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
+    /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
+    /// * `fee_rule`: The fee rule observed by the proposed transaction.
+    /// * `min_target_height`: The minimum block height at which the transaction may be created.
+    /// * `is_shielding`: A flag that identifies whether this is a wallet-internal shielding
+    ///   transaction.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         transaction_request: TransactionRequest,
+        payment_pools: BTreeMap<usize, PoolType>,
         transparent_inputs: Vec<WalletTransparentOutput>,
         shielded_inputs: Option<ShieldedInputs<NoteRef>>,
         balance: TransactionBalance,
@@ -191,6 +208,7 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         if input_total == output_total {
             Ok(Self {
                 transaction_request,
+                payment_pools,
                 transparent_inputs,
                 shielded_inputs,
                 balance,
@@ -209,6 +227,11 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
     /// Returns the transaction request that describes the payments to be made.
     pub fn transaction_request(&self) -> &TransactionRequest {
         &self.transaction_request
+    }
+    /// Returns the map from payment index to the pool that has been selected
+    /// for the output that will fulfill that payment.
+    pub fn payment_pools(&self) -> &BTreeMap<usize, PoolType> {
+        &self.payment_pools
     }
     /// Returns the transparent inputs that have been selected to fund the transaction.
     pub fn transparent_inputs(&self) -> &[WalletTransparentOutput] {
@@ -525,46 +548,46 @@ where
         let mut sapling_outputs = vec![];
         #[cfg(feature = "orchard")]
         let mut orchard_outputs = vec![];
-        for payment in transaction_request.payments() {
-            let mut push_transparent = |taddr: TransparentAddress| {
-                transparent_outputs.push(TxOut {
-                    value: payment.amount,
-                    script_pubkey: taddr.script(),
-                });
-            };
-            let mut push_sapling = || {
-                sapling_outputs.push(SaplingPayment(payment.amount));
-            };
-            #[cfg(feature = "orchard")]
-            let mut push_orchard = || {
-                orchard_outputs.push(OrchardPayment(payment.amount));
-            };
-
+        let mut payment_pools = BTreeMap::new();
+        for (idx, payment) in transaction_request.payments() {
             match &payment.recipient_address {
                 Address::Transparent(addr) => {
-                    push_transparent(*addr);
+                    payment_pools.insert(*idx, PoolType::Transparent);
+                    transparent_outputs.push(TxOut {
+                        value: payment.amount,
+                        script_pubkey: addr.script(),
+                    });
                 }
                 Address::Sapling(_) => {
-                    push_sapling();
+                    payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                    sapling_outputs.push(SaplingPayment(payment.amount));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
-                    let has_orchard = addr.orchard().is_some();
-                    #[cfg(not(feature = "orchard"))]
-                    let has_orchard = false;
-
-                    if has_orchard {
-                        #[cfg(feature = "orchard")]
-                        push_orchard();
-                    } else if addr.sapling().is_some() {
-                        push_sapling();
-                    } else if let Some(addr) = addr.transparent() {
-                        push_transparent(*addr);
-                    } else {
-                        return Err(InputSelectorError::Selection(
-                            GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
-                        ));
+                    if addr.orchard().is_some() {
+                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
+                        orchard_outputs.push(OrchardPayment(payment.amount));
+                        continue;
                     }
+
+                    if addr.sapling().is_some() {
+                        payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
+                        sapling_outputs.push(SaplingPayment(payment.amount));
+                        continue;
+                    }
+
+                    if let Some(addr) = addr.transparent() {
+                        payment_pools.insert(*idx, PoolType::Transparent);
+                        transparent_outputs.push(TxOut {
+                            value: payment.amount,
+                            script_pubkey: addr.script(),
+                        });
+                        continue;
+                    }
+
+                    return Err(InputSelectorError::Selection(
+                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+                    ));
                 }
             }
         }
@@ -617,6 +640,7 @@ where
                 Ok(balance) => {
                     return Ok(Proposal {
                         transaction_request,
+                        payment_pools,
                         transparent_inputs: vec![],
                         shielded_inputs: NonEmpty::from_vec(shielded_inputs).map(|notes| {
                             ShieldedInputs {
@@ -768,6 +792,7 @@ where
         if balance.total() >= shielding_threshold {
             Ok(Proposal {
                 transaction_request: TransactionRequest::empty(),
+                payment_pools: BTreeMap::new(),
                 transparent_inputs,
                 shielded_inputs: None,
                 balance,
