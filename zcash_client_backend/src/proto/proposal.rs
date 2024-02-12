@@ -1,41 +1,50 @@
-/// A data structure that describes the inputs to be consumed and outputs to
-/// be produced in a proposed transaction.
+/// A data structure that describes the a series of transactions to be created.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Proposal {
+    /// The version of this serialization format.
     #[prost(uint32, tag = "1")]
     pub proto_version: u32,
-    /// ZIP 321 serialized transaction request
-    #[prost(string, tag = "2")]
-    pub transaction_request: ::prost::alloc::string::String,
-    /// The vector of selected payment index / output pool mappings. Payment index
-    /// 0 corresponds to the payment with no explicit index.
-    #[prost(message, repeated, tag = "3")]
-    pub payment_output_pools: ::prost::alloc::vec::Vec<PaymentOutputPool>,
-    /// The anchor height to be used in creating the transaction, if any.
-    /// Setting the anchor height to zero will disallow the use of any shielded
-    /// inputs.
-    #[prost(uint32, tag = "4")]
-    pub anchor_height: u32,
-    /// The inputs to be used in creating the transaction.
-    #[prost(message, repeated, tag = "5")]
-    pub inputs: ::prost::alloc::vec::Vec<ProposedInput>,
-    /// The total value, fee value, and change outputs of the proposed
-    /// transaction
-    #[prost(message, optional, tag = "6")]
-    pub balance: ::core::option::Option<TransactionBalance>,
     /// The fee rule used in constructing this proposal
-    #[prost(enumeration = "FeeRule", tag = "7")]
+    #[prost(enumeration = "FeeRule", tag = "2")]
     pub fee_rule: i32,
     /// The target height for which the proposal was constructed
     ///
     /// The chain must contain at least this many blocks in order for the proposal to
     /// be executed.
-    #[prost(uint32, tag = "8")]
+    #[prost(uint32, tag = "3")]
     pub min_target_height: u32,
-    /// A flag indicating whether the proposal is for a shielding transaction,
+    /// The series of transactions to be created.
+    #[prost(message, repeated, tag = "4")]
+    pub steps: ::prost::alloc::vec::Vec<ProposalStep>,
+}
+/// A data structure that describes the inputs to be consumed and outputs to
+/// be produced in a proposed transaction.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProposalStep {
+    /// ZIP 321 serialized transaction request
+    #[prost(string, tag = "1")]
+    pub transaction_request: ::prost::alloc::string::String,
+    /// The vector of selected payment index / output pool mappings. Payment index
+    /// 0 corresponds to the payment with no explicit index.
+    #[prost(message, repeated, tag = "2")]
+    pub payment_output_pools: ::prost::alloc::vec::Vec<PaymentOutputPool>,
+    /// The anchor height to be used in creating the transaction, if any.
+    /// Setting the anchor height to zero will disallow the use of any shielded
+    /// inputs.
+    #[prost(uint32, tag = "3")]
+    pub anchor_height: u32,
+    /// The inputs to be used in creating the transaction.
+    #[prost(message, repeated, tag = "4")]
+    pub inputs: ::prost::alloc::vec::Vec<ProposedInput>,
+    /// The total value, fee value, and change outputs of the proposed
+    /// transaction
+    #[prost(message, optional, tag = "5")]
+    pub balance: ::core::option::Option<TransactionBalance>,
+    /// A flag indicating whether the step is for a shielding transaction,
     /// used for determining which OVK to select for wallet-internal outputs.
-    #[prost(bool, tag = "9")]
+    #[prost(bool, tag = "6")]
     pub is_shielding: bool,
 }
 /// A mapping from ZIP 321 payment index to the output pool that has been chosen
@@ -49,10 +58,11 @@ pub struct PaymentOutputPool {
     #[prost(enumeration = "ValuePool", tag = "2")]
     pub value_pool: i32,
 }
-/// The unique identifier and value for each proposed input.
+/// The unique identifier and value for each proposed input that does not
+/// require a back-reference to a prior step of the proposal.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ProposedInput {
+pub struct ReceivedOutput {
     #[prost(bytes = "vec", tag = "1")]
     pub txid: ::prost::alloc::vec::Vec<u8>,
     #[prost(enumeration = "ValuePool", tag = "2")]
@@ -62,12 +72,53 @@ pub struct ProposedInput {
     #[prost(uint64, tag = "4")]
     pub value: u64,
 }
+/// A reference a payment in a prior step of the proposal. This payment must
+/// belong to the wallet.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PriorStepOutput {
+    #[prost(uint32, tag = "1")]
+    pub step_index: u32,
+    #[prost(uint32, tag = "2")]
+    pub payment_index: u32,
+}
+/// A reference a change output from a prior step of the proposal.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PriorStepChange {
+    #[prost(uint32, tag = "1")]
+    pub step_index: u32,
+    #[prost(uint32, tag = "2")]
+    pub change_index: u32,
+}
+/// The unique identifier and value for an input to be used in the transaction.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProposedInput {
+    #[prost(oneof = "proposed_input::Value", tags = "1, 2, 3")]
+    pub value: ::core::option::Option<proposed_input::Value>,
+}
+/// Nested message and enum types in `ProposedInput`.
+pub mod proposed_input {
+    #[allow(clippy::derive_partial_eq_without_eq)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Value {
+        #[prost(message, tag = "1")]
+        ReceivedOutput(super::ReceivedOutput),
+        #[prost(message, tag = "2")]
+        PriorStepOutput(super::PriorStepOutput),
+        #[prost(message, tag = "3")]
+        PriorStepChange(super::PriorStepChange),
+    }
+}
 /// The proposed change outputs and fee value.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransactionBalance {
+    /// A list of change output values.
     #[prost(message, repeated, tag = "1")]
     pub proposed_change: ::prost::alloc::vec::Vec<ChangeValue>,
+    /// The fee to be paid by the proposed transaction, in zatoshis.
     #[prost(uint64, tag = "2")]
     pub fee_required: u64,
 }
@@ -76,10 +127,14 @@ pub struct TransactionBalance {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChangeValue {
+    /// The value of a change output to be created, in zatoshis.
     #[prost(uint64, tag = "1")]
     pub value: u64,
+    /// The value pool in which the change output should be created.
     #[prost(enumeration = "ValuePool", tag = "2")]
     pub value_pool: i32,
+    /// The optional memo that should be associated with the newly created change output.
+    /// Memos must not be present for transparent change outputs.
     #[prost(message, optional, tag = "3")]
     pub memo: ::core::option::Option<MemoBytes>,
 }

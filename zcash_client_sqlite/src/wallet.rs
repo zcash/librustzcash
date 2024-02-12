@@ -2316,7 +2316,7 @@ mod tests {
         );
         let txid = st
             .shield_transparent_funds(&input_selector, value, &usk, &[*taddr], 1)
-            .unwrap();
+            .unwrap()[0];
 
         // The wallet should have zero transparent balance, because the shielding
         // transaction can be mined.

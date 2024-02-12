@@ -589,10 +589,10 @@ pub(crate) mod tests {
             .unwrap();
 
         let create_proposed_result =
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal);
-        assert_matches!(create_proposed_result, Ok(_));
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal);
+        assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
 
-        let sent_tx_id = create_proposed_result.unwrap();
+        let sent_tx_id = create_proposed_result.unwrap()[0];
 
         // Verify that the sent transaction was stored and that we can decrypt the memos
         let tx = st
@@ -864,8 +864,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         let txid = st
-            .create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
-            .unwrap();
+            .create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
+            .unwrap()[0];
 
         let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);
@@ -921,8 +921,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal,),
-            Ok(_)
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal,),
+            Ok(txids) if txids.len() == 1
         );
 
         // A second proposal fails because there are no usable notes
@@ -1000,8 +1000,8 @@ pub(crate) mod tests {
             .unwrap();
 
         let txid2 = st
-            .create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
-            .unwrap();
+            .create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
+            .unwrap()[0];
 
         let (h, _) = st.generate_next_block_including(txid2);
         st.scan_cached_blocks(h, 1);
@@ -1066,7 +1066,7 @@ pub(crate) mod tests {
             )?;
 
             // Executing the proposal should succeed
-            let txid = st.create_proposed_transaction(&usk, ovk_policy, &proposal)?;
+            let txid = st.create_proposed_transactions(&usk, ovk_policy, &proposal)?[0];
 
             // Fetch the transaction from the database
             let raw_tx: Vec<_> = st
@@ -1170,8 +1170,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
-            Ok(_)
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
+            Ok(txids) if txids.len() == 1
         );
     }
 
@@ -1232,8 +1232,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
-            Ok(_)
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
+            Ok(txids) if txids.len() == 1
         );
     }
 
@@ -1310,7 +1310,7 @@ pub(crate) mod tests {
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
             )
-            .unwrap();
+            .unwrap()[0];
 
         let amount_left = (value - (amount_sent + fee_rule.fixed_fee()).unwrap()).unwrap();
         let pending_change = (amount_left - amount_legacy_change).unwrap();
@@ -1441,7 +1441,7 @@ pub(crate) mod tests {
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
             )
-            .unwrap();
+            .unwrap()[0];
 
         let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);

@@ -10,7 +10,6 @@ use std::{
 use nonempty::NonEmpty;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
     transaction::{
         components::{
             amount::{BalanceError, NonNegativeAmount},
@@ -31,11 +30,12 @@ use crate::{
     PoolType, ShieldedProtocol,
 };
 
-#[cfg(any(feature = "transparent-inputs"))]
-use std::convert::Infallible;
-
 #[cfg(feature = "transparent-inputs")]
-use {std::collections::BTreeSet, zcash_primitives::transaction::components::OutPoint};
+use {
+    std::collections::BTreeSet, std::convert::Infallible,
+    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::transaction::components::OutPoint,
+};
 
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
@@ -433,7 +433,7 @@ where
 
             match balance {
                 Ok(balance) => {
-                    return Proposal::from_parts(
+                    return Proposal::single_step(
                         transaction_request,
                         payment_pools,
                         vec![],
@@ -582,7 +582,7 @@ where
         };
 
         if balance.total() >= shielding_threshold {
-            Proposal::from_parts(
+            Proposal::single_step(
                 TransactionRequest::empty(),
                 BTreeMap::new(),
                 transparent_inputs,

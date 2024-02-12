@@ -378,6 +378,7 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
 /// viewing key, refer to [ZIP 310].
 ///
 /// [ZIP 310]: https://zips.z.cash/zip-0310
+#[derive(Debug, Clone)]
 pub enum OvkPolicy {
     /// Use the outgoing viewing key from the sender's [`ExtendedFullViewingKey`].
     ///

@@ -3062,6 +3062,7 @@ dependencies = [
  "incrementalmerkletree",
  "jubjub",
  "maybe-rayon",
+ "nonempty",
  "orchard",
  "proptest",
  "prost",
