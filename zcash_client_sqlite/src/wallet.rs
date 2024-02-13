@@ -383,12 +383,20 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
             })?;
 
         if let Some(taddr) = ua.transparent() {
-            let di_short = DiversifierIndex::from(di).try_into();
-            if let Ok(di_short) = di_short {
-                if let Some(index) = NonHardenedChildIndex::from_index(di_short) {
-                    ret.insert(*taddr, index);
-                }
-            }
+            let index = NonHardenedChildIndex::from_index(
+                DiversifierIndex::from(di).try_into().map_err(|_| {
+                    SqliteClientError::CorruptedData(
+                        "Unable to get diversifier for transparent address.".to_string(),
+                    )
+                })?,
+            )
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Unexpected hardened index for transparent address.".to_string(),
+                )
+            })?;
+
+            ret.insert(*taddr, index);
         }
     }
 

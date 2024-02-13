@@ -439,6 +439,8 @@ impl NonHardenedChildIndex {
     }
 
     pub fn next(&self) -> Option<Self> {
+        // overflow cannot happen because self.0 is 31 bits, and the next index is at most 32 bits
+        // which in that case would lead from_index to return None.
         Self::from_index(self.0 + 1)
     }
 }
@@ -585,7 +587,7 @@ mod tests {
         ));
 
         fn check<T: ConstantTimeEq>(v1: T, v2: T) -> bool {
-            v1.ct_eq(&v2).unwrap_u8() == 1
+            v1.ct_eq(&v2).into()
         }
     }
 
