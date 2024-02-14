@@ -14,7 +14,7 @@ use zcash_primitives::{
         fees::transparent as transparent_fees,
         TxId,
     },
-    zip32::{AccountId, Scope},
+    zip32::Scope,
 };
 
 use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
@@ -62,7 +62,7 @@ impl NoteId {
 /// internal account ID and the pool to which funds were sent in the case of a wallet-internal
 /// output.
 #[derive(Debug, Clone)]
-pub enum Recipient {
+pub enum Recipient<AccountId> {
     Transparent(TransparentAddress),
     Sapling(sapling::PaymentAddress),
     Unified(UnifiedAddress, PoolType),
@@ -76,7 +76,7 @@ pub struct WalletTx<N, S, A> {
     pub txid: TxId,
     pub index: usize,
     pub sapling_spends: Vec<WalletSaplingSpend<A>>,
-    pub sapling_outputs: Vec<WalletSaplingOutput<N, S>>,
+    pub sapling_outputs: Vec<WalletSaplingOutput<N, S, A>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +142,7 @@ pub struct WalletSaplingSpend<AccountId> {
     account: AccountId,
 }
 
-impl<AccountId> WalletSaplingSpend<AccountId> {
+impl<AccountId: Copy> WalletSaplingSpend<AccountId> {
     pub fn from_parts(index: usize, nf: sapling::Nullifier, account: AccountId) -> Self {
         Self { index, nf, account }
     }
@@ -170,11 +170,11 @@ impl<AccountId> WalletSaplingSpend<AccountId> {
 /// `()` for sent notes.
 ///
 /// [`OutputDescription`]: sapling::bundle::OutputDescription
-pub struct WalletSaplingOutput<N, S> {
+pub struct WalletSaplingOutput<N, S, A> {
     index: usize,
     cmu: sapling::note::ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    account: AccountId,
+    account: A,
     note: sapling::Note,
     is_change: bool,
     note_commitment_tree_position: Position,
@@ -182,14 +182,14 @@ pub struct WalletSaplingOutput<N, S> {
     recipient_key_scope: S,
 }
 
-impl<N, S> WalletSaplingOutput<N, S> {
+impl<N, S, A: Clone> WalletSaplingOutput<N, S, A> {
     /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         index: usize,
         cmu: sapling::note::ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        account: AccountId,
+        account: A,
         note: sapling::Note,
         is_change: bool,
         note_commitment_tree_position: Position,
@@ -218,8 +218,8 @@ impl<N, S> WalletSaplingOutput<N, S> {
     pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
         &self.ephemeral_key
     }
-    pub fn account(&self) -> AccountId {
-        self.account
+    pub fn account(&self) -> A {
+        self.account.clone()
     }
     pub fn note(&self) -> &sapling::Note {
         &self.note

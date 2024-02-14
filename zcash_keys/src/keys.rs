@@ -8,12 +8,12 @@ use zcash_primitives::{
 use crate::address::UnifiedAddress;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::NonHardenedChildIndex;
-
-#[cfg(feature = "transparent-inputs")]
 use {
     std::convert::TryInto,
-    zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey},
+    zcash_primitives::legacy::{
+        keys::{self as legacy, IncomingViewingKey},
+        NonHardenedChildIndex,
+    },
 };
 
 #[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
@@ -787,6 +787,7 @@ mod tests {
         zcash_primitives::legacy::{
             self,
             keys::{AccountPrivKey, IncomingViewingKey},
+            NonHardenedChildIndex,
         },
         zip32::DiversifierIndex,
     };
@@ -815,8 +816,6 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
-        use zcash_primitives::legacy::NonHardenedChildIndex;
-
         let taddr =
             legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
                 .unwrap()

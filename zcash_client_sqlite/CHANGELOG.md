@@ -10,11 +10,16 @@ and this library adheres to Rust's notion of
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
+- `AccountId` type alias, for use in generic type arguments.
 
 ### Changed
 - `zcash_client_sqlite::error::SqliteClientError` has new error variants:
   - `SqliteClientError::UnsupportedPoolType`
   - `SqliteClientError::BalanceError`
+  - Changes to the implementation of the `WalletWrite` trait:
+    - `create_account` function returns a unique identifier for the new account (as before),
+      except that this ID no longer happens to match the ZIP-32 account index.
+      To get the ZIP-32 account index, use the new `WalletRead::get_account_parameters` function.
 
 ## [0.8.1] - 2023-10-18
 

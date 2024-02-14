@@ -42,6 +42,7 @@ The entries below are relative to the `zcash_client_backend` crate as of
     feature is enabled.
   - `UnifiedSpendingKey::transparent` is now only available when the
     `transparent-inputs` feature is enabled.
+  - `UnifiedSpendingKey::default_transparent_address` return type changed.
   - `UnifiedFullViewingKey::new` no longer takes an Orchard full viewing key
     argument unless the `orchard` feature is enabled.
 

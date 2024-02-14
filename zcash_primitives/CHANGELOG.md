@@ -65,6 +65,8 @@ and this library adheres to Rust's notion of
     defaults to `constants::regtest::` for everything else. 
 
 ### Changed
+- `zcash_primitives::legacy::keys::IncomingViewingKey::derive_address` parameter type changed.
+- `zcash_primitives::legacy::keys::IncomingViewingKey::default_address` return type changed.
 - `zcash_primitives::legacy::TransparentAddress` variants have changed:
   - `TransparentAddress::PublicKey` has been renamed to `PublicKeyHash`
   - `TransparentAddress::Script` has been renamed to `ScriptHash`

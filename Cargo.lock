@@ -3011,6 +3011,7 @@ dependencies = [
  "assert_matches",
  "base64",
  "bech32",
+ "blake2b_simd",
  "bls12_381",
  "bs58",
  "byteorder",
@@ -3073,6 +3074,7 @@ dependencies = [
  "schemer-rusqlite",
  "secrecy",
  "shardtree",
+ "subtle",
  "tempfile",
  "time",
  "tracing",
@@ -3084,6 +3086,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
+ "zip32",
 ]
 
 [[package]]

@@ -23,14 +23,21 @@ and this library adheres to Rust's notion of
   - `Note::Orchard`
 
 ### Changed
+- Several structs and functions had `AccountId` added as a generic type
+  parameter in order to decouple the concepts of an account identifier
+  and a ZIP-32 account index.
 - `zcash_client_backend::data_api`:
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
+    - Added `get_account_parameters`
   - `ShieldedProtocol` has a new `Orchard` variant.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
+
+### Removed
+- `data_api::Error::ChildIndexOutOfRange`
 
 ## [0.11.0-pre-release] Unreleased
 

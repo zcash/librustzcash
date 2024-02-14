@@ -299,7 +299,7 @@ mod tests {
             components::{amount::NonNegativeAmount, transparent},
             fees::fixed,
         },
-        zip32::{AccountId, Scope},
+        zip32::{self, Scope},
     };
     use zcash_proofs::prover::LocalTxProver;
 
@@ -313,7 +313,7 @@ mod tests {
             memo_repr, parse_scope,
             sapling::ReceivedSaplingOutput,
         },
-        WalletDb,
+        AccountId, WalletDb,
     };
 
     // These must be different.
@@ -324,8 +324,9 @@ mod tests {
         db_data: &mut WalletDb<Connection, P>,
     ) -> (UnifiedFullViewingKey, BlockHeight, BuildResult) {
         // Create an account in the wallet
-        let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
-            .unwrap();
+        let usk0 =
+            UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], zip32::AccountId::ZERO)
+                .unwrap();
         let ufvk0 = usk0.to_unified_full_viewing_key();
         let height = db_data
             .params
@@ -442,7 +443,7 @@ mod tests {
         let sql_args = named_params![
             ":tx": &tx_ref,
             ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
-            ":account": u32::from(output.account()),
+            ":account": output.account().0,
             ":diversifier": &diversifier.0.as_ref(),
             ":value": output.note().value().inner(),
             ":rcm": &rcm.as_ref(),
@@ -479,6 +480,7 @@ mod tests {
 
         let (ufvk0, height, res) = prepare_wallet_state(&mut db_data);
         let tx = res.transaction();
+        let account_id = AccountId(0);
 
         // We can't use `decrypt_and_store_transaction` because we haven't migrated yet.
         // Replicate its relevant innards here.
@@ -488,7 +490,7 @@ mod tests {
                 &params,
                 height,
                 tx,
-                &[(AccountId::ZERO, ufvk0)].into_iter().collect(),
+                &[(account_id, ufvk0)].into_iter().collect(),
             ),
         };
         db_data
@@ -599,10 +601,11 @@ mod tests {
             ..Default::default()
         };
         block.vtx.push(compact_tx);
+        let account_id = AccountId(0);
         let scanned_block = scan_block(
             &params,
             block,
-            &[(&AccountId::ZERO, ufvk0.sapling().unwrap())],
+            &[(&account_id, ufvk0.sapling().unwrap())],
             &[],
             Some(&BlockMetadata::from_parts(
                 height - 1,

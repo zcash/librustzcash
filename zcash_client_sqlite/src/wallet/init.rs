@@ -203,19 +203,24 @@ mod tests {
         let re = Regex::new(r"\s+").unwrap();
 
         let expected_tables = vec![
-            "CREATE TABLE \"accounts\" (
-                account INTEGER PRIMARY KEY,
-                ufvk TEXT NOT NULL,
+            r#"CREATE TABLE "accounts" (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                account_type INTEGER NOT NULL DEFAULT 0,
+                hd_seed_fingerprint BLOB,
+                hd_account_index INTEGER,
+                uvk TEXT NOT NULL,
                 birthday_height INTEGER NOT NULL,
-                recover_until_height INTEGER )",
-            "CREATE TABLE addresses (
+                recover_until_height INTEGER,
+                CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
+            )"#,
+            r#"CREATE TABLE "addresses" (
                 account INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
                 cached_transparent_receiver_address TEXT,
-                FOREIGN KEY (account) REFERENCES accounts(account),
+                FOREIGN KEY (account) REFERENCES accounts(id),
                 CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
-            )",
+            )"#,
             "CREATE TABLE blocks (
                 height INTEGER PRIMARY KEY,
                 hash BLOB NOT NULL,
@@ -237,7 +242,7 @@ mod tests {
                     ON UPDATE RESTRICT,
                 CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
             )",
-            "CREATE TABLE sapling_received_notes (
+            r#"CREATE TABLE "sapling_received_notes" (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
@@ -252,10 +257,10 @@ mod tests {
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account) REFERENCES accounts(account),
+                FOREIGN KEY (account) REFERENCES accounts(id),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
-            )",
+            )"#,
             "CREATE TABLE sapling_tree_cap (
                 -- cap_id exists only to be able to take advantage of `ON CONFLICT`
                 -- upsert functionality; the table will only ever contain one row
@@ -303,7 +308,7 @@ mod tests {
             "CREATE TABLE schemer_migrations (
                 id blob PRIMARY KEY
             )",
-            "CREATE TABLE \"sent_notes\" (
+            r#"CREATE TABLE "sent_notes" (
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_pool INTEGER NOT NULL,
@@ -314,13 +319,14 @@ mod tests {
                 value INTEGER NOT NULL,
                 memo BLOB,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account) REFERENCES accounts(account),
-                FOREIGN KEY (to_account) REFERENCES accounts(account),
+                FOREIGN KEY (from_account) REFERENCES accounts(id),
+                FOREIGN KEY (to_account) REFERENCES accounts(id),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
                 CONSTRAINT note_recipient CHECK (
                     (to_address IS NOT NULL) != (to_account IS NOT NULL)
                 )
-            )",
+            )"#,
+            "CREATE TABLE sqlite_sequence(name,seq)",
             "CREATE TABLE transactions (
                 id_tx INTEGER PRIMARY KEY,
                 txid BLOB NOT NULL UNIQUE,
@@ -338,7 +344,7 @@ mod tests {
                 txid BLOB NOT NULL UNIQUE,
                 PRIMARY KEY (block_height, tx_index)
             )",
-            "CREATE TABLE \"utxos\" (
+            r#"CREATE TABLE "utxos" (
                 id_utxo INTEGER PRIMARY KEY,
                 received_by_account INTEGER NOT NULL,
                 address TEXT NOT NULL,
@@ -348,10 +354,10 @@ mod tests {
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
                 spent_in_tx INTEGER,
-                FOREIGN KEY (received_by_account) REFERENCES accounts(account),
+                FOREIGN KEY (received_by_account) REFERENCES accounts(id),
                 FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-            )",
+            )"#,
         ];
 
         let mut tables_query = st
@@ -1084,7 +1090,6 @@ mod tests {
         let (account, _usk) = db_data
             .create_account(&Secret::new(seed.to_vec()), birthday)
             .unwrap();
-        assert_eq!(account, AccountId::ZERO);
 
         for tv in &test_vectors::UNIFIED[..3] {
             if let Some(Address::Unified(tvua)) =

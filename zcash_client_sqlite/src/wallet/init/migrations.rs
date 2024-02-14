@@ -2,6 +2,7 @@ mod add_account_birthdays;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
+mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
 mod received_notes_nullable_nf;
@@ -20,7 +21,7 @@ mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
 use schemer_rusqlite::RusqliteMigration;
-use secrecy::SecretVec;
+use secrecy::{ExposeSecret, SecretVec};
 use zcash_primitives::consensus;
 
 use super::WalletMigrationError;
@@ -57,7 +58,14 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(utxos_table::Migration {}),
         Box::new(ufvk_support::Migration {
             params: params.clone(),
-            seed,
+            seed: seed
+                .as_ref()
+                .map(|s| SecretVec::new(s.expose_secret().clone())),
+        }),
+        Box::new(full_account_ids::Migration {
+            seed: seed
+                .as_ref()
+                .map(|s| SecretVec::new(s.expose_secret().clone())),
         }),
         Box::new(addresses_table::Migration {
             params: params.clone(),

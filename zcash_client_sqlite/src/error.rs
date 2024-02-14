@@ -8,11 +8,11 @@ use zcash_client_backend::{
     encoding::{Bech32DecodeError, TransparentCodecError},
     PoolType,
 };
-use zcash_primitives::{
-    consensus::BlockHeight, transaction::components::amount::BalanceError, zip32::AccountId,
-};
+use zcash_primitives::zip32;
+use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
 
 use crate::wallet::commitment_tree;
+use crate::AccountId;
 use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
@@ -76,7 +76,7 @@ pub enum SqliteClientError {
 
     /// An error occurred deriving a spending key from a seed and an account
     /// identifier.
-    KeyDerivationError(AccountId),
+    KeyDerivationError(zip32::AccountId),
 
     /// A caller attempted to initialize the accounts table with a discontinuous
     /// set of account identifiers.
@@ -147,7 +147,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
-            SqliteClientError::AccountUnknown(acct_id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*acct_id)),
+            SqliteClientError::AccountUnknown(acct_id) => write!(f, "Account {} does not belong to this wallet.", acct_id.0),
 
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),

@@ -15,7 +15,7 @@ use zcash_primitives::{
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
-    zip32::{AccountId, Scope},
+    zip32::Scope,
 };
 
 use crate::{
@@ -217,7 +217,9 @@ pub fn create_spend_to_address<DbT, ParamsT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletWrite
+        + WalletCommitmentTrees
+        + InputSource<Error = <DbT as WalletRead>::Error, AccountId = <DbT as WalletRead>::AccountId>,
     <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
 {
     let account = wallet_db
@@ -325,7 +327,9 @@ pub fn spend<DbT, ParamsT, InputsT>(
     >,
 >
 where
-    DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletWrite
+        + WalletCommitmentTrees
+        + InputSource<Error = <DbT as WalletRead>::Error, AccountId = <DbT as WalletRead>::AccountId>,
     <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<InputSource = DbT>,
@@ -363,7 +367,7 @@ where
 pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    spend_from_account: AccountId,
+    spend_from_account: <DbT as InputSource>::AccountId,
     input_selector: &InputsT,
     request: zip321::TransactionRequest,
     min_confirmations: NonZeroU32,
@@ -424,7 +428,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     fee_rule: StandardFeeRule,
-    spend_from_account: AccountId,
+    spend_from_account: <DbT as WalletRead>::AccountId,
     min_confirmations: NonZeroU32,
     to: &Address,
     amount: NonNegativeAmount,
@@ -441,7 +445,8 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: WalletRead
+        + InputSource<Error = <DbT as WalletRead>::Error, AccountId = <DbT as WalletRead>::AccountId>,
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![Payment {

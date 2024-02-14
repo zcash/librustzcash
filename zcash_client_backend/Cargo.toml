@@ -87,6 +87,9 @@ document-features.workspace = true
 byteorder = { workspace = true, optional = true }
 percent-encoding.workspace = true
 
+# - Digests
+blake2b_simd = { workspace = true }
+
 # - Scanning
 crossbeam-channel.workspace = true
 rayon.workspace = true

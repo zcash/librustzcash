@@ -278,8 +278,8 @@ pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
 where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
-    DbT: WalletWrite, 
-    <DbT as WalletRead>::AccountId: Clone + Default + Eq + Send,
+    DbT: WalletWrite,
+    <DbT as WalletRead>::AccountId: Clone + Default + Eq + Send + 'static,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data_db

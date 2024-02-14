@@ -6,11 +6,11 @@ use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
 use zcash_keys::keys::UnifiedAddressRequest;
-use zcash_primitives::{consensus, zip32::AccountId};
+use zcash_primitives::consensus;
 
 use crate::{
     wallet::{init::WalletMigrationError, insert_address},
-    UA_TRANSPARENT,
+    AccountId, UA_TRANSPARENT,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -64,10 +64,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
-            let account: u32 = row.get(0)?;
-            let account = AccountId::try_from(account).map_err(|_| {
-                WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())
-            })?;
+            let account = AccountId(row.get(0)?);
 
             let ufvk_str: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
@@ -157,7 +154,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 "INSERT INTO accounts_new (account, ufvk)
                  VALUES (:account, :ufvk)",
                 named_params![
-                    ":account": u32::from(account),
+                    ":account": account.0,
                     ":ufvk": ufvk.encode(&self.params),
                 ],
             )?;

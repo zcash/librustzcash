@@ -32,19 +32,19 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+use incrementalmerkletree::Position;
 use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
+use shardtree::{error::ShardTreeError, ShardTree};
 use std::{
     borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
     path::Path,
 };
-
-use incrementalmerkletree::Position;
-use shardtree::{error::ShardTreeError, ShardTree};
+use subtle::ConditionallySelectable;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -54,7 +54,7 @@ use zcash_primitives::{
         components::amount::{Amount, NonNegativeAmount},
         Transaction, TxId,
     },
-    zip32::{AccountId, DiversifierIndex, Scope},
+    zip32::{self, DiversifierIndex, Scope},
 };
 
 use zcash_client_backend::{
@@ -63,9 +63,10 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, TransparentAddressMetadata, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, AccountParameters, BlockMetadata, DecryptedTransaction, HDSeedAccount,
+        HDSeedFingerprint, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
+        TransparentAddressMetadata, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -114,6 +115,18 @@ pub(crate) const UA_TRANSPARENT: bool = true;
 
 pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
     UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+
+/// The ID type for accounts.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub struct AccountId(u32);
+
+impl ConditionallySelectable for AccountId {
+    fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
+        AccountId(subtle::ConditionallySelectable::conditional_select(
+            &a.0, &b.0, choice,
+        ))
+    }
+}
 
 /// A newtype wrapper for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -174,6 +187,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for WalletDb<C, P> {
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
+    type AccountId = AccountId;
 
     fn get_spendable_note(
         &self,
@@ -229,6 +243,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
+    type AccountId = AccountId;
+
+    fn get_account_parameters(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<AccountParameters>, Self::Error> {
+        wallet::get_account_parameters(self.conn.borrow(), &self.params, account_id)
+    }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
@@ -309,7 +331,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_wallet_summary(
         &self,
         min_confirmations: u32,
-    ) -> Result<Option<WalletSummary>, Self::Error> {
+    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         // This will return a runtime error if we call `get_wallet_summary` from two
         // threads at the same time, as transactions cannot nest.
         wallet::get_wallet_summary(
@@ -397,18 +419,23 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let account = wallet::get_max_account_id(wdb.conn.0)?
+            let seed_id = HDSeedFingerprint::from_seed(seed);
+            let account_index = wallet::get_max_account_id(wdb.conn.0, &seed_id)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
-                .unwrap_or(AccountId::ZERO);
+                .unwrap_or(zip32::AccountId::ZERO);
 
-            let usk = UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account)
-                .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
+            let usk =
+                UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account_index)
+                    .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            wallet::add_account(wdb.conn.0, &wdb.params, account, &ufvk, birthday)?;
+            let account_parameters =
+                AccountParameters::Zip32(HDSeedAccount(seed_id, account_index, ufvk));
+            let account_id =
+                wallet::add_account(wdb.conn.0, &wdb.params, account_parameters, birthday)?;
 
-            Ok((account, usk))
+            Ok((account_id, usk))
         })
     }
 
@@ -454,7 +481,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope, Self::AccountId>>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let start_positions = blocks.first().map(|block| {
@@ -593,7 +620,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         Ok(())
     }
 
-    fn store_decrypted_tx(&mut self, d_tx: DecryptedTransaction) -> Result<(), Self::Error> {
+    fn store_decrypted_tx(
+        &mut self,
+        d_tx: DecryptedTransaction<Self::AccountId>,
+    ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None)?;
 
@@ -684,7 +714,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         })
     }
 
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<(), Self::Error> {
+    fn store_sent_tx(
+        &mut self,
+        sent_tx: &SentTransaction<Self::AccountId>,
+    ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(
                 wdb.conn.0,
@@ -1126,7 +1159,7 @@ extern crate assert_matches;
 mod tests {
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
 
-    use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
+    use crate::{testing::TestBuilder, DEFAULT_UA_REQUEST};
 
     #[cfg(feature = "unstable")]
     use {
@@ -1142,20 +1175,20 @@ mod tests {
         let mut st = TestBuilder::new()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
+        let account = st.test_account().unwrap();
 
-        let account = AccountId::ZERO;
-        let current_addr = st.wallet().get_current_address(account).unwrap();
+        let current_addr = st.wallet().get_current_address(account.0).unwrap();
         assert!(current_addr.is_some());
 
         // TODO: Add Orchard
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account, DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.0, DEFAULT_UA_REQUEST)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = st.wallet().get_current_address(account).unwrap();
+        let addr2_cur = st.wallet().get_current_address(account.0).unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1167,15 +1200,13 @@ mod tests {
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
+        let account = st.test_account().unwrap();
 
         let (_, usk, _) = st.test_account().unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (taddr, _) = usk.default_transparent_address();
 
-        let receivers = st
-            .wallet()
-            .get_transparent_receivers(AccountId::ZERO)
-            .unwrap();
+        let receivers = st.wallet().get_transparent_receivers(account.0).unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
@@ -1192,6 +1223,8 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
+        use zcash_primitives::zip32;
+
         let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.
@@ -1199,7 +1232,7 @@ mod tests {
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
-        let account = AccountId::ZERO;
+        let account = zip32::AccountId::ZERO;
         let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(

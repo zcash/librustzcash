@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
-use std::hash::Hash;
 use std::fmt::{self, Debug};
+use std::hash::Hash;
 
 use incrementalmerkletree::{Position, Retention};
 use sapling::{
@@ -14,10 +14,7 @@ use sapling::{
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
 use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade};
-use zcash_primitives::{
-    consensus,
-    zip32::{AccountId, Scope},
-};
+use zcash_primitives::{consensus, zip32::Scope};
 
 use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBundles};
 use crate::{
@@ -252,13 +249,17 @@ impl fmt::Display for ScanError {
 /// [`IncrementalWitness`]: sapling::IncrementalWitness
 /// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey, A: Clone + Default + Eq + Hash + Send + ConditionallySelectable>(
+pub fn scan_block<
+    P: consensus::Parameters + Send + 'static,
+    K: ScanningKey,
+    A: Clone + Default + Eq + Hash + Send + ConditionallySelectable + 'static,
+>(
     params: &P,
     block: CompactBlock,
     vks: &[(&A, &K)],
     sapling_nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
+) -> Result<ScannedBlock<K::Nf, K::Scope, A>, ScanError> {
     scan_block_with_runner::<_, _, (), A>(
         params,
         block,
@@ -269,10 +270,9 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey, A: 
     )
 }
 
-type TaggedBatch<S> =
-    Batch<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor>;
-type TaggedBatchRunner<S, T> =
-    BatchRunner<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor, T>;
+type TaggedBatch<A, S> = Batch<(A, S), SaplingDomain, CompactOutputDescription, CompactDecryptor>;
+type TaggedBatchRunner<A, S, T> =
+    BatchRunner<(A, S), SaplingDomain, CompactOutputDescription, CompactDecryptor, T>;
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
 pub(crate) fn add_block_to_runner<P, S, T, A>(
@@ -283,7 +283,7 @@ pub(crate) fn add_block_to_runner<P, S, T, A>(
     P: consensus::Parameters + Send + 'static,
     S: Clone + Send + 'static,
     T: Tasks<TaggedBatch<A, S>>,
-    A: Clone + Default + Eq + Send
+    A: Clone + Default + Eq + Send + 'static,
 {
     let block_hash = block.hash();
     let block_height = block.height();
@@ -336,7 +336,7 @@ pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,
     T: Tasks<TaggedBatch<A, K::Scope>> + Sync,
-    A: Clone + Default + Eq + Hash + ConditionallySelectable
+    A: Send + Clone + Default + Eq + Hash + ConditionallySelectable + 'static,
 >(
     params: &P,
     block: CompactBlock,
@@ -344,7 +344,7 @@ pub(crate) fn scan_block_with_runner<
     nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runner: Option<&mut TaggedBatchRunner<A, K::Scope, T>>,
-) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
+) -> Result<ScannedBlock<K::Nf, K::Scope, A>, ScanError> {
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
     }
@@ -447,7 +447,7 @@ pub(crate) fn scan_block_with_runner<
         )?;
 
     let compact_block_tx_count = block.vtx.len();
-    let mut wtxs: Vec<WalletTx<K::Nf, K::Scope>> = vec![];
+    let mut wtxs: Vec<WalletTx<K::Nf, K::Scope, A>> = vec![];
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
@@ -501,7 +501,7 @@ pub(crate) fn scan_block_with_runner<
             u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
 
         // Check for incoming notes while incrementing tree and witnesses
-        let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf, K::Scope>> = vec![];
+        let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf, K::Scope, A>> = vec![];
         {
             let decoded = &tx
                 .outputs

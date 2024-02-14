@@ -1,16 +1,25 @@
 //! Interfaces for wallet data persistence & low-level wallet utilities.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fmt::Debug,
     io,
     num::{NonZeroU32, TryFromIntError},
 };
 
+use crate::{
+    address::UnifiedAddress,
+    decrypt::DecryptedOutput,
+    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    proto::service::TreeState,
+    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
+    ShieldedProtocol,
+};
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use sapling::{Node, NOTE_COMMITMENT_TREE_DEPTH};
-use secrecy::SecretVec;
+use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use subtle::ConditionallySelectable;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -22,15 +31,7 @@ use zcash_primitives::{
     },
     zip32::Scope,
 };
-
-use crate::{
-    address::UnifiedAddress,
-    decrypt::DecryptedOutput,
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    proto::service::TreeState,
-    wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
-    ShieldedProtocol,
-};
+use zip32::DiversifierIndex;
 
 use self::chain::CommitmentTreeRoot;
 use self::scanning::ScanRange;
@@ -38,10 +39,92 @@ use self::scanning::ScanRange;
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::transaction::components::OutPoint;
 
+use blake2b_simd::{Params as blake2bParams, OUTBYTES as BLAKE2B_OUTBYTES};
+
 pub mod chain;
 pub mod error;
 pub mod scanning;
 pub mod wallet;
+
+/// A hash of a seed used for an HD account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HDSeedFingerprint([u8; BLAKE2B_OUTBYTES]);
+
+impl HDSeedFingerprint {
+    /// Generates the fingerprint from a given seed.
+    pub fn from_seed(seed: &SecretVec<u8>) -> Self {
+        const PERSONALIZATION: &[u8] = b"Zcash_HD_Seed_FP";
+        let hash = blake2bParams::new()
+            .personal(PERSONALIZATION)
+            .to_state()
+            .update(seed.expose_secret())
+            .finalize();
+        Self(hash.as_array().to_owned())
+    }
+
+    /// Instantiates the fingerprint from a buffer containing a previously computed fingerprint.
+    pub fn from_bytes(hash: [u8; BLAKE2B_OUTBYTES]) -> Self {
+        Self(hash)
+    }
+
+    /// Returns the bytes of the fingerprint.
+    pub fn as_bytes(&self) -> &[u8; BLAKE2B_OUTBYTES] {
+        &self.0
+    }
+}
+
+/// Represents the identifier for an account that was derived from a ZIP-32 HD seed and account index.
+#[derive(Debug, Clone)]
+pub struct HDSeedAccount(
+    pub HDSeedFingerprint,
+    pub zip32::AccountId,
+    pub UnifiedFullViewingKey,
+);
+
+/// Represents an arbitrary account for which the seed and ZIP-32 account ID are not known
+/// and may not have been involved in creating this account.
+#[derive(Debug, Clone)]
+pub enum ImportedAccount {
+    /// An account that was imported via its full viewing key.
+    Full(UnifiedFullViewingKey),
+}
+
+/// The inputs for adding an account to a wallet.
+#[derive(Debug, Clone)]
+pub enum AccountParameters {
+    /// Inputs for a ZIP-32 HD account.
+    Zip32(HDSeedAccount),
+    /// Inputs for an imported account.
+    Imported(ImportedAccount),
+}
+
+impl AccountParameters {
+    /// Gets the default UA for the account.
+    pub fn default_address(
+        &self,
+        request: UnifiedAddressRequest,
+    ) -> (UnifiedAddress, DiversifierIndex) {
+        match self {
+            AccountParameters::Zip32(HDSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
+            AccountParameters::Imported(ImportedAccount::Full(ufvk)) => {
+                ufvk.default_address(request)
+            }
+        }
+    }
+
+    /// Gets the unified full viewing key for this account, if available.
+    ///
+    /// Accounts initialized with an incoming viewing key will not have a unified full viewing key.
+    pub fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        match self {
+            AccountParameters::Zip32(HDSeedAccount(_, _, ufvk)) => Some(ufvk),
+            AccountParameters::Imported(ImportedAccount::Full(ufvk)) => Some(ufvk),
+        }
+    }
+
+    // pub fn uivk(&self) -> Option<&UnifiedIncomingViewingKey> {
+    // }
+}
 
 /// The height of subtree roots in the Sapling note commitment tree.
 ///
@@ -307,18 +390,18 @@ impl<T> Ratio<T> {
 /// this circumstance it is possible that a newly created transaction could conflict with a
 /// not-yet-mined transaction in the mempool.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WalletSummary<AccountId> {
-    account_balances: BTreeMap<AccountId, AccountBalance>,
+pub struct WalletSummary<AccountId: Eq + std::hash::Hash> {
+    account_balances: HashMap<AccountId, AccountBalance>,
     chain_tip_height: BlockHeight,
     fully_scanned_height: BlockHeight,
     scan_progress: Option<Ratio<u64>>,
     next_sapling_subtree_index: u64,
 }
 
-impl<AccountId> WalletSummary<AccountId> {
+impl<AccountId: Eq + std::hash::Hash> WalletSummary<AccountId> {
     /// Constructs a new [`WalletSummary`] from its constituent parts.
     pub fn new(
-        account_balances: BTreeMap<AccountId, AccountBalance>,
+        account_balances: HashMap<AccountId, AccountBalance>,
         chain_tip_height: BlockHeight,
         fully_scanned_height: BlockHeight,
         scan_progress: Option<Ratio<u64>>,
@@ -334,7 +417,7 @@ impl<AccountId> WalletSummary<AccountId> {
     }
 
     /// Returns the balances of accounts in the wallet, keyed by account ID.
-    pub fn account_balances(&self) -> &BTreeMap<AccountId, AccountBalance> {
+    pub fn account_balances(&self) -> &HashMap<AccountId, AccountBalance> {
         &self.account_balances
     }
 
@@ -378,7 +461,7 @@ pub trait InputSource {
     type Error;
 
     /// The type used to track unique account identifiers.
-    type AccountId;
+    type AccountId: Copy + Clone + Send + PartialEq + Eq + std::hash::Hash;
 
     /// Backend-specific note identifier.
     ///
@@ -445,7 +528,13 @@ pub trait WalletRead {
     type Error;
 
     /// The type used to track unique account identifiers.
-    type AccountId;
+    type AccountId: Clone + Send + PartialEq + Eq + std::hash::Hash + ConditionallySelectable;
+
+    /// Gets the parameters that went into creating an account (e.g. seed+index or uvk).
+    fn get_account_parameters(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<AccountParameters>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
@@ -716,23 +805,23 @@ pub struct ScannedBlockCommitments {
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct ScannedBlock<Nf, S> {
+pub struct ScannedBlock<Nf, S, A> {
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
-    transactions: Vec<WalletTx<Nf, S>>,
+    transactions: Vec<WalletTx<Nf, S, A>>,
     sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
     #[cfg(feature = "orchard")]
     orchard: ScannedBundles<orchard::note::NoteCommitment, orchard::note::Nullifier>,
 }
 
-impl<Nf, S> ScannedBlock<Nf, S> {
+impl<Nf, S, A> ScannedBlock<Nf, S, A> {
     /// Constructs a new `ScannedBlock`
     pub(crate) fn from_parts(
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
-        transactions: Vec<WalletTx<Nf, S>>,
+        transactions: Vec<WalletTx<Nf, S, A>>,
         sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
         #[cfg(feature = "orchard")] orchard: ScannedBundles<
             orchard::note::NoteCommitment,
@@ -766,7 +855,7 @@ impl<Nf, S> ScannedBlock<Nf, S> {
     }
 
     /// Returns the list of transactions from this block that are relevant to the wallet.
-    pub fn transactions(&self) -> &[WalletTx<Nf, S>] {
+    pub fn transactions(&self) -> &[WalletTx<Nf, S, A>] {
         &self.transactions
     }
 
@@ -810,9 +899,9 @@ impl<Nf, S> ScannedBlock<Nf, S> {
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
-pub struct DecryptedTransaction<'a> {
+pub struct DecryptedTransaction<'a, AccountId> {
     pub tx: &'a Transaction,
-    pub sapling_outputs: &'a Vec<DecryptedOutput<sapling::Note>>,
+    pub sapling_outputs: &'a Vec<DecryptedOutput<sapling::Note, AccountId>>,
 }
 
 /// A transaction that was constructed and sent by the wallet.
@@ -833,7 +922,7 @@ pub struct SentTransaction<'a, AccountId> {
 /// A type that represents an output (either Sapling or transparent) that was sent by the wallet.
 pub struct SentTransactionOutput<AccountId> {
     output_index: usize,
-    recipient: Recipient,
+    recipient: Recipient<AccountId>,
     value: NonNegativeAmount,
     memo: Option<MemoBytes>,
     sapling_change_to: Option<(AccountId, sapling::Note)>,
@@ -842,7 +931,7 @@ pub struct SentTransactionOutput<AccountId> {
 impl<AccountId> SentTransactionOutput<AccountId> {
     pub fn from_parts(
         output_index: usize,
-        recipient: Recipient,
+        recipient: Recipient<AccountId>,
         value: NonNegativeAmount,
         memo: Option<MemoBytes>,
         sapling_change_to: Option<(AccountId, sapling::Note)>,
@@ -867,7 +956,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
     }
     /// Returns the recipient address of the transaction, or the account id for wallet-internal
     /// transactions.
-    pub fn recipient(&self) -> &Recipient {
+    pub fn recipient(&self) -> &Recipient<AccountId> {
         &self.recipient
     }
     /// Returns the value of the newly created output.
@@ -1011,6 +1100,7 @@ pub trait WalletWrite: WalletRead {
     ///
     /// Returns the account identifier for the newly-created wallet database entry, along with the
     /// associated [`UnifiedSpendingKey`].
+    /// Note that the unique account identifier should *not* be assumed equivalent to the ZIP-32 account index.
     ///
     /// If `birthday.height()` is below the current chain tip, this operation will
     /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
@@ -1056,7 +1146,7 @@ pub trait WalletWrite: WalletRead {
     /// `blocks` must be sequential, in order of increasing block height
     fn put_blocks(
         &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope, Self::AccountId>>,
     ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
@@ -1069,11 +1159,17 @@ pub trait WalletWrite: WalletRead {
     fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
-    fn store_decrypted_tx(&mut self, received_tx: DecryptedTransaction) -> Result<(), Self::Error>;
+    fn store_decrypted_tx(
+        &mut self,
+        received_tx: DecryptedTransaction<Self::AccountId>,
+    ) -> Result<(), Self::Error>;
 
     /// Saves information about a transaction that was constructed and sent by the wallet to the
     /// persistent wallet store.
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction<Self::AccountId>) -> Result<(), Self::Error>;
+    fn store_sent_tx(
+        &mut self,
+        sent_tx: &SentTransaction<Self::AccountId>,
+    ) -> Result<(), Self::Error>;
 
     /// Truncates the wallet database to the specified height.
     ///
@@ -1142,7 +1238,7 @@ pub mod testing {
         legacy::TransparentAddress,
         memo::Memo,
         transaction::{components::Amount, Transaction, TxId},
-        zip32::{AccountId, Scope},
+        zip32::Scope,
     };
 
     use crate::{
@@ -1180,7 +1276,7 @@ pub mod testing {
     impl InputSource for MockWalletDb {
         type Error = ();
         type NoteRef = u32;
-        type AccountId = AccountId;
+        type AccountId = u32;
 
         fn get_spendable_note(
             &self,
@@ -1193,7 +1289,7 @@ pub mod testing {
 
         fn select_spendable_notes(
             &self,
-            _account: AccountId,
+            _account: Self::AccountId,
             _target_value: Amount,
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
@@ -1205,7 +1301,14 @@ pub mod testing {
 
     impl WalletRead for MockWalletDb {
         type Error = ();
-        type AccountId = AccountId;
+        type AccountId = u32;
+
+        fn get_account_parameters(
+            &self,
+            _account_id: Self::AccountId,
+        ) -> Result<Option<super::AccountParameters>, Self::Error> {
+            Ok(None)
+        }
 
         fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)
@@ -1260,7 +1363,10 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_account_birthday(&self, _account: Self::AccountId) -> Result<BlockHeight, Self::Error> {
+        fn get_account_birthday(
+            &self,
+            _account: Self::AccountId,
+        ) -> Result<BlockHeight, Self::Error> {
             Err(())
         }
 
@@ -1302,7 +1408,7 @@ pub mod testing {
         fn get_sapling_nullifiers(
             &self,
             _query: NullifierQuery,
-        ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
+        ) -> Result<Vec<(Self::AccountId, sapling::Nullifier)>, Self::Error> {
             Ok(Vec::new())
         }
 
@@ -1310,13 +1416,13 @@ pub mod testing {
         fn get_orchard_nullifiers(
             &self,
             _query: NullifierQuery,
-        ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
+        ) -> Result<Vec<(Self::AccountId, orchard::note::Nullifier)>, Self::Error> {
             Ok(Vec::new())
         }
 
         fn get_transparent_receivers(
             &self,
-            _account: AccountId,
+            _account: Self::AccountId,
         ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>
         {
             Ok(HashMap::new())
@@ -1324,13 +1430,13 @@ pub mod testing {
 
         fn get_transparent_balances(
             &self,
-            _account: AccountId,
+            _account: Self::AccountId,
             _max_height: BlockHeight,
         ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
             Ok(HashMap::new())
         }
 
-        fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
+        fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
             Ok(Vec::new())
         }
     }
@@ -1342,16 +1448,16 @@ pub mod testing {
             &mut self,
             seed: &SecretVec<u8>,
             _birthday: AccountBirthday,
-        ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
-            let account = AccountId::ZERO;
+        ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
+            let account = zip32::AccountId::ZERO;
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
-                .map(|k| (account, k))
+                .map(|k| (u32::from(account), k))
                 .map_err(|_| ())
         }
 
         fn get_next_available_address(
             &mut self,
-            _account: AccountId,
+            _account: Self::AccountId,
             _request: UnifiedAddressRequest,
         ) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
@@ -1360,7 +1466,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
-            _blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
+            _blocks: Vec<ScannedBlock<sapling::Nullifier, Scope, Self::AccountId>>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }
@@ -1371,12 +1477,15 @@ pub mod testing {
 
         fn store_decrypted_tx(
             &mut self,
-            _received_tx: DecryptedTransaction,
+            _received_tx: DecryptedTransaction<Self::AccountId>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }
 
-        fn store_sent_tx(&mut self, _sent_tx: &SentTransaction<AccountId>) -> Result<(), Self::Error> {
+        fn store_sent_tx(
+            &mut self,
+            _sent_tx: &SentTransaction<Self::AccountId>,
+        ) -> Result<(), Self::Error> {
             Ok(())
         }
 
