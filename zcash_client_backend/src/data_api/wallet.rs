@@ -647,7 +647,7 @@ where
 
             let secret_key = usk
                 .transparent()
-                .derive_external_secret_key(address_metadata.address_index())
+                .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
                 .unwrap();
 
             builder.add_transparent_input(
