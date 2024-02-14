@@ -7,7 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
-- `legacy::keys::NonHardenedChildIndex`
+- `zcash_primitives::legacy::keys::NonHardenedChildIndex`
 - Dependency on `bellman 0.14`.
 - `zcash_primitives::consensus::sapling_zip212_enforcement`
 - `zcash_primitives::transaction`:
@@ -127,6 +127,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend` changes related to `local-consensus` feature:
   - added tests that verify `zip321` supports Payment URIs with `Local(P)`
   network parameters.
+- `zcash_primitives::legacy::keys::derive_external_secret_key` parameter type changed from `u32` to `NonHardenedChildIndex`.
 
 ### Removed
 - `zcash_primitives::constants`:
