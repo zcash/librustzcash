@@ -42,9 +42,10 @@ use super::InputSource;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::WalletTransparentOutput, input_selection::ShieldingSelector,
+    crate::proposal::ProposalError, input_selection::ShieldingSelector,
     sapling::keys::OutgoingViewingKey, std::convert::Infallible,
     zcash_keys::encoding::AddressCodec, zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::transaction::components::OutPoint,
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -709,33 +710,93 @@ where
     }
 
     #[cfg(feature = "transparent-inputs")]
-    let utxos = {
+    let utxos_spent = {
         let known_addrs = wallet_db
             .get_transparent_receivers(account)
             .map_err(Error::DataSource)?;
 
-        let mut utxos: Vec<WalletTransparentOutput> = vec![];
-        for utxo in proposal_step.transparent_inputs() {
-            utxos.push(utxo.clone());
-
+        let mut utxos_spent: Vec<OutPoint> = vec![];
+        let mut add_transparent_input = |addr,
+                                         outpoint: OutPoint,
+                                         utxo|
+         -> Result<
+            (),
+            Error<
+                <DbT as WalletRead>::Error,
+                <DbT as WalletCommitmentTrees>::Error,
+                InputsErrT,
+                FeeRuleT::Error,
+            >,
+        > {
             let address_metadata = known_addrs
-                .get(utxo.recipient_address())
-                .ok_or_else(|| Error::AddressNotRecognized(*utxo.recipient_address()))?
+                .get(addr)
+                .ok_or(Error::AddressNotRecognized(*addr))?
                 .clone()
-                .ok_or_else(|| Error::NoSpendingKey(utxo.recipient_address().encode(params)))?;
+                .ok_or_else(|| Error::NoSpendingKey(addr.encode(params)))?;
 
             let secret_key = usk
                 .transparent()
                 .derive_secret_key(address_metadata.scope(), address_metadata.address_index())
                 .unwrap();
 
-            builder.add_transparent_input(
-                secret_key,
+            utxos_spent.push(outpoint.clone());
+            builder.add_transparent_input(secret_key, outpoint, utxo)?;
+
+            Ok(())
+        };
+
+        for utxo in proposal_step.transparent_inputs() {
+            add_transparent_input(
+                utxo.recipient_address(),
                 utxo.outpoint().clone(),
                 utxo.txout().clone(),
             )?;
         }
-        utxos
+        for input_ref in proposal_step.prior_step_inputs() {
+            match input_ref.output_index() {
+                proposal::StepOutputIndex::Payment(i) => {
+                    // We know based upon the earlier check that this must be a transparent input,
+                    // We also know that transparent outputs for that previous step were added to
+                    // the transaction in payment index order, so we can use dead reckoning to
+                    // figure out which output it ended up being.
+                    let (prior_step, result) = &prior_step_results[input_ref.step_index()];
+                    let recipient_address = match &prior_step
+                        .transaction_request()
+                        .payments()
+                        .get(&i)
+                        .expect("Payment step references are checked at construction")
+                        .recipient_address
+                    {
+                        Address::Transparent(t) => Some(t),
+                        Address::Unified(uaddr) => uaddr.transparent(),
+                        _ => None,
+                    }
+                    .ok_or(Error::ProposalNotSupported)?;
+                    let outpoint = OutPoint::new(
+                        result.transaction().txid().into(),
+                        u32::try_from(
+                            prior_step
+                                .payment_pools()
+                                .iter()
+                                .filter(|(_, pool)| pool == &&PoolType::Transparent)
+                                .take_while(|(j, _)| j <= &&i)
+                                .count()
+                                - 1,
+                        )
+                        .expect("Transparent output index fits into a u32"),
+                    );
+                    let utxo = &result
+                        .transaction()
+                        .transparent_bundle()
+                        .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?
+                        .vout[outpoint.n() as usize];
+
+                    add_transparent_input(recipient_address, outpoint, utxo.clone())?;
+                }
+                proposal::StepOutputIndex::Change(_) => unreachable!(),
+            }
+        }
+        utxos_spent
     };
 
     let mut sapling_output_meta = vec![];
@@ -896,7 +957,7 @@ where
             outputs: sapling_outputs.chain(transparent_outputs).collect(),
             fee_amount: Amount::from(proposal_step.balance().fee_required()),
             #[cfg(feature = "transparent-inputs")]
-            utxos_spent: utxos.iter().map(|utxo| utxo.outpoint().clone()).collect(),
+            utxos_spent,
         })
         .map_err(Error::DataSource)?;
 
