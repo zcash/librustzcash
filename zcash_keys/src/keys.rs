@@ -8,6 +8,9 @@ use zcash_primitives::{
 use crate::address::UnifiedAddress;
 
 #[cfg(feature = "transparent-inputs")]
+use zcash_primitives::legacy::NonHardenedChildIndex;
+
+#[cfg(feature = "transparent-inputs")]
 use {
     std::convert::TryInto,
     zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey},
@@ -68,13 +71,13 @@ pub mod sapling {
 }
 
 #[cfg(feature = "transparent-inputs")]
-fn to_transparent_child_index(j: DiversifierIndex) -> Option<u32> {
+fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildIndex> {
     let (low_4_bytes, rest) = j.as_bytes().split_at(4);
     let transparent_j = u32::from_le_bytes(low_4_bytes.try_into().unwrap());
-    if transparent_j > (0x7FFFFFFF) || rest.iter().any(|b| b != &0) {
+    if rest.iter().any(|b| b != &0) {
         None
     } else {
-        Some(transparent_j)
+        NonHardenedChildIndex::from_index(transparent_j)
     }
 }
 
@@ -388,7 +391,7 @@ impl UnifiedSpendingKey {
     }
 
     #[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
-    pub fn default_transparent_address(&self) -> (TransparentAddress, u32) {
+    pub fn default_transparent_address(&self) -> (TransparentAddress, NonHardenedChildIndex) {
         self.transparent()
             .to_account_pubkey()
             .derive_external_ivk()
@@ -812,13 +815,15 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
+        use zcash_primitives::legacy::NonHardenedChildIndex;
+
         let taddr =
             legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
                 .unwrap()
                 .to_account_pubkey()
                 .derive_external_ivk()
                 .unwrap()
-                .derive_address(0)
+                .derive_address(NonHardenedChildIndex::ZERO)
                 .unwrap()
                 .encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());

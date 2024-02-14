@@ -6,6 +6,11 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::ops::Shl;
 
+#[cfg(feature = "transparent-inputs")]
+use hdwallet::KeyIndex;
+
+use subtle::{Choice, ConstantTimeEq};
+
 use zcash_encoding::Vector;
 
 #[cfg(feature = "transparent-inputs")]
@@ -402,6 +407,63 @@ impl TransparentAddress {
     }
 }
 
+/// A child index for a derived transparent address.
+///
+/// Only NON-hardened derivation is supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonHardenedChildIndex(u32);
+
+impl ConstantTimeEq for NonHardenedChildIndex {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl NonHardenedChildIndex {
+    pub const ZERO: NonHardenedChildIndex = NonHardenedChildIndex(0);
+
+    /// Parses the given ZIP 32 child index.
+    ///
+    /// Returns `None` if the hardened bit is set.
+    pub fn from_index(i: u32) -> Option<Self> {
+        if i < (1 << 31) {
+            Some(NonHardenedChildIndex(i))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the index as a 32-bit integer.
+    pub fn index(&self) -> u32 {
+        self.0
+    }
+
+    pub fn next(&self) -> Option<Self> {
+        // overflow cannot happen because self.0 is 31 bits, and the next index is at most 32 bits
+        // which in that case would lead from_index to return None.
+        Self::from_index(self.0 + 1)
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TryFrom<KeyIndex> for NonHardenedChildIndex {
+    type Error = ();
+
+    fn try_from(value: KeyIndex) -> Result<Self, Self::Error> {
+        match value {
+            KeyIndex::Normal(i) => NonHardenedChildIndex::from_index(i).ok_or(()),
+            KeyIndex::Hardened(_) => Err(()),
+        }
+    }
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl From<NonHardenedChildIndex> for KeyIndex {
+    fn from(value: NonHardenedChildIndex) -> Self {
+        Self::Normal(value.index())
+    }
+}
+
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::prelude::{any, prop_compose};
@@ -417,7 +479,9 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use super::{OpCode, Script, TransparentAddress};
+    use super::{NonHardenedChildIndex, OpCode, Script, TransparentAddress};
+    use hdwallet::KeyIndex;
+    use subtle::ConstantTimeEq;
 
     #[test]
     fn script_opcode() {
@@ -483,5 +547,56 @@ mod tests {
             ]
         );
         assert_eq!(addr.script().address(), Some(addr));
+    }
+
+    #[test]
+    fn nonhardened_indexes_accepted() {
+        assert_eq!(0, NonHardenedChildIndex::from_index(0).unwrap().index());
+        assert_eq!(
+            0x7fffffff,
+            NonHardenedChildIndex::from_index(0x7fffffff)
+                .unwrap()
+                .index()
+        );
+    }
+
+    #[test]
+    fn hardened_indexes_rejected() {
+        assert!(NonHardenedChildIndex::from_index(0x80000000).is_none());
+        assert!(NonHardenedChildIndex::from_index(0xffffffff).is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_next() {
+        assert_eq!(1, NonHardenedChildIndex::ZERO.next().unwrap().index());
+        assert!(NonHardenedChildIndex::from_index(0x7fffffff)
+            .unwrap()
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_ct_eq() {
+        assert!(check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO
+        ));
+        assert!(!check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO.next().unwrap()
+        ));
+
+        fn check<T: ConstantTimeEq>(v1: T, v2: T) -> bool {
+            v1.ct_eq(&v2).into()
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn nonhardened_index_tryfrom_keyindex() {
+        let nh: NonHardenedChildIndex = KeyIndex::Normal(0).try_into().unwrap();
+        assert_eq!(nh.index(), 0);
+
+        assert!(NonHardenedChildIndex::try_from(KeyIndex::Hardened(0)).is_err());
     }
 }

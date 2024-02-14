@@ -44,3 +44,7 @@ The entries below are relative to the `zcash_client_backend` crate as of
     `transparent-inputs` feature is enabled.
   - `UnifiedFullViewingKey::new` no longer takes an Orchard full viewing key
     argument unless the `orchard` feature is enabled.
+
+### Removed
+- `zcash_keys::address::AddressMetadata` has been moved to 
+  `zcash_client_backend::data_api::TransparentAddressMetadata` and fields changed.
