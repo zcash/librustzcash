@@ -10,9 +10,7 @@ use zcash_spec::PrfExpand;
 
 use crate::{consensus, zip32::AccountId};
 
-use super::TransparentAddress;
-
-const MAX_TRANSPARENT_CHILD_INDEX: u32 = 0x7FFFFFFF;
+use super::{NonHardenedChildIndex, TransparentAddress};
 
 /// A [BIP44] private key at the account path level `m/44'/<coin_type>'/<account>'`.
 ///
@@ -50,11 +48,11 @@ impl AccountPrivKey {
     /// `m/44'/<coin_type>'/<account>'/0/<child_index>`.
     pub fn derive_external_secret_key(
         &self,
-        child_index: u32,
+        child_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
         self.0
             .derive_private_key(KeyIndex::Normal(0))?
-            .derive_private_key(KeyIndex::Normal(child_index))
+            .derive_private_key(child_index.into())
             .map(|k| k.private_key)
     }
 
@@ -186,30 +184,31 @@ pub trait IncomingViewingKey: private::SealedChangeLevelKey + std::marker::Sized
     #[allow(deprecated)]
     fn derive_address(
         &self,
-        child_index: u32,
+        child_index: NonHardenedChildIndex,
     ) -> Result<TransparentAddress, hdwallet::error::Error> {
         let child_key = self
             .extended_pubkey()
-            .derive_public_key(KeyIndex::Normal(child_index))?;
+            .derive_public_key(child_index.into())?;
         Ok(pubkey_to_address(&child_key.public_key))
     }
 
     /// Searches the space of child indexes for an index that will
     /// generate a valid transparent address, and returns the resulting
     /// address and the index at which it was generated.
-    fn default_address(&self) -> (TransparentAddress, u32) {
-        let mut child_index = 0;
-        while child_index <= MAX_TRANSPARENT_CHILD_INDEX {
+    fn default_address(&self) -> (TransparentAddress, NonHardenedChildIndex) {
+        let mut child_index = NonHardenedChildIndex::ZERO;
+        loop {
             match self.derive_address(child_index) {
                 Ok(addr) => {
                     return (addr, child_index);
                 }
                 Err(_) => {
-                    child_index += 1;
+                    child_index = child_index.next().unwrap_or_else(|| {
+                        panic!("Exhausted child index space attempting to find a default address.");
+                    });
                 }
             }
         }
-        panic!("Exhausted child index space attempting to find a default address.");
     }
 
     fn serialize(&self) -> Vec<u8> {

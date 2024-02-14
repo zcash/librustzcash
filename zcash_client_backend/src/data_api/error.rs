@@ -17,7 +17,7 @@ use crate::data_api::wallet::input_selection::InputSelectorError;
 use crate::PoolType;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::{legacy::TransparentAddress, zip32::DiversifierIndex};
+use zcash_primitives::legacy::TransparentAddress;
 
 use crate::wallet::NoteId;
 
@@ -64,15 +64,18 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// Attempted to create a spend to an unsupported Unified Address receiver
     NoSupportedReceivers(Vec<u32>),
 
+    /// A proposed transaction cannot be built because it requires spending an input
+    /// for which no spending key is available.
+    ///
+    /// The argument is the address of the note or UTXO being spent.
+    NoSpendingKey(String),
+
     /// A note being spent does not correspond to either the internal or external
     /// full viewing key for an account.
     NoteMismatch(NoteId),
 
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
-
-    #[cfg(feature = "transparent-inputs")]
-    ChildIndexOutOfRange(DiversifierIndex),
 }
 
 impl<DE, CE, SE, FE> fmt::Display for Error<DE, CE, SE, FE>
@@ -122,19 +125,12 @@ where
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
             Error::UnsupportedPoolType(t) => write!(f, "Attempted to send to an unsupported pool: {}", t),
             Error::NoSupportedReceivers(t) => write!(f, "Unified address contained only unsupported receiver types: {:?}", &t[..]),
+            Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
             #[cfg(feature = "transparent-inputs")]
             Error::AddressNotRecognized(_) => {
                 write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
-            }
-            #[cfg(feature = "transparent-inputs")]
-            Error::ChildIndexOutOfRange(i) => {
-                write!(
-                    f,
-                    "The diversifier index {:?} is out of range for transparent addresses.",
-                    i
-                )
             }
         }
     }

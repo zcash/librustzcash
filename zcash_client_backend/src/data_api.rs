@@ -14,7 +14,7 @@ use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
-    legacy::TransparentAddress,
+    legacy::{NonHardenedChildIndex, TransparentAddress},
     memo::{Memo, MemoBytes},
     transaction::{
         components::amount::{Amount, BalanceError, NonNegativeAmount},
@@ -24,7 +24,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::{AddressMetadata, UnifiedAddress},
+    address::UnifiedAddress,
     decrypt::DecryptedOutput,
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
@@ -54,6 +54,30 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 pub enum NullifierQuery {
     Unspent,
     All,
+}
+
+/// Describes the derivation of a transparent address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransparentAddressMetadata {
+    scope: zip32::Scope,
+    address_index: NonHardenedChildIndex,
+}
+
+impl TransparentAddressMetadata {
+    pub fn new(scope: zip32::Scope, address_index: NonHardenedChildIndex) -> Self {
+        Self {
+            scope,
+            address_index,
+        }
+    }
+
+    pub fn scope(&self) -> zip32::Scope {
+        self.scope
+    }
+
+    pub fn address_index(&self) -> NonHardenedChildIndex {
+        self.address_index
+    }
 }
 
 /// Balance information for a value within a single pool in an account.
@@ -566,7 +590,7 @@ pub trait WalletRead {
     fn get_transparent_receivers(
         &self,
         account: Self::AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error>;
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>;
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
     /// for each address associated with a nonzero balance.
@@ -1122,7 +1146,7 @@ pub mod testing {
     };
 
     use crate::{
-        address::{AddressMetadata, UnifiedAddress},
+        address::UnifiedAddress,
         keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
         wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
         ShieldedProtocol,
@@ -1131,7 +1155,8 @@ pub mod testing {
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        TransparentAddressMetadata, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -1292,7 +1317,8 @@ pub mod testing {
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
-        ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
+        ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>
+        {
             Ok(HashMap::new())
         }
 

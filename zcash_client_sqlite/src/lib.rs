@@ -58,14 +58,14 @@ use zcash_primitives::{
 };
 
 use zcash_client_backend::{
-    address::{AddressMetadata, UnifiedAddress},
+    address::UnifiedAddress,
     data_api::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SentTransaction, TransparentAddressMetadata, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -346,7 +346,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_transparent_receivers(
         &self,
         _account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
         #[cfg(feature = "transparent-inputs")]
         return wallet::get_transparent_receivers(self.conn.borrow(), &self.params, _account);
 

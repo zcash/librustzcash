@@ -5,6 +5,7 @@ use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
+use zcash_keys::encoding::AddressCodec;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
@@ -639,17 +640,17 @@ where
         for utxo in proposal.transparent_inputs() {
             utxos.push(utxo.clone());
 
-            let diversifier_index = known_addrs
+            let address_metadata = known_addrs
                 .get(utxo.recipient_address())
                 .ok_or_else(|| Error::AddressNotRecognized(*utxo.recipient_address()))?
-                .diversifier_index();
-
-            let child_index = u32::try_from(*diversifier_index)
-                .map_err(|_| Error::ChildIndexOutOfRange(*diversifier_index))?;
+                .clone()
+                .ok_or_else(|| {
+                    Error::NoSpendingKey(utxo.recipient_address().encode(params))
+                })?;
 
             let secret_key = usk
                 .transparent()
-                .derive_external_secret_key(child_index)
+                .derive_external_secret_key(address_metadata.address_index())
                 .unwrap();
 
             builder.add_transparent_input(
