@@ -64,6 +64,12 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// Attempted to create a spend to an unsupported Unified Address receiver
     NoSupportedReceivers(Vec<u32>),
 
+    /// A proposed transaction cannot be built because it requires spending an input
+    /// for which no spending key is available.
+    ///
+    /// The argument is the address of the note or UTXO being spent.
+    NoSpendingKey(String),
+
     /// A note being spent does not correspond to either the internal or external
     /// full viewing key for an account.
     NoteMismatch(NoteId),
@@ -119,6 +125,7 @@ where
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
             Error::UnsupportedPoolType(t) => write!(f, "Attempted to send to an unsupported pool: {}", t),
             Error::NoSupportedReceivers(t) => write!(f, "Unified address contained only unsupported receiver types: {:?}", &t[..]),
+            Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
             #[cfg(feature = "transparent-inputs")]

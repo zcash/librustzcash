@@ -86,9 +86,6 @@ use zcash_primitives::{
     zip32::{AccountId, DiversifierIndex},
 };
 
-#[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::NonHardenedChildIndex;
-
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
@@ -115,9 +112,9 @@ use {
     crate::UtxoId,
     rusqlite::Row,
     std::collections::BTreeSet,
-    zcash_client_backend::wallet::WalletTransparentOutput,
+    zcash_client_backend::{data_api::TransparentAddressMetadata, wallet::WalletTransparentOutput},
     zcash_primitives::{
-        legacy::{keys::IncomingViewingKey, Script, TransparentAddress},
+        legacy::{keys::IncomingViewingKey, NonHardenedChildIndex, Script, TransparentAddress},
         transaction::components::{OutPoint, TxOut},
     },
 };
@@ -352,8 +349,8 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountId,
-) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, SqliteClientError> {
-    let mut ret = HashMap::new();
+) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
+    let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
 
     // Get all UAs derived
     let mut ua_query = conn
@@ -396,12 +393,21 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
                 )
             })?;
 
-            ret.insert(*taddr, index);
+            ret.insert(
+                *taddr,
+                Some(TransparentAddressMetadata::new(Scope::External, index)),
+            );
         }
     }
 
     if let Some((taddr, child_index)) = get_legacy_transparent_address(params, conn, account)? {
-        ret.insert(taddr, child_index);
+        ret.insert(
+            taddr,
+            Some(TransparentAddressMetadata::new(
+                Scope::External,
+                child_index,
+            )),
+        );
     }
 
     Ok(ret)

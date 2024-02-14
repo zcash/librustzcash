@@ -56,6 +56,30 @@ pub enum NullifierQuery {
     All,
 }
 
+/// Describes the derivation of a transparent address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransparentAddressMetadata {
+    scope: zip32::Scope,
+    address_index: NonHardenedChildIndex,
+}
+
+impl TransparentAddressMetadata {
+    pub fn new(scope: zip32::Scope, address_index: NonHardenedChildIndex) -> Self {
+        Self {
+            scope,
+            address_index,
+        }
+    }
+
+    pub fn scope(&self) -> zip32::Scope {
+        self.scope
+    }
+
+    pub fn address_index(&self) -> NonHardenedChildIndex {
+        self.address_index
+    }
+}
+
 /// Balance information for a value within a single pool in an account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
@@ -560,7 +584,7 @@ pub trait WalletRead {
     fn get_transparent_receivers(
         &self,
         account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, Self::Error>;
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>;
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
     /// for each address associated with a nonzero balance.
@@ -1109,7 +1133,7 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},
-        legacy::{NonHardenedChildIndex, TransparentAddress},
+        legacy::TransparentAddress,
         memo::Memo,
         transaction::{components::Amount, Transaction, TxId},
         zip32::{AccountId, Scope},
@@ -1125,7 +1149,8 @@ pub mod testing {
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        TransparentAddressMetadata, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     };
 
     pub struct MockWalletDb {
@@ -1284,7 +1309,8 @@ pub mod testing {
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
-        ) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, Self::Error> {
+        ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>
+        {
             Ok(HashMap::new())
         }
 

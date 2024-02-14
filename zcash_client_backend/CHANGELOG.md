@@ -52,6 +52,7 @@ and this library adheres to Rust's notion of
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
     functionality and move it behind the `transparent-inputs` feature flag.
+  - `TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
 - `zcash_client_backend::fees::{standard, sapling}`
 - `zcash_client_backend::fees::ChangeValue::new`
 - `zcash_client_backend::wallet`:
@@ -114,6 +115,7 @@ and this library adheres to Rust's notion of
       been removed from `error::Error`.
     - A new variant `UnsupportedPoolType` has been added.
     - A new variant `NoSupportedReceivers` has been added.
+    - A new variant `NoSpendingKey` has been added.
     - Variant `ChildIndexOutOfRange` has been removed.
   - `wallet::shield_transparent_funds` no longer takes a `memo` argument;
     instead, memos to be associated with the shielded outputs should be
@@ -163,8 +165,8 @@ and this library adheres to Rust's notion of
       `data_api::InputSource` instead.
     - Added `get_account_ids`.
     - `get_transparent_receivers` now returns
-      `zcash_primitives::legacy::NonHardenedChildIndex` instead of
-      `zcash_client_backend::address::AddressMetadata`.
+      `zcash_client_backend::data_api::TransparentAddressMetadata` instead of
+      `zcash_keys::address::AddressMetadata`.
   - `wallet::{propose_shielding, shield_transparent_funds}` now takes their
     `min_confirmations` arguments as `u32` rather than a `NonZeroU32` to permit
     implmentations to enable zero-conf shielding.
