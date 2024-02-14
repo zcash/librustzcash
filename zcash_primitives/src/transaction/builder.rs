@@ -950,7 +950,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn binding_sig_absent_if_no_shielded_spend_or_output() {
         use crate::consensus::NetworkUpgrade;
-        use crate::legacy::NonHardenedChildIndex;
+        use crate::legacy::keys::NonHardenedChildIndex;
         use crate::transaction::builder::{self, TransparentBuilder};
 
         let sapling_activation_height = TEST_NETWORK

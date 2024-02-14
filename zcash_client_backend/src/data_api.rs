@@ -14,7 +14,6 @@ use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
-    legacy::{NonHardenedChildIndex, TransparentAddress},
     memo::{Memo, MemoBytes},
     transaction::{
         components::amount::{Amount, BalanceError, NonNegativeAmount},
@@ -36,7 +35,10 @@ use self::chain::CommitmentTreeRoot;
 use self::scanning::ScanRange;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::components::OutPoint;
+use {
+    crate::wallet::TransparentAddressMetadata,
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+};
 
 pub mod chain;
 pub mod error;
@@ -54,30 +56,6 @@ pub const SAPLING_SHARD_HEIGHT: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH / 2;
 pub enum NullifierQuery {
     Unspent,
     All,
-}
-
-/// Describes the derivation of a transparent address.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransparentAddressMetadata {
-    scope: zip32::Scope,
-    address_index: NonHardenedChildIndex,
-}
-
-impl TransparentAddressMetadata {
-    pub fn new(scope: zip32::Scope, address_index: NonHardenedChildIndex) -> Self {
-        Self {
-            scope,
-            address_index,
-        }
-    }
-
-    pub fn scope(&self) -> zip32::Scope {
-        self.scope
-    }
-
-    pub fn address_index(&self) -> NonHardenedChildIndex {
-        self.address_index
-    }
 }
 
 /// Balance information for a value within a single pool in an account.
@@ -581,18 +559,24 @@ pub trait WalletRead {
     /// The set contains all transparent receivers that are known to have been derived
     /// under this account. Wallets should scan the chain for UTXOs sent to these
     /// receivers.
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
-        account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>;
+        _account: AccountId,
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+        Ok(HashMap::new())
+    }
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
     /// for each address associated with a nonzero balance.
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
-        account: AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error>;
+        _account: AccountId,
+        _max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        Ok(HashMap::new())
+    }
 
     /// Returns a vector with the IDs of all accounts known to this wallet.
     fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error>;
@@ -1133,7 +1117,6 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},
-        legacy::TransparentAddress,
         memo::Memo,
         transaction::{components::Amount, Transaction, TxId},
         zip32::{AccountId, Scope},
@@ -1149,9 +1132,11 @@ pub mod testing {
     use super::{
         chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        TransparentAddressMetadata, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
+
+    #[cfg(feature = "transparent-inputs")]
+    use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
 
     pub struct MockWalletDb {
         pub network: Network,
@@ -1306,6 +1291,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
+        #[cfg(feature = "transparent-inputs")]
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
@@ -1314,6 +1300,7 @@ pub mod testing {
             Ok(HashMap::new())
         }
 
+        #[cfg(feature = "transparent-inputs")]
         fn get_transparent_balances(
             &self,
             _account: AccountId,

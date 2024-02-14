@@ -8,7 +8,7 @@ use zcash_primitives::{
 use crate::address::UnifiedAddress;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::NonHardenedChildIndex;
+use zcash_primitives::legacy::keys::NonHardenedChildIndex;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -815,7 +815,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     #[test]
     fn pk_to_taddr() {
-        use zcash_primitives::legacy::NonHardenedChildIndex;
+        use zcash_primitives::legacy::keys::NonHardenedChildIndex;
 
         let taddr =
             legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)

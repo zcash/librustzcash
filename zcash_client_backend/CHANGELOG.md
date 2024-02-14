@@ -52,13 +52,13 @@ and this library adheres to Rust's notion of
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
     functionality and move it behind the `transparent-inputs` feature flag.
-  - `TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
 - `zcash_client_backend::fees::{standard, sapling}`
 - `zcash_client_backend::fees::ChangeValue::new`
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
   - `WalletSaplingOutput::recipient_key_scope`
+  - `wallet::TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
 - `zcash_client_backend::zip321::TransactionRequest::total`
 - `zcash_client_backend::zip321::parse::Param::name`
 - `zcash_client_backend::proto::`
@@ -164,9 +164,12 @@ and this library adheres to Rust's notion of
       `get_unspent_transparent_outputs` have been removed; use
       `data_api::InputSource` instead.
     - Added `get_account_ids`.
+    - `get_transparent_receivers` and `get_transparent_balances` are now
+      guarded by the `transparent-inputs` feature flag, with noop default
+      implementations provided.
     - `get_transparent_receivers` now returns
-      `zcash_client_backend::data_api::TransparentAddressMetadata` instead of
-      `zcash_keys::address::AddressMetadata`.
+      `Option<zcash_client_backend::wallet::TransparentAddressMetadata>` as part of
+      its result where previously it returned `zcash_keys::address::AddressMetadata`.
   - `wallet::{propose_shielding, shield_transparent_funds}` now takes their
     `min_confirmations` arguments as `u32` rather than a `NonZeroU32` to permit
     implmentations to enable zero-conf shielding.

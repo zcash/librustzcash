@@ -22,6 +22,9 @@ use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, Sh
 #[cfg(feature = "orchard")]
 use crate::fees::orchard as orchard_fees;
 
+#[cfg(feature = "transparent-inputs")]
+use zcash_primitives::legacy::keys::{NonHardenedChildIndex, TransparentKeyScope};
+
 /// A unique identifier for a shielded transaction output
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NoteId {
@@ -394,4 +397,30 @@ pub enum OvkPolicy {
     /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.
     Discard,
+}
+
+/// Metadata related to the ZIP 32 derivation of a transparent address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(feature = "transparent-inputs")]
+pub struct TransparentAddressMetadata {
+    scope: TransparentKeyScope,
+    address_index: NonHardenedChildIndex,
+}
+
+#[cfg(feature = "transparent-inputs")]
+impl TransparentAddressMetadata {
+    pub fn new(scope: TransparentKeyScope, address_index: NonHardenedChildIndex) -> Self {
+        Self {
+            scope,
+            address_index,
+        }
+    }
+
+    pub fn scope(&self) -> TransparentKeyScope {
+        self.scope
+    }
+
+    pub fn address_index(&self) -> NonHardenedChildIndex {
+        self.address_index
+    }
 }
