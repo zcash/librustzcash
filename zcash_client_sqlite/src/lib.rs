@@ -64,9 +64,10 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, AccountParameters, BlockMetadata, DecryptedTransaction, HDSeedAccount,
-        InputSource, NullifierQuery, ScannedBlock, SentTransaction, TransparentAddressMetadata,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        wallet::{Account, HDSeedAccount},
+        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
+        ScannedBlock, SentTransaction, TransparentAddressMetadata, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -248,7 +249,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_account_parameters(
         &self,
         account_id: Self::AccountId,
-    ) -> Result<Option<AccountParameters>, Self::Error> {
+    ) -> Result<Option<Account>, Self::Error> {
         wallet::get_account_parameters(self.conn.borrow(), &self.params, account_id)
     }
 
@@ -430,8 +431,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let account_parameters =
-                AccountParameters::Zip32(HDSeedAccount(seed_id, account_index, ufvk));
+            let account_parameters = Account::Zip32(HDSeedAccount(seed_id, account_index, ufvk));
             let account_id =
                 wallet::add_account(wdb.conn.0, &wdb.params, account_parameters, birthday)?;
 

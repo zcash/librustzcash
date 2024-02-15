@@ -74,7 +74,8 @@ use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
 use zcash_client_backend::data_api::{
-    AccountBalance, AccountParameters, HDSeedAccount, ImportedAccount, Ratio, WalletSummary,
+    wallet::{Account, HDSeedAccount, ImportedAccount},
+    AccountBalance, Ratio, WalletSummary,
 };
 use zcash_keys::keys::HDSeedFingerprint;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
@@ -186,26 +187,24 @@ pub(crate) fn get_max_account_id(
 }
 
 fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
-    account: &'a AccountParameters,
+    account: &'a Account,
     params: &P,
 ) -> (u32, Option<&'a [u8]>, Option<u32>, String) {
     match account {
-        AccountParameters::Zip32(HDSeedAccount(fingerprint, account_index, ufvk)) => (
+        Account::Zip32(HDSeedAccount(fingerprint, account_index, ufvk)) => (
             0,
             Some(fingerprint.as_bytes()),
             Some((*account_index).into()),
             ufvk.encode(params),
         ),
-        AccountParameters::Imported(ImportedAccount::Full(ufvk)) => {
-            (1, None, None, ufvk.encode(params))
-        }
+        Account::Imported(ImportedAccount::Full(ufvk)) => (1, None, None, ufvk.encode(params)),
     }
 }
 
 pub(crate) fn add_account<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    account: AccountParameters,
+    account: Account,
     birthday: AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
     let args = get_sql_values_for_account_parameters(&account, params);
@@ -1005,7 +1004,7 @@ pub(crate) fn get_account_parameters<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_id: AccountId,
-) -> Result<Option<AccountParameters>, SqliteClientError> {
+) -> Result<Option<Account>, SqliteClientError> {
     let mut sql = conn.prepare_cached(
         r#"
         SELECT account_type, uvk, hd_seed_fingerprint, hd_account_index
@@ -1024,7 +1023,7 @@ pub(crate) fn get_account_parameters<P: Parameters>(
                 .map_err(SqliteClientError::CorruptedData)?;
 
             match account_type {
-                0 => Ok(Some(AccountParameters::Zip32(HDSeedAccount(
+                0 => Ok(Some(Account::Zip32(HDSeedAccount(
                     HDSeedFingerprint::from_bytes(row.get(2)?),
                     zip32::AccountId::try_from(row.get::<_, u32>(3)?).map_err(|_| {
                         SqliteClientError::CorruptedData(
@@ -1033,9 +1032,7 @@ pub(crate) fn get_account_parameters<P: Parameters>(
                     })?,
                     ufvk,
                 )))),
-                1 => Ok(Some(AccountParameters::Imported(ImportedAccount::Full(
-                    ufvk,
-                )))),
+                1 => Ok(Some(Account::Imported(ImportedAccount::Full(ufvk)))),
                 _ => Err(SqliteClientError::CorruptedData(
                     "Unrecognized account_type".to_string(),
                 )),
@@ -2116,7 +2113,8 @@ mod tests {
 
     use sapling::zip32::ExtendedSpendingKey;
     use zcash_client_backend::data_api::{
-        AccountBirthday, AccountParameters, HDSeedAccount, WalletRead,
+        wallet::{Account, HDSeedAccount},
+        AccountBirthday, WalletRead,
     };
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
@@ -2278,7 +2276,7 @@ mod tests {
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(
             account_parameters,
-            AccountParameters::Zip32(HDSeedAccount(_,actual_account_index,_)) if actual_account_index == expected_account_index
+            Account::Zip32(HDSeedAccount(_,actual_account_index,_)) if actual_account_index == expected_account_index
         );
     }
 

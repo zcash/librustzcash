@@ -5,6 +5,10 @@ use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
+use zcash_keys::{
+    address::UnifiedAddress,
+    keys::{HDSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey},
+};
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
@@ -16,6 +20,7 @@ use zcash_primitives::{
     },
     zip32::Scope,
 };
+use zip32::DiversifierIndex;
 
 use crate::{
     address::Address,
@@ -44,6 +49,58 @@ use {
     sapling::keys::OutgoingViewingKey, std::convert::Infallible,
     zcash_keys::encoding::AddressCodec, zcash_primitives::legacy::TransparentAddress,
 };
+
+/// Represents the identifier for an account that was derived from a ZIP-32 HD seed and account index.
+#[derive(Debug, Clone)]
+pub struct HDSeedAccount(
+    pub HDSeedFingerprint,
+    pub zip32::AccountId,
+    pub UnifiedFullViewingKey,
+);
+
+/// Represents an arbitrary account for which the seed and ZIP-32 account ID are not known
+/// and may not have been involved in creating this account.
+#[derive(Debug, Clone)]
+pub enum ImportedAccount {
+    /// An account that was imported via its full viewing key.
+    Full(UnifiedFullViewingKey),
+}
+
+/// The inputs for adding an account to a wallet.
+#[derive(Debug, Clone)]
+pub enum Account {
+    /// Inputs for a ZIP-32 HD account.
+    Zip32(HDSeedAccount),
+    /// Inputs for an imported account.
+    Imported(ImportedAccount),
+}
+
+impl Account {
+    /// Gets the default UA for the account.
+    pub fn default_address(
+        &self,
+        request: UnifiedAddressRequest,
+    ) -> (UnifiedAddress, DiversifierIndex) {
+        match self {
+            Account::Zip32(HDSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
+            Account::Imported(ImportedAccount::Full(ufvk)) => ufvk.default_address(request),
+        }
+    }
+
+    /// Gets the unified full viewing key for this account, if available.
+    ///
+    /// Accounts initialized with an incoming viewing key will not have a unified full viewing key.
+    pub fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        match self {
+            Account::Zip32(HDSeedAccount(_, _, ufvk)) => Some(ufvk),
+            Account::Imported(ImportedAccount::Full(ufvk)) => Some(ufvk),
+        }
+    }
+
+    // TODO: When a UnifiedIncomingViewingKey is available, add a function that
+    // will return it. Even if the Account was initialized with a UFVK, we can always
+    // derive a UIVK from that.
+}
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.

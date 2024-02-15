@@ -7,6 +7,8 @@ use std::{
     num::{NonZeroU32, TryFromIntError},
 };
 
+use self::scanning::ScanRange;
+use self::{chain::CommitmentTreeRoot, wallet::Account};
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
@@ -20,7 +22,6 @@ use sapling::{Node, NOTE_COMMITMENT_TREE_DEPTH};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use subtle::ConditionallySelectable;
-use zcash_keys::keys::HDSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -32,10 +33,6 @@ use zcash_primitives::{
     },
     zip32::Scope,
 };
-use zip32::DiversifierIndex;
-
-use self::chain::CommitmentTreeRoot;
-use self::scanning::ScanRange;
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::transaction::components::OutPoint;
@@ -44,59 +41,6 @@ pub mod chain;
 pub mod error;
 pub mod scanning;
 pub mod wallet;
-
-/// Represents the identifier for an account that was derived from a ZIP-32 HD seed and account index.
-#[derive(Debug, Clone)]
-pub struct HDSeedAccount(
-    pub HDSeedFingerprint,
-    pub zip32::AccountId,
-    pub UnifiedFullViewingKey,
-);
-
-/// Represents an arbitrary account for which the seed and ZIP-32 account ID are not known
-/// and may not have been involved in creating this account.
-#[derive(Debug, Clone)]
-pub enum ImportedAccount {
-    /// An account that was imported via its full viewing key.
-    Full(UnifiedFullViewingKey),
-}
-
-/// The inputs for adding an account to a wallet.
-#[derive(Debug, Clone)]
-pub enum AccountParameters {
-    /// Inputs for a ZIP-32 HD account.
-    Zip32(HDSeedAccount),
-    /// Inputs for an imported account.
-    Imported(ImportedAccount),
-}
-
-impl AccountParameters {
-    /// Gets the default UA for the account.
-    pub fn default_address(
-        &self,
-        request: UnifiedAddressRequest,
-    ) -> (UnifiedAddress, DiversifierIndex) {
-        match self {
-            AccountParameters::Zip32(HDSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
-            AccountParameters::Imported(ImportedAccount::Full(ufvk)) => {
-                ufvk.default_address(request)
-            }
-        }
-    }
-
-    /// Gets the unified full viewing key for this account, if available.
-    ///
-    /// Accounts initialized with an incoming viewing key will not have a unified full viewing key.
-    pub fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
-        match self {
-            AccountParameters::Zip32(HDSeedAccount(_, _, ufvk)) => Some(ufvk),
-            AccountParameters::Imported(ImportedAccount::Full(ufvk)) => Some(ufvk),
-        }
-    }
-
-    // pub fn uivk(&self) -> Option<&UnifiedIncomingViewingKey> {
-    // }
-}
 
 /// The height of subtree roots in the Sapling note commitment tree.
 ///
@@ -506,7 +450,7 @@ pub trait WalletRead {
     fn get_account_parameters(
         &self,
         account_id: Self::AccountId,
-    ) -> Result<Option<AccountParameters>, Self::Error>;
+    ) -> Result<Option<Account>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
@@ -1278,7 +1222,7 @@ pub mod testing {
         fn get_account_parameters(
             &self,
             _account_id: Self::AccountId,
-        ) -> Result<Option<super::AccountParameters>, Self::Error> {
+        ) -> Result<Option<super::Account>, Self::Error> {
             Ok(None)
         }
 
