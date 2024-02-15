@@ -60,7 +60,9 @@ pub fn decrypt_transaction<P: consensus::Parameters, A: Clone>(
             ufvks
                 .iter()
                 .flat_map(move |(account, ufvk)| {
-                    ufvk.sapling().into_iter().map(|dfvk| (account.to_owned(), dfvk))
+                    ufvk.sapling()
+                        .into_iter()
+                        .map(|dfvk| (account.to_owned(), dfvk))
                 })
                 .flat_map(move |(account, dfvk)| {
                     let ivk_external =

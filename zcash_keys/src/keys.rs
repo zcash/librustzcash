@@ -1,4 +1,5 @@
 //! Helper functions for managing light client key material.
+use secrecy::{ExposeSecret, SecretVec};
 use zcash_address::unified::{self, Container, Encoding, Typecode};
 use zcash_primitives::{
     consensus,
@@ -19,6 +20,7 @@ use {
 #[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
 use zcash_primitives::legacy::TransparentAddress;
 
+use blake2b_simd::{Params as blake2bParams, OUTBYTES as BLAKE2B_LENGTH};
 #[cfg(feature = "unstable")]
 use {
     byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
@@ -67,6 +69,33 @@ pub mod sapling {
                 account.into(),
             ],
         )
+    }
+}
+
+/// A hash of a seed used for an HD account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HDSeedFingerprint([u8; BLAKE2B_LENGTH]);
+
+impl HDSeedFingerprint {
+    /// Generates the fingerprint from a given seed.
+    pub fn from_seed(seed: &SecretVec<u8>) -> Self {
+        const PERSONALIZATION: &[u8] = b"Zcash_HD_Seed_FP";
+        let hash = blake2bParams::new()
+            .personal(PERSONALIZATION)
+            .to_state()
+            .update(seed.expose_secret())
+            .finalize();
+        Self(hash.as_array().to_owned())
+    }
+
+    /// Instantiates the fingerprint from a buffer containing a previously computed fingerprint.
+    pub fn from_bytes(hash: [u8; BLAKE2B_LENGTH]) -> Self {
+        Self(hash)
+    }
+
+    /// Returns the bytes of the fingerprint.
+    pub fn as_bytes(&self) -> &[u8; BLAKE2B_LENGTH] {
+        &self.0
     }
 }
 

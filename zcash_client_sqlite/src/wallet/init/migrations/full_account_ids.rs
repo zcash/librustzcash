@@ -4,7 +4,7 @@ use rusqlite::{params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
 use uuid::Uuid;
-use zcash_client_backend::data_api::HDSeedFingerprint;
+use zcash_keys::keys::HDSeedFingerprint;
 
 use crate::wallet::init::WalletMigrationError;
 

@@ -45,6 +45,7 @@ use std::{
     path::Path,
 };
 use subtle::ConditionallySelectable;
+use zcash_keys::keys::HDSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -64,9 +65,8 @@ use zcash_client_backend::{
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, AccountParameters, BlockMetadata, DecryptedTransaction, HDSeedAccount,
-        HDSeedFingerprint, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        TransparentAddressMetadata, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        InputSource, NullifierQuery, ScannedBlock, SentTransaction, TransparentAddressMetadata,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,

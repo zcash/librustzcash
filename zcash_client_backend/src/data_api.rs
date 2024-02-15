@@ -17,9 +17,10 @@ use crate::{
 };
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use sapling::{Node, NOTE_COMMITMENT_TREE_DEPTH};
-use secrecy::{ExposeSecret, SecretVec};
+use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use subtle::ConditionallySelectable;
+use zcash_keys::keys::HDSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -39,39 +40,10 @@ use self::scanning::ScanRange;
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::transaction::components::OutPoint;
 
-use blake2b_simd::{Params as blake2bParams, OUTBYTES as BLAKE2B_OUTBYTES};
-
 pub mod chain;
 pub mod error;
 pub mod scanning;
 pub mod wallet;
-
-/// A hash of a seed used for an HD account.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct HDSeedFingerprint([u8; BLAKE2B_OUTBYTES]);
-
-impl HDSeedFingerprint {
-    /// Generates the fingerprint from a given seed.
-    pub fn from_seed(seed: &SecretVec<u8>) -> Self {
-        const PERSONALIZATION: &[u8] = b"Zcash_HD_Seed_FP";
-        let hash = blake2bParams::new()
-            .personal(PERSONALIZATION)
-            .to_state()
-            .update(seed.expose_secret())
-            .finalize();
-        Self(hash.as_array().to_owned())
-    }
-
-    /// Instantiates the fingerprint from a buffer containing a previously computed fingerprint.
-    pub fn from_bytes(hash: [u8; BLAKE2B_OUTBYTES]) -> Self {
-        Self(hash)
-    }
-
-    /// Returns the bytes of the fingerprint.
-    pub fn as_bytes(&self) -> &[u8; BLAKE2B_OUTBYTES] {
-        &self.0
-    }
-}
 
 /// Represents the identifier for an account that was derived from a ZIP-32 HD seed and account index.
 #[derive(Debug, Clone)]

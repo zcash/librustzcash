@@ -18,6 +18,7 @@ The entries below are relative to the `zcash_client_backend` crate as of
 - `zcash_keys::keys`:
   - `AddressGenerationError`
   - `UnifiedAddressRequest`
+  - `HDSeedFingerprint`
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
 

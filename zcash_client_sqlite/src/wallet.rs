@@ -74,9 +74,9 @@ use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
 use zcash_client_backend::data_api::{
-    AccountBalance, AccountParameters, HDSeedAccount, HDSeedFingerprint, ImportedAccount, Ratio,
-    WalletSummary,
+    AccountBalance, AccountParameters, HDSeedAccount, ImportedAccount, Ratio, WalletSummary,
 };
+use zcash_keys::keys::HDSeedFingerprint;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 use zcash_primitives::zip32::{self, Scope};
 

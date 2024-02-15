@@ -5,7 +5,6 @@ use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
-use zcash_keys::encoding::AddressCodec;
 use zcash_primitives::{
     consensus::{self, NetworkUpgrade},
     memo::MemoBytes,
@@ -43,7 +42,7 @@ use super::InputSource;
 use {
     crate::wallet::WalletTransparentOutput, input_selection::ShieldingSelector,
     sapling::keys::OutgoingViewingKey, std::convert::Infallible,
-    zcash_primitives::legacy::TransparentAddress,
+    zcash_keys::encoding::AddressCodec, zcash_primitives::legacy::TransparentAddress,
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -649,9 +648,7 @@ where
                 .get(utxo.recipient_address())
                 .ok_or_else(|| Error::AddressNotRecognized(*utxo.recipient_address()))?
                 .clone()
-                .ok_or_else(|| {
-                    Error::NoSpendingKey(utxo.recipient_address().encode(params))
-                })?;
+                .ok_or_else(|| Error::NoSpendingKey(utxo.recipient_address().encode(params)))?;
 
             let secret_key = usk
                 .transparent()

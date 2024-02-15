@@ -3011,7 +3011,6 @@ dependencies = [
  "assert_matches",
  "base64",
  "bech32",
- "blake2b_simd",
  "bls12_381",
  "bs58",
  "byteorder",
@@ -3128,6 +3127,7 @@ name = "zcash_keys"
 version = "0.0.0"
 dependencies = [
  "bech32",
+ "blake2b_simd",
  "bls12_381",
  "bs58",
  "byteorder",
@@ -3142,6 +3142,7 @@ dependencies = [
  "proptest",
  "rand_core",
  "sapling-crypto",
+ "secrecy",
  "subtle",
  "tracing",
  "zcash_address",
