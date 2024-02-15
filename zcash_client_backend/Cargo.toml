@@ -114,6 +114,8 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 
 [features]
+default = ["unstable", "sync"]
+
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic"]
 
