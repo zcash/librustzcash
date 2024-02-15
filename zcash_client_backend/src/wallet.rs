@@ -142,7 +142,7 @@ pub struct WalletSaplingSpend<AccountId> {
     account: AccountId,
 }
 
-impl<AccountId: Copy> WalletSaplingSpend<AccountId> {
+impl<AccountId> WalletSaplingSpend<AccountId> {
     pub fn from_parts(index: usize, nf: sapling::Nullifier, account: AccountId) -> Self {
         Self { index, nf, account }
     }
@@ -153,8 +153,8 @@ impl<AccountId: Copy> WalletSaplingSpend<AccountId> {
     pub fn nf(&self) -> &sapling::Nullifier {
         &self.nf
     }
-    pub fn account(&self) -> AccountId {
-        self.account
+    pub fn account(&self) -> &AccountId {
+        &self.account
     }
 }
 

@@ -1013,7 +1013,7 @@ mod tests {
         assert_eq!(tx.sapling_outputs.len(), 0);
         assert_eq!(tx.sapling_spends[0].index(), 0);
         assert_eq!(tx.sapling_spends[0].nf(), &nf);
-        assert_eq!(tx.sapling_spends[0].account(), account);
+        assert_eq!(tx.sapling_spends[0].account().to_owned(), account);
 
         assert_eq!(
             scanned_block
