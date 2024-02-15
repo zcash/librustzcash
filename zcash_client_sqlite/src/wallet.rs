@@ -53,8 +53,8 @@
 //! This view exposes the history of transaction outputs received by and sent from the wallet,
 //! keyed by transaction ID, pool type, and output index. The contents of this view are useful for
 //! producing a detailed report of the effects of a transaction. Each row of this view contains:
-//! - `from_account` for sent outputs, the account from which the value was sent.
-//! - `to_account` in the case that the output was received by an account in the wallet, the
+//! - `from_account_id` for sent outputs, the account from which the value was sent.
+//! - `to_account_id` in the case that the output was received by an account in the wallet, the
 //!   identifier for the account receiving the funds.
 //! - `to_address` the address to which an output was sent, or the address at which value was
 //!   received in the case of received transparent funds.
@@ -305,7 +305,7 @@ pub(crate) fn get_current_address<P: consensus::Parameters>(
     let addr: Option<(String, Vec<u8>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be
-            FROM addresses WHERE account = :account
+            FROM addresses WHERE account_id = :account
             ORDER BY diversifier_index_be DESC
             LIMIT 1",
             named_params![":account": account.0],
@@ -347,7 +347,7 @@ pub(crate) fn insert_address<P: consensus::Parameters>(
 ) -> Result<(), rusqlite::Error> {
     let mut stmt = conn.prepare_cached(
         "INSERT INTO addresses (
-            account,
+            account_id,
             diversifier_index_be,
             address,
             cached_transparent_receiver_address
@@ -382,8 +382,9 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
     let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
 
     // Get all UAs derived
-    let mut ua_query = conn
-        .prepare("SELECT address, diversifier_index_be FROM addresses WHERE account = :account")?;
+    let mut ua_query = conn.prepare(
+        "SELECT address, diversifier_index_be FROM addresses WHERE account_id = :account",
+    )?;
     let mut rows = ua_query.query(named_params![":account": account.0])?;
 
     while let Some(row) = rows.next()? {
@@ -675,7 +676,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
 
     let sapling_trace = tracing::info_span!("stmt_select_notes").entered();
     let mut stmt_select_notes = tx.prepare_cached(
-        "SELECT n.account, n.value, n.is_change, scan_state.max_priority, t.block
+        "SELECT n.account_id, n.value, n.is_change, scan_state.max_priority, t.block
          FROM sapling_received_notes n
          JOIN transactions t ON t.id_tx = n.tx
          LEFT OUTER JOIN v_sapling_shards_scan_state scan_state
@@ -754,13 +755,13 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         let stable_height = chain_tip_height.saturating_sub(PRUNING_DEPTH);
 
         let mut stmt_transparent_balances = tx.prepare(
-            "SELECT u.received_by_account, SUM(u.value_zat)
+            "SELECT u.received_by_account_id, SUM(u.value_zat)
              FROM utxos u
              LEFT OUTER JOIN transactions tx
              ON tx.id_tx = u.spent_in_tx
              WHERE u.height <= :max_height
              AND (u.spent_in_tx IS NULL OR (tx.block IS NULL AND tx.expiry_height <= :stable_height))
-             GROUP BY u.received_by_account",
+             GROUP BY u.received_by_account_id",
         )?;
         let mut rows = stmt_transparent_balances.query(named_params![
             ":max_height": u32::from(zero_conf_height),
@@ -1556,7 +1557,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
          FROM utxos u
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = u.spent_in_tx
-         WHERE u.received_by_account = :account_id
+         WHERE u.received_by_account_id = :account_id
          AND u.height <= :max_height
          AND (u.spent_in_tx IS NULL OR (tx.block IS NULL AND tx.expiry_height <= :stable_height))
          GROUP BY u.address",
@@ -1754,7 +1755,7 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     let address_str = output.recipient_address().encode(params);
     let account_id = conn
         .query_row(
-            "SELECT account FROM addresses WHERE cached_transparent_receiver_address = :address",
+            "SELECT account_id FROM addresses WHERE cached_transparent_receiver_address = :address",
             named_params![":address": &address_str],
             |row| Ok(AccountId(row.get(0)?)),
         )
@@ -1797,14 +1798,14 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
     let mut stmt_upsert_legacy_transparent_utxo = conn.prepare_cached(
         "INSERT INTO utxos (
             prevout_txid, prevout_idx,
-            received_by_account, address, script,
+            received_by_account_id, address, script,
             value_zat, height)
         VALUES
             (:prevout_txid, :prevout_idx,
-            :received_by_account, :address, :script,
+            :received_by_account_id, :address, :script,
             :value_zat, :height)
         ON CONFLICT (prevout_txid, prevout_idx) DO UPDATE
-        SET received_by_account = :received_by_account,
+        SET received_by_account_id = :received_by_account_id,
             height = :height,
             address = :address,
             script = :script,
@@ -1815,7 +1816,7 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
     let sql_args = named_params![
         ":prevout_txid": &output.outpoint().hash().to_vec(),
         ":prevout_idx": &output.outpoint().n(),
-        ":received_by_account": received_by_account.0,
+        ":received_by_account_id": received_by_account.0,
         ":address": &output.recipient_address().encode(params),
         ":script": &output.txout().script_pubkey.0,
         ":value_zat": &i64::from(Amount::from(output.txout().value)),
@@ -1869,21 +1870,21 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_insert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
-            tx, output_pool, output_index, from_account,
-            to_address, to_account, value, memo)
+            tx, output_pool, output_index, from_account_id,
+            to_address, to_account_id, value, memo)
         VALUES (
-            :tx, :output_pool, :output_index, :from_account,
-            :to_address, :to_account, :value, :memo)",
+            :tx, :output_pool, :output_index, :from_account_id,
+            :to_address, :to_account_id, :value, :memo)",
     )?;
 
-    let (to_address, to_account, pool_type) = recipient_params(params, output.recipient());
+    let (to_address, to_account_id, pool_type) = recipient_params(params, output.recipient());
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output.output_index()).unwrap(),
-        ":from_account": from_account.0,
+        ":from_account_id": from_account.0,
         ":to_address": &to_address,
-        ":to_account": to_account.map(|a| a.0),
+        ":to_account_id": to_account_id.map(|a| a.0),
         ":value": &i64::from(Amount::from(output.value())),
         ":memo": memo_repr(output.memo())
     ];
@@ -1917,27 +1918,27 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
-            tx, output_pool, output_index, from_account,
-            to_address, to_account, value, memo)
+            tx, output_pool, output_index, from_account_id,
+            to_address, to_account_id, value, memo)
         VALUES (
-            :tx, :output_pool, :output_index, :from_account,
-            :to_address, :to_account, :value, :memo)
+            :tx, :output_pool, :output_index, :from_account_id,
+            :to_address, :to_account_id, :value, :memo)
         ON CONFLICT (tx, output_pool, output_index) DO UPDATE
-        SET from_account = :from_account,
+        SET from_account_id = :from_account_id,
             to_address = :to_address,
-            to_account = :to_account,
+            to_account_id = :to_account_id,
             value = :value,
             memo = IFNULL(:memo, memo)",
     )?;
 
-    let (to_address, to_account, pool_type) = recipient_params(params, recipient);
+    let (to_address, to_account_id, pool_type) = recipient_params(params, recipient);
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_pool": &pool_code(pool_type),
         ":output_index": &i64::try_from(output_index).unwrap(),
-        ":from_account": from_account.0,
+        ":from_account_id": from_account.0,
         ":to_address": &to_address,
-        ":to_account": &to_account.map(|a| a.0),
+        ":to_account_id": &to_account_id.map(|a| a.0),
         ":value": &i64::from(Amount::from(value)),
         ":memo": memo_repr(memo)
     ];

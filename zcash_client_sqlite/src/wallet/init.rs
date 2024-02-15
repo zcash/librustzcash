@@ -214,12 +214,12 @@ mod tests {
                 CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
             )"#,
             r#"CREATE TABLE "addresses" (
-                account INTEGER NOT NULL,
+                account_id INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
                 cached_transparent_receiver_address TEXT,
-                FOREIGN KEY (account) REFERENCES accounts(id),
-                CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
+                FOREIGN KEY (account_id) REFERENCES accounts(id),
+                CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
             )"#,
             "CREATE TABLE blocks (
                 height INTEGER PRIMARY KEY,
@@ -246,7 +246,7 @@ mod tests {
                 id_note INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
-                account INTEGER NOT NULL,
+                account_id INTEGER NOT NULL,
                 diversifier BLOB NOT NULL,
                 value INTEGER NOT NULL,
                 rcm BLOB NOT NULL,
@@ -257,7 +257,7 @@ mod tests {
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account) REFERENCES accounts(id),
+                FOREIGN KEY (account_id) REFERENCES accounts(id),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
             )"#,
@@ -313,17 +313,17 @@ mod tests {
                 tx INTEGER NOT NULL,
                 output_pool INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
-                from_account INTEGER NOT NULL,
+                from_account_id INTEGER NOT NULL,
                 to_address TEXT,
-                to_account INTEGER,
+                to_account_id INTEGER,
                 value INTEGER NOT NULL,
                 memo BLOB,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account) REFERENCES accounts(id),
-                FOREIGN KEY (to_account) REFERENCES accounts(id),
+                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+                FOREIGN KEY (to_account_id) REFERENCES accounts(id),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
                 CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) != (to_account IS NOT NULL)
+                    (to_address IS NOT NULL) != (to_account_id IS NOT NULL)
                 )
             )"#,
             "CREATE TABLE sqlite_sequence(name,seq)",
@@ -346,7 +346,7 @@ mod tests {
             )",
             r#"CREATE TABLE "utxos" (
                 id_utxo INTEGER PRIMARY KEY,
-                received_by_account INTEGER NOT NULL,
+                received_by_account_id INTEGER NOT NULL,
                 address TEXT NOT NULL,
                 prevout_txid BLOB NOT NULL,
                 prevout_idx INTEGER NOT NULL,
@@ -354,7 +354,7 @@ mod tests {
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
                 spent_in_tx INTEGER,
-                FOREIGN KEY (received_by_account) REFERENCES accounts(id),
+                FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
                 FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
             )"#,
@@ -446,7 +446,7 @@ mod tests {
             WITH
             notes AS (
                 SELECT sapling_received_notes.id_note        AS id,
-                       sapling_received_notes.account        AS account_id,
+                       sapling_received_notes.account_id     AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
                        2                                     AS pool,
@@ -469,7 +469,7 @@ mod tests {
                      ON transactions.id_tx = sapling_received_notes.tx
                 UNION
                 SELECT utxos.id_utxo                 AS id,
-                       utxos.received_by_account     AS account_id,
+                       utxos.received_by_account_id  AS account_id,
                        utxos.height                  AS block,
                        utxos.prevout_txid            AS txid,
                        0                             AS pool,
@@ -480,7 +480,7 @@ mod tests {
                 FROM utxos
                 UNION
                 SELECT sapling_received_notes.id_note        AS id,
-                       sapling_received_notes.account        AS account_id,
+                       sapling_received_notes.account_id     AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
                        2                                     AS pool,
@@ -493,7 +493,7 @@ mod tests {
                      ON transactions.id_tx = sapling_received_notes.spent
                 UNION
                 SELECT utxos.id_utxo                 AS id,
-                       utxos.received_by_account     AS account_id,
+                       utxos.received_by_account_id  AS account_id,
                        transactions.block            AS block,
                        transactions.txid             AS txid,
                        0                             AS pool,
@@ -506,7 +506,7 @@ mod tests {
                      ON transactions.id_tx = utxos.spent_in_tx
             ),
             sent_note_counts AS (
-                SELECT sent_notes.from_account AS account_id,
+                SELECT sent_notes.from_account_id AS account_id,
                        transactions.txid       AS txid,
                        COUNT(DISTINCT sent_notes.id_note) as sent_notes,
                        SUM(
@@ -559,8 +559,8 @@ mod tests {
             SELECT transactions.txid                   AS txid,
                    2                                   AS output_pool,
                    sapling_received_notes.output_index AS output_index,
-                   sent_notes.from_account             AS from_account,
-                   sapling_received_notes.account      AS to_account,
+                   sent_notes.from_account_id          AS from_account_id,
+                   sapling_received_notes.account_id   AS to_account_id,
                    NULL                                AS to_address,
                    sapling_received_notes.value        AS value,
                    sapling_received_notes.is_change    AS is_change,
@@ -572,26 +572,26 @@ mod tests {
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (sapling_received_notes.tx, 2, sent_notes.output_index)
             UNION
-            SELECT utxos.prevout_txid          AS txid,
-                   0                           AS output_pool,
-                   utxos.prevout_idx           AS output_index,
-                   NULL                        AS from_account,
-                   utxos.received_by_account   AS to_account,
-                   utxos.address               AS to_address,
-                   utxos.value_zat             AS value,
-                   0                           AS is_change,
-                   NULL                        AS memo
+            SELECT utxos.prevout_txid           AS txid,
+                   0                            AS output_pool,
+                   utxos.prevout_idx            AS output_index,
+                   NULL                         AS from_account_id,
+                   utxos.received_by_account_id AS to_account_id,
+                   utxos.address                AS to_address,
+                   utxos.value_zat              AS value,
+                   0                            AS is_change,
+                   NULL                         AS memo
             FROM utxos
             UNION
-            SELECT transactions.txid              AS txid,
-                   sent_notes.output_pool         AS output_pool,
-                   sent_notes.output_index        AS output_index,
-                   sent_notes.from_account        AS from_account,
-                   sapling_received_notes.account AS to_account,
-                   sent_notes.to_address          AS to_address,
-                   sent_notes.value               AS value,
-                   0                              AS is_change,
-                   sent_notes.memo                AS memo
+            SELECT transactions.txid                 AS txid,
+                   sent_notes.output_pool            AS output_pool,
+                   sent_notes.output_index           AS output_index,
+                   sent_notes.from_account_id        AS from_account_id,
+                   sapling_received_notes.account_id AS to_account_id,
+                   sent_notes.to_address             AS to_address,
+                   sent_notes.value                  AS value,
+                   0                                 AS is_change,
+                   sent_notes.memo                   AS memo
             FROM sent_notes
             JOIN transactions
                  ON transactions.id_tx = sent_notes.tx

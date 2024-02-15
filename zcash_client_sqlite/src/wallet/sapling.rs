@@ -187,7 +187,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
         "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                 accounts.uvk, recipient_key_scope
          FROM sapling_received_notes
-         INNER JOIN accounts on accounts.id = sapling_received_notes.account
+         INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
          WHERE txid = :txid
          AND output_index = :output_index
@@ -274,13 +274,13 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
              SELECT
                  id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
-                    OVER (PARTITION BY sapling_received_notes.account, spent ORDER BY id_note) AS so_far,
+                    OVER (PARTITION BY sapling_received_notes.account_id, spent ORDER BY id_note) AS so_far,
                  accounts.uvk as uvk, recipient_key_scope
              FROM sapling_received_notes
-             INNER JOIN accounts on accounts.id = sapling_received_notes.account
+             INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
              INNER JOIN transactions
                 ON transactions.id_tx = sapling_received_notes.tx
-             WHERE sapling_received_notes.account = :account
+             WHERE sapling_received_notes.account_id = :account
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
@@ -331,7 +331,7 @@ pub(crate) fn get_sapling_nullifiers(
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = conn.prepare(
-        "SELECT rn.id_note, rn.account, rn.nf, tx.block as block
+        "SELECT rn.id_note, rn.account_id, rn.nf, tx.block as block
          FROM sapling_received_notes rn
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = rn.spent
@@ -354,7 +354,7 @@ pub(crate) fn get_all_sapling_nullifiers(
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = conn.prepare(
-        "SELECT rn.id_note, rn.account, rn.nf
+        "SELECT rn.id_note, rn.account_id, rn.nf
          FROM sapling_received_notes rn
          WHERE nf IS NOT NULL",
     )?;
@@ -401,13 +401,13 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
-        (tx, output_index, account, diversifier, value, rcm, memo, nf,
+        (tx, output_index, account_id, diversifier, value, rcm, memo, nf,
          is_change, spent, commitment_tree_position,
          recipient_key_scope)
         VALUES (
             :tx,
             :output_index,
-            :account,
+            :account_id,
             :diversifier,
             :value,
             :rcm,
@@ -419,7 +419,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             :recipient_key_scope
         )
         ON CONFLICT (tx, output_index) DO UPDATE
-        SET account = :account,
+        SET account_id = :account_id,
             diversifier = :diversifier,
             value = :value,
             rcm = :rcm,
@@ -438,7 +438,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
-        ":account": output.account().0,
+        ":account_id": output.account().0,
         ":diversifier": &diversifier.0.as_ref(),
         ":value": output.note().value().inner(),
         ":rcm": &rcm.as_ref(),
