@@ -645,7 +645,7 @@ where
 
             shielded_inputs = wallet_db
                 .select_spendable_notes(
-                    account,
+                    account.clone(),
                     amount_required.into(),
                     selectable_pools,
                     anchor_height,

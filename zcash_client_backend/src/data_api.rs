@@ -433,7 +433,7 @@ pub trait InputSource {
     type Error;
 
     /// The type used to track unique account identifiers.
-    type AccountId: Copy + Clone + Send + PartialEq + Eq + std::hash::Hash;
+    type AccountId: Clone + Send + PartialEq + Eq + std::hash::Hash;
 
     /// Backend-specific note identifier.
     ///
