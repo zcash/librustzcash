@@ -79,11 +79,11 @@ where
 }
 
 #[allow(clippy::needless_doctest_main)]
-/// Creates a transaction paying the specified address from the given account.
+/// Creates a transaction or series of transactions paying the specified address from
+/// the given account, and the [`TxId`] corresponding to each newly-created transaction.
 ///
-/// Returns the row index of the newly-created transaction in the `transactions` table
-/// within the data database. The caller can read the raw transaction bytes from the `raw`
-/// column in order to broadcast the transaction to the network.
+/// These transactions can be retrieved from the underlying data store using the
+/// [`WalletRead::get_transaction`] method.
 ///
 /// Do not call this multiple times in parallel, or you will generate transactions that
 /// double-spend the same notes.
@@ -251,15 +251,12 @@ where
     )
 }
 
-/// Constructs a transaction that sends funds as specified by the `request` argument
-/// and stores it to the wallet's "sent transactions" data store, and returns a
-/// unique identifier for the transaction; this identifier is used only for internal
-/// reference purposes and is not the same as the transaction's txid, although after v4
-/// transactions have been made invalid in a future network upgrade, the txid could
-/// potentially be used for this type (as it is non-malleable for v5+ transactions).
+/// Constructs a transaction or series of transactions that send funds as specified
+/// by the `request` argument, stores them to the wallet's "sent transactions" data
+/// store, and returns the [`TxId`] for each transaction constructed.
 ///
-/// This procedure uses the wallet's underlying note selection algorithm to choose
-/// inputs of sufficient value to satisfy the request, if possible.
+/// The newly-created transactions can be retrieved from the underlying data store using the
+/// [`WalletRead::get_transaction`] method.
 ///
 /// Do not call this multiple times in parallel, or you will generate transactions that
 /// double-spend the same notes.
@@ -357,8 +354,8 @@ where
     )
 }
 
-/// Select transaction inputs, compute fees, and construct a proposal for a transaction
-/// that can then be authorized and made ready for submission to the network with
+/// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
+/// of transactions that can then be authorized and made ready for submission to the network with
 /// [`create_proposed_transaction`].
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -401,9 +398,13 @@ where
         .map_err(Error::from)
 }
 
-/// Proposes a transaction paying the specified address from the given account.
+/// Proposes making a payment to the specified address from the given account.
 ///
-/// Returns the proposal, which may then be executed using [`create_proposed_transaction`]
+/// Returns the proposal, which may then be executed using [`create_proposed_transaction`].
+/// Depending upon the recipient address, more than one transaction may be constructed
+/// in the execution of the returned proposal.
+///
+/// This method uses the basic [`GreedyInputSelector`] for input selection.
 ///
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database.
@@ -472,6 +473,8 @@ where
     )
 }
 
+/// Constructs a proposal to shield all of the funds belonging to the provided set of
+/// addresses.
 #[cfg(feature = "transparent-inputs")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
@@ -513,14 +516,16 @@ where
         .map_err(Error::from)
 }
 
-/// Construct, prove, and sign a transaction using the inputs supplied by the given proposal,
-/// and persist it to the wallet database.
+/// Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
+/// the given proposal, and persist it to the wallet database.
 ///
-/// Returns the database identifier for the newly constructed transaction, or an error if
+/// Returns the database identifier for eacy newly constructed transaction, or an error if
 /// an error occurs in transaction construction, proving, or signing.
 ///
-/// Note: If the payment includes a recipient with an Orchard-only UA, this will attempt
-/// to fall back to the transparent receiver until full Orchard support is implemented.
+/// When evaluating multi-step proposals, only transparent outputs of any given step may be spent
+/// in later steps; attempting to spend a shielded note (including change) output by an earlier
+/// step is not supported, because the ultimate positions of those notes cannot be known and
+/// therefore the required spend proofs for such notes cannot be constructed.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
@@ -964,13 +969,13 @@ where
     Ok(build_result)
 }
 
-/// Constructs a transaction that consumes available transparent UTXOs belonging to
-/// the specified secret key, and sends them to the default address for the provided Sapling
-/// extended full viewing key.
+/// Constructs a transaction that consumes available transparent UTXOs belonging to the specified
+/// secret key, and sends them to the most-preferred receiver of the default internal address for
+/// the provided Unified Spending Key.
 ///
 /// This procedure will not attempt to shield transparent funds if the total amount being shielded
-/// is less than the default fee to send the transaction. Fees will be paid only from the transparent
-/// UTXOs being consumed.
+/// is less than the default fee to send the transaction. Fees will be paid only from the
+/// transparent UTXOs being consumed.
 ///
 /// Parameters:
 /// * `wallet_db`: A read/write reference to the wallet database

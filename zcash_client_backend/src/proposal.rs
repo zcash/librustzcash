@@ -1,3 +1,5 @@
+//! Types related to the construction and evaluation of transaction proposals.
+
 use std::{
     collections::BTreeMap,
     fmt::{self, Debug, Display},
@@ -372,7 +374,7 @@ impl<NoteRef> Step<NoteRef> {
     pub fn transparent_inputs(&self) -> &[WalletTransparentOutput] {
         &self.transparent_inputs
     }
-    /// Returns the Sapling inputs that have been selected to fund the transaction.
+    /// Returns the shielded inputs that have been selected to fund the transaction.
     pub fn shielded_inputs(&self) -> Option<&ShieldedInputs<NoteRef>> {
         self.shielded_inputs.as_ref()
     }

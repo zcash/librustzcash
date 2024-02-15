@@ -458,7 +458,6 @@ impl proposal::Proposal {
                     fee_required: step.balance().fee_required().into(),
                 });
 
-                #[allow(deprecated)]
                 proposal::ProposalStep {
                     transaction_request,
                     payment_output_pools,

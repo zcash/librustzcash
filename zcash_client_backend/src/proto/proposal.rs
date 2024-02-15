@@ -1,4 +1,4 @@
-/// A data structure that describes the a series of transactions to be created.
+/// A data structure that describes a series of transactions to be created.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Proposal {

@@ -5,7 +5,7 @@
 syntax = "proto3";
 package cash.z.wallet.sdk.ffi;
 
-// A data structure that describes the a series of transactions to be created.
+// A data structure that describes a series of transactions to be created.
 message Proposal {
     // The version of this serialization format.
     uint32 protoVersion = 1;
