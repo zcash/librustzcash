@@ -101,7 +101,7 @@ pub enum ShieldedProtocol {
 }
 
 /// A value pool to which the wallet supports sending transaction outputs.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PoolType {
     /// The transparent value pool
     Transparent,

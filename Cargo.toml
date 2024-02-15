@@ -115,3 +115,6 @@ zip32 = "0.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto", rev = "346a6507413eb2388b2967c014672cd83199648a" }

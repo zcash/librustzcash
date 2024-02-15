@@ -1,20 +1,21 @@
 //! Types related to the construction and evaluation of transaction proposals.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display},
 };
 
 use nonempty::NonEmpty;
 use zcash_primitives::{
-    consensus::BlockHeight, transaction::components::amount::NonNegativeAmount,
+    consensus::BlockHeight,
+    transaction::{components::amount::NonNegativeAmount, TxId},
 };
 
 use crate::{
     fees::TransactionBalance,
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
     zip321::TransactionRequest,
-    PoolType,
+    PoolType, ShieldedProtocol,
 };
 
 /// Errors that can occur in construction of a [`Step`].
@@ -39,6 +40,10 @@ pub enum ProposalError {
     ShieldingInvalid,
     /// A reference to the output of a prior step is invalid.
     ReferenceError(StepOutput),
+    /// An attempted double-spend of a prior step output was detected.
+    StepDoubleSpend(StepOutput),
+    /// An attempted double-spend of an output belonging to the wallet was detected.
+    ChainDoubleSpend(PoolType, TxId, u32),
 }
 
 impl Display for ProposalError {
@@ -65,7 +70,19 @@ impl Display for ProposalError {
                 f,
                 "The proposal violates the rules for a shielding transaction."
             ),
-            ProposalError::ReferenceError(r) => write!(f, "No prior step output found for {:?}", r),
+            ProposalError::ReferenceError(r) => {
+                write!(f, "No prior step output found for reference {:?}", r)
+            }
+            ProposalError::StepDoubleSpend(r) => write!(
+                f,
+                "The proposal uses the output of step {:?} in more than one place.",
+                r
+            ),
+            ProposalError::ChainDoubleSpend(pool, txid, index) => write!(
+                f,
+                "The proposal attempts to spend the same output twice: {}, {}, {}",
+                pool, txid, index
+            ),
         }
     }
 }
@@ -131,7 +148,64 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
         min_target_height: BlockHeight,
         steps: NonEmpty<Step<NoteRef>>,
     ) -> Result<Self, ProposalError> {
-        // TODO: actually perform the validation described in the documentation.
+        let mut consumed_chain_inputs: BTreeSet<(PoolType, TxId, u32)> = BTreeSet::new();
+        let mut consumed_prior_inputs: BTreeSet<StepOutput> = BTreeSet::new();
+
+        for (i, step) in steps.iter().enumerate() {
+            for prior_ref in step.prior_step_inputs() {
+                // check that there are no forward references
+                if prior_ref.step_index() >= i {
+                    return Err(ProposalError::ReferenceError(*prior_ref));
+                }
+                // check that the reference is valid
+                let prior_step = &steps[prior_ref.step_index()];
+                match prior_ref.output_index() {
+                    StepOutputIndex::Payment(idx) => {
+                        if prior_step.transaction_request().payments().len() <= idx {
+                            return Err(ProposalError::ReferenceError(*prior_ref));
+                        }
+                    }
+                    StepOutputIndex::Change(idx) => {
+                        if prior_step.balance().proposed_change().len() <= idx {
+                            return Err(ProposalError::ReferenceError(*prior_ref));
+                        }
+                    }
+                }
+                // check that there are no double-spends
+                if consumed_prior_inputs.contains(prior_ref) {
+                    return Err(ProposalError::StepDoubleSpend(*prior_ref));
+                }
+                consumed_prior_inputs.insert(*prior_ref);
+            }
+
+            for t_out in step.transparent_inputs() {
+                let key = (
+                    PoolType::Transparent,
+                    TxId::from_bytes(*t_out.outpoint().hash()),
+                    t_out.outpoint().n(),
+                );
+                if consumed_chain_inputs.contains(&key) {
+                    return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
+                }
+                consumed_chain_inputs.insert(key);
+            }
+
+            for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
+                let key = (
+                    match &s_out.note() {
+                        Note::Sapling(_) => PoolType::Shielded(ShieldedProtocol::Sapling),
+                        #[cfg(feature = "orchard")]
+                        Note::Orchard(_) => PoolType::Shielded(ShieldedProtocol::Orchard),
+                    },
+                    *s_out.txid(),
+                    s_out.output_index().into(),
+                );
+                if consumed_chain_inputs.contains(&key) {
+                    return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
+                }
+                consumed_chain_inputs.insert(key);
+            }
+        }
 
         Ok(Self {
             fee_rule,
@@ -214,14 +288,14 @@ impl<FeeRuleT: Debug, NoteRef> Debug for Proposal<FeeRuleT, NoteRef> {
 }
 
 /// A reference to either a payment or change output within a step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StepOutputIndex {
     Payment(usize),
     Change(usize),
 }
 
 /// A reference to the output of a step in a proposal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StepOutput {
     step_index: usize,
     output_index: StepOutputIndex,

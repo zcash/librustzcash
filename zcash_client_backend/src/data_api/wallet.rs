@@ -11,7 +11,10 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         builder::{BuildConfig, BuildResult, Builder},
-        components::amount::{Amount, NonNegativeAmount},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            TxOut,
+        },
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
@@ -721,9 +724,9 @@ where
             .map_err(Error::DataSource)?;
 
         let mut utxos_spent: Vec<OutPoint> = vec![];
-        let mut add_transparent_input = |addr,
+        let mut add_transparent_input = |addr: &TransparentAddress,
                                          outpoint: OutPoint,
-                                         utxo|
+                                         utxo: TxOut|
          -> Result<
             (),
             Error<
