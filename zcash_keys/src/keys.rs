@@ -3,7 +3,8 @@ use std::{
     error,
     fmt::{self, Display},
 };
-use zcash_address::unified::{self, Container, Encoding, Item, MetadataItem, Typecode};
+
+use zcash_address::unified::{self, Container, Encoding, Item, MetadataItem, Revision, Typecode};
 use zcash_protocol::consensus::{self, BlockHeight};
 use zip32::{AccountId, DiversifierIndex};
 
@@ -928,6 +929,11 @@ impl UnifiedFullViewingKey {
             .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
 
         zcash_address::unified::Ufvk::try_from_items(
+            if self.expiry_height().is_some() || self.expiry_time().is_some() {
+                Revision::R1
+            } else {
+                Revision::R0
+            },
             data_items
                 .map(Item::Data)
                 .chain(meta_items.map(Item::Metadata))
@@ -1257,6 +1263,11 @@ impl UnifiedIncomingViewingKey {
             .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
 
         zcash_address::unified::Uivk::try_from_items(
+            if self.expiry_height.is_some() || self.expiry_time.is_some() {
+                Revision::R1
+            } else {
+                Revision::R0
+            },
             data_items
                 .map(Item::Data)
                 .chain(meta_items.map(Item::Metadata))
