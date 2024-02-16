@@ -23,21 +23,14 @@ and this library adheres to Rust's notion of
   - `Note::Orchard`
 
 ### Changed
-- Several structs and functions had `AccountId` added as a generic type
-  parameter in order to decouple the concepts of an account identifier
-  and a ZIP-32 account index.
 - `zcash_client_backend::data_api`:
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
-    - Added `get_account_parameters`
   - `ShieldedProtocol` has a new `Orchard` variant.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
-
-### Removed
-- `data_api::Error::ChildIndexOutOfRange`
 
 ## [0.11.0-pre-release] Unreleased
 
@@ -53,6 +46,9 @@ and this library adheres to Rust's notion of
       add_unshielded_value
     }`
   - `WalletSummary::next_sapling_subtree_index`
+  - `wallet::HDSeedAccount`
+  - `wallet::ImportedAccount`
+  - `wallet::Account`
   - `wallet::propose_standard_transfer_to_address`
   - `wallet::input_selection::Proposal::{from_parts, shielded_inputs}`
   - `wallet::input_selection::ShieldedInputs`
@@ -95,6 +91,34 @@ and this library adheres to Rust's notion of
   named `{tree_size, nullifier_map, commitments}` respectively.
 
 ### Changed
+- Several structs and functions had `AccountId` added as a generic type
+  parameter in order to decouple the concepts of an account identifier
+  and a ZIP-32 account index. Many APIs that previously referenced `zcash_primitives::zip32::AccountId` now reference the generic type. Impacted types and functions are:
+  - `zcash_client_backend::data_api::wallet::InputSelector::propose_transaction`
+  - `zcash_client_backend::data_api::wallet::propose_transfer`
+  - `zcash_client_backend::data_api::wallet::propose_standard_transfer_to_address`
+  - `zcash_client_backend::data_api::WalletRead::get_account_birthday`
+  - `zcash_client_backend::data_api::WalletRead::get_current_address`
+  - `zcash_client_backend::data_api::WalletRead::get_unified_full_viewing_keys`
+  - `zcash_client_backend::data_api::WalletRead::get_account_for_ufvk`
+  - `zcash_client_backend::data_api::WalletRead::get_wallet_summary`
+  - `zcash_client_backend::data_api::WalletRead::get_sapling_nullifiers`
+  - `zcash_client_backend::data_api::WalletRead::get_transparent_receivers`
+  - `zcash_client_backend::data_api::WalletRead::get_transparent_balances`
+  - `zcash_client_backend::data_api::WalletRead::get_account_ids`
+  - `zcash_client_backend::data_api::ScannedBlock`
+  - `zcash_client_backend::data_api::DecryptedTransaction`
+  - `zcash_client_backend::data_api::SentTransaction`
+  - `zcash_client_backend::data_api::SentTransactionOutput`
+  - `zcash_client_backend::data_api::WalletWrite::create_account`
+  - `zcash_client_backend::data_api::WalletWrite::get_next_available_address`
+  - `zcash_client_backend::decrypt::DecryptedOutput`
+  - `zcash_client_backend::decrypt::decrypt_transaction`
+  - `zcash_client_backend::scanning::scan_block`
+  - `zcash_client_backend::wallet::Recipient`
+  - `zcash_client_backend::wallet::WalletTx`
+  - `zcash_client_backend::wallet::WalletSaplingSpend`
+  - `zcash_client_backend::wallet::WalletSaplingOutput`
 - `zcash_client_backend::data_api`:
   - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
     a `u32` for future consistency with Orchard.
@@ -162,6 +186,8 @@ and this library adheres to Rust's notion of
     arguments. This helps to minimize the set of capabilities that the
     `data_api::InputSource` must expose.
   - Changes to the `WalletRead` trait:
+    - Added `AccountId` type.
+    - Added `get_account` function.
     - `get_checkpoint_depth` has been removed without replacement. This
       is no longer needed given the change to use the stored anchor height for transaction
       proposal execution.
@@ -236,6 +262,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api::ScannedBlock::from_parts` has been made crate-private.
 - `zcash_client_backend::data_api::ScannedBlock::into_sapling_commitments` has been
   replaced by `into_commitments` which returns a `ScannedBlockCommitments` value.
+- `data_api::Error::ChildIndexOutOfRange`
 
 ## [0.10.0] - 2023-09-25
 

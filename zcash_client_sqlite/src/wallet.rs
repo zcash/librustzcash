@@ -1001,7 +1001,7 @@ pub(crate) fn block_height_extrema(
     })
 }
 
-pub(crate) fn get_account_parameters<P: Parameters>(
+pub(crate) fn get_account<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account_id: AccountId,
@@ -2268,11 +2268,7 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
         let account_id = st.test_account().unwrap().0;
-        let account_parameters = st
-            .wallet()
-            .get_account_parameters(account_id)
-            .unwrap()
-            .unwrap();
+        let account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(

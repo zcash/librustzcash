@@ -447,10 +447,7 @@ pub trait WalletRead {
     type AccountId: Clone + Send + PartialEq + Eq + std::hash::Hash + ConditionallySelectable;
 
     /// Gets the parameters that went into creating an account (e.g. seed+index or uvk).
-    fn get_account_parameters(
-        &self,
-        account_id: Self::AccountId,
-    ) -> Result<Option<Account>, Self::Error>;
+    fn get_account(&self, account_id: Self::AccountId) -> Result<Option<Account>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
@@ -1219,7 +1216,7 @@ pub mod testing {
         type Error = ();
         type AccountId = u32;
 
-        fn get_account_parameters(
+        fn get_account(
             &self,
             _account_id: Self::AccountId,
         ) -> Result<Option<super::Account>, Self::Error> {

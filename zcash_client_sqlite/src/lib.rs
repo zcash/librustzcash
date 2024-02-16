@@ -246,11 +246,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     type Error = SqliteClientError;
     type AccountId = AccountId;
 
-    fn get_account_parameters(
-        &self,
-        account_id: Self::AccountId,
-    ) -> Result<Option<Account>, Self::Error> {
-        wallet::get_account_parameters(self.conn.borrow(), &self.params, account_id)
+    fn get_account(&self, account_id: Self::AccountId) -> Result<Option<Account>, Self::Error> {
+        wallet::get_account(self.conn.borrow(), &self.params, account_id)
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
