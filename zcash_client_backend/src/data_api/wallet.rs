@@ -855,18 +855,15 @@ where
     #[cfg(feature = "orchard")]
     let orchard_internal_ovk = || {
         #[cfg(feature = "transparent-inputs")]
-        return if proposal_step.is_shielding() {
-            Some(orchard::keys::OutgoingViewingKey::from(
+        if proposal_step.is_shielding() {
+            return Some(orchard::keys::OutgoingViewingKey::from(
                 usk.transparent()
                     .to_account_pubkey()
                     .internal_ovk()
                     .as_bytes(),
-            ))
-        } else {
-            Some(orchard_fvk.to_ovk(orchard::keys::Scope::Internal))
-        };
+            ));
+        }
 
-        #[cfg(not(feature = "transparent-inputs"))]
         Some(orchard_fvk.to_ovk(Scope::Internal))
     };
 
@@ -881,18 +878,15 @@ where
 
     let sapling_internal_ovk = || {
         #[cfg(feature = "transparent-inputs")]
-        return if proposal_step.is_shielding() {
-            Some(sapling::keys::OutgoingViewingKey(
+        if proposal_step.is_shielding() {
+            return Some(sapling::keys::OutgoingViewingKey(
                 usk.transparent()
                     .to_account_pubkey()
                     .internal_ovk()
                     .as_bytes(),
-            ))
-        } else {
-            Some(sapling_dfvk.to_ovk(Scope::Internal))
-        };
+            ));
+        }
 
-        #[cfg(not(feature = "transparent-inputs"))]
         Some(sapling_dfvk.to_ovk(Scope::Internal))
     };
 
