@@ -10,10 +10,18 @@ and this library adheres to Rust's notion of
 - `impl serde::{Serialize, Deserialize} for zcash_address::ZcashAddress` behind
   the `serde` feature flag.
 
+### Added
+- `zcash_address::unified`:
+  - `Container::revision`
+  - `Item`
+  - `MetadataItem`
+  - `Revision`
+
 ### Changed
 - `zcash_address::unified`:
   - `Typecode` has changed. Instead of having a variant for each receiver type,
     it now has two variants, `Typecode::Data` and `Typecode::Metadata`.
+  - `Encoding::try_from_items` now takes an additional `Revision` argument.
 
 ### Removed
 - `zcash_address::unified::Container::items` Preference order is only

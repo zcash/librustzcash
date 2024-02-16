@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use super::{
     private::{SealedContainer, SealedDataItem},
-    Container, DataTypecode, Encoding, Item, ParseError,
+    Container, DataTypecode, Encoding, Item, ParseError, Revision,
 };
 
 /// The set of known IVKs for Unified IVKs.
@@ -84,7 +84,7 @@ impl SealedDataItem for Ivk {
 ///
 /// ```
 /// # use std::error::Error;
-/// use zcash_address::unified::{self, Container, Encoding, Item};
+/// use zcash_address::unified::{self, Container, Encoding, Item, Revision};
 ///
 /// # fn main() -> Result<(), Box<dyn Error>> {
 /// # let uivk_from_user = || "uivk1djetqg3fws7y7qu5tekynvcdhz69gsyq07ewvppmzxdqhpfzdgmx8urnkqzv7ylz78ez43ux266pqjhecd59fzhn7wpe6zarnzh804hjtkyad25ryqla5pnc8p5wdl3phj9fczhz64zprun3ux7y9jc08567xryumuz59rjmg4uuflpjqwnq0j0tzce0x74t4tv3gfjq7nczkawxy6y7hse733ae3vw7qfjd0ss0pytvezxp42p6rrpzeh6t2zrz7zpjk0xhngcm6gwdppxs58jkx56gsfflugehf5vjlmu7vj3393gj6u37wenavtqyhdvcdeaj86s6jczl4zq";
@@ -96,44 +96,68 @@ impl SealedDataItem for Ivk {
 /// let ivks: &[Item<unified::Ivk>] = uivk.items_as_parsed();
 ///
 /// // And we can create the UIVK from a vector of IVKs:
-/// let new_uivk = unified::Uivk::try_from_items(ivks.to_vec())?;
+/// let new_uivk = unified::Uivk::try_from_items(Revision::R0, ivks.to_vec())?;
 /// assert_eq!(new_uivk, uivk);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Uivk(pub(crate) Vec<Item<Ivk>>);
+pub struct Uivk {
+    pub(crate) revision: Revision,
+    pub(crate) ivks: Vec<Item<Ivk>>,
+}
 
 impl Container for Uivk {
     type DataItem = Ivk;
 
     fn items_as_parsed(&self) -> &[Item<Ivk>] {
-        &self.0
+        &self.ivks
+    }
+
+    fn revision(&self) -> Revision {
+        self.revision
     }
 }
 
 impl Encoding for Uivk {}
 
 impl SealedContainer for Uivk {
-    /// The HRP for a Bech32m-encoded mainnet Unified IVK.
+    /// The HRP for a Bech32m-encoded mainnet Revision 0 Unified IVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = "uivk";
+    const MAINNET_R0: &'static str = "uivk";
 
-    /// The HRP for a Bech32m-encoded testnet Unified IVK.
+    /// The HRP for a Bech32m-encoded testnet Revision 0 Unified IVK.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = "uivktest";
+    const TESTNET_R0: &'static str = "uivktest";
 
-    /// The HRP for a Bech32m-encoded regtest Unified IVK.
-    const REGTEST: &'static str = "uivkregtest";
+    /// The HRP for a Bech32m-encoded regtest Revision 0 Unified IVK.
+    const REGTEST_R0: &'static str = "uivkregtest";
 
-    fn from_inner(ivks: Vec<Item<Self::DataItem>>) -> Self {
-        Self(ivks)
+    /// The HRP for a Bech32m-encoded mainnet Revision 1 Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const MAINNET_R1: &'static str = "urivk";
+
+    /// The HRP for a Bech32m-encoded testnet Revision 1 Unified IVK.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const TESTNET_R1: &'static str = "urivktest";
+
+    /// The HRP for a Bech32m-encoded regtest Revision 1 Unified IVK.
+    const REGTEST_R1: &'static str = "urivkregtest";
+
+    fn from_inner(revision: Revision, ivks: Vec<Item<Self::DataItem>>) -> Self {
+        Self { revision, ivks }
     }
 }
 
@@ -150,7 +174,7 @@ mod tests {
     use super::{Ivk, ParseError, Uivk};
     use crate::{
         kind::unified::{private::SealedContainer, Encoding},
-        unified::{Item, Typecode},
+        unified::{Item, Revision, Typecode},
         Network,
     };
 
@@ -192,9 +216,9 @@ mod tests {
             shielded in arb_shielded_ivk(),
             transparent in prop::option::of(arb_transparent_ivk()),
         ) -> Uivk {
-            let mut items: Vec<_> = transparent.into_iter().chain(shielded).map(Item::Data).collect();
-            items.sort_unstable_by(Item::encoding_order);
-            Uivk(items)
+            let mut ivks: Vec<_> = transparent.into_iter().chain(shielded).map(Item::Data).collect();
+            ivks.sort_unstable_by(Item::encoding_order);
+            Uivk { revision: Revision::R0, ivks }
         }
     }
 
@@ -224,7 +248,7 @@ mod tests {
             0x83, 0xe8, 0x92, 0x18, 0x28, 0x70, 0x1e, 0x81, 0x76, 0x56, 0xb6, 0x15,
         ];
         assert_eq!(
-            Uivk::parse_internal(Uivk::MAINNET, &invalid_padding[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -240,7 +264,7 @@ mod tests {
             0xf9, 0x65, 0x49, 0x14, 0xab, 0x7c, 0x55, 0x7b, 0x39, 0x47,
         ];
         assert_eq!(
-            Uivk::parse_internal(Uivk::MAINNET, &truncated_padding[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -268,7 +292,7 @@ mod tests {
             0xf5, 0xd5, 0x8a, 0xb5, 0x1a,
         ];
         assert_matches!(
-            Uivk::parse_internal(Uivk::MAINNET, &truncated_sapling_data[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -281,7 +305,7 @@ mod tests {
             0xd8, 0x21, 0x5e, 0x8, 0xa, 0x82, 0x95, 0x21, 0x74,
         ];
         assert_matches!(
-            Uivk::parse_internal(Uivk::MAINNET, &truncated_after_sapling_typecode[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -289,10 +313,13 @@ mod tests {
     #[test]
     fn duplicate_typecode() {
         // Construct and serialize an invalid UIVK.
-        let uivk = Uivk(vec![
-            Item::Data(Ivk::Sapling([1; 64])),
-            Item::Data(Ivk::Sapling([2; 64])),
-        ]);
+        let uivk = Uivk {
+            revision: Revision::R0,
+            ivks: vec![
+                Item::Data(Ivk::Sapling([1; 64])),
+                Item::Data(Ivk::Sapling([2; 64])),
+            ],
+        };
         let encoded = uivk.encode(&Network::Main);
         assert_eq!(
             Uivk::decode(&encoded),
@@ -313,7 +340,7 @@ mod tests {
         ];
 
         assert_eq!(
-            Uivk::parse_internal(Uivk::MAINNET, &encoded[..]),
+            Uivk::parse_internal(Uivk::MAINNET_R0, &encoded[..]),
             Err(ParseError::OnlyTransparent)
         );
     }
