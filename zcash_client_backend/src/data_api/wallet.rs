@@ -11,10 +11,7 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         builder::{BuildConfig, BuildResult, Builder},
-        components::{
-            amount::{Amount, NonNegativeAmount},
-            TxOut,
-        },
+        components::amount::{Amount, NonNegativeAmount},
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
@@ -30,6 +27,7 @@ use crate::{
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
     keys::UnifiedSpendingKey,
+    proposal::ProposalError,
     proposal::{self, Proposal},
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
@@ -45,10 +43,12 @@ use super::InputSource;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::proposal::ProposalError, input_selection::ShieldingSelector,
-    sapling::keys::OutgoingViewingKey, std::convert::Infallible,
-    zcash_keys::encoding::AddressCodec, zcash_primitives::legacy::TransparentAddress,
-    zcash_primitives::transaction::components::OutPoint,
+    input_selection::ShieldingSelector,
+    sapling::keys::OutgoingViewingKey,
+    std::convert::Infallible,
+    zcash_keys::encoding::AddressCodec,
+    zcash_primitives::legacy::TransparentAddress,
+    zcash_primitives::transaction::components::{OutPoint, TxOut},
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -522,13 +522,14 @@ where
 /// Construct, prove, and sign a transaction or series of transactions using the inputs supplied by
 /// the given proposal, and persist it to the wallet database.
 ///
-/// Returns the database identifier for eacy newly constructed transaction, or an error if
+/// Returns the database identifier for each newly constructed transaction, or an error if
 /// an error occurs in transaction construction, proving, or signing.
 ///
 /// When evaluating multi-step proposals, only transparent outputs of any given step may be spent
 /// in later steps; attempting to spend a shielded note (including change) output by an earlier
-/// step is not supported, because the ultimate positions of those notes cannot be known and
-/// therefore the required spend proofs for such notes cannot be constructed.
+/// step is not supported, because the ultimate positions of those notes in the global note
+/// commitment tree cannot be known until the transaction that produces those notes is mined,
+/// and therefore the required spend proofs for such notes cannot be constructed.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn create_proposed_transactions<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
@@ -610,24 +611,33 @@ where
     // supported. Maybe support this at some point? Doing so would require a higher-level
     // approach in the wallet that waits for transactions with shielded outputs to be
     // mined and only then attempts to perform the next step.
-    if proposal_step.prior_step_inputs().iter().any(|s_ref| {
-        prior_step_results.len() <= s_ref.step_index()
-            || match s_ref.output_index() {
-                proposal::StepOutputIndex::Payment(i) => prior_step_results[s_ref.step_index()]
-                    .0
-                    .payment_pools()
-                    .get(&i)
-                    .iter()
-                    .all(|pool| matches!(pool, PoolType::Shielded(_))),
+    for s_ref in proposal_step.prior_step_inputs() {
+        prior_step_results.get(s_ref.step_index()).map_or_else(
+            || {
+                // Return an error in case the step index doesn't match up with a step
+                Err(Error::Proposal(ProposalError::ReferenceError(*s_ref)))
+            },
+            |step| match s_ref.output_index() {
+                proposal::StepOutputIndex::Payment(i) => {
+                    let prior_pool = step
+                        .0
+                        .payment_pools()
+                        .get(&i)
+                        .ok_or(Error::Proposal(ProposalError::ReferenceError(*s_ref)))?;
 
+                    if matches!(prior_pool, PoolType::Shielded(_)) {
+                        Err(Error::ProposalNotSupported)
+                    } else {
+                        Ok(())
+                    }
+                }
                 proposal::StepOutputIndex::Change(_) => {
                     // Only shielded change is supported by zcash_client_backend, so multi-step
                     // transactions cannot yet spend prior transactions' change outputs.
-                    true
+                    Err(Error::ProposalNotSupported)
                 }
-            }
-    }) {
-        return Err(Error::ProposalNotSupported);
+            },
+        )?;
     }
 
     let account = wallet_db

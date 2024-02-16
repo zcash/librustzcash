@@ -44,6 +44,9 @@ pub enum ProposalError {
     StepDoubleSpend(StepOutput),
     /// An attempted double-spend of an output belonging to the wallet was detected.
     ChainDoubleSpend(PoolType, TxId, u32),
+    /// There was a mismatch between the payments in the proposal's transaction request
+    /// and the payment pool selection values.
+    PaymentPoolsMismatch,
 }
 
 impl Display for ProposalError {
@@ -82,6 +85,10 @@ impl Display for ProposalError {
                 f,
                 "The proposal attempts to spend the same output twice: {}, {}, {}",
                 pool, txid, index
+            ),
+            ProposalError::PaymentPoolsMismatch => write!(
+                f,
+                "The chosen payment pools did not match the payments of the transaction request."
             ),
         }
     }
@@ -172,10 +179,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                     }
                 }
                 // check that there are no double-spends
-                if consumed_prior_inputs.contains(prior_ref) {
+                if !consumed_prior_inputs.insert(*prior_ref) {
                     return Err(ProposalError::StepDoubleSpend(*prior_ref));
                 }
-                consumed_prior_inputs.insert(*prior_ref);
             }
 
             for t_out in step.transparent_inputs() {
@@ -184,10 +190,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                     TxId::from_bytes(*t_out.outpoint().hash()),
                     t_out.outpoint().n(),
                 );
-                if consumed_chain_inputs.contains(&key) {
+                if !consumed_chain_inputs.insert(key) {
                     return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
                 }
-                consumed_chain_inputs.insert(key);
             }
 
             for s_out in step.shielded_inputs().iter().flat_map(|i| i.notes().iter()) {
@@ -200,10 +205,9 @@ impl<FeeRuleT, NoteRef> Proposal<FeeRuleT, NoteRef> {
                     *s_out.txid(),
                     s_out.output_index().into(),
                 );
-                if consumed_chain_inputs.contains(&key) {
+                if !consumed_chain_inputs.insert(key) {
                     return Err(ProposalError::ChainDoubleSpend(key.0, key.1, key.2));
                 }
-                consumed_chain_inputs.insert(key);
             }
         }
 
@@ -343,7 +347,11 @@ impl<NoteRef> Step<NoteRef> {
     /// Parameters:
     /// * `transaction_request`: The ZIP 321 transaction request describing the payments
     ///   to be made.
-    /// * `payment_pools`: A map from payment index to pool type.
+    /// * `payment_pools`: A map from payment index to pool type. The set of payment indices
+    ///   provided here must exactly match the set of payment indices in the [`TransactionRequest`],
+    ///   and the selected pool for an index must correspond to a valid receiver of the
+    ///   address at that index (or the address itself in the case of bare transparent or Sapling
+    ///   addresses).
     /// * `transparent_inputs`: The set of previous transparent outputs to be spent.
     /// * `shielded_inputs`: The sets of previous shielded outputs to be spent.
     /// * `balance`: The change outputs to be added the transaction and the fee to be paid.
@@ -360,6 +368,21 @@ impl<NoteRef> Step<NoteRef> {
         balance: TransactionBalance,
         is_shielding: bool,
     ) -> Result<Self, ProposalError> {
+        // Verify that the set of payment pools matches exactly a set of valid payment recipients
+        if transaction_request.payments().len() != payment_pools.len() {
+            return Err(ProposalError::PaymentPoolsMismatch);
+        }
+        for (idx, pool) in &payment_pools {
+            if !transaction_request
+                .payments()
+                .get(idx)
+                .iter()
+                .any(|payment| pool.is_receiver(&payment.recipient_address))
+            {
+                return Err(ProposalError::PaymentPoolsMismatch);
+            }
+        }
+
         let transparent_input_total = transparent_inputs
             .iter()
             .map(|out| out.txout().value)

@@ -35,6 +35,7 @@ and this library adheres to Rust's notion of
 ## [0.11.0-pre-release] Unreleased
 
 ### Added
+- `zcash_client_backend::PoolType::is_receiver`
 - `zcash_client_backend::data_api`:
   - `InputSource`
   - `ScannedBlock::{into_commitments, sapling}`
@@ -206,6 +207,11 @@ and this library adheres to Rust's notion of
     it possible to represent multi-step transactions, such as a deshielding
     transaction followed by a zero-conf transfer as required by ZIP 320. Individual
     transaction proposals are now represented by the `proposal::Step` type.
+  - `ProposalError` has new variants:
+    - `ReferenceError`
+    - `StepDoubleSpend`
+    - `ChainDoubleSpend`
+    - `PaymentPoolsMismatch`
 
 - `zcash_client_backend::fees`:
   - `ChangeStrategy::compute_balance` arguments have changed.

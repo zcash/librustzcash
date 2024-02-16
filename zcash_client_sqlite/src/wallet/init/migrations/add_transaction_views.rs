@@ -2,7 +2,6 @@
 use std::collections::HashSet;
 
 use rusqlite::{self, types::ToSql, OptionalExtension};
-use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
