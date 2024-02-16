@@ -10,16 +10,18 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_address::unified`:
   - `Address::receivers`
+  - `Container::revision`
   - `DataTypecode`
-  - `MetadataTypecode`
   - `Item`
   - `MetadataItem`
-  - `Address::receivers`
+  - `MetadataTypecode`
+  - `Revision`
 
 ### Changed
 - `zcash_address::unified`:
   - `Typecode` has changed. Instead of having a variant for each receiver type,
     it now has two variants, `Typecode::Data` and `Typecode::Metadata`.
+  - `Encoding::try_from_items` now takes an additional `Revision` argument.
 
 ### Removed
 - `zcash_address::unified::Container::items` Preference order is only
