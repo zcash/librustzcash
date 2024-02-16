@@ -14,7 +14,7 @@ use {
     },
     alloc::string::ToString,
     core::iter,
-    zcash_protocol::consensus::NetworkType,
+    zcash_protocol::{address::Revision, consensus::NetworkType},
 };
 
 #[test]
@@ -42,8 +42,13 @@ fn unified() {
             .map(Item::Data)
             .collect();
 
-        let expected_addr =
-            ZcashAddress::from_unified(NetworkType::Main, unified::Address(receivers));
+        let expected_addr = ZcashAddress::from_unified(
+            NetworkType::Main,
+            unified::Address {
+                revision: Revision::R0,
+                receivers,
+            },
+        );
 
         // Test parsing
         let addr: ZcashAddress = tv.unified_addr.parse().unwrap();

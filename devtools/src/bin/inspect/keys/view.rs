@@ -48,9 +48,10 @@ pub(crate) fn inspect_ufvk(ufvk: unified::Ufvk, network: NetworkType) {
                 unified::Fvk::Orchard(data) => {
                     eprintln!(
                         "   - Orchard ({})",
-                        unified::Ufvk::try_from_items(vec![unified::Item::Data(
-                            unified::Fvk::Orchard(*data)
-                        )])
+                        unified::Ufvk::try_from_items(
+                            ufvk.revision(),
+                            vec![unified::Item::Data(unified::Fvk::Orchard(*data))]
+                        )
                         .unwrap()
                         .encode(&network)
                     );
@@ -99,9 +100,10 @@ pub(crate) fn inspect_uivk(uivk: unified::Uivk, network: NetworkType) {
                 unified::Ivk::Orchard(data) => {
                     eprintln!(
                         "   - Orchard ({})",
-                        unified::Uivk::try_from_items(vec![unified::Item::Data(
-                            unified::Ivk::Orchard(*data)
-                        )])
+                        unified::Uivk::try_from_items(
+                            uivk.revision(),
+                            vec![unified::Item::Data(unified::Ivk::Orchard(*data))]
+                        )
                         .unwrap()
                         .encode(&network)
                     );

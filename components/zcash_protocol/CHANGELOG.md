@@ -7,11 +7,30 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::address::Revision`
+- `zcash_protocol::constants::`
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_ADDRESS_R0`
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_IVK_R0`
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_FVK_R0`
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_ADDRESS_R1`
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_IVK_R1`
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_FVK_R1`
+
 ### Changed
 - `zcash_protocol::consensus::NetworkConstants` has added methods:
   - `hrp_unified_address`
   - `hrp_unified_fvk`
   - `hrp_unified_ivk`
+
+### Removed
+- `zcash_protocol::constants::`
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_ADDRESS` have been replaced by
+    `{mainnet|testnet|regtest}::HRP_UNIFIED_ADDRESS_R0` respectively.
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_IVK` have been replaced by
+    `{mainnet|testnet|regtest}::HRP_UNIFIED_IVK_R0` respectively.
+  - `{mainnet|testnet|regtest}::HRP_UNIFIED_FVK` have been replaced by
+    `{mainnet|testnet|regtest}::HRP_UNIFIED_FVK_R0` respectively.
 
 ## [0.4.3] - 2024-12-16
 ### Added

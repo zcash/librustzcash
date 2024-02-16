@@ -1,4 +1,4 @@
-use zcash_protocol::{constants, PoolType};
+use zcash_protocol::{address::Revision, constants, PoolType};
 
 use super::{private::SealedDataItem, DataTypecode, Item, ParseError};
 
@@ -72,6 +72,7 @@ impl SealedDataItem for Receiver {
 ///     unified::{self, Container, Encoding, Item},
 ///     ConversionError, TryFromRawAddress, ZcashAddress,
 /// };
+/// use zcash_protocol::address::Revision;
 ///
 /// # #[cfg(not(feature = "std"))]
 /// # fn main() {}
@@ -103,13 +104,16 @@ impl SealedDataItem for Receiver {
 /// let receivers: Vec<unified::Receiver> = ua.receivers();
 ///
 /// // And we can create the UA from a list of receivers:
-/// let new_ua = unified::Address::try_from_items(receivers.into_iter().map(Item::Data).collect())?;
+/// let new_ua = unified::Address::try_from_items(Revision::R0, receivers.into_iter().map(Item::Data).collect())?;
 /// assert_eq!(new_ua, ua);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Address(pub(crate) Vec<Item<Receiver>>);
+pub struct Address {
+    pub(crate) revision: Revision,
+    pub(crate) receivers: Vec<Item<Receiver>>,
+}
 
 impl Address {
     /// Returns the receiver items for this address, in order of decreasing preference.
@@ -118,7 +122,7 @@ impl Address {
     /// of a type that wallet supports from the result.
     pub fn receivers(&self) -> Vec<Receiver> {
         let mut result = self
-            .0
+            .receivers
             .iter()
             .filter_map(|item| match item {
                 Item::Data(r) => Some(r.clone()),
@@ -133,7 +137,7 @@ impl Address {
 impl Address {
     /// Returns whether this address has the ability to receive transfers of the given pool type.
     pub fn has_receiver_of_type(&self, pool_type: PoolType) -> bool {
-        self.0.iter().any(|item| match item {
+        self.receivers.iter().any(|item| match item {
             Item::Data(Receiver::Orchard(_)) => pool_type == PoolType::ORCHARD,
             Item::Data(Receiver::Sapling(_)) => pool_type == PoolType::SAPLING,
             Item::Data(Receiver::P2pkh(_)) | Item::Data(Receiver::P2sh(_)) => {
@@ -146,14 +150,14 @@ impl Address {
 
     /// Returns whether this address contains the given receiver.
     pub fn contains_receiver(&self, receiver: &Receiver) -> bool {
-        self.0
+        self.receivers
             .iter()
             .any(|item| matches!(item, Item::Data(r) if r == receiver))
     }
 
     /// Returns whether this address can receive a memo.
     pub fn can_receive_memo(&self) -> bool {
-        self.0.iter().any(|r| {
+        self.receivers.iter().any(|r| {
             matches!(
                 r,
                 Item::Data(Receiver::Sapling(_)) | Item::Data(Receiver::Orchard(_))
@@ -163,25 +167,45 @@ impl Address {
 }
 
 impl super::private::SealedContainer for Address {
-    /// The HRP for a Bech32m-encoded mainnet Unified Address.
+    /// The HRP for a Bech32m-encoded mainnet Revision 0 Unified Address.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const MAINNET: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS;
+    const MAINNET_R0: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS_R0;
 
-    /// The HRP for a Bech32m-encoded testnet Unified Address.
+    /// The HRP for a Bech32m-encoded testnet Revision 0 Unified Address.
     ///
     /// Defined in [ZIP 316][zip-0316].
     ///
     /// [zip-0316]: https://zips.z.cash/zip-0316
-    const TESTNET: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS;
+    const TESTNET_R0: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS_R0;
 
     /// The HRP for a Bech32m-encoded regtest Unified Address.
-    const REGTEST: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS;
+    const REGTEST_R0: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS_R0;
 
-    fn from_inner(receivers: Vec<Item<Self::DataItem>>) -> Self {
-        Self(receivers)
+    /// The HRP for a Bech32m-encoded mainnet Revision 1 Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const MAINNET_R1: &'static str = constants::mainnet::HRP_UNIFIED_ADDRESS_R1;
+
+    /// The HRP for a Bech32m-encoded testnet Revision 1 Unified Address.
+    ///
+    /// Defined in [ZIP 316][zip-0316].
+    ///
+    /// [zip-0316]: https://zips.z.cash/zip-0316
+    const TESTNET_R1: &'static str = constants::testnet::HRP_UNIFIED_ADDRESS_R1;
+
+    /// The HRP for a Bech32m-encoded regtest Revision 1 Unified Address.
+    const REGTEST_R1: &'static str = constants::regtest::HRP_UNIFIED_ADDRESS_R1;
+
+    fn from_inner(revision: Revision, receivers: Vec<Item<Self::DataItem>>) -> Self {
+        Self {
+            revision,
+            receivers,
+        }
     }
 }
 
@@ -190,7 +214,11 @@ impl super::Container for Address {
     type DataItem = Receiver;
 
     fn items_as_parsed(&self) -> &[Item<Receiver>] {
-        &self.0
+        &self.receivers
+    }
+
+    fn revision(&self) -> Revision {
+        self.revision
     }
 }
 
@@ -209,6 +237,7 @@ pub mod testing {
     use super::{Address, Receiver};
     use crate::unified::{DataTypecode, Item};
     use zcash_encoding::MAX_COMPACT_SIZE;
+    use zcash_protocol::address::Revision;
 
     prop_compose! {
         fn uniform43()(a in uniform11(0u8..), b in uniform32(0u8..)) -> [u8; 43] {
@@ -222,6 +251,11 @@ pub mod testing {
     /// A strategy to generate an arbitrary transparent typecode.
     fn arb_transparent_typecode() -> impl Strategy<Value = DataTypecode> {
         select(vec![DataTypecode::P2pkh, DataTypecode::P2sh])
+    }
+
+    /// A strategy to generate an arbitrary transparent typecode.
+    pub(crate) fn arb_revision() -> impl Strategy<Value = Revision> {
+        select(vec![Revision::R0, Revision::R1])
     }
 
     /// A strategy to generate an arbitrary shielded (Sapling, Orchard, or unknown) typecode.
@@ -269,13 +303,16 @@ pub mod testing {
     /// protocol rules; this generator is only intended for use in testing parsing and
     /// serialization.
     pub fn arb_unified_address() -> impl Strategy<Value = Address> {
-        arb_typecodes()
-            .prop_flat_map(arb_unified_address_receivers)
-            .prop_map(|rs| {
-                let mut items = rs.into_iter().map(Item::Data).collect::<Vec<_>>();
-                items.sort_unstable_by(Item::encoding_order);
-                Address(items)
+        (arb_typecodes(), arb_revision()).prop_flat_map(|(tc, revision)| {
+            arb_unified_address_receivers(tc).prop_map(move |rs| {
+                let mut receivers = rs.into_iter().map(Item::Data).collect::<Vec<_>>();
+                receivers.sort_unstable_by(Item::encoding_order);
+                Address {
+                    revision,
+                    receivers: receivers.clone(),
+                }
             })
+        })
     }
 }
 
@@ -294,7 +331,7 @@ mod tests {
     use super::{Address, ParseError, Receiver};
     use crate::{
         kind::unified::{private::SealedContainer, Encoding as _},
-        unified::{address::testing::arb_unified_address, Item, Typecode},
+        unified::{address::testing::arb_unified_address, Item, Revision, Typecode},
     };
 
     proptest! {
@@ -324,7 +361,7 @@ mod tests {
             0x7b, 0x28, 0x69, 0xc9, 0x84,
         ];
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &invalid_padding[..]),
+            Address::parse_internal(Address::MAINNET_R0, &invalid_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -339,7 +376,7 @@ mod tests {
             0x4b, 0x31, 0xee, 0x5a,
         ];
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &truncated_padding[..]),
+            Address::parse_internal(Address::MAINNET_R0, &truncated_padding[..]),
             Err(ParseError::InvalidEncoding(
                 "Invalid padding bytes".to_owned()
             ))
@@ -364,7 +401,7 @@ mod tests {
             0xc6, 0x5e, 0x68, 0xa2, 0x78, 0x6c, 0x9e,
         ];
         assert_matches!(
-            Address::parse_internal(Address::MAINNET, &truncated_sapling_data[..]),
+            Address::parse_internal(Address::MAINNET_R0, &truncated_sapling_data[..]),
             Err(ParseError::InvalidEncoding(_))
         );
 
@@ -377,7 +414,7 @@ mod tests {
             0xe6, 0x70, 0x36, 0x5b, 0x7b, 0x9e,
         ];
         assert_matches!(
-            Address::parse_internal(Address::MAINNET, &truncated_after_sapling_typecode[..]),
+            Address::parse_internal(Address::MAINNET_R0, &truncated_after_sapling_typecode[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -386,13 +423,16 @@ mod tests {
     fn duplicate_typecode() {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![
-            Item::Data(Receiver::Sapling([1; 43])),
-            Item::Data(Receiver::Sapling([2; 43])),
-        ]);
-        let encoded = ua.to_jumbled_bytes(Address::MAINNET);
+        let ua = Address {
+            revision: Revision::R0,
+            receivers: vec![
+                Item::Data(Receiver::Sapling([1; 43])),
+                Item::Data(Receiver::Sapling([2; 43])),
+            ],
+        };
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET_R0);
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Address::parse_internal(Address::MAINNET_R0, &encoded[..]),
             Err(ParseError::DuplicateTypecode(Typecode::SAPLING))
         );
     }
@@ -401,14 +441,17 @@ mod tests {
     fn p2pkh_and_p2sh() {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![
-            Item::Data(Receiver::P2pkh([0; 20])),
-            Item::Data(Receiver::P2sh([0; 20])),
-        ]);
-        let encoded = ua.to_jumbled_bytes(Address::MAINNET);
+        let ua = Address {
+            revision: Revision::R0,
+            receivers: vec![
+                Item::Data(Receiver::P2pkh([0; 20])),
+                Item::Data(Receiver::P2sh([0; 20])),
+            ],
+        };
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET_R0);
         // ensure that decoding catches the error
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Address::parse_internal(Address::MAINNET_R0, &encoded[..]),
             Err(ParseError::BothP2phkAndP2sh)
         );
     }
@@ -417,14 +460,17 @@ mod tests {
     fn addresses_out_of_order() {
         // Construct and serialize an invalid UA. This must be done using private
         // methods, as the public API does not permit construction of such invalid values.
-        let ua = Address(vec![
-            Item::Data(Receiver::Sapling([0; 43])),
-            Item::Data(Receiver::P2pkh([0; 20])),
-        ]);
-        let encoded = ua.to_jumbled_bytes(Address::MAINNET);
+        let ua = Address {
+            revision: Revision::R0,
+            receivers: vec![
+                Item::Data(Receiver::Sapling([0; 43])),
+                Item::Data(Receiver::P2pkh([0; 20])),
+            ],
+        };
+        let encoded = ua.to_jumbled_bytes(Address::MAINNET_R0);
         // ensure that decoding catches the error
         assert_eq!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Address::parse_internal(Address::MAINNET_R0, &encoded[..]),
             Err(ParseError::InvalidTypecodeOrder)
         );
     }
@@ -443,7 +489,7 @@ mod tests {
         // with only one of them we don't have sufficient data for F4Jumble (so we hit a
         // different error).
         assert_matches!(
-            Address::parse_internal(Address::MAINNET, &encoded[..]),
+            Address::parse_internal(Address::MAINNET_R0, &encoded[..]),
             Err(ParseError::InvalidEncoding(_))
         );
     }
@@ -451,15 +497,18 @@ mod tests {
     #[test]
     fn receivers_are_sorted() {
         // Construct a UA with receivers in an unsorted order.
-        let ua = Address(vec![
-            Item::Data(Receiver::P2pkh([0; 20])),
-            Item::Data(Receiver::Orchard([0; 43])),
-            Item::Data(Receiver::Unknown {
-                typecode: 0xff,
-                data: vec![],
-            }),
-            Item::Data(Receiver::Sapling([0; 43])),
-        ]);
+        let ua = Address {
+            revision: Revision::R0,
+            receivers: vec![
+                Item::Data(Receiver::P2pkh([0; 20])),
+                Item::Data(Receiver::Orchard([0; 43])),
+                Item::Data(Receiver::Unknown {
+                    typecode: 0xff,
+                    data: vec![],
+                }),
+                Item::Data(Receiver::Sapling([0; 43])),
+            ],
+        };
 
         // `Address::receivers` sorts the receivers in priority order.
         assert_eq!(

@@ -11,9 +11,10 @@ and this library adheres to Rust's notion of
 - `zcash_address::unified`:
   - `Address::receivers`
   - `DataTypecode`
-  - `MetadataTypecode`
   - `Item`
   - `MetadataItem`
+  - `MetadataTypecode`
+  - `Revision`
 - `impl serde::{Serialize, Deserialize} for zcash_address::ZcashAddress` behind
   the `serde` feature flag.
 
@@ -23,6 +24,7 @@ and this library adheres to Rust's notion of
     it now has two variants, `Typecode::Data` and `Typecode::Metadata`.
   - `Encoding::try_from_items` arguments have changed.
   - The result type of `Container::items_as_parsed` has changed.
+  - The `Container` trait has an added `revision` accessor method.
   - `ParseError::InvalidTypecodeValue` now wraps a `u32` instead of a `u64`.
   - `ParseError` has added variant `NotUnderstood`.
 
