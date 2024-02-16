@@ -14,6 +14,7 @@ use zcash_primitives::{
 };
 
 use crate::data_api::wallet::input_selection::InputSelectorError;
+use crate::proposal::ProposalError;
 use crate::PoolType;
 
 #[cfg(feature = "transparent-inputs")]
@@ -32,6 +33,13 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
 
     /// An error in note selection
     NoteSelection(SelectionError),
+
+    /// An error in transaction proposal construction
+    Proposal(ProposalError),
+
+    /// The proposal was structurally valid, but spending shielded outputs of prior multi-step
+    /// transaction steps is not yet supported.
+    ProposalNotSupported,
 
     /// No account could be found corresponding to a provided spending key.
     KeyNotRecognized,
@@ -100,6 +108,15 @@ where
             Error::NoteSelection(e) => {
                 write!(f, "Note selection encountered the following error: {}", e)
             }
+            Error::Proposal(e) => {
+                write!(f, "Input selection attempted to construct an invalid proposal: {}", e)
+            }
+            Error::ProposalNotSupported => {
+                write!(
+                    f,
+                    "The proposal was valid, but spending shielded outputs of prior transaction steps is not yet supported."
+                )
+            }
             Error::KeyNotRecognized => {
                 write!(
                     f,
@@ -148,6 +165,7 @@ where
             Error::DataSource(e) => Some(e),
             Error::CommitmentTree(e) => Some(e),
             Error::NoteSelection(e) => Some(e),
+            Error::Proposal(e) => Some(e),
             Error::Builder(e) => Some(e),
             _ => None,
         }
@@ -171,6 +189,7 @@ impl<DE, CE, SE, FE> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE> 
         match e {
             InputSelectorError::DataSource(e) => Error::DataSource(e),
             InputSelectorError::Selection(e) => Error::NoteSelection(e),
+            InputSelectorError::Proposal(e) => Error::Proposal(e),
             InputSelectorError::InsufficientFunds {
                 available,
                 required,

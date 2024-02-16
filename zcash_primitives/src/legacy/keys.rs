@@ -6,11 +6,99 @@ use hdwallet::{
 };
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
+use subtle::{Choice, ConstantTimeEq};
 use zcash_spec::PrfExpand;
 
 use crate::{consensus, zip32::AccountId};
 
-use super::{NonHardenedChildIndex, TransparentAddress};
+use super::TransparentAddress;
+
+/// The scope of a transparent key.
+///
+/// This type can represent [`zip32`] internal and external scopes, as well as custom scopes that
+/// may be used in non-hardened derivation at the `change` level of the BIP 44 key path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransparentKeyScope(u32);
+
+impl TransparentKeyScope {
+    pub fn custom(i: u32) -> Option<Self> {
+        if i < (1 << 31) {
+            Some(TransparentKeyScope(i))
+        } else {
+            None
+        }
+    }
+}
+
+impl From<zip32::Scope> for TransparentKeyScope {
+    fn from(value: zip32::Scope) -> Self {
+        match value {
+            zip32::Scope::External => TransparentKeyScope(0),
+            zip32::Scope::Internal => TransparentKeyScope(1),
+        }
+    }
+}
+
+impl From<TransparentKeyScope> for KeyIndex {
+    fn from(value: TransparentKeyScope) -> Self {
+        KeyIndex::Normal(value.0)
+    }
+}
+
+/// A child index for a derived transparent address.
+///
+/// Only NON-hardened derivation is supported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonHardenedChildIndex(u32);
+
+impl ConstantTimeEq for NonHardenedChildIndex {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl NonHardenedChildIndex {
+    pub const ZERO: NonHardenedChildIndex = NonHardenedChildIndex(0);
+
+    /// Parses the given ZIP 32 child index.
+    ///
+    /// Returns `None` if the hardened bit is set.
+    pub fn from_index(i: u32) -> Option<Self> {
+        if i < (1 << 31) {
+            Some(NonHardenedChildIndex(i))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the index as a 32-bit integer.
+    pub fn index(&self) -> u32 {
+        self.0
+    }
+
+    pub fn next(&self) -> Option<Self> {
+        // overflow cannot happen because self.0 is 31 bits, and the next index is at most 32 bits
+        // which in that case would lead from_index to return None.
+        Self::from_index(self.0 + 1)
+    }
+}
+
+impl TryFrom<KeyIndex> for NonHardenedChildIndex {
+    type Error = ();
+
+    fn try_from(value: KeyIndex) -> Result<Self, Self::Error> {
+        match value {
+            KeyIndex::Normal(i) => NonHardenedChildIndex::from_index(i).ok_or(()),
+            KeyIndex::Hardened(_) => Err(()),
+        }
+    }
+}
+
+impl From<NonHardenedChildIndex> for KeyIndex {
+    fn from(value: NonHardenedChildIndex) -> Self {
+        Self::Normal(value.index())
+    }
+}
 
 /// A [BIP44] private key at the account path level `m/44'/<coin_type>'/<account>'`.
 ///
@@ -44,28 +132,35 @@ impl AccountPrivKey {
         AccountPubKey(ExtendedPubKey::from_private_key(&self.0))
     }
 
+    /// Derives the BIP44 private spending key for the child path
+    /// `m/44'/<coin_type>'/<account>'/<scope>/<child_index>`.
+    pub fn derive_secret_key(
+        &self,
+        scope: TransparentKeyScope,
+        child_index: NonHardenedChildIndex,
+    ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
+        self.0
+            .derive_private_key(scope.into())?
+            .derive_private_key(child_index.into())
+            .map(|k| k.private_key)
+    }
+
     /// Derives the BIP44 private spending key for the external (incoming payment) child path
     /// `m/44'/<coin_type>'/<account>'/0/<child_index>`.
     pub fn derive_external_secret_key(
         &self,
         child_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
-        self.0
-            .derive_private_key(KeyIndex::Normal(0))?
-            .derive_private_key(child_index.into())
-            .map(|k| k.private_key)
+        self.derive_secret_key(zip32::Scope::External.into(), child_index)
     }
 
     /// Derives the BIP44 private spending key for the internal (change) child path
     /// `m/44'/<coin_type>'/<account>'/1/<child_index>`.
     pub fn derive_internal_secret_key(
         &self,
-        child_index: u32,
+        child_index: NonHardenedChildIndex,
     ) -> Result<secp256k1::SecretKey, hdwallet::error::Error> {
-        self.0
-            .derive_private_key(KeyIndex::Normal(1))?
-            .derive_private_key(KeyIndex::Normal(child_index))
-            .map(|k| k.private_key)
+        self.derive_secret_key(zip32::Scope::Internal.into(), child_index)
     }
 
     /// Returns the `AccountPrivKey` serialized using the encoding for a
@@ -292,7 +387,11 @@ impl ExternalOvk {
 
 #[cfg(test)]
 mod tests {
+    use hdwallet::KeyIndex;
+    use subtle::ConstantTimeEq;
+
     use super::AccountPubKey;
+    use super::NonHardenedChildIndex;
 
     #[test]
     fn check_ovk_test_vectors() {
@@ -538,5 +637,55 @@ mod tests {
             assert_eq!(tv.internal_ovk, internal.as_bytes());
             assert_eq!(tv.external_ovk, external.as_bytes());
         }
+    }
+
+    #[test]
+    fn nonhardened_indexes_accepted() {
+        assert_eq!(0, NonHardenedChildIndex::from_index(0).unwrap().index());
+        assert_eq!(
+            0x7fffffff,
+            NonHardenedChildIndex::from_index(0x7fffffff)
+                .unwrap()
+                .index()
+        );
+    }
+
+    #[test]
+    fn hardened_indexes_rejected() {
+        assert!(NonHardenedChildIndex::from_index(0x80000000).is_none());
+        assert!(NonHardenedChildIndex::from_index(0xffffffff).is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_next() {
+        assert_eq!(1, NonHardenedChildIndex::ZERO.next().unwrap().index());
+        assert!(NonHardenedChildIndex::from_index(0x7fffffff)
+            .unwrap()
+            .next()
+            .is_none());
+    }
+
+    #[test]
+    fn nonhardened_index_ct_eq() {
+        assert!(check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO
+        ));
+        assert!(!check(
+            NonHardenedChildIndex::ZERO,
+            NonHardenedChildIndex::ZERO.next().unwrap()
+        ));
+
+        fn check<T: ConstantTimeEq>(v1: T, v2: T) -> bool {
+            v1.ct_eq(&v2).into()
+        }
+    }
+
+    #[test]
+    fn nonhardened_index_tryfrom_keyindex() {
+        let nh: NonHardenedChildIndex = KeyIndex::Normal(0).try_into().unwrap();
+        assert_eq!(nh.index(), 0);
+
+        assert!(NonHardenedChildIndex::try_from(KeyIndex::Hardened(0)).is_err());
     }
 }

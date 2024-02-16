@@ -48,7 +48,6 @@ use shardtree::{error::ShardTreeError, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
-    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     transaction::{
         components::amount::{Amount, NonNegativeAmount},
@@ -64,8 +63,8 @@ use zcash_client_backend::{
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, TransparentAddressMetadata, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
@@ -76,7 +75,10 @@ use zcash_client_backend::{
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::components::OutPoint;
+use {
+    zcash_client_backend::wallet::TransparentAddressMetadata,
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+};
 
 #[cfg(feature = "unstable")]
 use {
@@ -343,36 +345,21 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
         _account: AccountId,
     ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::get_transparent_receivers(self.conn.borrow(), &self.params, _account);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
+        wallet::get_transparent_receivers(self.conn.borrow(), &self.params, _account)
     }
 
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
         _account: AccountId,
         _max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::get_transparent_balances(
-            self.conn.borrow(),
-            &self.params,
-            _account,
-            _max_height,
-        );
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
+        wallet::get_transparent_balances(self.conn.borrow(), &self.params, _account, _max_height)
     }
 
     #[cfg(feature = "orchard")]
