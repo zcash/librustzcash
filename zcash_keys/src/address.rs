@@ -1,7 +1,7 @@
 //! Structs for handling supported address types.
 
 use zcash_address::{
-    unified::{self, Container, DataTypecode, Encoding, Item, Typecode},
+    unified::{self, Container, DataTypecode, Encoding, Item, Revision, Typecode},
     ConversionError, ToAddress, TryFromRawAddress, ZcashAddress,
 };
 use zcash_primitives::legacy::TransparentAddress;
@@ -278,6 +278,11 @@ impl UnifiedAddress {
             .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
 
         let ua = unified::Address::try_from_items(
+            if self.expiry_height().is_some() || self.expiry_time().is_some() {
+                Revision::R1
+            } else {
+                Revision::R0
+            },
             data_items
                 .map(Item::Data)
                 .chain(meta_items.map(Item::Metadata))
@@ -337,7 +342,7 @@ impl Receiver {
             Receiver::Orchard(addr) => {
                 let receiver =
                     unified::Item::Data(unified::Receiver::Orchard(addr.to_raw_address_bytes()));
-                let ua = unified::Address::try_from_items(vec![receiver])
+                let ua = unified::Address::try_from_items(Revision::R0, vec![receiver])
                     .expect("A unified address may contain a single Orchard receiver.");
                 ZcashAddress::from_unified(net, ua)
             }
