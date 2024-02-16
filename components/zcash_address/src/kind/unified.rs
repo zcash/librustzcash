@@ -108,7 +108,7 @@ impl DataTypecode {
 pub enum MetadataTypecode {
     /// Expiration height metadata as specified in [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
     ExpiryHeight,
-    /// Expiration height metadata as specified in [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
+    /// Expiration time metadata as specified in [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
     ExpiryTime,
     /// An unknown MUST-understand metadata item as specified in
     /// [ZIP 316, Revision 1](https://zips.z.cash/zip-0316)
@@ -216,9 +216,15 @@ pub enum MetadataItem {
 
 impl MetadataItem {
     /// Parse a metadata item for the specified metadata typecode from the provided bytes.
-    pub fn parse(typecode: MetadataTypecode, data: &[u8]) -> Result<Self, ParseError> {
-        match typecode {
-            MetadataTypecode::ExpiryHeight => data
+    pub fn parse(
+        revision: Revision,
+        typecode: MetadataTypecode,
+        data: &[u8],
+    ) -> Result<Self, ParseError> {
+        use MetadataTypecode::*;
+        use Revision::*;
+        match (revision, typecode) {
+            (R1, ExpiryHeight) => data
                 .try_into()
                 .map(u32::from_le_bytes)
                 .map(MetadataItem::ExpiryHeight)
@@ -227,7 +233,7 @@ impl MetadataItem {
                         "Expiry height must be a 32-bit little-endian value.".to_string(),
                     )
                 }),
-            MetadataTypecode::ExpiryTime => data
+            (R1, ExpiryTime) => data
                 .try_into()
                 .map(u64::from_le_bytes)
                 .map(MetadataItem::ExpiryTime)
@@ -236,11 +242,12 @@ impl MetadataItem {
                         "Expiry time must be a 64-bit little-endian value.".to_string(),
                     )
                 }),
-            MetadataTypecode::MustUnderstand(tc) => Err(ParseError::NotUnderstood(tc)),
-            MetadataTypecode::Unknown(typecode) => Ok(MetadataItem::Unknown {
+            (R0 | R1, MustUnderstand(tc)) => Err(ParseError::NotUnderstood(tc)),
+            (R0 | R1, Unknown(typecode)) => Ok(MetadataItem::Unknown {
                 typecode,
                 data: data.to_vec(),
             }),
+            (R0, ExpiryHeight | ExpiryTime) => Err(ParseError::NotUnderstood(typecode.into())),
         }
     }
 
@@ -350,8 +357,19 @@ impl fmt::Display for ParseError {
 
 impl Error for ParseError {}
 
+/// The [revision] of the Unified Address standard that an address was parsed under.
+///
+/// [revision]: https://zips.z.cash/zip-0316#revisions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Revision {
+    /// Identifier for ZIP 316 Revision 0
+    R0,
+    /// Identifier for ZIP 316 Revision 1
+    R1,
+}
+
 pub(crate) mod private {
-    use super::{DataTypecode, ParseError, Typecode, PADDING_LEN};
+    use super::{DataTypecode, ParseError, Revision, Typecode, PADDING_LEN};
     use crate::{
         unified::{Item, MetadataItem},
         Network,
@@ -376,29 +394,47 @@ pub(crate) mod private {
 
     /// A Unified Container containing addresses or viewing keys.
     pub trait SealedContainer: super::Container + std::marker::Sized {
-        const MAINNET: &'static str;
-        const TESTNET: &'static str;
-        const REGTEST: &'static str;
+        const MAINNET_R0: &'static str;
+        const TESTNET_R0: &'static str;
+        const REGTEST_R0: &'static str;
+
+        const MAINNET_R1: &'static str;
+        const TESTNET_R1: &'static str;
+        const REGTEST_R1: &'static str;
 
         /// Implementations of this method should act as unchecked constructors
         /// of the container type; the caller is guaranteed to check the
         /// general invariants that apply to all unified containers.
-        fn from_inner(items: Vec<Item<Self::DataItem>>) -> Self;
+        fn from_inner(revision: Revision, items: Vec<Item<Self::DataItem>>) -> Self;
 
-        fn network_hrp(network: &Network) -> &'static str {
-            match network {
-                Network::Main => Self::MAINNET,
-                Network::Test => Self::TESTNET,
-                Network::Regtest => Self::REGTEST,
+        fn network_hrp(revision: Revision, network: &Network) -> &'static str {
+            match (revision, network) {
+                (Revision::R0, Network::Main) => Self::MAINNET_R0,
+                (Revision::R0, Network::Test) => Self::TESTNET_R0,
+                (Revision::R0, Network::Regtest) => Self::REGTEST_R0,
+                (Revision::R1, Network::Main) => Self::MAINNET_R1,
+                (Revision::R1, Network::Test) => Self::TESTNET_R1,
+                (Revision::R1, Network::Regtest) => Self::REGTEST_R1,
+            }
+        }
+
+        fn hrp_revision(hrp: &str) -> Option<Revision> {
+            if hrp == Self::MAINNET_R0 || hrp == Self::TESTNET_R0 || hrp == Self::REGTEST_R0 {
+                Some(Revision::R0)
+            } else if hrp == Self::MAINNET_R1 || hrp == Self::TESTNET_R1 || hrp == Self::REGTEST_R1
+            {
+                Some(Revision::R1)
+            } else {
+                None
             }
         }
 
         fn hrp_network(hrp: &str) -> Option<Network> {
-            if hrp == Self::MAINNET {
+            if hrp == Self::MAINNET_R0 || hrp == Self::MAINNET_R1 {
                 Some(Network::Main)
-            } else if hrp == Self::TESTNET {
+            } else if hrp == Self::TESTNET_R0 || hrp == Self::TESTNET_R1 {
                 Some(Network::Test)
-            } else if hrp == Self::REGTEST {
+            } else if hrp == Self::REGTEST_R0 || hrp == Self::REGTEST_R1 {
                 Some(Network::Regtest)
             } else {
                 None
@@ -435,11 +471,13 @@ pub(crate) mod private {
         }
 
         /// Parse the items of the unified container.
+        #[allow(clippy::type_complexity)]
         fn parse_items<T: Into<Vec<u8>>>(
             hrp: &str,
             buf: T,
-        ) -> Result<Vec<Item<Self::DataItem>>, ParseError> {
-            fn read_receiver<R: SealedDataItem>(
+        ) -> Result<(Revision, Vec<Item<Self::DataItem>>), ParseError> {
+            fn read_item<R: SealedDataItem>(
+                revision: Revision,
                 mut cursor: &mut std::io::Cursor<&[u8]>,
             ) -> Result<Item<R>, ParseError> {
                 let typecode = CompactSize::read(&mut cursor)
@@ -472,7 +510,9 @@ pub(crate) mod private {
                 let data = &buf[cursor.position() as usize..addr_end as usize];
                 let result = match Typecode::try_from(typecode)? {
                     Typecode::Data(tc) => Item::Data(R::parse(tc, data)?),
-                    Typecode::Metadata(tc) => Item::Metadata(MetadataItem::parse(tc, data)?),
+                    Typecode::Metadata(tc) => {
+                        Item::Metadata(MetadataItem::parse(revision, tc, data)?)
+                    }
                 };
                 cursor.set_position(addr_end);
                 Ok(result)
@@ -499,19 +539,25 @@ pub(crate) mod private {
                 )),
             }?;
 
+            let revision = Self::hrp_revision(hrp)
+                .ok_or_else(|| ParseError::UnknownPrefix(hrp.to_string()))?;
+
             let mut cursor = std::io::Cursor::new(encoded);
             let mut result = vec![];
             while cursor.position() < encoded.len().try_into().unwrap() {
-                result.push(read_receiver(&mut cursor)?);
+                result.push(read_item(revision, &mut cursor)?);
             }
             assert_eq!(cursor.position(), encoded.len().try_into().unwrap());
 
-            Ok(result)
+            Ok((revision, result))
         }
 
         /// A private function that constructs a unified container with the
         /// specified items, which must be in ascending typecode order.
-        fn try_from_items_internal(items: Vec<Item<Self::DataItem>>) -> Result<Self, ParseError> {
+        fn try_from_items_internal(
+            revision: Revision,
+            items: Vec<Item<Self::DataItem>>,
+        ) -> Result<Self, ParseError> {
             assert!(u32::from(Typecode::P2SH) == u32::from(Typecode::P2PKH) + 1);
 
             let mut only_transparent = true;
@@ -539,12 +585,13 @@ pub(crate) mod private {
                 Err(ParseError::OnlyTransparent)
             } else {
                 // All checks pass!
-                Ok(Self::from_inner(items))
+                Ok(Self::from_inner(revision, items))
             }
         }
 
         fn parse_internal<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Self, ParseError> {
-            Self::parse_items(hrp, buf).and_then(Self::try_from_items_internal)
+            Self::parse_items(hrp, buf)
+                .and_then(|(revision, items)| Self::try_from_items_internal(revision, items))
         }
     }
 }
@@ -564,9 +611,12 @@ pub trait Encoding: private::SealedContainer {
     /// * the item list may not contain two items having the same typecode
     /// * the item list may not contain only transparent items (or no items)
     /// * the item list may not contain both P2PKH and P2SH items.
-    fn try_from_items(mut items: Vec<Item<Self::DataItem>>) -> Result<Self, ParseError> {
+    fn try_from_items(
+        revision: Revision,
+        mut items: Vec<Item<Self::DataItem>>,
+    ) -> Result<Self, ParseError> {
         items.sort_unstable_by(Item::encoding_order);
-        Self::try_from_items_internal(items)
+        Self::try_from_items_internal(revision, items)
     }
 
     /// Decodes a unified container from its string representation, preserving
@@ -593,7 +643,7 @@ pub trait Encoding: private::SealedContainer {
     /// ordering of the contained items such that it correctly obeys round-trip
     /// serialization invariants.
     fn encode(&self, network: &Network) -> String {
-        let hrp = Self::network_hrp(network);
+        let hrp = Self::network_hrp(self.revision(), network);
         bech32::encode(
             hrp,
             self.to_jumbled_bytes(hrp).to_base32(),
@@ -610,4 +660,8 @@ pub trait Container {
 
     /// Returns the items in encoding order.
     fn items_as_parsed(&self) -> &[Item<Self::DataItem>];
+
+    /// Returns the revision of the ZIP 316 standard that this unified container
+    /// conforms to.
+    fn revision(&self) -> Revision;
 }

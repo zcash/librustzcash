@@ -1,5 +1,5 @@
 use zcash_address::{
-    unified::{self, Encoding},
+    unified::{self, Container as _, Encoding},
     ConversionError, Network, ToAddress, ZcashAddress,
 };
 
@@ -112,9 +112,10 @@ pub(crate) fn inspect(addr: ZcashAddress) {
                             unified::Receiver::Orchard(data) => {
                                 eprintln!(
                                     "   - Orchard ({})",
-                                    unified::Address::try_from_items(vec![unified::Item::Data(
-                                        unified::Receiver::Orchard(data)
-                                    )])
+                                    unified::Address::try_from_items(
+                                        ua.revision(),
+                                        vec![unified::Item::Data(unified::Receiver::Orchard(data))]
+                                    )
                                     .unwrap()
                                     .encode(&addr.net)
                                 );
