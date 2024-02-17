@@ -7,9 +7,9 @@ use uuid::Uuid;
 use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
 use zcash_keys::{address::UnifiedAddress, encoding::AddressCodec, keys::UnifiedAddressRequest};
 use zcash_primitives::consensus;
-use zip32::DiversifierIndex;
+use zip32::{AccountId, DiversifierIndex};
 
-use crate::{wallet::init::WalletMigrationError, AccountId, UA_TRANSPARENT};
+use crate::{wallet::init::WalletMigrationError, UA_TRANSPARENT};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::keys::IncomingViewingKey;
@@ -62,7 +62,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
-            let account = AccountId(row.get(0)?);
+            let account = AccountId::try_from(row.get::<_, u32>(0)?).map_err(|_| {
+                WalletMigrationError::CorruptedData("Invalid ZIP-32 account index.".to_string())
+            })?;
 
             let ufvk_str: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
@@ -152,7 +154,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 "INSERT INTO accounts_new (account, ufvk)
                  VALUES (:account, :ufvk)",
                 named_params![
-                    ":account": account.0,
+                    ":account": u32::from(account),
                     ":ufvk": ufvk.encode(&self.params),
                 ],
             )?;
@@ -208,7 +210,7 @@ fn insert_address<P: consensus::Parameters>(
     let mut di_be = *diversifier_index.as_bytes();
     di_be.reverse();
     stmt.execute(named_params![
-        ":account": account.0,
+        ":account": u32::from(account),
         ":diversifier_index_be": &di_be[..],
         ":address": &address.encode(params),
         ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),

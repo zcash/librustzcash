@@ -11,7 +11,7 @@ use crate::wallet::init::WalletMigrationError;
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::{error::SqliteClientError, AccountId},
+    crate::error::SqliteClientError,
     rusqlite::{named_params, OptionalExtension},
     std::collections::HashMap,
     zcash_client_backend::encoding::AddressCodec,
@@ -20,7 +20,7 @@ use {
     zcash_primitives::legacy::{
         keys::IncomingViewingKey, NonHardenedChildIndex, TransparentAddress,
     },
-    zip32::DiversifierIndex,
+    zip32::{AccountId, DiversifierIndex},
 };
 
 /// This migration adds an account identifier column to the UTXOs table.
@@ -62,7 +62,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             let mut rows = stmt_fetch_accounts.query([])?;
             while let Some(row) = rows.next()? {
-                let account = AccountId(row.get(0)?);
+                let account = AccountId::try_from(row.get::<_, u32>(0)?).map_err(|_| {
+                    WalletMigrationError::CorruptedData(
+                        "Unexpected ZIP-32 account index.".to_string(),
+                    )
+                })?;
                 let taddrs = get_transparent_receivers(transaction, &self._params, account)
                     .map_err(|e| match e {
                         SqliteClientError::DbError(e) => WalletMigrationError::DbError(e),
@@ -77,7 +81,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                 for (taddr, _) in taddrs {
                     stmt_update_utxo_account.execute(named_params![
-                        ":account": &account.0,
+                        ":account": u32::from(account),
                         ":address": &taddr.encode(&self._params),
                     ])?;
                 }
@@ -135,7 +139,7 @@ fn get_transparent_receivers<P: consensus::Parameters>(
     // Get all UAs derived
     let mut ua_query = conn
         .prepare("SELECT address, diversifier_index_be FROM addresses WHERE account = :account")?;
-    let mut rows = ua_query.query(named_params![":account": account.0])?;
+    let mut rows = ua_query.query(named_params![":account": u32::from(account)])?;
 
     while let Some(row) = rows.next()? {
         let ua_str: String = row.get(0)?;
@@ -186,7 +190,7 @@ fn get_legacy_transparent_address<P: consensus::Parameters>(
     let ufvk_str: Option<String> = conn
         .query_row(
             "SELECT ufvk FROM accounts WHERE account = :account",
-            [account.0],
+            [u32::from(account)],
             |row| row.get(0),
         )
         .optional()?;

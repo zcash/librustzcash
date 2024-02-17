@@ -377,7 +377,7 @@ where
             sapling_nullifiers.extend(scanned_block.transactions.iter().flat_map(|tx| {
                 tx.sapling_outputs
                     .iter()
-                    .map(|out| (out.account(), *out.nf()))
+                    .map(|out| (*out.account(), *out.nf()))
             }));
 
             prior_block_metadata = Some(scanned_block.to_block_metadata());

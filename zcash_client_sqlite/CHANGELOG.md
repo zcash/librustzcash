@@ -22,6 +22,9 @@ and this library adheres to Rust's notion of
     - `create_account` function returns a unique identifier for the new account (as before),
       except that this ID no longer happens to match the ZIP-32 account index.
       To get the ZIP-32 account index, use the new `WalletRead::get_account` function.
+  - Two columns in the `transactions` view were renamed:
+    - `to_account` -> `to_account_id`
+    - `from_account` -> `from_account_id`
 
 ## [0.8.1] - 2023-10-18
 

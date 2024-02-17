@@ -29,7 +29,7 @@ use super::{memo_repr, parse_scope, scope_code, wallet_birthday};
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;
-    fn account(&self) -> AccountId;
+    fn account(&self) -> &AccountId;
     fn note(&self) -> &sapling::Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> bool;
@@ -42,7 +42,7 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope, Ac
     fn index(&self) -> usize {
         self.index()
     }
-    fn account(&self) -> AccountId {
+    fn account(&self) -> &AccountId {
         WalletSaplingOutput::account(self)
     }
     fn note(&self) -> &sapling::Note {
@@ -70,8 +70,8 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
     fn index(&self) -> usize {
         self.index
     }
-    fn account(&self) -> AccountId {
-        self.account
+    fn account(&self) -> &AccountId {
+        &self.account
     }
     fn note(&self) -> &sapling::Note {
         &self.note

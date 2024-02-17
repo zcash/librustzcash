@@ -877,7 +877,7 @@ mod tests {
             assert_eq!(tx.sapling_spends.len(), 0);
             assert_eq!(tx.sapling_outputs.len(), 1);
             assert_eq!(tx.sapling_outputs[0].index(), 0);
-            assert_eq!(tx.sapling_outputs[0].account(), account);
+            assert_eq!(*tx.sapling_outputs[0].account(), account);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
             assert_eq!(
                 tx.sapling_outputs[0].note_commitment_tree_position(),
@@ -958,7 +958,7 @@ mod tests {
             assert_eq!(tx.sapling_spends.len(), 0);
             assert_eq!(tx.sapling_outputs.len(), 1);
             assert_eq!(tx.sapling_outputs[0].index(), 0);
-            assert_eq!(tx.sapling_outputs[0].account(), AccountId::ZERO);
+            assert_eq!(*tx.sapling_outputs[0].account(), AccountId::ZERO);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
 
             assert_eq!(

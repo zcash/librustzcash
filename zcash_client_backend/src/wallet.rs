@@ -182,7 +182,7 @@ pub struct WalletSaplingOutput<N, S, A> {
     recipient_key_scope: S,
 }
 
-impl<N, S, A: Clone> WalletSaplingOutput<N, S, A> {
+impl<N, S, A> WalletSaplingOutput<N, S, A> {
     /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -218,8 +218,8 @@ impl<N, S, A: Clone> WalletSaplingOutput<N, S, A> {
     pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
         &self.ephemeral_key
     }
-    pub fn account(&self) -> A {
-        self.account.clone()
+    pub fn account(&self) -> &A {
+        &self.account
     }
     pub fn note(&self) -> &sapling::Note {
         &self.note
