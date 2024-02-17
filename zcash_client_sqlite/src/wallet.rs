@@ -133,6 +133,32 @@ pub(crate) mod scanning;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
+enum AccountTypes {
+    Zip32,
+    Imported,
+}
+
+impl TryFrom<u32> for AccountTypes {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(AccountTypes::Zip32),
+            1 => Ok(AccountTypes::Imported),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<AccountTypes> for u32 {
+    fn from(value: AccountTypes) -> Self {
+        match value {
+            AccountTypes::Zip32 => 0,
+            AccountTypes::Imported => 1,
+        }
+    }
+}
+
 pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     // These constants are *incidentally* shared with the typecodes
     // for unified addresses, but this is exclusively an internal
@@ -195,12 +221,17 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
 ) -> (u32, Option<&'a [u8]>, Option<u32>, String) {
     match account {
         Account::Zip32(HDSeedAccount(fingerprint, account_index, ufvk)) => (
-            0,
+            AccountTypes::Zip32.into(),
             Some(fingerprint.as_bytes()),
             Some((*account_index).into()),
             ufvk.encode(params),
         ),
-        Account::Imported(ImportedAccount::Full(ufvk)) => (1, None, None, ufvk.encode(params)),
+        Account::Imported(ImportedAccount::Full(ufvk)) => (
+            AccountTypes::Imported.into(),
+            None,
+            None,
+            ufvk.encode(params),
+        ),
     }
 }
 
@@ -1024,13 +1055,15 @@ pub(crate) fn get_account<P: Parameters>(
     let row = result.next()?;
     match row {
         Some(row) => {
-            let account_type: u32 = row.get(0)?;
+            let account_type: AccountTypes = row.get::<_, u32>(0)?.try_into().map_err(|_| {
+                SqliteClientError::CorruptedData("Unrecognized account_type".to_string())
+            })?;
             let uvk: String = row.get(1)?;
             let ufvk = UnifiedFullViewingKey::decode(params, &uvk[..])
                 .map_err(SqliteClientError::CorruptedData)?;
 
             match account_type {
-                0 => Ok(Some(Account::Zip32(HDSeedAccount(
+                AccountTypes::Zip32 => Ok(Some(Account::Zip32(HDSeedAccount(
                     HDSeedFingerprint::from_bytes(row.get(2)?),
                     zip32::AccountId::try_from(row.get::<_, u32>(3)?).map_err(|_| {
                         SqliteClientError::CorruptedData(
@@ -1039,10 +1072,7 @@ pub(crate) fn get_account<P: Parameters>(
                     })?,
                     ufvk,
                 )))),
-                1 => Ok(Some(Account::Imported(ImportedAccount::Full(ufvk)))),
-                _ => Err(SqliteClientError::CorruptedData(
-                    "Unrecognized account_type".to_string(),
-                )),
+                AccountTypes::Imported => Ok(Some(Account::Imported(ImportedAccount::Full(ufvk)))),
             }
         }
         None => Ok(None),
