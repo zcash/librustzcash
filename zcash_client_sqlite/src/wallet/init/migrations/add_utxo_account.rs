@@ -18,7 +18,8 @@ use {
     zcash_client_backend::keys::UnifiedFullViewingKey,
     zcash_keys::address::Address,
     zcash_primitives::legacy::{
-        keys::IncomingViewingKey, NonHardenedChildIndex, TransparentAddress,
+        keys::{IncomingViewingKey, NonHardenedChildIndex},
+        TransparentAddress,
     },
     zip32::{AccountId, DiversifierIndex},
 };

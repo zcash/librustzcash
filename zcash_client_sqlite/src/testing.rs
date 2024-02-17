@@ -5,6 +5,7 @@ use std::num::NonZeroU32;
 #[cfg(feature = "unstable")]
 use std::fs::File;
 
+use nonempty::NonEmpty;
 use prost::Message;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, Connection};
@@ -29,15 +30,14 @@ use zcash_client_backend::{
         self,
         chain::{scan_cached_blocks, BlockSource, ScanSummary},
         wallet::{
-            create_proposed_transaction, create_spend_to_address,
-            input_selection::{
-                GreedyInputSelector, GreedyInputSelectorError, InputSelector, Proposal,
-            },
+            create_proposed_transactions, create_spend_to_address,
+            input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector},
             propose_standard_transfer_to_address, propose_transfer, spend,
         },
         AccountBalance, AccountBirthday, WalletRead, WalletSummary, WalletWrite,
     },
     keys::UnifiedSpendingKey,
+    proposal::Proposal,
     proto::compact_formats::{
         self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     },
@@ -443,7 +443,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: NonZeroU32,
         change_memo: Option<MemoBytes>,
     ) -> Result<
-        TxId,
+        NonEmpty<TxId>,
         data_api::error::Error<
             SqliteClientError,
             commitment_tree::Error,
@@ -478,7 +478,7 @@ impl<Cache> TestState<Cache> {
         ovk_policy: OvkPolicy,
         min_confirmations: NonZeroU32,
     ) -> Result<
-        TxId,
+        NonEmpty<TxId>,
         data_api::error::Error<
             SqliteClientError,
             commitment_tree::Error,
@@ -609,14 +609,14 @@ impl<Cache> TestState<Cache> {
         )
     }
 
-    /// Invokes [`create_proposed_transaction`] with the given arguments.
-    pub(crate) fn create_proposed_transaction<InputsErrT, FeeRuleT>(
+    /// Invokes [`create_proposed_transactions`] with the given arguments.
+    pub(crate) fn create_proposed_transactions<InputsErrT, FeeRuleT>(
         &mut self,
         usk: &UnifiedSpendingKey,
         ovk_policy: OvkPolicy,
         proposal: &Proposal<FeeRuleT, ReceivedNoteId>,
     ) -> Result<
-        TxId,
+        NonEmpty<TxId>,
         data_api::error::Error<
             SqliteClientError,
             commitment_tree::Error,
@@ -629,7 +629,7 @@ impl<Cache> TestState<Cache> {
     {
         let params = self.network();
         let prover = test_prover();
-        create_proposed_transaction(
+        create_proposed_transactions(
             &mut self.db_data,
             &params,
             &prover,
@@ -651,7 +651,7 @@ impl<Cache> TestState<Cache> {
         from_addrs: &[TransparentAddress],
         min_confirmations: u32,
     ) -> Result<
-        TxId,
+        NonEmpty<TxId>,
         data_api::error::Error<
             SqliteClientError,
             commitment_tree::Error,

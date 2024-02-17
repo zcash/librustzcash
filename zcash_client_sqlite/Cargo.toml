@@ -72,6 +72,7 @@ maybe-rayon.workspace = true
 assert_matches.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
+nonempty.workspace = true
 proptest.workspace = true
 rand_core.workspace = true
 regex = "1.4"

@@ -116,9 +116,12 @@ use {
     crate::UtxoId,
     rusqlite::Row,
     std::collections::BTreeSet,
-    zcash_client_backend::{data_api::TransparentAddressMetadata, wallet::WalletTransparentOutput},
+    zcash_client_backend::wallet::{TransparentAddressMetadata, WalletTransparentOutput},
     zcash_primitives::{
-        legacy::{keys::IncomingViewingKey, NonHardenedChildIndex, Script, TransparentAddress},
+        legacy::{
+            keys::{IncomingViewingKey, NonHardenedChildIndex},
+            Script, TransparentAddress,
+        },
         transaction::components::{OutPoint, TxOut},
     },
 };
@@ -425,7 +428,10 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
 
             ret.insert(
                 *taddr,
-                Some(TransparentAddressMetadata::new(Scope::External, index)),
+                Some(TransparentAddressMetadata::new(
+                    Scope::External.into(),
+                    index,
+                )),
             );
         }
     }
@@ -434,7 +440,7 @@ pub(crate) fn get_transparent_receivers<P: consensus::Parameters>(
         ret.insert(
             taddr,
             Some(TransparentAddressMetadata::new(
-                Scope::External,
+                Scope::External.into(),
                 child_index,
             )),
         );
@@ -2369,7 +2375,7 @@ mod tests {
         );
         let txid = st
             .shield_transparent_funds(&input_selector, value, &usk, &[*taddr], 1)
-            .unwrap();
+            .unwrap()[0];
 
         // The wallet should have zero transparent balance, because the shielding
         // transaction can be mined.

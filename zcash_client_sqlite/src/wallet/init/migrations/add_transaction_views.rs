@@ -2,7 +2,6 @@
 use std::collections::HashSet;
 
 use rusqlite::{self, types::ToSql, OptionalExtension};
-use schemer::{self};
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
@@ -397,7 +396,7 @@ mod tests {
     fn migrate_from_wm2() {
         use zcash_client_backend::keys::UnifiedAddressRequest;
         use zcash_primitives::{
-            legacy::NonHardenedChildIndex, transaction::components::amount::NonNegativeAmount,
+            legacy::keys::NonHardenedChildIndex, transaction::components::amount::NonNegativeAmount,
         };
 
         use crate::UA_TRANSPARENT;

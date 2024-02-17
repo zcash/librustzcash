@@ -292,7 +292,7 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
-        legacy::{keys::IncomingViewingKey, NonHardenedChildIndex},
+        legacy::keys::{IncomingViewingKey, NonHardenedChildIndex},
         memo::MemoBytes,
         transaction::{
             builder::{BuildConfig, BuildResult, Builder},

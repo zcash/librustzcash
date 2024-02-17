@@ -11,10 +11,7 @@ use crate::address::UnifiedAddress;
 #[cfg(feature = "transparent-inputs")]
 use {
     std::convert::TryInto,
-    zcash_primitives::legacy::{
-        keys::{self as legacy, IncomingViewingKey},
-        NonHardenedChildIndex,
-    },
+    zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey, NonHardenedChildIndex},
 };
 
 #[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
@@ -815,8 +812,7 @@ mod tests {
         zcash_address::test_vectors,
         zcash_primitives::legacy::{
             self,
-            keys::{AccountPrivKey, IncomingViewingKey},
-            NonHardenedChildIndex,
+            keys::{AccountPrivKey, IncomingViewingKey, NonHardenedChildIndex},
         },
         zip32::DiversifierIndex,
     };
