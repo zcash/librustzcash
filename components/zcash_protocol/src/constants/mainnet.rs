@@ -45,3 +45,8 @@ pub const B58_PUBKEY_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xb8];
 ///
 /// [`ScriptHash`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/legacy/enum.TransparentAddress.html
 pub const B58_SCRIPT_ADDRESS_PREFIX: [u8; 2] = [0x1c, 0xbd];
+
+/// The HRP for a Bech32m-encoded mainnet [ZIP 320] TEX address.
+///
+/// [ZIP 320]: https://zips.z.cash/zip-0320
+pub const HRP_TEX_ADDRESS: &str = "tex";

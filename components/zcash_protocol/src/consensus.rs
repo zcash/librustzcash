@@ -190,6 +190,14 @@ pub trait NetworkConstants: Clone {
     ///
     /// [`TransparentAddress::Script`]: zcash_primitives::legacy::TransparentAddress::Script
     fn b58_script_address_prefix(&self) -> [u8; 2];
+
+    /// Returns the Bech32-encoded human-readable prefix for TEX addresses, for the
+    /// network to which this `NetworkConstants` value applies.
+    ///
+    /// Defined in [ZIP 320].
+    ///
+    /// [ZIP 320]: https://zips.z.cash/zip-0320
+    fn hrp_tex_address(&self) -> &'static str;
 }
 
 /// The enumeration of known Zcash network types.
@@ -264,6 +272,14 @@ impl NetworkConstants for NetworkType {
             NetworkType::Regtest => regtest::B58_SCRIPT_ADDRESS_PREFIX,
         }
     }
+
+    fn hrp_tex_address(&self) -> &'static str {
+        match self {
+            NetworkType::Main => mainnet::HRP_TEX_ADDRESS,
+            NetworkType::Test => testnet::HRP_TEX_ADDRESS,
+            NetworkType::Regtest => regtest::HRP_TEX_ADDRESS,
+        }
+    }
 }
 
 /// Zcash consensus parameters.
@@ -309,6 +325,10 @@ impl<P: Parameters> NetworkConstants for P {
 
     fn b58_script_address_prefix(&self) -> [u8; 2] {
         self.network_type().b58_script_address_prefix()
+    }
+
+    fn hrp_tex_address(&self) -> &'static str {
+        self.network_type().hrp_tex_address()
     }
 }
 
