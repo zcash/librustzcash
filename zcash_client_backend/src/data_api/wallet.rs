@@ -359,7 +359,7 @@ where
 
 /// Select transaction inputs, compute fees, and construct a proposal for a transaction or series
 /// of transactions that can then be authorized and made ready for submission to the network with
-/// [`create_proposed_transaction`].
+/// [`create_proposed_transactions`].
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
@@ -403,7 +403,7 @@ where
 
 /// Proposes making a payment to the specified address from the given account.
 ///
-/// Returns the proposal, which may then be executed using [`create_proposed_transaction`].
+/// Returns the proposal, which may then be executed using [`create_proposed_transactions`].
 /// Depending upon the recipient address, more than one transaction may be constructed
 /// in the execution of the returned proposal.
 ///
