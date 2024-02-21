@@ -217,8 +217,8 @@ pub trait BlockCache: BlockSource {
     /// Returns a range of compact blocks from the cache.
     fn read(&self, block_range: Range<BlockHeight>) -> Result<Vec<CompactBlock>, Self::Error>;
 
-    /// Returns the maximum height known to the block cache.
-    fn max_cached_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
+    /// Returns the height of highest block known to the block cache.
+    fn highest_block(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Inserts a set of compact blocks into the block cache.
     fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
