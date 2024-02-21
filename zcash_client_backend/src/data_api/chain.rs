@@ -221,7 +221,7 @@ pub trait BlockCache: BlockSource {
     fn max_cached_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Inserts a set of compact blocks into the block cache.
-    fn insert(&self, ompact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
+    fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
 
     /// Removes all cached blocks above a specified block height.
     fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error>;
