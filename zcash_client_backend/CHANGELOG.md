@@ -156,8 +156,7 @@ and this library adheres to Rust's notion of
     - It returns a `NonEmpty<TxId>` instead of a single `TxId` value.
   - `wallet::create_spend_to_address` now takes additional `change_memo` and
     `fallback_change_pool` arguments. It also returns its result as a
-    `NonEmpty<TxId>` instead of a
-    single `TxId`.
+    `NonEmpty<TxId>` instead of a single `TxId`.
   - `wallet::spend` returns its result as a `NonEmpty<TxId>` instead of a
     single `TxId`.
   - The error type of `wallet::create_spend_to_address` has been changed to use
@@ -237,9 +236,10 @@ and this library adheres to Rust's notion of
     are provided for each previously public field.
   - `Recipient` is now polymorphic in the type of the payload for wallet-internal
     recipients. This simplifies the handling of wallet-internal outputs.
-  - `SentTransactionOutput::from_parts` now takes a `Recipient<Note>`
-  - `SentTransactionOutput::recipient` now returns a `Recipient<Note>`
-  - `OvkPolicy::Custom` now wraps a bare `[u8; 32]` instead of a Sapling `OutgoingViewingKey`.
+  - `SentTransactionOutput::from_parts` now takes a `Recipient<Note>`.
+  - `SentTransactionOutput::recipient` now returns a `Recipient<Note>`.
+  - `OvkPolicy::Custom` is now a structured variant that can contain independent 
+    Sapling and Orchard `OutgoingViewingKey`s.
 - `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
 - `zcash_client_backend::zip321::TransactionRequest::payments` now returns a
   `BTreeMap<usize, Payment>` instead of `&[Payment]` so that parameter

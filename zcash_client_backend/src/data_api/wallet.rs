@@ -846,9 +846,9 @@ where
     let orchard_fvk: orchard::keys::FullViewingKey = usk.orchard().into();
 
     #[cfg(feature = "orchard")]
-    let orchard_external_ovk = match ovk_policy {
+    let orchard_external_ovk = match &ovk_policy {
         OvkPolicy::Sender => Some(orchard_fvk.to_ovk(orchard::keys::Scope::External)),
-        OvkPolicy::Custom(ovk) => Some(orchard::keys::OutgoingViewingKey::from(ovk)),
+        OvkPolicy::Custom { orchard, .. } => Some(orchard.clone()),
         OvkPolicy::Discard => None,
     };
 
@@ -870,9 +870,9 @@ where
     let sapling_dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
     // Apply the outgoing viewing key policy.
-    let sapling_external_ovk = match ovk_policy {
+    let sapling_external_ovk = match &ovk_policy {
         OvkPolicy::Sender => Some(sapling_dfvk.to_ovk(Scope::External)),
-        OvkPolicy::Custom(ovk) => Some(sapling::keys::OutgoingViewingKey(ovk)),
+        OvkPolicy::Custom { sapling, .. } => Some(*sapling),
         OvkPolicy::Discard => None,
     };
 
@@ -1040,7 +1040,7 @@ where
                     .expect("An action should exist in the transaction for each Orchard output.");
 
                 let recipient = recipient
-                    .map(|pool| {
+                    .map_internal_account(|pool| {
                         assert!(pool == PoolType::Shielded(ShieldedProtocol::Orchard));
                         build_result
                             .transaction()
@@ -1051,7 +1051,7 @@ where
                                     .map(|(note, _, _)| Note::Orchard(note))
                             })
                     })
-                    .transpose()
+                    .internal_account_transpose_option()
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
 
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo)
@@ -1070,7 +1070,7 @@ where
                     .expect("An output should exist in the transaction for each Sapling payment.");
 
                 let recipient = recipient
-                    .map(|pool| {
+                    .map_internal_account(|pool| {
                         assert!(pool == PoolType::Shielded(ShieldedProtocol::Sapling));
                         build_result
                             .transaction()
@@ -1087,7 +1087,7 @@ where
                                 .map(|(note, _, _)| Note::Sapling(note))
                             })
                     })
-                    .transpose()
+                    .internal_account_transpose_option()
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
 
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo)

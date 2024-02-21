@@ -14,7 +14,8 @@ The entries below are relative to the `zcash_client_backend` crate as of
   - `address`
   - `encoding`
   - `keys`
-- `zcash_keys::address::UnifiedAddress::{unknown, has_orchard, has_sapling, has_transparent}`:
+- `zcash_keys::address::UnifiedAddress::{unknown, has_orchard, has_sapling, 
+   has_transparent, receiver_types}`:
 - `zcash_keys::keys`:
   - `AddressGenerationError`
   - `UnifiedAddressRequest`

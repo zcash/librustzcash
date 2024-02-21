@@ -73,7 +73,7 @@ pub enum Recipient<N> {
 }
 
 impl<N> Recipient<N> {
-    pub fn map<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<B> {
+    pub fn map_internal_account<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<B> {
         match self {
             Recipient::Transparent(t) => Recipient::Transparent(t),
             Recipient::Sapling(s) => Recipient::Sapling(s),
@@ -84,7 +84,7 @@ impl<N> Recipient<N> {
 }
 
 impl<N> Recipient<Option<N>> {
-    pub fn transpose(self) -> Option<Recipient<N>> {
+    pub fn internal_account_transpose_option(self) -> Option<Recipient<N>> {
         match self {
             Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
             Recipient::Sapling(s) => Some(Recipient::Sapling(s)),
@@ -415,11 +415,28 @@ pub enum OvkPolicy {
     ///
     /// Transaction outputs will be decryptable by the recipients, and whoever controls
     /// the provided outgoing viewing key.
-    Custom([u8; 32]),
-
+    Custom {
+        sapling: sapling::keys::OutgoingViewingKey,
+        #[cfg(feature = "orchard")]
+        orchard: orchard::keys::OutgoingViewingKey,
+    },
     /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.
     Discard,
+}
+
+impl OvkPolicy {
+    /// Construct an [`OvkPolicy::Custom`] value from an arbitrary 32-byte key.
+    ///
+    /// Transactions constructed under this OVK policy will have their outputs
+    /// recoverable using this key irrespective of the output pool.
+    pub fn custom_from_common_bytes(key: &[u8; 32]) -> Self {
+        OvkPolicy::Custom {
+            sapling: sapling::keys::OutgoingViewingKey(*key),
+            #[cfg(feature = "orchard")]
+            orchard: orchard::keys::OutgoingViewingKey::from(*key),
+        }
+    }
 }
 
 /// Metadata related to the ZIP 32 derivation of a transparent address.

@@ -1,10 +1,8 @@
 //! Structs for handling supported address types.
 
-use std::convert::TryFrom;
-
 use sapling::PaymentAddress;
 use zcash_address::{
-    unified::{self, Container, Encoding},
+    unified::{self, Container, Encoding, Typecode},
     ConversionError, Network, ToAddress, TryFromRawAddress, ZcashAddress,
 };
 use zcash_primitives::{consensus, legacy::TransparentAddress};
@@ -187,6 +185,21 @@ impl UnifiedAddress {
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
         self.to_address(params.address_network().expect("Unrecognized network"))
             .to_string()
+    }
+
+    /// Returns the set of receiver typecodes.
+    pub fn receiver_types(&self) -> Vec<Typecode> {
+        let result = std::iter::empty();
+        #[cfg(feature = "orchard")]
+        let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
+        let result = result.chain(self.sapling.map(|_| Typecode::Sapling));
+        let result = result.chain(self.transparent.map(|_| Typecode::P2pkh));
+        let result = result.chain(
+            self.unknown()
+                .iter()
+                .map(|(typecode, _)| Typecode::Unknown(*typecode)),
+        );
+        result.collect()
     }
 }
 

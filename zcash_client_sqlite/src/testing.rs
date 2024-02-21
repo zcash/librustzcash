@@ -445,6 +445,7 @@ impl<Cache> TestState<Cache> {
         ovk_policy: OvkPolicy,
         min_confirmations: NonZeroU32,
         change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
     ) -> Result<
         NonEmpty<TxId>,
         data_api::error::Error<
@@ -468,7 +469,7 @@ impl<Cache> TestState<Cache> {
             ovk_policy,
             min_confirmations,
             change_memo,
-            ShieldedProtocol::Sapling,
+            fallback_change_pool,
         )
     }
 
@@ -551,6 +552,7 @@ impl<Cache> TestState<Cache> {
         amount: NonNegativeAmount,
         memo: Option<MemoBytes>,
         change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
     ) -> Result<
         Proposal<StandardFeeRule, ReceivedNoteId>,
         data_api::error::Error<
@@ -571,7 +573,7 @@ impl<Cache> TestState<Cache> {
             amount,
             memo,
             change_memo,
-            ShieldedProtocol::Sapling,
+            fallback_change_pool,
         );
 
         if let Ok(proposal) = &result {
@@ -1058,13 +1060,14 @@ impl TestCache for FsBlockCache {
 pub(crate) fn input_selector(
     fee_rule: StandardFeeRule,
     change_memo: Option<&str>,
+    fallback_change_pool: ShieldedProtocol,
 ) -> GreedyInputSelector<
     WalletDb<rusqlite::Connection, Network>,
     standard::SingleOutputChangeStrategy,
 > {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
     let change_strategy =
-        standard::SingleOutputChangeStrategy::new(fee_rule, change_memo, ShieldedProtocol::Sapling);
+        standard::SingleOutputChangeStrategy::new(fee_rule, change_memo, fallback_change_pool);
     GreedyInputSelector::new(change_strategy, DustOutputPolicy::default())
 }
 

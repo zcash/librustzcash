@@ -67,7 +67,11 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// It is forbidden to provide a memo when constructing a transparent output.
     MemoForbidden,
 
-    /// Attempted to create a send change to an unsupported pool.
+    /// Attempted to send change to an unsupported pool.
+    ///
+    /// This is indicative of a programming error; execution of a transaction proposal that
+    /// presumes support for the specified pool was performed using an application that does not
+    /// provide such support.
     UnsupportedChangeType(PoolType),
 
     /// Attempted to create a spend to an unsupported Unified Address receiver
@@ -142,7 +146,11 @@ where
             Error::Builder(e) => write!(f, "An error occurred building the transaction: {}", e),
             Error::MemoForbidden => write!(f, "It is not possible to send a memo to a transparent address."),
             Error::UnsupportedChangeType(t) => write!(f, "Attempted to send change to an unsupported pool type: {}", t),
-            Error::NoSupportedReceivers(_) => write!(f, "A recipient's unified address does not contain any receivers to which the wallet can send funds."),
+            Error::NoSupportedReceivers(ua) => write!(
+                f,
+                "A recipient's unified address does not contain any receivers to which the wallet can send funds; required {}",
+                ua.receiver_types().iter().enumerate().map(|(i, tc)| format!("{}{:?}", if i > 0 { ", " } else { "" }, tc)).collect::<String>()
+            ),
             Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
