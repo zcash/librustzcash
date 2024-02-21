@@ -3081,6 +3081,7 @@ dependencies = [
 name = "zcash_client_sqlite"
 version = "0.8.1"
 dependencies = [
+ "anyhow",
  "assert_matches",
  "bs58",
  "byteorder",
@@ -3104,6 +3105,7 @@ dependencies = [
  "shardtree",
  "tempfile",
  "time",
+ "tokio",
  "tracing",
  "uuid",
  "zcash_address",

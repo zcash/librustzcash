@@ -61,6 +61,10 @@ schemer-rusqlite = "0.2.2"
 time = "0.3.22"
 uuid = "1.1"
 
+# - Sync engine
+anyhow = { version = "1", optional = true }
+tokio = { version = "1.21.0", optional = true, features = ["fs", "macros"] }
+
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
@@ -84,7 +88,7 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 # default = ["multicore"]
-default = ["multicore", "unstable"]
+default = ["multicore", "unstable", "sync"]
 
 ## Enables multithreading support for creating proofs and building subtrees.
 multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
@@ -108,6 +112,12 @@ transparent-inputs = ["dep:hdwallet", "zcash_client_backend/transparent-inputs"]
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["zcash_client_backend/unstable"]
+
+## Exposes APIs for interfacing with the zcash_client_backend sync engine.
+sync = [
+    "dep:anyhow",
+    "dep:tokio",
+]
 
 [lib]
 bench = false

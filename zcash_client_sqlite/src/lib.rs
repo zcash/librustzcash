@@ -60,7 +60,7 @@ use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
         self,
-        chain::{BlockSource, CommitmentTreeRoot},
+        chain::{BlockCache, BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
@@ -1050,6 +1050,101 @@ impl BlockSource for FsBlockDb {
         F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
     {
         fsblockdb_with_blocks(self, from_height, limit, with_row)
+    }
+}
+
+impl BlockCache for FsBlockDb {
+    /// Returns a range of compact blocks from the cache.
+    fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(scan_range.block_range().start),
+            Some(scan_range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+        );
+        Ok(compact_blocks)
+    }
+
+    /// Returns the height of highest block known to the block cache, within a specified range.
+    /// If `range` is `None`, returns the tip of the entire cache.
+    fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+        todo!()
+    }
+
+    /// Inserts a set of compact blocks into the block cache.
+    async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+        let block_meta = compact_blocks
+            .map(|block| async move {
+                let (sapling_outputs_count, orchard_actions_count) = block
+                    .vtx
+                    .iter()
+                    .map(|tx| (tx.outputs.len() as u32, tx.actions.len() as u32))
+                    .fold((0, 0), |(acc_sapling, acc_orchard), (sapling, orchard)| {
+                        (acc_sapling + sapling, acc_orchard + orchard)
+                    });
+
+                let meta = BlockMeta {
+                    height: block.height(),
+                    block_hash: block.hash(),
+                    block_time: block.time,
+                    sapling_outputs_count,
+                    orchard_actions_count,
+                };
+
+                let encoded = block.encode_to_vec();
+                let mut block_file =
+                    tokio::fs::File::create(meta.block_file_path(self.blocks_dir.as_ref())).await?;
+                block_file.write_all(&encoded).await?;
+
+                Ok(meta)
+            })
+            .try_collect::<Vec<_>>()
+            .await?;
+        self.write_block_metadata(&block_meta)?;
+        Ok(())
+    }
+
+    /// Removes all cached blocks above a specified block height.
+    fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error> {
+        self.with_blocks(Some(block_height + 1), None, |block| {
+            let meta = BlockMeta {
+                height: block.height(),
+                block_hash: block.hash(),
+                block_time: block.time,
+                // These values don't matter for deletion.
+                sapling_outputs_count: 0,
+                orchard_actions_count: 0,
+            };
+            std::fs::remove_file(meta.block_file_path(self.blocks_dir.as_ref()))
+                .map_err(|e| ChainError::<(), _>::BlockSource(FsBlockDbError::Fs(e)))
+        })
+        .map_err(|e| anyhow!("{:?}", e))?;
+
+        self.truncate_to_height(block_height)
+            .map_err(|e| anyhow!("{:?}", e))?;
+        Ok(())
+    }
+
+    /// Mark a range of blocks as scanned for cache removal.
+    fn mark_as_scanned(&self, range: &ScanRange) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    /// Deletes all blocks marked as scanned from the block cache.
+    /// Returns a handle so tasks can be performed concurrently.
+    async fn delete_scanned(&self) -> JoinHandle<()> {
+        // TODO: original implementation below, needs updating to remove blocks marked as scanned
+        // tokio::spawn(async move {
+        //     for meta in block_meta {
+        //         if let Err(e) = tokio::fs::remove_file(get_block_path(&meta)).await {
+        //             error!("Failed to remove {:?}: {}", meta, e);
+        //         }
+        //     }
+        // })
+        todo!()
     }
 }
 

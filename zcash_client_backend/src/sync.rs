@@ -11,7 +11,6 @@ use tonic::{
 };
 use tracing::{debug, error, info};
 // TODO: Move `FsBlockDb` behind a `BlockCache` trait to break cyclic dependency.
-use zcash_client_sqlite::{chain::BlockMeta, FsBlockDb, FsBlockDbError};
 use zcash_primitives::{
     consensus::{BlockHeight, Parameters},
     merkle_tree::HashSer,
@@ -19,24 +18,22 @@ use zcash_primitives::{
 
 use crate::{
     data_api::{
-        chain::{error::Error as ChainError, scan_cached_blocks, BlockSource, CommitmentTreeRoot},
+        chain::{
+            error::Error as ChainError, scan_cached_blocks, BlockCache, BlockSource,
+            CommitmentTreeRoot,
+        },
         scanning::{ScanPriority, ScanRange},
         WalletCommitmentTrees, WalletRead, WalletWrite,
     },
     proto::service::{self, compact_tx_streamer_client::CompactTxStreamerClient},
 };
 
-pub(crate) fn get_block_path(fsblockdb_root: &Path, meta: &BlockMeta) -> PathBuf {
-    meta.block_file_path(&fsblockdb_root.join("blocks"))
-}
-
 /// Scans the chain until the wallet is up-to-date.
-pub async fn run<P, ChT, DbT>(
+pub async fn run<P, ChT, BcT, DbT>(
     client: &mut CompactTxStreamerClient<ChT>,
     params: &P,
-    fsblockdb_root: &Path,
-    db_cache: &mut FsBlockDb,
-    db_data: &mut DbT,
+    block_cache: &mut BcT,
+    wallet_data: &mut DbT,
     batch_size: u32,
 ) -> Result<(), anyhow::Error>
 where
@@ -45,34 +42,26 @@ where
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
+    BcT: BlockSource + BlockCache,
+    <BcT as BlockSource>::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite + WalletCommitmentTrees,
     <DbT as WalletRead>::Error: std::error::Error + Send + Sync + 'static,
     <DbT as WalletCommitmentTrees>::Error: std::error::Error + Send + Sync + 'static,
 {
     // 1) Download note commitment tree data from lightwalletd
     // 2) Pass the commitment tree data to the database.
-    update_subtree_roots(client, db_data).await?;
+    update_subtree_roots(client, wallet_data).await?;
 
-    while running(
-        client,
-        params,
-        fsblockdb_root,
-        db_cache,
-        db_data,
-        batch_size,
-    )
-    .await?
-    {}
+    while running(client, params, block_cache, wallet_data, batch_size).await? {}
 
     Ok(())
 }
 
-async fn running<P, ChT, DbT>(
+async fn running<P, ChT, BcT, DbT>(
     client: &mut CompactTxStreamerClient<ChT>,
     params: &P,
-    fsblockdb_root: &Path,
-    db_cache: &mut FsBlockDb,
-    db_data: &mut DbT,
+    block_cache: &mut BcT,
+    wallet_data: &mut DbT,
     batch_size: u32,
 ) -> Result<bool, anyhow::Error>
 where
@@ -81,15 +70,17 @@ where
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
+    BcT: BlockSource + BlockCache,
+    <BcT as BlockSource>::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite,
     DbT::Error: std::error::Error + Send + Sync + 'static,
 {
     // 3) Download chain tip metadata from lightwalletd
     // 4) Notify the wallet of the updated chain tip.
-    update_chain_tip(client, db_data).await?;
+    update_chain_tip(client, wallet_data).await?;
 
     // 5) Get the suggested scan ranges from the wallet database
-    let mut scan_ranges = db_data.suggest_scan_ranges()?;
+    let mut scan_ranges = wallet_data.suggest_scan_ranges()?;
 
     // Store the handles to cached block deletions (which we spawn into separate
     // tasks to allow us to continue downloading and scanning other ranges).
@@ -104,22 +95,21 @@ where
             Some(scan_range) if scan_range.priority() == ScanPriority::Verify => {
                 // Download the blocks in `scan_range` into the block source,
                 // overwriting any existing blocks in this range.
-                let block_meta =
-                    download_blocks(client, fsblockdb_root, db_cache, scan_range).await?;
+                download_blocks(client, block_cache, scan_range).await?;
 
                 // Scan the downloaded blocks and check for scanning errors that
                 // indicate the wallet's chain tip is out of sync with blockchain
                 // history.
                 let scan_ranges_updated =
-                    scan_blocks(params, fsblockdb_root, db_cache, db_data, scan_range)?;
+                    scan_blocks(params, block_cache, wallet_data, scan_range)?;
 
                 // Delete the now-scanned blocks, because keeping the entire chain
                 // in CompactBlock files on disk is horrendous for the filesystem.
-                block_deletions.push(delete_cached_blocks(fsblockdb_root, block_meta));
+                block_deletions.push(block_cache.delete_scanned());
 
                 if scan_ranges_updated {
                     // The suggested scan ranges have been updated, so we re-request.
-                    scan_ranges = db_data.suggest_scan_ranges()?;
+                    scan_ranges = wallet_data.suggest_scan_ranges()?;
                 } else {
                     // At this point, the cache and scanned data are locally
                     // consistent (though not necessarily consistent with the
@@ -138,7 +128,7 @@ where
 
     // 7) Loop over the remaining suggested scan ranges, retrieving the requested data
     //    and calling `scan_cached_blocks` on each range.
-    let scan_ranges = db_data.suggest_scan_ranges()?;
+    let scan_ranges = wallet_data.suggest_scan_ranges()?;
     debug!("Suggested ranges: {:?}", scan_ranges);
     for scan_range in scan_ranges.into_iter().flat_map(|r| {
         // Limit the number of blocks we download and scan at any one time.
@@ -157,14 +147,13 @@ where
         })
     }) {
         // Download the blocks in `scan_range` into the block source.
-        let block_meta = download_blocks(client, fsblockdb_root, db_cache, &scan_range).await?;
+        download_blocks(client, block_cache, &scan_range).await?;
 
         // Scan the downloaded blocks.
-        let scan_ranges_updated =
-            scan_blocks(params, fsblockdb_root, db_cache, db_data, &scan_range)?;
+        let scan_ranges_updated = scan_blocks(params, block_cache, wallet_data, &scan_range)?;
 
         // Delete the now-scanned blocks.
-        block_deletions.push(delete_cached_blocks(fsblockdb_root, block_meta));
+        block_deletions.push(block_cache.delete_scanned());
 
         if scan_ranges_updated {
             // The suggested scan ranges have been updated (either due to a continuity
@@ -186,7 +175,7 @@ where
 
 async fn update_subtree_roots<ChT, DbT>(
     client: &mut CompactTxStreamerClient<ChT>,
-    db_data: &mut DbT,
+    wallet_data: &mut DbT,
 ) -> Result<(), anyhow::Error>
 where
     ChT: GrpcService<BoxBody>,
@@ -216,14 +205,14 @@ where
         .await?;
 
     info!("Sapling tree has {} subtrees", roots.len());
-    db_data.put_sapling_subtree_roots(0, &roots)?;
+    wallet_data.put_sapling_subtree_roots(0, &roots)?;
 
     Ok(())
 }
 
 async fn update_chain_tip<ChT, DbT>(
     client: &mut CompactTxStreamerClient<ChT>,
-    db_data: &mut DbT,
+    wallet_data: &mut DbT,
 ) -> Result<(), anyhow::Error>
 where
     ChT: GrpcService<BoxBody>,
@@ -243,22 +232,23 @@ where
         .map_err(|_| anyhow::anyhow!("invalid amount"))?;
 
     info!("Latest block height is {}", tip_height);
-    db_data.update_chain_tip(tip_height)?;
+    wallet_data.update_chain_tip(tip_height)?;
 
     Ok(())
 }
 
-async fn download_blocks<ChT>(
+async fn download_blocks<ChT, BcT>(
     client: &mut CompactTxStreamerClient<ChT>,
-    fsblockdb_root: &Path,
-    db_cache: &FsBlockDb,
+    block_cache: &BcT,
     scan_range: &ScanRange,
-) -> Result<Vec<BlockMeta>, anyhow::Error>
+) -> Result<(), anyhow::Error>
 where
     ChT: GrpcService<BoxBody>,
     ChT::Error: Into<StdError>,
     ChT::ResponseBody: Body<Data = Bytes> + Send + 'static,
     <ChT::ResponseBody as Body>::Error: Into<StdError> + Send,
+    BcT: BlockSource + BlockCache,
+    <BcT as BlockSource>::Error: std::error::Error + Send + Sync + 'static,
 {
     info!("Fetching {}", scan_range);
     let mut start = service::BlockId::default();
@@ -269,77 +259,44 @@ where
         start: Some(start),
         end: Some(end),
     };
-    let block_meta = client
+
+    let mut compact_blocks = vec![];
+    let mut block_stream = client
         .get_block_range(range)
         .await
         .map_err(anyhow::Error::from)?
-        .into_inner()
-        .and_then(|block| async move {
-            let (sapling_outputs_count, orchard_actions_count) = block
-                .vtx
-                .iter()
-                .map(|tx| (tx.outputs.len() as u32, tx.actions.len() as u32))
-                .fold((0, 0), |(acc_sapling, acc_orchard), (sapling, orchard)| {
-                    (acc_sapling + sapling, acc_orchard + orchard)
-                });
+        .into_inner();
+    while let Some(block) = block_stream.message().await.map_err(anyhow::Error::from)? {
+        compact_blocks.push(block);
+    }
 
-            let meta = BlockMeta {
-                height: block.height(),
-                block_hash: block.hash(),
-                block_time: block.time,
-                sapling_outputs_count,
-                orchard_actions_count,
-            };
+    block_cache
+        .insert(compact_blocks)
+        .await
+        .map_err(anyhow::Error::from)?;
 
-            let encoded = block.encode_to_vec();
-            let mut block_file = File::create(get_block_path(fsblockdb_root, &meta)).await?;
-            block_file.write_all(&encoded).await?;
-
-            Ok(meta)
-        })
-        .try_collect::<Vec<_>>()
-        .await?;
-
-    db_cache.write_block_metadata(&block_meta)?;
-
-    Ok(block_meta)
-}
-
-fn delete_cached_blocks(fsblockdb_root: &Path, block_meta: Vec<BlockMeta>) -> JoinHandle<()> {
-    let fsblockdb_root = fsblockdb_root.to_owned();
-    tokio::spawn(async move {
-        for meta in block_meta {
-            if let Err(e) = tokio::fs::remove_file(get_block_path(&fsblockdb_root, &meta)).await {
-                error!("Failed to remove {:?}: {}", meta, e);
-            }
-        }
-    })
+    Ok(())
 }
 
 /// Scans the given block range and checks for scanning errors that indicate the wallet's
 /// chain tip is out of sync with blockchain history.
 ///
 /// Returns `true` if scanning these blocks materially changed the suggested scan ranges.
-fn scan_blocks<P, DbT>(
+fn scan_blocks<P, BcT, DbT>(
     params: &P,
-    fsblockdb_root: &Path,
-    db_cache: &mut FsBlockDb,
-    db_data: &mut DbT,
+    block_cache: &mut BcT,
+    wallet_data: &mut DbT,
     scan_range: &ScanRange,
 ) -> Result<bool, anyhow::Error>
 where
     P: Parameters + Send + 'static,
+    BcT: BlockSource + BlockCache,
+    <BcT as BlockSource>::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite,
     DbT::Error: std::error::Error + Send + Sync + 'static,
 {
     info!("Scanning {}", scan_range);
-    let scan_result = scan_cached_blocks(
-        params,
-        db_cache,
-        db_data,
-        scan_range.block_range().start,
-        scan_range.len(),
-    );
+    let scan_result = scan_cached_blocks(params, block_cache, wallet_data, &scan_range);
 
     match scan_result {
         Err(ChainError::Scan(err)) if err.is_continuity_error() => {
@@ -355,29 +312,15 @@ where
             );
 
             // Rewind to the chosen height.
-            db_data.truncate_to_height(rewind_height)?;
+            wallet_data.truncate_to_height(rewind_height)?;
 
             // Delete cached blocks from rewind_height onwards.
             //
             // This does imply that assumed-valid blocks will be re-downloaded, but it is
             // also possible that in the intervening time, a chain reorg has occurred that
             // orphaned some of those blocks.
-            db_cache
-                .with_blocks(Some(rewind_height + 1), None, |block| {
-                    let meta = BlockMeta {
-                        height: block.height(),
-                        block_hash: block.hash(),
-                        block_time: block.time,
-                        // These values don't matter for deletion.
-                        sapling_outputs_count: 0,
-                        orchard_actions_count: 0,
-                    };
-                    std::fs::remove_file(get_block_path(fsblockdb_root, &meta))
-                        .map_err(|e| ChainError::<(), _>::BlockSource(FsBlockDbError::Fs(e)))
-                })
-                .map_err(|e| anyhow!("{:?}", e))?;
-            db_cache
-                .truncate_to_height(rewind_height)
+            block_cache
+                .truncate(rewind_height)
                 .map_err(|e| anyhow!("{:?}", e))?;
 
             // The database was truncated, invalidating prior suggested ranges.
@@ -386,7 +329,7 @@ where
         Ok(_) => {
             // If scanning these blocks caused a suggested range to be added that has a
             // higher priority than the current range, invalidate the current ranges.
-            let latest_ranges = db_data.suggest_scan_ranges()?;
+            let latest_ranges = wallet_data.suggest_scan_ranges()?;
 
             Ok(if let Some(range) = latest_ranges.first() {
                 range.priority() > scan_range.priority()

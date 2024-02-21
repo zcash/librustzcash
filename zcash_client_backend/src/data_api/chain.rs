@@ -146,6 +146,7 @@
 use std::ops::Range;
 
 use sapling::note_encryption::PreparedIncomingViewingKey;
+use tokio::task::JoinHandle;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     zip32::Scope,
@@ -160,6 +161,8 @@ use crate::{
 
 pub mod error;
 use error::Error;
+
+use super::scanning::ScanRange;
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -215,26 +218,24 @@ pub trait BlockSource {
 
 pub trait BlockCache: BlockSource {
     /// Returns a range of compact blocks from the cache.
-    fn read(&self, block_range: Range<BlockHeight>) -> Result<Vec<CompactBlock>, Self::Error>;
+    fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error>;
 
     /// Returns the height of highest block known to the block cache, within a specified range.
-    /// If `block_range` is `None`, returns the tip of the entire cache.
-    fn cache_tip(
-        &self,
-        block_range: Option<Range<BlockHeight>>,
-    ) -> Result<Option<BlockHeight>, Self::Error>;
+    /// If `range` is `None`, returns the tip of the entire cache.
+    fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Inserts a set of compact blocks into the block cache.
-    fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
+    async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
 
     /// Removes all cached blocks above a specified block height.
     fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Mark a range of blocks as scanned for cache removal.
-    fn mark_as_scanned(&self, block_range: Range<BlockHeight>) -> Result<(), Self::Error>;
+    fn mark_as_scanned(&self, range: &ScanRange) -> Result<(), Self::Error>;
 
-    /// Removes all blocks marked as scanned from the block cache.
-    fn remove_scanned(&self) -> Result<(), Self::Error>;
+    /// Deletes all blocks marked as scanned from the block cache.
+    /// Returns a handle so tasks can be performed concurrently.
+    async fn delete_scanned(&self) -> JoinHandle<()>;
 }
 
 /// Metadata about modifications to the wallet state made in the course of scanning a set of
@@ -288,22 +289,22 @@ impl ScanSummary {
 /// This function will return after scanning at most `limit` new blocks, to enable the caller to
 /// update their UI with scanning progress. Repeatedly calling this function with `from_height ==
 /// None` will process sequential ranges of blocks.
-#[tracing::instrument(skip(params, block_source, data_db))]
+#[tracing::instrument(skip(params, block_cache, wallet_data))]
 #[allow(clippy::type_complexity)]
-pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
+pub fn scan_cached_blocks<ParamsT, DbT, BcT>(
     params: &ParamsT,
-    block_source: &BlockSourceT,
-    data_db: &mut DbT,
-    from_height: BlockHeight,
-    limit: usize,
-) -> Result<ScanSummary, Error<DbT::Error, BlockSourceT::Error>>
+    block_cache: &BcT,
+    wallet_data: &mut DbT,
+    scan_range: &ScanRange,
+) -> Result<ScanSummary, Error<DbT::Error, BcT::Error>>
 where
     ParamsT: consensus::Parameters + Send + 'static,
-    BlockSourceT: BlockSource,
+    BcT: BlockSource + BlockCache,
+    <BcT as BlockSource>::Error: std::error::Error + Send + Sync + 'static,
     DbT: WalletWrite,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
-    let ufvks = data_db
+    let ufvks = wallet_data
         .get_unified_full_viewing_keys()
         .map_err(Error::Wallet)?;
     // TODO: Change `scan_block` to also scan Orchard.
@@ -323,7 +324,7 @@ where
         .collect::<Vec<_>>();
 
     // Get the nullifiers for the unspent notes we are tracking
-    let mut sapling_nullifiers = data_db
+    let mut sapling_nullifiers = wallet_data
         .get_sapling_nullifiers(NullifierQuery::Unspent)
         .map_err(Error::Wallet)?;
 
@@ -340,34 +341,31 @@ where
             .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(&ivk))),
     );
 
-    let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
-        data_db
-            .block_metadata(from_height - 1)
+    let mut prior_block_metadata = if scan_range.block_range().start > BlockHeight::from(0) {
+        wallet_data
+            .block_metadata(scan_range.block_range().start - 1)
             .map_err(Error::Wallet)?
     } else {
         None
     };
 
-    block_source.with_blocks::<_, DbT::Error>(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
-            add_block_to_runner(params, block, &mut batch_runner);
-
-            Ok(())
-        },
-    )?;
+    block_cache
+        .read(scan_range)
+        .map_err(Error::BlockSource)?
+        .into_iter()
+        .map(|block| add_block_to_runner(params, block, &mut batch_runner));
 
     batch_runner.flush();
 
     let mut scanned_blocks = vec![];
-    let mut scan_end_height = from_height;
+    let mut scan_end_height = scan_range.block_range().start;
     let mut received_note_count = 0;
     let mut spent_note_count = 0;
-    block_source.with_blocks::<_, DbT::Error>(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
+    block_cache
+        .read(scan_range)
+        .map_err(Error::BlockSource)?
+        .into_iter()
+        .map(|block| {
             scan_end_height = block.height() + 1;
             let scanned_block = scan_block_with_runner(
                 params,
@@ -405,12 +403,15 @@ where
             scanned_blocks.push(scanned_block);
 
             Ok(())
-        },
-    )?;
+        });
 
-    data_db.put_blocks(scanned_blocks).map_err(Error::Wallet)?;
+    wallet_data
+        .put_blocks(scanned_blocks)
+        .map_err(Error::Wallet)?;
+    block_cache.mark_as_scanned(scan_range);
+
     Ok(ScanSummary::from_parts(
-        from_height..scan_end_height,
+        scan_range.block_range().start..scan_end_height,
         spent_note_count,
         received_note_count,
     ))
