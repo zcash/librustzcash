@@ -67,8 +67,7 @@
 //!                 &network,
 //!                 &block_source,
 //!                 &mut wallet_db,
-//!                 scan_range.block_range().start,
-//!                 scan_range.len()
+//!                 &scan_range,
 //!             );
 //!
 //!             // Check for scanning errors that indicate that the wallet's chain tip is out of
@@ -132,8 +131,7 @@
 //!         &network,
 //!         &block_source,
 //!         &mut wallet_db,
-//!         scan_range.block_range().start,
-//!         scan_range.len()
+//!         &scan_range,
 //!     )?;
 //!
 //!     // Handle scan errors, etc.
@@ -199,19 +197,14 @@ pub trait BlockSource {
     /// Scan the specified `limit` number of blocks from the blockchain, starting at
     /// `from_height`, applying the provided callback to each block. If `from_height`
     /// is `None` then scanning will begin at the first available block.
-    ///
-    /// * `WalletErrT`: the types of errors produced by the wallet operations performed
-    ///   as part of processing each row.
-    /// * `NoteRefT`: the type of note identifiers in the wallet data store, for use in
-    ///   reporting errors related to specific notes.
-    fn with_blocks<F, WalletErrT>(
+    fn with_blocks<F>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
         with_block: F,
-    ) -> Result<(), error::Error<WalletErrT, Self::Error>>
+    ) -> Result<(), Self::Error>
     where
-        F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
+        F: FnMut(CompactBlock) -> Result<(), Self::Error>;
 }
 
 /// `BlockCache` is a trait that extends `BlockSource` and defines methods for managing
@@ -236,14 +229,14 @@ pub trait BlockSource {
 /// #    impl BlockSource for ExampleBlockCache {
 /// #        type Error = ();
 /// #
-/// #        fn with_blocks<F, WalletErrT>(
+/// #        fn with_blocks<F>(
 /// #            &self,
 /// #            _from_height: Option<BlockHeight>,
 /// #            _limit: Option<usize>,
 /// #            _with_block: F,
-/// #        ) -> Result<(), error::Error<WalletErrT, Self::Error>>
+/// #        ) -> Result<(), Self::Error>
 /// #        where
-/// #            F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>,
+/// #            F: FnMut(CompactBlock) -> Result<(), Self::Error>,
 /// #        {
 /// #            Ok(())
 /// #        }
@@ -479,36 +472,37 @@ impl ScanSummary {
 /// This function will return after scanning at most `limit` new blocks, to enable the caller to
 /// update their UI with scanning progress. Repeatedly calling this function with `from_height ==
 /// None` will process sequential ranges of blocks.
-#[tracing::instrument(skip(params, block_source, data_db))]
+#[tracing::instrument(skip(params, block_cache, wallet_data))]
 #[allow(clippy::type_complexity)]
-pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
+pub fn scan_cached_blocks<ParamsT, DbT, BcT>(
     params: &ParamsT,
-    block_source: &BlockSourceT,
-    data_db: &mut DbT,
-    from_height: BlockHeight,
-    limit: usize,
-) -> Result<ScanSummary, Error<DbT::Error, BlockSourceT::Error>>
+    block_cache: &BcT,
+    wallet_data: &mut DbT,
+    scan_range: &ScanRange,
+) -> Result<ScanSummary, Error<DbT::Error, BcT::Error>>
 where
     ParamsT: consensus::Parameters + Send + 'static,
-    BlockSourceT: BlockSource,
+    BcT: BlockCache,
     DbT: WalletWrite,
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
-    let account_ufvks = data_db
+    let account_ufvks = wallet_data
         .get_unified_full_viewing_keys()
         .map_err(Error::Wallet)?;
     let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
-    block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
-        runners.add_block(params, block).map_err(|e| e.into())
-    })?;
+    block_cache
+        .read(scan_range)
+        .map_err(Error::BlockSource)?
+        .into_iter()
+        .try_for_each(|block| runners.add_block(params, block).map_err(Error::Scan))?;
     runners.flush();
 
-    let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
-        data_db
-            .block_metadata(from_height - 1)
+    let mut prior_block_metadata = if scan_range.block_range().start > BlockHeight::from(0) {
+        wallet_data
+            .block_metadata(scan_range.block_range().start - 1)
             .map_err(Error::Wallet)?
     } else {
         None
@@ -516,105 +510,129 @@ where
 
     // Get the nullifiers for the unspent notes we are tracking
     let mut nullifiers = Nullifiers::new(
-        data_db
+        wallet_data
             .get_sapling_nullifiers(NullifierQuery::Unspent)
             .map_err(Error::Wallet)?,
         #[cfg(feature = "orchard")]
-        data_db
+        wallet_data
             .get_orchard_nullifiers(NullifierQuery::Unspent)
             .map_err(Error::Wallet)?,
     );
 
     let mut scanned_blocks = vec![];
-    let mut scan_summary = ScanSummary::for_range(from_height..from_height);
-    block_source.with_blocks::<_, DbT::Error>(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
-            scan_summary.scanned_range.end = block.height() + 1;
-            let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
-                params,
-                block,
-                &scanning_keys,
-                &nullifiers,
-                prior_block_metadata.as_ref(),
-                Some(&mut runners),
-            )
-            .map_err(Error::Scan)?;
+    let mut scan_summary =
+        ScanSummary::for_range(scan_range.block_range().start..scan_range.block_range().start);
+    let compact_blocks = block_cache.read(scan_range).map_err(Error::BlockSource)?;
 
-            for wtx in &scanned_block.transactions {
-                scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();
-                scan_summary.received_sapling_note_count += wtx.sapling_outputs().len();
-                #[cfg(feature = "orchard")]
-                {
-                    scan_summary.spent_orchard_note_count += wtx.orchard_spends().len();
-                    scan_summary.received_orchard_note_count += wtx.orchard_outputs().len();
-                }
+    for block in compact_blocks {
+        scan_summary.scanned_range.end = block.height() + 1;
+        let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
+            params,
+            block,
+            &scanning_keys,
+            &nullifiers,
+            prior_block_metadata.as_ref(),
+            Some(&mut runners),
+        )
+        .map_err(Error::Scan)?;
+
+        for wtx in &scanned_block.transactions {
+            scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();
+            scan_summary.received_sapling_note_count += wtx.sapling_outputs().len();
+            #[cfg(feature = "orchard")]
+            {
+                scan_summary.spent_orchard_note_count += wtx.orchard_spends().len();
+                scan_summary.received_orchard_note_count += wtx.orchard_outputs().len();
             }
+        }
 
-            let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
+        let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
+            .collect();
+        nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
+        nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
+            tx.sapling_outputs()
+                .iter()
+                .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+        }));
+        #[cfg(feature = "orchard")]
+        {
+            let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
                 .transactions
                 .iter()
-                .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
+                .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
                 .collect();
-            nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
-            nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
-                tx.sapling_outputs()
+
+            nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
+            nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
+                tx.orchard_outputs()
                     .iter()
                     .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
             }));
+        }
 
-            #[cfg(feature = "orchard")]
-            {
-                let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
-                    .transactions
-                    .iter()
-                    .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
-                    .collect();
+        prior_block_metadata = Some(scanned_block.to_block_metadata());
+        scanned_blocks.push(scanned_block);
+    }
 
-                nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
-                nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
-                    tx.orchard_outputs()
-                        .iter()
-                        .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-                }));
-            }
-
-            prior_block_metadata = Some(scanned_block.to_block_metadata());
-            scanned_blocks.push(scanned_block);
-
-            Ok(())
-        },
-    )?;
-
-    data_db.put_blocks(scanned_blocks).map_err(Error::Wallet)?;
+    wallet_data
+        .put_blocks(scanned_blocks)
+        .map_err(Error::Wallet)?;
     Ok(scan_summary)
 }
 
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
     use std::convert::Infallible;
+    use tokio::task::JoinHandle;
     use zcash_primitives::consensus::BlockHeight;
 
-    use crate::proto::compact_formats::CompactBlock;
+    use crate::{data_api::scanning::ScanRange, proto::compact_formats::CompactBlock};
 
-    use super::{error::Error, BlockSource};
+    use super::{BlockCache, BlockSource};
 
     pub struct MockBlockSource;
 
     impl BlockSource for MockBlockSource {
         type Error = Infallible;
 
-        fn with_blocks<F, DbErrT>(
+        fn with_blocks<F>(
             &self,
             _from_height: Option<BlockHeight>,
             _limit: Option<usize>,
             _with_row: F,
-        ) -> Result<(), Error<DbErrT, Infallible>>
+        ) -> Result<(), Infallible>
         where
-            F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>>,
+            F: FnMut(CompactBlock) -> Result<(), Infallible>,
         {
             Ok(())
+        }
+    }
+
+    impl BlockCache for MockBlockSource {
+        fn read(&self, _range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn cache_tip(
+            &self,
+            _range: Option<&ScanRange>,
+        ) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn insert(&self, _compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn truncate(&self, _block_height: BlockHeight) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn delete(&self, _range: &ScanRange) -> JoinHandle<Result<(), Self::Error>> {
+            tokio::spawn(async move { Ok(()) })
         }
     }
 }

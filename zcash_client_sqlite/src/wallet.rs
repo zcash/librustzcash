@@ -2573,7 +2573,7 @@ mod tests {
         // Initialize the wallet with chain data that has no shielded notes for us.
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
         let not_our_value = NonNegativeAmount::const_from_u64(10000);
-        let (start_height, _, _) =
+        let (start_height, _) =
             st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
         for _ in 1..10 {
             st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -2656,7 +2656,7 @@ mod tests {
         check_balance(&st, 2, NonNegativeAmount::ZERO);
 
         // Mine the shielding transaction.
-        let (mined_height, _) = st.generate_next_block_including(txid);
+        let mined_height = st.generate_next_block_including(txid);
         st.scan_cached_blocks(mined_height, 1);
 
         // The wallet should still have zero transparent balance.
@@ -2705,7 +2705,7 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let block_fully_scanned = |st: &TestState<BlockCache>| {
+        let block_fully_scanned = |st: &TestState<TestBlockCache>| {
             st.wallet()
                 .block_fully_scanned()
                 .unwrap()
@@ -2719,7 +2719,7 @@ mod tests {
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
         let not_our_value = NonNegativeAmount::const_from_u64(10000);
         let end_height = st.sapling_activation_height() + 2;
-        let _ = st.generate_block_at(
+        st.generate_block_at(
             end_height,
             BlockHash([37; 32]),
             &not_our_key,
@@ -2736,7 +2736,7 @@ mod tests {
 
         // Scan the block at the wallet's birthday height.
         let start_height = st.sapling_activation_height();
-        let _ = st.generate_block_at(
+        st.generate_block_at(
             start_height,
             BlockHash([0; 32]),
             &not_our_key,
@@ -2751,7 +2751,7 @@ mod tests {
         assert_eq!(block_fully_scanned(&st), Some(start_height));
 
         // Scan the block in between the two previous blocks.
-        let (h, _, _) =
+        let (h, _) =
             st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
         st.scan_cached_blocks(h, 1);
 

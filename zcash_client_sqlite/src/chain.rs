@@ -5,7 +5,7 @@ use rusqlite::params;
 
 use zcash_primitives::consensus::BlockHeight;
 
-use zcash_client_backend::{data_api::chain::error::Error, proto::compact_formats::CompactBlock};
+use zcash_client_backend::proto::compact_formats::CompactBlock;
 
 use crate::{error::SqliteClientError, BlockDb};
 
@@ -26,60 +26,52 @@ pub mod migrations;
 /// Starting at `from_height`, the `with_row` callback is invoked with each block retrieved from
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height.
-pub(crate) fn blockdb_with_blocks<F, DbErrT>(
+pub(crate) fn blockdb_with_blocks<F>(
     block_source: &BlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<usize>,
     mut with_row: F,
-) -> Result<(), Error<DbErrT, SqliteClientError>>
+) -> Result<(), SqliteClientError>
 where
-    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, SqliteClientError>>,
+    F: FnMut(CompactBlock) -> Result<(), SqliteClientError>,
 {
-    fn to_chain_error<D, E: Into<SqliteClientError>>(err: E) -> Error<D, SqliteClientError> {
-        Error::BlockSource(err.into())
-    }
-
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = block_source
-        .0
-        .prepare(
-            "SELECT height, data FROM compactblocks
+    let connector = block_source.0.lock().unwrap();
+    let mut stmt_blocks = connector.prepare(
+        "SELECT height, data FROM compactblocks
             WHERE height >= ?
             ORDER BY height ASC LIMIT ?",
-        )
-        .map_err(to_chain_error)?;
+    )?;
 
-    let mut rows = stmt_blocks
-        .query(params![
-            from_height.map_or(0u32, u32::from),
-            limit
-                .and_then(|l| u32::try_from(l).ok())
-                .unwrap_or(u32::MAX)
-        ])
-        .map_err(to_chain_error)?;
+    let mut rows = stmt_blocks.query(params![
+        from_height.map_or(0u32, u32::from),
+        limit
+            .and_then(|l| u32::try_from(l).ok())
+            .unwrap_or(u32::MAX)
+    ])?;
 
     // Only look for the `from_height` in the scanned blocks if it is set.
     let mut from_height_found = from_height.is_none();
-    while let Some(row) = rows.next().map_err(to_chain_error)? {
-        let height = BlockHeight::from_u32(row.get(0).map_err(to_chain_error)?);
+    while let Some(row) = rows.next()? {
+        let height = BlockHeight::from_u32(row.get(0)?);
         if !from_height_found {
             // We will only perform this check on the first row.
             let from_height = from_height.expect("can only reach here if set");
             if from_height != height {
-                return Err(to_chain_error(SqliteClientError::CacheMiss(from_height)));
+                return Err(SqliteClientError::CacheMiss(from_height));
             } else {
                 from_height_found = true;
             }
         }
 
-        let data: Vec<u8> = row.get(1).map_err(to_chain_error)?;
-        let block = CompactBlock::decode(&data[..]).map_err(to_chain_error)?;
+        let data: Vec<u8> = row.get(1)?;
+        let block = CompactBlock::decode(&data[..])?;
         if block.height() != height {
-            return Err(to_chain_error(SqliteClientError::CorruptedData(format!(
+            return Err(SqliteClientError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
                 block.height(),
                 height
-            ))));
+            )));
         }
 
         with_row(block)?;
@@ -87,7 +79,7 @@ where
 
     if !from_height_found {
         let from_height = from_height.expect("can only reach here if set");
-        return Err(to_chain_error(SqliteClientError::CacheMiss(from_height)));
+        return Err(SqliteClientError::CacheMiss(from_height));
     }
 
     Ok(())
@@ -233,79 +225,68 @@ pub(crate) fn blockmetadb_find_block(
 /// the backing store. If the `limit` value provided is `None`, all blocks are traversed up to the
 /// maximum height for which metadata is available.
 #[cfg(feature = "unstable")]
-pub(crate) fn fsblockdb_with_blocks<F, DbErrT>(
+pub(crate) fn fsblockdb_with_blocks<F>(
     cache: &FsBlockDb,
     from_height: Option<BlockHeight>,
     limit: Option<usize>,
     mut with_block: F,
-) -> Result<(), Error<DbErrT, FsBlockDbError>>
+) -> Result<(), FsBlockDbError>
 where
-    F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, FsBlockDbError>>,
+    F: FnMut(CompactBlock) -> Result<(), FsBlockDbError>,
 {
-    fn to_chain_error<D, E: Into<FsBlockDbError>>(err: E) -> Error<D, FsBlockDbError> {
-        Error::BlockSource(err.into())
-    }
-
     // Fetch the CompactBlocks we need to scan
-    let mut stmt_blocks = cache
-        .conn
-        .prepare(
-            "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
+    let connector = cache.conn.lock().unwrap();
+    let mut stmt_blocks = connector.prepare(
+        "SELECT height, blockhash, time, sapling_outputs_count, orchard_actions_count
              FROM compactblocks_meta
              WHERE height >= ?
              ORDER BY height ASC LIMIT ?",
-        )
-        .map_err(to_chain_error)?;
+    )?;
 
-    let rows = stmt_blocks
-        .query_map(
-            params![
-                from_height.map_or(0u32, u32::from),
-                limit
-                    .and_then(|l| u32::try_from(l).ok())
-                    .unwrap_or(u32::MAX)
-            ],
-            |row| {
-                Ok(BlockMeta {
-                    height: BlockHeight::from_u32(row.get(0)?),
-                    block_hash: BlockHash::from_slice(&row.get::<_, Vec<_>>(1)?),
-                    block_time: row.get(2)?,
-                    sapling_outputs_count: row.get(3)?,
-                    orchard_actions_count: row.get(4)?,
-                })
-            },
-        )
-        .map_err(to_chain_error)?;
+    let rows = stmt_blocks.query_map(
+        params![
+            from_height.map_or(0u32, u32::from),
+            limit
+                .and_then(|l| u32::try_from(l).ok())
+                .unwrap_or(u32::MAX)
+        ],
+        |row| {
+            Ok(BlockMeta {
+                height: BlockHeight::from_u32(row.get(0)?),
+                block_hash: BlockHash::from_slice(&row.get::<_, Vec<_>>(1)?),
+                block_time: row.get(2)?,
+                sapling_outputs_count: row.get(3)?,
+                orchard_actions_count: row.get(4)?,
+            })
+        },
+    )?;
 
     // Only look for the `from_height` in the scanned blocks if it is set.
     let mut from_height_found = from_height.is_none();
     for row_result in rows {
-        let cbr = row_result.map_err(to_chain_error)?;
+        let cbr = row_result?;
         if !from_height_found {
             // We will only perform this check on the first row.
             let from_height = from_height.expect("can only reach here if set");
             if from_height != cbr.height {
-                return Err(to_chain_error(FsBlockDbError::CacheMiss(from_height)));
+                return Err(FsBlockDbError::CacheMiss(from_height));
             } else {
                 from_height_found = true;
             }
         }
 
-        let mut block_file =
-            File::open(cbr.block_file_path(&cache.blocks_dir)).map_err(to_chain_error)?;
+        let mut block_file = File::open(cbr.block_file_path(cache.blocks_dir.as_ref()))?;
         let mut block_data = vec![];
-        block_file
-            .read_to_end(&mut block_data)
-            .map_err(to_chain_error)?;
+        block_file.read_to_end(&mut block_data)?;
 
-        let block = CompactBlock::decode(&block_data[..]).map_err(to_chain_error)?;
+        let block = CompactBlock::decode(&block_data[..])?;
 
         if block.height() != cbr.height {
-            return Err(to_chain_error(FsBlockDbError::CorruptedData(format!(
+            return Err(FsBlockDbError::CorruptedData(format!(
                 "Block height {} did not match row's height field value {}",
                 block.height(),
                 cbr.height
-            ))));
+            )));
         }
 
         with_block(block)?;
@@ -313,7 +294,7 @@ where
 
     if !from_height_found {
         let from_height = from_height.expect("can only reach here if set");
-        return Err(to_chain_error(FsBlockDbError::CacheMiss(from_height)));
+        return Err(FsBlockDbError::CacheMiss(from_height));
     }
 
     Ok(())

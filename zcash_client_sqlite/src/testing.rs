@@ -1,9 +1,6 @@
-use std::convert::Infallible;
 use std::fmt;
 use std::num::NonZeroU32;
-
-#[cfg(feature = "unstable")]
-use std::fs::File;
+use std::{convert::Infallible, ops::Add};
 
 use nonempty::NonEmpty;
 use prost::Message;
@@ -13,21 +10,19 @@ use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
 use tempfile::NamedTempFile;
 
-#[cfg(feature = "unstable")]
-use tempfile::TempDir;
-
 use sapling::{
     note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
+use tokio::task::JoinHandle;
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
     data_api::{
         self,
-        chain::{scan_cached_blocks, BlockSource, ScanSummary},
+        chain::{scan_cached_blocks, BlockCache, BlockSource, ScanSummary},
         wallet::{
             create_proposed_transactions, create_spend_to_address,
             input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector},
@@ -45,6 +40,7 @@ use zcash_client_backend::{
     zip321,
 };
 use zcash_client_backend::{
+    data_api::scanning::{ScanPriority, ScanRange},
     fees::{standard, DustOutputPolicy},
     ShieldedProtocol,
 };
@@ -63,7 +59,7 @@ use zcash_primitives::{
 use zcash_protocol::local_consensus::LocalNetwork;
 
 use crate::{
-    chain::init::init_cache_database,
+    chain::{self, init::init_cache_database},
     error::SqliteClientError,
     wallet::{
         commitment_tree, get_wallet_summary, init::init_wallet_db, sapling::tests::test_prover,
@@ -91,9 +87,9 @@ use {
 };
 
 #[cfg(feature = "unstable")]
-use crate::{
-    chain::{init::init_blockmeta_db, BlockMeta},
-    FsBlockDb,
+use {
+    crate::{chain::init::init_blockmeta_db, FsBlockDb},
+    tempfile::TempDir,
 };
 
 pub(crate) mod pool;
@@ -131,10 +127,10 @@ impl TestBuilder<()> {
     }
 
     /// Adds a [`BlockDb`] cache to the test.
-    pub(crate) fn with_block_cache(self) -> TestBuilder<BlockCache> {
+    pub(crate) fn with_block_cache(self) -> TestBuilder<TestBlockCache> {
         TestBuilder {
             network: self.network,
-            cache: BlockCache::new(),
+            cache: TestBlockCache::new(),
             test_account_birthday: self.test_account_birthday,
             rng: self.rng,
         }
@@ -142,10 +138,13 @@ impl TestBuilder<()> {
 
     /// Adds a [`FsBlockDb`] cache to the test.
     #[cfg(feature = "unstable")]
-    pub(crate) fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache> {
+    pub(crate) fn with_fs_block_cache(self, fsblockdb_root: &TempDir) -> TestBuilder<FsBlockDb> {
+        let mut fsblockdb = FsBlockDb::for_path(fsblockdb_root).unwrap();
+        init_blockmeta_db(&mut fsblockdb).unwrap();
+
         TestBuilder {
             network: self.network,
-            cache: FsBlockCache::new(),
+            cache: fsblockdb,
             test_account_birthday: self.test_account_birthday,
             rng: self.rng,
         }
@@ -245,14 +244,14 @@ pub(crate) struct TestState<Cache> {
     rng: ChaChaRng,
 }
 
-impl<Cache: TestCache> TestState<Cache>
+impl<Cache: BlockCache> TestState<Cache>
 where
-    <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
+    <Cache as BlockSource>::Error: fmt::Debug,
 {
     /// Exposes an immutable reference to the test's [`BlockSource`].
     #[cfg(feature = "unstable")]
-    pub(crate) fn cache(&self) -> &Cache::BlockSource {
-        self.cache.block_source()
+    pub(crate) fn cache(&self) -> &Cache {
+        &self.cache
     }
 
     pub(crate) fn latest_cached_block(&self) -> Option<&CachedBlock> {
@@ -266,14 +265,14 @@ where
         fvk: &Fvk,
         req: AddressType,
         value: NonNegativeAmount,
-    ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
+    ) -> (BlockHeight, Fvk::Nullifier) {
         let cached_block = self
             .latest_cached_block
             .take()
             .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
         let height = cached_block.height + 1;
 
-        let (res, nf) = self.generate_block_at(
+        let nf = self.generate_block_at(
             height,
             cached_block.hash,
             fvk,
@@ -284,7 +283,7 @@ where
         );
         assert!(self.latest_cached_block.is_some());
 
-        (height, res, nf)
+        (height, nf)
     }
 
     /// Creates a fake block with the given height and hash containing a single output of
@@ -302,7 +301,7 @@ where
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
         initial_orchard_tree_size: u32,
-    ) -> (Cache::InsertResult, Fvk::Nullifier) {
+    ) -> Fvk::Nullifier {
         let (cb, nf) = fake_compact_block(
             &self.network(),
             height,
@@ -314,7 +313,9 @@ where
             initial_orchard_tree_size,
             &mut self.rng,
         );
-        let res = self.cache.insert(&cb);
+        self.cache
+            .insert(vec![cb.clone()])
+            .expect("should be able to insert into the block cache.");
 
         self.latest_cached_block = Some(
             CachedBlock::at(
@@ -326,7 +327,7 @@ where
             .roll_forward(&cb),
         );
 
-        (res, nf)
+        nf
     }
 
     /// Creates a fake block at the expected next height spending the given note, and
@@ -337,7 +338,7 @@ where
         note: (Fvk::Nullifier, NonNegativeAmount),
         to: impl Into<Address>,
         value: NonNegativeAmount,
-    ) -> (BlockHeight, Cache::InsertResult) {
+    ) -> BlockHeight {
         let cached_block = self
             .latest_cached_block
             .take()
@@ -356,11 +357,13 @@ where
             cached_block.orchard_end_size,
             &mut self.rng,
         );
-        let res = self.cache.insert(&cb);
+        self.cache
+            .insert(vec![cb.clone()])
+            .expect("should be able to insert into the block cache.");
 
         self.latest_cached_block = Some(cached_block.roll_forward(&cb));
 
-        (height, res)
+        height
     }
 
     /// Creates a fake block at the expected next height containing only the wallet
@@ -368,10 +371,7 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] (or similar) will build on it.
-    pub(crate) fn generate_next_block_including(
-        &mut self,
-        txid: TxId,
-    ) -> (BlockHeight, Cache::InsertResult) {
+    pub(crate) fn generate_next_block_including(&mut self, txid: TxId) -> BlockHeight {
         let tx = self
             .wallet()
             .get_transaction(txid)
@@ -392,7 +392,7 @@ where
         &mut self,
         tx_index: usize,
         tx: &Transaction,
-    ) -> (BlockHeight, Cache::InsertResult) {
+    ) -> BlockHeight {
         let cached_block = self
             .latest_cached_block
             .take()
@@ -408,11 +408,13 @@ where
             cached_block.orchard_end_size,
             &mut self.rng,
         );
-        let res = self.cache.insert(&cb);
+        self.cache
+            .insert(vec![cb.clone()])
+            .expect("should be able to insert into the block cache.");
 
         self.latest_cached_block = Some(cached_block.roll_forward(&cb));
 
-        (height, res)
+        height
     }
 
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
@@ -433,18 +435,13 @@ where
         limit: usize,
     ) -> Result<
         ScanSummary,
-        data_api::chain::error::Error<
-            SqliteClientError,
-            <Cache::BlockSource as BlockSource>::Error,
-        >,
+        data_api::chain::error::Error<SqliteClientError, <Cache as BlockSource>::Error>,
     > {
-        scan_cached_blocks(
-            &self.network(),
-            self.cache.block_source(),
-            &mut self.db_data,
-            from_height,
-            limit,
-        )
+        let range = ScanRange::from_parts(
+            from_height..from_height.add(limit as u32),
+            ScanPriority::Historic,
+        );
+        scan_cached_blocks(&self.network(), &self.cache, &mut self.db_data, &range)
     }
 
     /// Resets the wallet using a new wallet database but with the same cache of blocks,
@@ -1352,104 +1349,94 @@ fn fake_compact_block_from_compact_tx(
     cb
 }
 
-/// Trait used by tests that require a block cache.
-pub(crate) trait TestCache {
-    type BlockSource: BlockSource;
-    type InsertResult;
-
-    /// Exposes the block cache as a [`BlockSource`].
-    fn block_source(&self) -> &Self::BlockSource;
-
-    /// Inserts a CompactBlock into the cache DB.
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult;
-}
-
-pub(crate) struct BlockCache {
+pub(crate) struct TestBlockCache {
     _cache_file: NamedTempFile,
     db_cache: BlockDb,
 }
 
-impl BlockCache {
+impl TestBlockCache {
     fn new() -> Self {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
         init_cache_database(&db_cache).unwrap();
 
-        BlockCache {
+        TestBlockCache {
             _cache_file: cache_file,
             db_cache,
         }
     }
 }
 
-impl TestCache for BlockCache {
-    type BlockSource = BlockDb;
-    type InsertResult = ();
+impl BlockSource for TestBlockCache {
+    type Error = SqliteClientError;
 
-    fn block_source(&self) -> &Self::BlockSource {
-        &self.db_cache
-    }
-
-    fn insert(&self, cb: &CompactBlock) {
-        let cb_bytes = cb.encode_to_vec();
-        self.db_cache
-            .0
-            .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
-            .unwrap()
-            .execute(params![u32::from(cb.height()), cb_bytes,])
-            .unwrap();
+    fn with_blocks<F>(
+        &self,
+        from_height: Option<BlockHeight>,
+        limit: Option<usize>,
+        with_row: F,
+    ) -> Result<(), Self::Error>
+    where
+        F: FnMut(CompactBlock) -> Result<(), Self::Error>,
+    {
+        self.db_cache.with_blocks(from_height, limit, with_row)
     }
 }
 
-#[cfg(feature = "unstable")]
-pub(crate) struct FsBlockCache {
-    fsblockdb_root: TempDir,
-    db_meta: FsBlockDb,
-}
+impl BlockCache for TestBlockCache {
+    /// Returns a range of compact blocks from the cache.
+    fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(range.block_range().start),
+            Some(range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+        )?;
+        Ok(compact_blocks)
+    }
 
-#[cfg(feature = "unstable")]
-impl FsBlockCache {
-    fn new() -> Self {
-        let fsblockdb_root = tempfile::tempdir().unwrap();
-        let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
-        init_blockmeta_db(&mut db_meta).unwrap();
-
-        FsBlockCache {
-            fsblockdb_root,
-            db_meta,
+    /// Returns the height of highest block known to the block cache.
+    fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+        // TODO: Implement cache tip for a specified range.
+        if range.is_some() {
+            panic!("Cache tip for a specified range not currently implemented.")
         }
-    }
-}
 
-#[cfg(feature = "unstable")]
-impl TestCache for FsBlockCache {
-    type BlockSource = FsBlockDb;
-    type InsertResult = BlockMeta;
-
-    fn block_source(&self) -> &Self::BlockSource {
-        &self.db_meta
+        chain::blockmetadb_get_max_cached_height(&self.db_cache.0.lock().unwrap())
+            .map_err(SqliteClientError::DbError)
     }
 
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
-        use std::io::Write;
+    /// Inserts a compact block into the block cache.
+    /// Takes the first compact block from `compact_blocks`.
+    fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+        // TODO: implement for multiple compact blocks
+        if let Some(cb) = compact_blocks.first() {
+            let cb_bytes = cb.encode_to_vec();
+            self.db_cache
+                .0
+                .lock()
+                .unwrap()
+                .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
+                .unwrap()
+                .execute(params![u32::from(cb.height()), cb_bytes,])?;
+        } else {
+            panic!("`compact_blocks` is empty, cannot insert zero blocks into cache!");
+        }
 
-        let meta = BlockMeta {
-            height: cb.height(),
-            block_hash: cb.hash(),
-            block_time: cb.time,
-            sapling_outputs_count: cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum(),
-            orchard_actions_count: cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum(),
-        };
+        Ok(())
+    }
 
-        let blocks_dir = self.fsblockdb_root.as_ref().join("blocks");
-        let block_path = meta.block_file_path(&blocks_dir);
+    /// Removes all cached blocks above a specified block height.
+    fn truncate(&self, _block_height: BlockHeight) -> Result<(), Self::Error> {
+        todo!()
+    }
 
-        File::create(block_path)
-            .unwrap()
-            .write_all(&cb.encode_to_vec())
-            .unwrap();
-
-        meta
+    /// Deletes a range of compact blocks from the block cache.    
+    fn delete(&self, _range: &ScanRange) -> JoinHandle<Result<(), Self::Error>> {
+        todo!()
     }
 }
 

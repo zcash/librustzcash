@@ -71,6 +71,9 @@ schemer-rusqlite = "0.2.2"
 time = "0.3.22"
 uuid = "1.1"
 
+# - Sync engine
+tokio.workspace = true
+
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 document-features.workspace = true
