@@ -74,9 +74,13 @@ shardtree.workspace = true
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
 
 # - ZIP 321
 nom = "7"
+
+# - Runtime
+tokio.workspace = true
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -126,6 +130,7 @@ orchard = ["dep:orchard", "zcash_keys/orchard"]
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
+    "dep:jubjub",
     "orchard?/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
