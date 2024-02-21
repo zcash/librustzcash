@@ -64,9 +64,11 @@
 pub use zcash_keys::address;
 pub mod data_api;
 mod decrypt;
+use zcash_keys::address::Address;
 pub use zcash_keys::encoding;
 pub mod fees;
 pub use zcash_keys::keys;
+pub mod proposal;
 pub mod proto;
 pub mod scan;
 pub mod scanning;
@@ -103,12 +105,33 @@ pub enum ShieldedProtocol {
 }
 
 /// A value pool to which the wallet supports sending transaction outputs.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PoolType {
     /// The transparent value pool
     Transparent,
     /// A shielded value pool.
     Shielded(ShieldedProtocol),
+}
+
+impl PoolType {
+    pub fn is_receiver(&self, addr: &Address) -> bool {
+        match addr {
+            Address::Sapling(_) => matches!(self, PoolType::Shielded(ShieldedProtocol::Sapling)),
+            Address::Transparent(_) => matches!(self, PoolType::Transparent),
+            Address::Unified(ua) => match self {
+                PoolType::Transparent => ua.transparent().is_some(),
+                PoolType::Shielded(ShieldedProtocol::Sapling) => ua.sapling().is_some(),
+                #[cfg(zcash_unstable = "orchard")]
+                PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                    #[cfg(feature = "orchard")]
+                    return ua.orchard().is_some();
+
+                    #[cfg(not(feature = "orchard"))]
+                    return false;
+                }
+            },
+        }
+    }
 }
 
 impl fmt::Display for PoolType {

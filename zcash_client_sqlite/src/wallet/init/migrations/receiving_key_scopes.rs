@@ -292,13 +292,13 @@ mod tests {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network, NetworkUpgrade, Parameters},
-        legacy::keys::IncomingViewingKey,
+        legacy::keys::{IncomingViewingKey, NonHardenedChildIndex},
         memo::MemoBytes,
         transaction::{
             builder::{BuildConfig, BuildResult, Builder},
-            components::amount::NonNegativeAmount,
+            components::{amount::NonNegativeAmount, transparent},
+            fees::fixed,
         },
-        transaction::{components::transparent, fees::fixed},
         zip32::{AccountId, Scope},
     };
     use zcash_proofs::prover::LocalTxProver;
@@ -354,7 +354,9 @@ mod tests {
         );
         builder
             .add_transparent_input(
-                usk0.transparent().derive_external_secret_key(0).unwrap(),
+                usk0.transparent()
+                    .derive_external_secret_key(NonHardenedChildIndex::ZERO)
+                    .unwrap(),
                 transparent::OutPoint::new([1; 32], 0),
                 transparent::TxOut {
                     value: NonNegativeAmount::const_from_u64(EXTERNAL_VALUE + INTERNAL_VALUE),

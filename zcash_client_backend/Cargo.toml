@@ -141,6 +141,7 @@ sync = [
 test-dependencies = [
     "dep:proptest",
     "orchard?/test-dependencies",
+    "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
     "incrementalmerkletree/test-dependencies",
 ]

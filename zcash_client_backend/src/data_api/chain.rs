@@ -213,6 +213,26 @@ pub trait BlockSource {
         F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
 }
 
+pub trait BlockCache: BlockSource {
+    /// Returns a range of compact blocks from the cache.
+    fn read(&self, block_range: Range<BlockHeight>) -> Result<Vec<CompactBlock>, Self::Error>;
+
+    /// Returns the maximum height known to the block cache.
+    fn max_cached_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
+
+    /// Inserts a set of compact blocks into the block cache.
+    fn insert(&self, ompact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
+
+    /// Removes all cached blocks above a specified block height.
+    fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error>;
+
+    /// Mark a range of blocks as scanned for cache removal.
+    fn mark_as_scanned(&self, block_range: Range<BlockHeight>) -> Result<(), Self::Error>;
+
+    /// Removes all blocks marked as scanned from the block cache.
+    fn remove_scanned(&self) -> Result<(), Self::Error>;
+}
+
 /// Metadata about modifications to the wallet state made in the course of scanning a set of
 /// blocks.
 #[derive(Clone, Debug)]

@@ -49,7 +49,7 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
-sapling = { package = "sapling-crypto", version = "0.1" }
+sapling = { package = "sapling-crypto", version = "0.1.1" }
 
 # - Orchard
 nonempty = "0.7"

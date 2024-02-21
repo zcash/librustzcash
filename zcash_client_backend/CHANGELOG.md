@@ -35,6 +35,7 @@ and this library adheres to Rust's notion of
 ## [0.11.0-pre-release] Unreleased
 
 ### Added
+- `zcash_client_backend::PoolType::is_receiver`
 - `zcash_client_backend::data_api`:
   - `InputSource`
   - `ScannedBlock::{into_commitments, sapling}`
@@ -47,35 +48,42 @@ and this library adheres to Rust's notion of
     }`
   - `WalletSummary::next_sapling_subtree_index`
   - `wallet::propose_standard_transfer_to_address`
-  - `wallet::input_selection::Proposal::{from_parts, shielded_inputs}`
+  - `wallet::create_proposed_transactions`
   - `wallet::input_selection::ShieldedInputs`
   - `wallet::input_selection::ShieldingSelector` has been
     factored out from the `InputSelector` trait to separate out transparent
     functionality and move it behind the `transparent-inputs` feature flag.
+  - `impl std::error::Error for wallet::input_selection::InputSelectorError`
 - `zcash_client_backend::fees::{standard, sapling}`
 - `zcash_client_backend::fees::ChangeValue::new`
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
   - `WalletSaplingOutput::recipient_key_scope`
+  - `TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
+  - `impl {Debug, Clone} for OvkPolicy`
 - `zcash_client_backend::zip321::TransactionRequest::total`
 - `zcash_client_backend::zip321::parse::Param::name`
-- `zcash_client_backend::proto::`
+- `zcash_client_backend::proposal`:
+  - `Proposal::{shielded_inputs, payment_pools, single_step, multi_step}`
+  - `Step`
+- `zcash_client_backend::proto`:
   - `PROPOSAL_SER_V1`
   - `ProposalDecodingError`
   - `proposal` module, for parsing and serializing transaction proposals.
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
      wallet::{ReceivedSaplingNote, WalletTransparentOutput},
-     wallet::input_selection::{Proposal, SaplingInputs},
+     proposal::{Proposal, SaplingInputs},
    }`
 - `impl {PartialEq, Eq} for zcash_client_backend::{
      zip321::{Zip321Error, parse::Param, parse::IndexedParam},
      wallet::{ReceivedSaplingNote, WalletTransparentOutput},
-     wallet::input_selection::{Proposal, SaplingInputs},
+     proposal::{Proposal, SaplingInputs},
    }`
-- `zcash_client_backend::zip321::to_uri` now returns a `String` rather than an
-  `Option<String>` and provides canonical serialization for the empty proposal.
+- `zcash_client_backend::zip321`:
+  - `TransactionRequest::{total, from_indexed}`
+  - `parse::Param::name`
 
 ### Moved
 - `zcash_client_backend::data_api::{PoolType, ShieldedProtocol}` have
@@ -112,29 +120,44 @@ and this library adheres to Rust's notion of
     - The `NoteMismatch` variant now wraps a `NoteId` instead of a
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
-    - A new variant `UnsupportedPoolType` has been added.
-    - A new variant `NoSupportedReceivers` has been added.
+    - New variants have been added:
+      - `Error::UnsupportedPoolType`
+      - `Error::NoSupportedReceivers`
+      - `Error::NoSpendingKey`
+      - `Error::Proposal`
+      - `Error::ProposalNotSupported`
+    - Variant `ChildIndexOutOfRange` has been removed.
   - `wallet::shield_transparent_funds` no longer takes a `memo` argument;
     instead, memos to be associated with the shielded outputs should be
     specified in the construction of the value of the `input_selector`
     argument, which is used to construct the proposed shielded values as
-    internal "change" outputs.
-  - `wallet::create_proposed_transaction` no longer takes a
-    `change_memo` argument; instead, change memos are represented in the
-    individual values of the `proposed_change` field of the `Proposal`'s
-    `TransactionBalance`.
-  - `wallet::create_proposed_transaction` now takes its `proposal` argument
-    by reference instead of as an owned value.
-  - `wallet::create_proposed_transaction` no longer takes a `min_confirmations`
-    argument. Instead, it uses the anchor height from its `proposal` argument.
-  - `wallet::create_spend_to_address` now takes an additional
-    `change_memo` argument.
+    internal "change" outputs. Also, it returns its result as a `NonEmpty<TxId>`
+    instead of a single `TxId`.
+  - `wallet::create_proposed_transaction` has been replaced by
+    `wallet::create_proposed_transactions`. Relative to the prior method,
+    the new method has the following changes:
+    - It no longer takes a `change_memo` argument; instead, change memos are
+      represented in the individual values of the `proposed_change` field of
+      the `Proposal`'s `TransactionBalance`.
+    - `wallet::create_proposed_transactions` takes its `proposal` argument
+      by reference instead of as an owned value.
+    - `wallet::create_proposed_transactions` no longer takes a `min_confirmations`
+      argument. Instead, it uses the anchor height from its `proposal` argument.
+    - `wallet::create_proposed_transactions` forces implementations to ignore
+      the database identifiers for its contained notes by universally quantifying
+      the `NoteRef` type parameter.
+    - It returns a `NonEmpty<TxId>` instead of a single `TxId` value.
+  - `wallet::create_spend_to_address` now takes an additional `change_memo`
+    argument. It also returns its result as a `NonEmpty<TxId>` instead of a
+    single `TxId`.
+  - `wallet::spend` returns its result as a `NonEmpty<TxId>` instead of a
+    single `TxId`.
   - The error type of `wallet::create_spend_to_address` has been changed to use
     `zcash_primitives::transaction::fees::zip317::FeeError` instead of
     `zcash_primitives::transaction::components::amount::BalanceError`.
   - The following methods now take `&impl SpendProver, &impl OutputProver`
     instead of `impl TxProver`:
-    - `wallet::create_proposed_transaction`
+    - `wallet::create_proposed_transactions`
     - `wallet::create_spend_to_address`
     - `wallet::shield_transparent_funds`
     - `wallet::spend`
@@ -146,6 +169,7 @@ and this library adheres to Rust's notion of
       `min_confirmations` argument as `u32` instead of `NonZeroU32`.
   - The `wallet::input_selection::InputSelector::DataSource`
     associated type has been renamed to `InputSource`.
+  - `wallet::input_selection::InputSelectorError` has added variant `Proposal`
   - The signature of `wallet:input_selection::InputSelector::propose_transaction`
     has been altered such that it longer takes `min_confirmations` as an
     argument, instead taking explicit `target_height` and `anchor_height`
@@ -153,25 +177,41 @@ and this library adheres to Rust's notion of
     `data_api::InputSource` must expose.
   - Changes to the `WalletRead` trait:
     - `get_checkpoint_depth` has been removed without replacement. This
-      is no longer needed given the change to use the stored anchor height for transaction
-      proposal execution.
+      is no longer needed given the change to use the stored anchor height for
+      transaction proposal execution.
     - `is_valid_account_extfvk` has been removed; it was unused in
       the ECC mobile wallet SDKs and has been superseded by `get_account_for_ufvk`.
     - `get_spendable_sapling_notes`, `select_spendable_sapling_notes`, and
       `get_unspent_transparent_outputs` have been removed; use
       `data_api::InputSource` instead.
     - Added `get_account_ids`.
+    - `get_transparent_receivers` and `get_transparent_balances` are now
+      guarded by the `transparent-inputs` feature flag, with noop default
+      implementations provided.
+    - `get_transparent_receivers` now returns
+      `Option<zcash_client_backend::wallet::TransparentAddressMetadata>` as part of
+      its result where previously it returned `zcash_keys::address::AddressMetadata`.
   - `wallet::{propose_shielding, shield_transparent_funds}` now takes their
     `min_confirmations` arguments as `u32` rather than a `NonZeroU32` to permit
     implmentations to enable zero-conf shielding.
-  - `wallet::create_proposed_transaction` now forces implementations to ignore
-    the database identifiers for its contained notes by universally quantifying
-    the `NoteRef` type parameter.
-  - Arguments to `wallet::input_selection::Proposal::from_parts` have changed.
-  - `wallet::input_selection::Proposal::min_anchor_height` has been removed in
-    favor of storing this value in `SaplingInputs`.
   - `wallet::input_selection::GreedyInputSelector` now has relaxed requirements
     for its `InputSource` associated type.
+
+- `zcash_client_backend::proposal`:
+  - Arguments to `Proposal::from_parts` have changed.
+  - `Proposal::min_anchor_height` has been removed in favor of storing this
+    value in `SaplingInputs`.
+  - `Proposal::sapling_inputs` has been replaced by `Proposal::shielded_inputs`
+  - In addition to having been moved to the `zcash_client_backend::proposal`
+    module, the `Proposal` type has been substantially modified in order to make
+    it possible to represent multi-step transactions, such as a deshielding
+    transaction followed by a zero-conf transfer as required by ZIP 320. Individual
+    transaction proposals are now represented by the `proposal::Step` type.
+  - `ProposalError` has new variants:
+    - `ReferenceError`
+    - `StepDoubleSpend`
+    - `ChainDoubleSpend`
+    - `PaymentPoolsMismatch`
 
 - `zcash_client_backend::fees`:
   - `ChangeStrategy::compute_balance` arguments have changed.
@@ -187,6 +227,14 @@ and this library adheres to Rust's notion of
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
     are provided for each previously public field.
 - `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
+- `zcash_client_backend::zip321::TransactionRequest::payments` now returns a
+  `BTreeMap<usize, Payment>` instead of `&[Payment]` so that parameter
+  indices may be preserved.
+- `zcash_client_backend::zip321::to_uri` now returns a `String` rather than an
+  `Option<String>` and provides canonical serialization for the empty proposal.
+- `zcash_client_backend::zip321::from_uri` previously stripped payment indices,
+  meaning that round-trip serialization was not supported. Payment indices are
+  now retained.
 - The following fields now have type `NonNegativeAmount` instead of `Amount`:
   - `zcash_client_backend::data_api`:
     - `error::Error::InsufficientFunds.{available, required}`
@@ -217,12 +265,13 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_client_backend::wallet::ReceivedSaplingNote` has been replaced by
   `zcash_client_backend::ReceivedNote`.
-- `zcash_client_backend::wallet::input_selection::Proposal::sapling_inputs` has
-  been replaced by `Proposal::shielded_inputs`
+- `zcash_client_backend::::wallet::input_selection::{Proposal, ShieldedInputs, ProposalError}`
+  have been moved to `zcash_client_backend::proposal`.
 - `zcash_client_backend::data_api`
 - `zcash_client_backend::data_api::ScannedBlock::from_parts` has been made crate-private.
 - `zcash_client_backend::data_api::ScannedBlock::into_sapling_commitments` has been
   replaced by `into_commitments` which returns a `ScannedBlockCommitments` value.
+- `zcash_client_backend::data_api::wallet::create_proposed_transaction`
 
 ## [0.10.0] - 2023-09-25
 

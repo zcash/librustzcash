@@ -2,7 +2,6 @@
 use std::collections::HashSet;
 
 use rusqlite::{self, types::ToSql, OptionalExtension};
-use schemer::{self};
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 
@@ -396,7 +395,9 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn migrate_from_wm2() {
         use zcash_client_backend::keys::UnifiedAddressRequest;
-        use zcash_primitives::transaction::components::amount::NonNegativeAmount;
+        use zcash_primitives::{
+            legacy::keys::NonHardenedChildIndex, transaction::components::amount::NonNegativeAmount,
+        };
 
         use crate::UA_TRANSPARENT;
 
@@ -450,7 +451,7 @@ mod tests {
             .and_then(|k| {
                 k.derive_external_ivk()
                     .ok()
-                    .map(|k| k.derive_address(0).unwrap())
+                    .map(|k| k.derive_address(NonHardenedChildIndex::ZERO).unwrap())
             })
             .map(|a| a.encode(&network));
 

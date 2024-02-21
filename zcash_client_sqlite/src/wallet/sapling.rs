@@ -521,8 +521,13 @@ pub(crate) mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        zcash_client_backend::wallet::WalletTransparentOutput,
-        zcash_primitives::transaction::components::{OutPoint, TxOut},
+        zcash_client_backend::{
+            fees::TransactionBalance, proposal::Step, wallet::WalletTransparentOutput, PoolType,
+        },
+        zcash_primitives::{
+            legacy::keys::IncomingViewingKey,
+            transaction::components::{OutPoint, TxOut},
+        },
     };
 
     pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
@@ -530,7 +535,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn send_proposed_transfer() {
+    fn send_single_step_proposed_transfer() {
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -589,10 +594,10 @@ pub(crate) mod tests {
             .unwrap();
 
         let create_proposed_result =
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal);
-        assert_matches!(create_proposed_result, Ok(_));
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal);
+        assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
 
-        let sent_tx_id = create_proposed_result.unwrap();
+        let sent_tx_id = create_proposed_result.unwrap()[0];
 
         // Verify that the sent transaction was stored and that we can decrypt the memos
         let tx = st
@@ -674,6 +679,158 @@ pub(crate) mod tests {
             st.wallet()
                 .get_memo(NoteId::new(sent_tx_id, ShieldedProtocol::Sapling, 12345)),
             Ok(None)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "transparent-inputs")]
+    fn send_multi_step_proposed_transfer() {
+        use nonempty::NonEmpty;
+        use zcash_client_backend::proposal::{Proposal, StepOutput, StepOutputIndex};
+
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+
+        let (account, usk, _) = st.test_account().unwrap();
+        let dfvk = st.test_account_sapling().unwrap();
+
+        // Add funds to the wallet in a single note
+        let value = NonNegativeAmount::const_from_u64(65000);
+        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        st.scan_cached_blocks(h, 1);
+
+        // Spendable balance matches total balance
+        assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
+
+        assert_eq!(
+            block_max_scanned(&st.wallet().conn, &st.wallet().params)
+                .unwrap()
+                .unwrap()
+                .block_height(),
+            h
+        );
+
+        // Generate a single-step proposal. Then, instead of executing that proposal,
+        // we will use its only step as the first step in a multi-step proposal that
+        // spends the first step's output.
+
+        // The first step will deshield to the wallet's default transparent address
+        let to0 = Address::Transparent(usk.default_transparent_address().0);
+        let request0 = zip321::TransactionRequest::new(vec![Payment {
+            recipient_address: to0,
+            amount: NonNegativeAmount::const_from_u64(50000),
+            memo: None,
+            label: None,
+            message: None,
+            other_params: vec![],
+        }])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+        let input_selector = GreedyInputSelector::new(
+            standard::SingleOutputChangeStrategy::new(fee_rule, None),
+            DustOutputPolicy::default(),
+        );
+        let proposal0 = st
+            .propose_transfer(
+                account,
+                &input_selector,
+                request0,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .unwrap();
+
+        let min_target_height = proposal0.min_target_height();
+        let step0 = &proposal0.steps().head;
+
+        assert!(step0.balance().proposed_change().is_empty());
+        assert_eq!(
+            step0.balance().fee_required(),
+            NonNegativeAmount::const_from_u64(15000)
+        );
+
+        // We'll use an internal transparent address that hasn't been added to the wallet
+        // to simulate an external transparent recipient.
+        let to1 = Address::Transparent(
+            usk.transparent()
+                .to_account_pubkey()
+                .derive_internal_ivk()
+                .unwrap()
+                .default_address()
+                .0,
+        );
+        let request1 = zip321::TransactionRequest::new(vec![Payment {
+            recipient_address: to1,
+            amount: NonNegativeAmount::const_from_u64(40000),
+            memo: None,
+            label: None,
+            message: None,
+            other_params: vec![],
+        }])
+        .unwrap();
+
+        let step1 = Step::from_parts(
+            &[step0.clone()],
+            request1,
+            [(0, PoolType::Transparent)].into_iter().collect(),
+            vec![],
+            None,
+            vec![StepOutput::new(0, StepOutputIndex::Payment(0))],
+            TransactionBalance::new(vec![], NonNegativeAmount::const_from_u64(10000)).unwrap(),
+            false,
+        )
+        .unwrap();
+
+        let proposal = Proposal::multi_step(
+            fee_rule,
+            min_target_height,
+            NonEmpty::from_vec(vec![step0.clone(), step1]).unwrap(),
+        )
+        .unwrap();
+
+        let create_proposed_result =
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal);
+        assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 2);
+        let txids = create_proposed_result.unwrap();
+
+        // Verify that the stored sent outputs match what we're expecting
+        let mut stmt_sent = st
+            .wallet()
+            .conn
+            .prepare(
+                "SELECT value
+                FROM sent_notes
+                JOIN transactions ON transactions.id_tx = sent_notes.tx
+                WHERE transactions.txid = ?",
+            )
+            .unwrap();
+
+        let confirmed_sent = txids
+            .iter()
+            .map(|sent_txid| {
+                // check that there's a sent output with the correct value corresponding to
+                stmt_sent
+                    .query(rusqlite::params![sent_txid.as_ref()])
+                    .unwrap()
+                    .mapped(|row| {
+                        let value: u32 = row.get(0)?;
+                        Ok((sent_txid, value))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            confirmed_sent.get(0).and_then(|v| v.get(0)),
+            Some(&(&txids[0], 50000))
+        );
+        assert_eq!(
+            confirmed_sent.get(1).and_then(|v| v.get(0)),
+            Some(&(&txids[1], 40000))
         );
     }
 
@@ -864,8 +1021,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         let txid = st
-            .create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
-            .unwrap();
+            .create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
+            .unwrap()[0];
 
         let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);
@@ -921,8 +1078,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal,),
-            Ok(_)
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal,),
+            Ok(txids) if txids.len() == 1
         );
 
         // A second proposal fails because there are no usable notes
@@ -1000,8 +1157,8 @@ pub(crate) mod tests {
             .unwrap();
 
         let txid2 = st
-            .create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
-            .unwrap();
+            .create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
+            .unwrap()[0];
 
         let (h, _) = st.generate_next_block_including(txid2);
         st.scan_cached_blocks(h, 1);
@@ -1066,7 +1223,7 @@ pub(crate) mod tests {
             )?;
 
             // Executing the proposal should succeed
-            let txid = st.create_proposed_transaction(&usk, ovk_policy, &proposal)?;
+            let txid = st.create_proposed_transactions(&usk, ovk_policy, &proposal)?[0];
 
             // Fetch the transaction from the database
             let raw_tx: Vec<_> = st
@@ -1170,8 +1327,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
-            Ok(_)
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
+            Ok(txids) if txids.len() == 1
         );
     }
 
@@ -1232,8 +1389,8 @@ pub(crate) mod tests {
 
         // Executing the proposal should succeed
         assert_matches!(
-            st.create_proposed_transaction::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
-            Ok(_)
+            st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal),
+            Ok(txids) if txids.len() == 1
         );
     }
 
@@ -1310,7 +1467,7 @@ pub(crate) mod tests {
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
             )
-            .unwrap();
+            .unwrap()[0];
 
         let amount_left = (value - (amount_sent + fee_rule.fixed_fee()).unwrap()).unwrap();
         let pending_change = (amount_left - amount_legacy_change).unwrap();
@@ -1441,7 +1598,7 @@ pub(crate) mod tests {
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
             )
-            .unwrap();
+            .unwrap()[0];
 
         let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);

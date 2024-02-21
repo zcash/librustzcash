@@ -14,7 +14,6 @@ use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
-    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     transaction::{
         components::amount::{Amount, BalanceError, NonNegativeAmount},
@@ -24,7 +23,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    address::{AddressMetadata, UnifiedAddress},
+    address::UnifiedAddress,
     decrypt::DecryptedOutput,
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::service::TreeState,
@@ -36,7 +35,10 @@ use self::chain::CommitmentTreeRoot;
 use self::scanning::ScanRange;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::transaction::components::OutPoint;
+use {
+    crate::wallet::TransparentAddressMetadata,
+    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+};
 
 pub mod chain;
 pub mod error;
@@ -557,18 +559,24 @@ pub trait WalletRead {
     /// The set contains all transparent receivers that are known to have been derived
     /// under this account. Wallets should scan the chain for UTXOs sent to these
     /// receivers.
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_receivers(
         &self,
-        account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error>;
+        _account: AccountId,
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+        Ok(HashMap::new())
+    }
 
     /// Returns a mapping from transparent receiver to not-yet-shielded UTXO balance,
     /// for each address associated with a nonzero balance.
+    #[cfg(feature = "transparent-inputs")]
     fn get_transparent_balances(
         &self,
-        account: AccountId,
-        max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error>;
+        _account: AccountId,
+        _max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        Ok(HashMap::new())
+    }
 
     /// Returns a vector with the IDs of all accounts known to this wallet.
     fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error>;
@@ -1109,14 +1117,13 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},
-        legacy::TransparentAddress,
         memo::Memo,
         transaction::{components::Amount, Transaction, TxId},
         zip32::{AccountId, Scope},
     };
 
     use crate::{
-        address::{AddressMetadata, UnifiedAddress},
+        address::UnifiedAddress,
         keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
         wallet::{Note, NoteId, ReceivedNote, WalletTransparentOutput},
         ShieldedProtocol,
@@ -1127,6 +1134,9 @@ pub mod testing {
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
         WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
+
+    #[cfg(feature = "transparent-inputs")]
+    use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
 
     pub struct MockWalletDb {
         pub network: Network,
@@ -1281,13 +1291,16 @@ pub mod testing {
             Ok(Vec::new())
         }
 
+        #[cfg(feature = "transparent-inputs")]
         fn get_transparent_receivers(
             &self,
             _account: AccountId,
-        ) -> Result<HashMap<TransparentAddress, AddressMetadata>, Self::Error> {
+        ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error>
+        {
             Ok(HashMap::new())
         }
 
+        #[cfg(feature = "transparent-inputs")]
         fn get_transparent_balances(
             &self,
             _account: AccountId,
