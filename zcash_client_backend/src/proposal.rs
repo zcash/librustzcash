@@ -520,10 +520,10 @@ impl<NoteRef> Step<NoteRef> {
 
                 sapling_in || sapling_out || sapling_change
             }
-            #[cfg(not(feature = "orchard"))]
-            PoolType::Shielded(ShieldedProtocol::Orchard) => false,
-            #[cfg(feature = "orchard")]
             PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                #[cfg(not(feature = "orchard"))]
+                let orchard_in = false;
+                #[cfg(feature = "orchard")]
                 let orchard_in = self.shielded_inputs.iter().any(|s_in| {
                     s_in.notes()
                         .iter()

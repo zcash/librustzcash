@@ -65,7 +65,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
-  - `Recipient::{map, transpose}`
+  - `Recipient::{map_internal_account, internal_account_transpose_option}`
   - `WalletSaplingOutput::recipient_key_scope`
   - `TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
   - `impl {Debug, Clone} for OvkPolicy`

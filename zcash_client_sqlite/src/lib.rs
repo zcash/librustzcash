@@ -183,10 +183,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     fn get_spendable_note(
         &self,
         txid: &TxId,
-        _protocol: ShieldedProtocol,
+        protocol: ShieldedProtocol,
         index: u32,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), &self.params, txid, index)
+        match protocol {
+            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+                self.conn.borrow(),
+                &self.params,
+                txid,
+                index,
+            ),
+            ShieldedProtocol::Orchard => Ok(None),
+        }
     }
 
     fn select_spendable_notes(

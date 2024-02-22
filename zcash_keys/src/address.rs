@@ -193,7 +193,10 @@ impl UnifiedAddress {
         #[cfg(feature = "orchard")]
         let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
         let result = result.chain(self.sapling.map(|_| Typecode::Sapling));
-        let result = result.chain(self.transparent.map(|_| Typecode::P2pkh));
+        let result = result.chain(self.transparent.map(|taddr| match taddr {
+            TransparentAddress::PublicKeyHash(_) => Typecode::P2pkh,
+            TransparentAddress::ScriptHash(_) => Typecode::P2sh,
+        }));
         let result = result.chain(
             self.unknown()
                 .iter()

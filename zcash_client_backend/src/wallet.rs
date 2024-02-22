@@ -402,34 +402,34 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
 /// [ZIP 310]: https://zips.z.cash/zip-0310
 #[derive(Debug, Clone)]
 pub enum OvkPolicy {
-    /// Use the outgoing viewing key from the sender's [`ExtendedFullViewingKey`].
+    /// Use the outgoing viewing key from the sender's [`UnifiedFullViewingKey`].
     ///
     /// Transaction outputs will be decryptable by the sender, in addition to the
     /// recipients.
     ///
-    /// [`ExtendedFullViewingKey`]: sapling::zip32::ExtendedFullViewingKey
+    /// [`UnifiedFullViewingKey`]: zcash_keys::keys::UnifiedFullViewingKey
     Sender,
 
-    /// Use a custom outgoing viewing key. This might for instance be derived from a
-    /// separate seed than the wallet's spending keys.
+    /// Use custom outgoing viewing keys. These might for instance be derived from a
+    /// different seed than the wallet's spending keys.
     ///
     /// Transaction outputs will be decryptable by the recipients, and whoever controls
-    /// the provided outgoing viewing key.
+    /// the provided outgoing viewing keys.
     Custom {
         sapling: sapling::keys::OutgoingViewingKey,
         #[cfg(feature = "orchard")]
         orchard: orchard::keys::OutgoingViewingKey,
     },
-    /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
+    /// Use no outgoing viewing keys. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.
     Discard,
 }
 
 impl OvkPolicy {
-    /// Construct an [`OvkPolicy::Custom`] value from an arbitrary 32-byte key.
+    /// Constructs an [`OvkPolicy::Custom`] value from a single arbitrary 32-byte key.
     ///
-    /// Transactions constructed under this OVK policy will have their outputs
-    /// recoverable using this key irrespective of the output pool.
+    /// Outputs of transactions created with this OVK policy will be recoverable using
+    /// this key irrespective of the output pool.
     pub fn custom_from_common_bytes(key: &[u8; 32]) -> Self {
         OvkPolicy::Custom {
             sapling: sapling::keys::OutgoingViewingKey(*key),

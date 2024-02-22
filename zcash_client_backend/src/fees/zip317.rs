@@ -34,6 +34,9 @@ pub struct SingleOutputChangeStrategy {
 impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
     /// fee parameters and change memo.
+    ///
+    /// `fallback_change_pool` is used when more than one shielded pool is enabled via
+    /// feature flags, and the transaction has no shielded inputs.
     pub fn new(
         fee_rule: Zip317FeeRule,
         change_memo: Option<MemoBytes>,

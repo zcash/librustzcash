@@ -148,7 +148,7 @@ where
             Error::UnsupportedChangeType(t) => write!(f, "Attempted to send change to an unsupported pool type: {}", t),
             Error::NoSupportedReceivers(ua) => write!(
                 f,
-                "A recipient's unified address does not contain any receivers to which the wallet can send funds; required {}",
+                "A recipient's unified address does not contain any receivers to which the wallet can send funds; required one of {}",
                 ua.receiver_types().iter().enumerate().map(|(i, tc)| format!("{}{:?}", if i > 0 { ", " } else { "" }, tc)).collect::<String>()
             ),
             Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),

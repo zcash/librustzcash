@@ -894,7 +894,20 @@ where
     let mut orchard_output_meta = vec![];
     let mut sapling_output_meta = vec![];
     let mut transparent_output_meta = vec![];
-    for payment in proposal_step.transaction_request().payments().values() {
+    for (payment, output_pool) in proposal_step
+        .payment_pools()
+        .iter()
+        .map(|(idx, output_pool)| {
+            let payment = proposal_step
+                .transaction_request()
+                .payments()
+                .get(idx)
+                .expect(
+                    "The mapping between payment index and payment is checked in step construction",
+                );
+            (payment, output_pool)
+        })
+    {
         match &payment.recipient_address {
             Address::Unified(ua) => {
                 let memo = payment
@@ -902,54 +915,57 @@ where
                     .as_ref()
                     .map_or_else(MemoBytes::empty, |m| m.clone());
 
-                #[cfg(feature = "orchard")]
-                if let Some(orchard_receiver) = ua.orchard() {
-                    builder.add_orchard_output(
-                        orchard_external_ovk.clone(),
-                        *orchard_receiver,
-                        payment.amount.into(),
-                        memo.clone(),
-                    )?;
-                    orchard_output_meta.push((
-                        Recipient::Unified(
-                            ua.clone(),
-                            PoolType::Shielded(ShieldedProtocol::Orchard),
-                        ),
-                        payment.amount,
-                        Some(memo),
-                    ));
-                    continue;
-                }
+                match output_pool {
+                    #[cfg(not(feature = "orchard"))]
+                    PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                        return Err(Error::ProposalNotSupported);
+                    }
+                    #[cfg(feature = "orchard")]
+                    PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                        builder.add_orchard_output(
+                            orchard_external_ovk.clone(),
+                            *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction"),
+                            payment.amount.into(),
+                            memo.clone(),
+                        )?;
+                        orchard_output_meta.push((
+                            Recipient::Unified(
+                                ua.clone(),
+                                PoolType::Shielded(ShieldedProtocol::Orchard),
+                            ),
+                            payment.amount,
+                            Some(memo),
+                        ));
+                    }
 
-                if let Some(sapling_receiver) = ua.sapling() {
-                    builder.add_sapling_output(
-                        sapling_external_ovk,
-                        *sapling_receiver,
-                        payment.amount,
-                        memo.clone(),
-                    )?;
-                    sapling_output_meta.push((
-                        Recipient::Unified(
-                            ua.clone(),
-                            PoolType::Shielded(ShieldedProtocol::Sapling),
-                        ),
-                        payment.amount,
-                        Some(memo),
-                    ));
+                    PoolType::Shielded(ShieldedProtocol::Sapling) => {
+                        builder.add_sapling_output(
+                            sapling_external_ovk,
+                            *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction"),
+                            payment.amount,
+                            memo.clone(),
+                        )?;
+                        sapling_output_meta.push((
+                            Recipient::Unified(
+                                ua.clone(),
+                                PoolType::Shielded(ShieldedProtocol::Sapling),
+                            ),
+                            payment.amount,
+                            Some(memo),
+                        ));
+                    }
 
-                    continue;
-                }
-
-                if let Some(taddr) = ua.transparent() {
-                    if payment.memo.is_some() {
-                        return Err(Error::MemoForbidden);
-                    } else {
-                        builder.add_transparent_output(taddr, payment.amount)?;
-                        continue;
+                    PoolType::Transparent => {
+                        if payment.memo.is_some() {
+                            return Err(Error::MemoForbidden);
+                        } else {
+                            builder.add_transparent_output(
+                                ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction."),
+                                payment.amount
+                            )?;
+                        }
                     }
                 }
-
-                return Err(Error::NoSupportedReceivers(Box::new(ua.clone())));
             }
             Address::Sapling(addr) => {
                 let memo = payment
