@@ -7,10 +7,21 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 ### Added
-- `zcash_primitives::legacy::keys::{NonHardenedChildIndex, TransparentKeyScope}`
-- `zcash_primitives::legacy::keys::AccountPrivKey::derive_secret_key`
 - Dependency on `bellman 0.14`.
 - `zcash_primitives::consensus::sapling_zip212_enforcement`
+- `zcash_primitives::legacy::keys`:
+  - `AccountPrivKey::derive_secret_key`
+  - `NonHardenedChildIndex`
+  - `TransparentKeyScope`
+- `zcash_primitives::local_consensus` module, behind the `local-consensus`
+  feature flag.
+  - The `LocalNetwork` struct provides a type for specifying network upgrade
+    activation heights for a local or specific configuration of a full node.
+    Developers can make use of this type when connecting to a Regtest node by
+    replicating the activation heights used on their node configuration.
+  - `impl zcash_primitives::consensus::Parameters for LocalNetwork` uses the
+    provided activation heights, and `zcash_primitives::constants::regtest::`
+    for everything else.
 - `zcash_primitives::transaction`:
   - `builder::{BuildConfig, FeeError, get_fee, BuildResult}`
   - `builder::Error::SaplingBuilderNotAvailable`
@@ -30,6 +41,7 @@ and this library adheres to Rust's notion of
     - `GRACE_ACTIONS`
     - `P2PKH_STANDARD_INPUT_SIZE`
     - `P2PKH_STANDARD_OUTPUT_SIZE`
+  - `impl From<TxId> for [u8; 32]`
 - `zcash_primitives::zip32`:
   - `ChildIndex::hardened`
   - `ChildIndex::index`
@@ -54,57 +66,51 @@ and this library adheres to Rust's notion of
   - `impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
   - `impl TryFrom<orchard::NoteValue> for NonNegativeAmount`
 - `impl {Clone, PartialEq, Eq} for zcash_primitives::memo::Error`
-- `impl {PartialEq, Eq} for zcash_primitives::sapling::note::Rseed`
-- `impl From<TxId> for [u8; 32]`
-- Added feature `local-consensus` to crate `zcash_primitives`
-  - Adds `pub mod local_consensus`
-  - `zcash_primitives::local_consensus::LocalNetwork` provides a type for specifying 
-    network upgrade activation heights for a local or specific configuration of a full
-    node. Developers can make use of this type when connecting to a Regtest node by
-    replicating the activation heights used on their node configuration.
-  - `impl Parameters for LocalNetwork` that use provided activation heights and
-    defaults to `constants::regtest::` for everything else. 
 
 ### Changed
-- `zcash_primitives::legacy::TransparentAddress` variants have changed:
-  - `TransparentAddress::PublicKey` has been renamed to `PublicKeyHash`
-  - `TransparentAddress::Script` has been renamed to `ScriptHash`
+- `zcash_primitives::legacy`:
+  - `TransparentAddress` variants have changed:
+    - `TransparentAddress::PublicKey` has been renamed to `PublicKeyHash`
+    - `TransparentAddress::Script` has been renamed to `ScriptHash`
+  - `keys::{derive_external_secret_key, derive_internal_secret_key}` arguments
+    changed from `u32` to `NonHardenedChildIndex`.
 - `zcash_primitives::transaction`:
-  - `builder::Builder` now has a generic parameter for the type of progress
-    notifier, which needs to implement `sapling::builder::ProverProgress` in
-    order to build transactions.
-  - `builder::Builder::new` now takes a `BuildConfig` argument instead of an
-    optional Orchard anchor. Anchors for both Sapling and Orchard are now
-    required at the time of builder construction.
-  - `builder::Builder::{build, build_zfuture}` now take
-    `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
-  - `builder::Builder::add_sapling_spend` no longer takes a `diversifier`
-    argument as the diversifier may be obtained from the note.
-  - `builder::Builder::add_sapling_spend` now takes its `ExtendedSpendingKey`
-    argument by reference.
-  - `builder::Builder::{add_sapling_spend, add_sapling_output}` now return
-    `builder::Error`s instead of the underlying `sapling_crypto::builder::Error`s
-    when returning `Err`.
-  - `builder::Builder::add_orchard_spend` now takes its `SpendingKey` argument
-     by reference.
-  - `builder::Builder::with_progress_notifier` now consumes `self` and returns a
-    `Builder` typed on the provided channel.
-  - `builder::Builder::get_fee` now returns a `builder::FeeError` instead of the
-    bare `FeeRule::Error` when returning `Err`.
-  - `builder::Builder::build` now returns a `Result<BuildResult, ...>` instead of 
-    using a tuple to return the constructed transaction and build metadata.
-  - `builder::Error::OrchardAnchorNotAvailable` has been renamed to
-    `OrchardBuilderNotAvailable`.
-  - `builder::{build, build_zfuture}` each now take an additional `rng` argument.
-  - `components::transparent::TxOut.value` now has type `NonNegativeAmount`
-    instead of `Amount`.
-  - `components::sapling::MapAuth` trait methods now take `&mut self` instead
-    of `&self`.
-  - `components::transparent::fees` has been moved to
-    `zcash_primitives::transaction::fees::transparent`
-  - `components::transparent::builder::TransparentBuilder::{inputs, outputs}`
-    have changed to return `&[TransparentInputInfo]` and `&[TxOut]` respectively,
-    in order to avoid coupling to the fee traits.
+  - `builder`:
+    - `Builder` now has a generic parameter for the type of progress notifier,
+      which needs to implement `sapling::builder::ProverProgress` in order to
+      build transactions.
+    - `Builder::new` now takes a `BuildConfig` argument instead of an optional
+      Orchard anchor. Anchors for both Sapling and Orchard are now required at
+      the time of builder construction.
+    - `Builder::{build, build_zfuture}` now take
+      `&impl SpendProver, &impl OutputProver` instead of `&impl TxProver`.
+    - `Builder::add_sapling_spend` no longer takes a `diversifier` argument as
+      the diversifier may be obtained from the note.
+    - `Builder::add_sapling_spend` now takes its `ExtendedSpendingKey` argument
+      by reference.
+    - `Builder::{add_sapling_spend, add_sapling_output}` now return `Error`s
+      instead of the underlying `sapling_crypto::builder::Error`s when returning
+      `Err`.
+    - `Builder::add_orchard_spend` now takes its `SpendingKey` argument by
+      reference.
+    - `Builder::with_progress_notifier` now consumes `self` and returns a
+      `Builder` typed on the provided channel.
+    - `Builder::get_fee` now returns a `builder::FeeError` instead of the bare
+      `FeeRule::Error` when returning `Err`.
+    - `Builder::build` now returns a `Result<BuildResult, ...>` instead of
+      using a tuple to return the constructed transaction and build metadata.
+    - `Error::OrchardAnchorNotAvailable` has been renamed to
+      `OrchardBuilderNotAvailable`.
+    - `build` and `build_zfuture` each now take an additional `rng` argument.
+  - `components`:
+    - `transparent::TxOut.value` now has type `NonNegativeAmount` instead of
+      `Amount`.
+    - `sapling::MapAuth` trait methods now take `&mut self` instead of `&self`.
+    - `transparent::fees` has been moved to
+      `zcash_primitives::transaction::fees::transparent`
+    - `transparent::builder::TransparentBuilder::{inputs, outputs}` have changed
+      to return `&[TransparentInputInfo]` and `&[TxOut]` respectively, in order
+      to avoid coupling to the fee traits.
   - `Unauthorized::SaplingAuth` now has type `InProgress<Proven, Unsigned>`.
   - `fees::FeeRule::fee_required` now takes an additional `orchard_action_count`
     argument.
@@ -125,11 +131,6 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::zip32`:
   - `ChildIndex` has been changed from an enum to an opaque struct, and no
     longer supports non-hardened indices.
-- `zcash_client_backend` changes related to `local-consensus` feature:
-  - added tests that verify `zip321` supports Payment URIs with `Local(P)`
-  network parameters.
-- `zcash_primitives::legacy::keys::{derive_external_secret_key, derive_internal_secret_key}` 
-  arguments changed from `u32` to `NonHardenedChildIndex`.
 
 ### Removed
 - `zcash_primitives::constants`:
