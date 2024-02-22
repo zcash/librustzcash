@@ -69,10 +69,13 @@ use zcash_client_backend::{
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
-    DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
+    DecryptedOutput, ShieldedProtocol, TransferType,
 };
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
+
+#[cfg(feature = "orchard")]
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -180,10 +183,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     fn get_spendable_note(
         &self,
         txid: &TxId,
-        _protocol: ShieldedProtocol,
+        protocol: ShieldedProtocol,
         index: u32,
     ) -> Result<Option<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        wallet::sapling::get_spendable_sapling_note(self.conn.borrow(), &self.params, txid, index)
+        match protocol {
+            ShieldedProtocol::Sapling => wallet::sapling::get_spendable_sapling_note(
+                self.conn.borrow(),
+                &self.params,
+                txid,
+                index,
+            ),
+            ShieldedProtocol::Orchard => Ok(None),
+        }
     }
 
     fn select_spendable_notes(
@@ -588,12 +599,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             for output in d_tx.sapling_outputs {
                 match output.transfer_type {
                     TransferType::Outgoing | TransferType::WalletInternal => {
+                        let value = output.note.value();
                         let recipient = if output.transfer_type == TransferType::Outgoing {
                             Recipient::Sapling(output.note.recipient())
                         } else {
                             Recipient::InternalAccount(
                                 output.account,
-                                PoolType::Shielded(ShieldedProtocol::Sapling)
+                                Note::Sapling(output.note.clone()),
                             )
                         };
 
@@ -604,7 +616,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             tx_ref,
                             output.index,
                             &recipient,
-                            NonNegativeAmount::from_u64(output.note.value().inner()).map_err(|_| {
+                            NonNegativeAmount::from_u64(value.inner()).map_err(|_| {
                                 SqliteClientError::CorruptedData(
                                     "Note value is not a valid Zcash amount.".to_string(),
                                 )
@@ -712,21 +724,28 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     output,
                 )?;
 
-                if let Some((account, note)) = output.sapling_change_to() {
-                    wallet::sapling::put_received_note(
-                        wdb.conn.0,
-                        &DecryptedOutput {
-                            index: output.output_index(),
-                            note: note.clone(),
-                            account: *account,
-                            memo: output
-                                .memo()
-                                .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                            transfer_type: TransferType::WalletInternal,
-                        },
-                        tx_ref,
-                        None,
-                    )?;
+                match output.recipient() {
+                    Recipient::InternalAccount(account, Note::Sapling(note)) => {
+                        wallet::sapling::put_received_note(
+                            wdb.conn.0,
+                            &DecryptedOutput {
+                                index: output.output_index(),
+                                note: note.clone(),
+                                account: *account,
+                                memo: output
+                                    .memo()
+                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                                transfer_type: TransferType::WalletInternal,
+                            },
+                            tx_ref,
+                            None,
+                        )?;
+                    }
+                    #[cfg(feature = "orchard")]
+                    Recipient::InternalAccount(_account, Note::Orchard(_note)) => {
+                        todo!();
+                    }
+                    _ => (),
                 }
             }
 
@@ -805,6 +824,37 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
             .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
         Ok(())
     }
+
+    #[cfg(feature = "orchard")]
+    type OrchardShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >;
+
+    #[cfg(feature = "orchard")]
+    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::OrchardShardStore<'a>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        todo!()
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_orchard_subtree_roots(
+        &mut self,
+        _start_index: u64,
+        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        todo!()
+    }
 }
 
 impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTransaction<'conn>, P> {
@@ -844,6 +894,37 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
             start_index,
             roots,
         )
+    }
+
+    #[cfg(feature = "orchard")]
+    type OrchardShardStore<'a> = SqliteShardStore<
+        &'a rusqlite::Transaction<'a>,
+        orchard::tree::MerkleHashOrchard,
+        ORCHARD_SHARD_HEIGHT,
+    >;
+
+    #[cfg(feature = "orchard")]
+    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    where
+        for<'a> F: FnMut(
+            &'a mut ShardTree<
+                Self::OrchardShardStore<'a>,
+                { ORCHARD_SHARD_HEIGHT * 2 },
+                ORCHARD_SHARD_HEIGHT,
+            >,
+        ) -> Result<A, E>,
+        E: From<ShardTreeError<Self::Error>>,
+    {
+        todo!()
+    }
+
+    #[cfg(feature = "orchard")]
+    fn put_orchard_subtree_roots(
+        &mut self,
+        _start_index: u64,
+        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<Self::Error>> {
+        todo!()
     }
 }
 

@@ -17,6 +17,8 @@ and this library adheres to Rust's notion of
   - `BlockMetadata::orchard_tree_size`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
+  - `ORCHARD_SHARD_HEIGHT`
+  - `BlockMetadata::orchard_tree_size`
 - `zcash_client_backend::fees::orchard`
 - `zcash_client_backend::fees::ChangeValue::orchard`
 - `zcash_client_backend::wallet`:
@@ -29,6 +31,10 @@ and this library adheres to Rust's notion of
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
   - `ShieldedProtocol` has a new `Orchard` variant.
+  - `WalletCommitmentTrees` has new members when the `orchard` feature is enabled:
+    - `type OrchardShardStore`
+    - `fn with_orchard_tree_mut`
+    - `fn put_orchard_subtree_roots`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 
@@ -59,6 +65,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::wallet`:
   - `Note`
   - `ReceivedNote`
+  - `Recipient::{map_internal_account, internal_account_transpose_option}`
   - `WalletSaplingOutput::recipient_key_scope`
   - `TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
   - `impl {Debug, Clone} for OvkPolicy`
@@ -121,7 +128,7 @@ and this library adheres to Rust's notion of
       backend-specific note identifier. The related `NoteRef` type parameter has
       been removed from `error::Error`.
     - New variants have been added:
-      - `Error::UnsupportedPoolType`
+      - `Error::UnsupportedChangeType`
       - `Error::NoSupportedReceivers`
       - `Error::NoSpendingKey`
       - `Error::Proposal`
@@ -147,9 +154,9 @@ and this library adheres to Rust's notion of
       the database identifiers for its contained notes by universally quantifying
       the `NoteRef` type parameter.
     - It returns a `NonEmpty<TxId>` instead of a single `TxId` value.
-  - `wallet::create_spend_to_address` now takes an additional `change_memo`
-    argument. It also returns its result as a `NonEmpty<TxId>` instead of a
-    single `TxId`.
+  - `wallet::create_spend_to_address` now takes additional `change_memo` and
+    `fallback_change_pool` arguments. It also returns its result as a
+    `NonEmpty<TxId>` instead of a single `TxId`.
   - `wallet::spend` returns its result as a `NonEmpty<TxId>` instead of a
     single `TxId`.
   - The error type of `wallet::create_spend_to_address` has been changed to use
@@ -219,13 +226,20 @@ and this library adheres to Rust's notion of
     now also provides the output pool to which change should be sent and an
     optional memo to be associated with the change output.
   - `ChangeError` has a new `BundleError` variant.
-  - `fixed::SingleOutputChangeStrategy::new` and
-    `zip317::SingleOutputChangeStrategy::new` each now accept an additional
-    `change_memo` argument.
+  - `fixed::SingleOutputChangeStrategy::new`,
+    `zip317::SingleOutputChangeStrategy::new`, and
+    `standard::SingleOutputChangeStrategy::new` each now accept additional
+    `change_memo` and `fallback_change_pool` arguments.
 - `zcash_client_backend::wallet`:
   - The fields of `ReceivedSaplingNote` are now private. Use
     `ReceivedSaplingNote::from_parts` for construction instead. Accessor methods
     are provided for each previously public field.
+  - `Recipient` is now polymorphic in the type of the payload for wallet-internal
+    recipients. This simplifies the handling of wallet-internal outputs.
+  - `SentTransactionOutput::from_parts` now takes a `Recipient<Note>`.
+  - `SentTransactionOutput::recipient` now returns a `Recipient<Note>`.
+  - `OvkPolicy::Custom` is now a structured variant that can contain independent 
+    Sapling and Orchard `OutgoingViewingKey`s.
 - `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
 - `zcash_client_backend::zip321::TransactionRequest::payments` now returns a
   `BTreeMap<usize, Payment>` instead of `&[Payment]` so that parameter
@@ -267,6 +281,8 @@ and this library adheres to Rust's notion of
   `zcash_client_backend::ReceivedNote`.
 - `zcash_client_backend::::wallet::input_selection::{Proposal, ShieldedInputs, ProposalError}`
   have been moved to `zcash_client_backend::proposal`.
+- `zcash_client_backend::wallet::SentTransactionOutput::sapling_change_to` - the
+  note created by an internal transfer is now conveyed in the `recipient` field.
 - `zcash_client_backend::data_api`
 - `zcash_client_backend::data_api::ScannedBlock::from_parts` has been made crate-private.
 - `zcash_client_backend::data_api::ScannedBlock::into_sapling_commitments` has been

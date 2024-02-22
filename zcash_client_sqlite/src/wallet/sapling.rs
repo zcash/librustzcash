@@ -579,8 +579,11 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::PreZip313;
 
         let change_memo = "Test change memo".parse::<Memo>().unwrap();
-        let change_strategy =
-            standard::SingleOutputChangeStrategy::new(fee_rule, Some(change_memo.clone().into()));
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.clone().into()),
+            ShieldedProtocol::Sapling,
+        );
         let input_selector =
             &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
 
@@ -731,7 +734,7 @@ pub(crate) mod tests {
 
         let fee_rule = StandardFeeRule::Zip317;
         let input_selector = GreedyInputSelector::new(
-            standard::SingleOutputChangeStrategy::new(fee_rule, None),
+            standard::SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling),
             DustOutputPolicy::default(),
         );
         let proposal0 = st
@@ -856,7 +859,8 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(1).unwrap(),
-                None
+                None,
+                ShieldedProtocol::Sapling
             ),
             Err(data_api::error::Error::KeyNotRecognized)
         );
@@ -885,7 +889,8 @@ pub(crate) mod tests {
                 &to,
                 NonNegativeAmount::const_from_u64(1),
                 None,
-                None
+                None,
+                ShieldedProtocol::Sapling
             ),
             Err(data_api::error::Error::ScanRequired)
         );
@@ -952,7 +957,8 @@ pub(crate) mod tests {
                 &to,
                 NonNegativeAmount::const_from_u64(70000),
                 None,
-                None
+                None,
+                ShieldedProtocol::Sapling
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -981,7 +987,8 @@ pub(crate) mod tests {
                 &to,
                 NonNegativeAmount::const_from_u64(70000),
                 None,
-                None
+                None,
+                ShieldedProtocol::Sapling
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -1016,6 +1023,7 @@ pub(crate) mod tests {
                 amount_sent,
                 None,
                 None,
+                ShieldedProtocol::Sapling,
             )
             .unwrap();
 
@@ -1073,6 +1081,7 @@ pub(crate) mod tests {
                 NonNegativeAmount::const_from_u64(15000),
                 None,
                 None,
+                ShieldedProtocol::Sapling,
             )
             .unwrap();
 
@@ -1091,7 +1100,8 @@ pub(crate) mod tests {
                 &to,
                 NonNegativeAmount::const_from_u64(2000),
                 None,
-                None
+                None,
+                ShieldedProtocol::Sapling
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -1120,7 +1130,8 @@ pub(crate) mod tests {
                 &to,
                 NonNegativeAmount::const_from_u64(2000),
                 None,
-                None
+                None,
+                ShieldedProtocol::Sapling
             ),
             Err(data_api::error::Error::InsufficientFunds {
                 available,
@@ -1153,6 +1164,7 @@ pub(crate) mod tests {
                 amount_sent2,
                 None,
                 None,
+                ShieldedProtocol::Sapling,
             )
             .unwrap();
 
@@ -1220,6 +1232,7 @@ pub(crate) mod tests {
                 NonNegativeAmount::const_from_u64(15000),
                 None,
                 None,
+                ShieldedProtocol::Sapling,
             )?;
 
             // Executing the proposal should succeed
@@ -1322,6 +1335,7 @@ pub(crate) mod tests {
                 NonNegativeAmount::const_from_u64(50000),
                 None,
                 None,
+                ShieldedProtocol::Sapling,
             )
             .unwrap();
 
@@ -1384,6 +1398,7 @@ pub(crate) mod tests {
                 NonNegativeAmount::const_from_u64(50000),
                 None,
                 None,
+                ShieldedProtocol::Sapling,
             )
             .unwrap();
 
@@ -1455,7 +1470,7 @@ pub(crate) mod tests {
         #[allow(deprecated)]
         let fee_rule = FixedFeeRule::standard();
         let input_selector = GreedyInputSelector::new(
-            fixed::SingleOutputChangeStrategy::new(fee_rule, None),
+            fixed::SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling),
             DustOutputPolicy::default(),
         );
 
@@ -1552,7 +1567,8 @@ pub(crate) mod tests {
         assert_eq!(st.get_total_balance(account), total);
         assert_eq!(st.get_spendable_balance(account, 1), total);
 
-        let input_selector = input_selector(StandardFeeRule::Zip317, None);
+        let input_selector =
+            input_selector(StandardFeeRule::Zip317, None, ShieldedProtocol::Sapling);
 
         // This first request will fail due to insufficient non-dust funds
         let req = TransactionRequest::new(vec![Payment {
@@ -1657,7 +1673,7 @@ pub(crate) mod tests {
         let fee_rule = StandardFeeRule::PreZip313;
 
         let input_selector = GreedyInputSelector::new(
-            standard::SingleOutputChangeStrategy::new(fee_rule, None),
+            standard::SingleOutputChangeStrategy::new(fee_rule, None, ShieldedProtocol::Sapling),
             DustOutputPolicy::default(),
         );
 
@@ -1825,7 +1841,8 @@ pub(crate) mod tests {
                 None,
                 OvkPolicy::Sender,
                 NonZeroU32::new(5).unwrap(),
-                None
+                None,
+                ShieldedProtocol::Sapling
             ),
             Ok(_)
         );

@@ -1,10 +1,8 @@
 //! Structs for handling supported address types.
 
-use std::convert::TryFrom;
-
 use sapling::PaymentAddress;
 use zcash_address::{
-    unified::{self, Container, Encoding},
+    unified::{self, Container, Encoding, Typecode},
     ConversionError, Network, ToAddress, TryFromRawAddress, ZcashAddress,
 };
 use zcash_primitives::{consensus, legacy::TransparentAddress};
@@ -108,15 +106,35 @@ impl UnifiedAddress {
         }
     }
 
+    /// Returns whether this address has an Orchard receiver.
+    ///
+    /// This method is available irrespective of whether the `orchard` feature flag is enabled.
+    pub fn has_orchard(&self) -> bool {
+        #[cfg(not(feature = "orchard"))]
+        return false;
+        #[cfg(feature = "orchard")]
+        return self.orchard.is_some();
+    }
+
     /// Returns the Orchard receiver within this Unified Address, if any.
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> Option<&orchard::Address> {
         self.orchard.as_ref()
     }
 
+    /// Returns whether this address has a Sapling receiver.
+    pub fn has_sapling(&self) -> bool {
+        self.sapling.is_some()
+    }
+
     /// Returns the Sapling receiver within this Unified Address, if any.
     pub fn sapling(&self) -> Option<&PaymentAddress> {
         self.sapling.as_ref()
+    }
+
+    /// Returns whether this address has a Transparent receiver.
+    pub fn has_transparent(&self) -> bool {
+        self.transparent.is_some()
     }
 
     /// Returns the transparent receiver within this Unified Address, if any.
@@ -167,6 +185,24 @@ impl UnifiedAddress {
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
         self.to_address(params.address_network().expect("Unrecognized network"))
             .to_string()
+    }
+
+    /// Returns the set of receiver typecodes.
+    pub fn receiver_types(&self) -> Vec<Typecode> {
+        let result = std::iter::empty();
+        #[cfg(feature = "orchard")]
+        let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
+        let result = result.chain(self.sapling.map(|_| Typecode::Sapling));
+        let result = result.chain(self.transparent.map(|taddr| match taddr {
+            TransparentAddress::PublicKeyHash(_) => Typecode::P2pkh,
+            TransparentAddress::ScriptHash(_) => Typecode::P2sh,
+        }));
+        let result = result.chain(
+            self.unknown()
+                .iter()
+                .map(|(typecode, _)| Typecode::Unknown(*typecode)),
+        );
+        result.collect()
     }
 }
 
