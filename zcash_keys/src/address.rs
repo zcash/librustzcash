@@ -390,12 +390,19 @@ mod tests {
         #[cfg(all(not(feature = "orchard"), feature = "sapling"))]
         let ua = UnifiedAddress::from_receivers(sapling, transparent).unwrap();
 
-        #[cfg(all(not(feature = "orchard"), not(feature = "sapling")))]
-        let ua = UnifiedAddress::from_receivers(transparent).unwrap();
+        #[cfg(all(feature = "orchard", not(feature = "sapling")))]
+        let ua = UnifiedAddress::from_receivers(orchard, transparent).unwrap();
 
         let addr = Address::Unified(ua);
         let addr_str = addr.encode(&MAIN_NETWORK);
         assert_eq!(Address::decode(&MAIN_NETWORK, &addr_str), Some(addr));
+    }
+
+    #[test]
+    #[cfg(not(any(feature = "orchard", feature = "sapling")))]
+    fn ua_round_trip() {
+        let transparent = None;
+        assert_eq!(UnifiedAddress::from_receivers(transparent), None)
     }
 
     #[test]

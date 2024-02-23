@@ -166,11 +166,7 @@ where
 /// };
 ///
 /// let account = AccountId::from(0);
-/// let req = UnifiedAddressRequest {
-///     has_orchard: false,
-///     has_sapling: true,
-///     has_p2pkh: true
-/// };
+/// let req = UnifiedAddressRequest::new(false, true, true);
 /// let usk = UnifiedSpendingKey::from_seed(&Network::TestNetwork, &[0; 32][..], account).unwrap();
 /// let to = usk.to_unified_full_viewing_key().default_address(req).0.into();
 ///

@@ -22,7 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
 zcash_encoding.workspace = true
-zcash_keys = { workspace = true, features = ["sapling"] }
+zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
 zcash_primitives.workspace = true
 
 # Dependencies exposed in a public API:
