@@ -94,14 +94,53 @@ impl<AccountId, N> Recipient<AccountId, Option<N>> {
     }
 }
 
-/// A subset of a [`Transaction`] relevant to wallets and light clients.
+/// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
-pub struct WalletTx<N, S, A> {
-    pub txid: TxId,
-    pub index: usize,
-    pub sapling_spends: Vec<WalletSaplingSpend<A>>,
-    pub sapling_outputs: Vec<WalletSaplingOutput<N, S, A>>,
+pub struct WalletTx<AccountId> {
+    txid: TxId,
+    block_index: usize,
+    sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
+    sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
+}
+
+impl<AccountId> WalletTx<AccountId> {
+    /// Constructs a new [`WalletTx`] from its constituent parts
+    pub fn new(
+        txid: TxId,
+        block_index: usize,
+        sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
+        sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
+    ) -> Self {
+        Self {
+            txid,
+            block_index,
+            sapling_spends,
+            sapling_outputs,
+        }
+    }
+
+    /// Returns the [`TxId`] for the corresponding [`Transaction`]
+    pub fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    /// Returns the index of the transaction in the containing block.
+    pub fn block_index(&self) -> usize {
+        self.block_index
+    }
+
+    /// Returns a record for each Sapling note belonging to the wallet that was spent in the
+    /// transaction.
+    pub fn sapling_spends(&self) -> &[WalletSaplingSpend<AccountId>] {
+        self.sapling_spends.as_ref()
+    }
+
+    /// Returns a record for each Sapling note belonging to and/or produced by the wallet in the
+    /// transaction.
+    pub fn sapling_outputs(&self) -> &[WalletSaplingOutput<AccountId>] {
+        self.sapling_outputs.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,41 +234,41 @@ impl<AccountId> WalletSaplingSpend<AccountId> {
 /// `()` for sent notes.
 ///
 /// [`OutputDescription`]: sapling::bundle::OutputDescription
-pub struct WalletSaplingOutput<N, S, A> {
+pub struct WalletSaplingOutput<AccountId> {
     index: usize,
     cmu: sapling::note::ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    account: A,
+    account_id: AccountId,
     note: sapling::Note,
     is_change: bool,
     note_commitment_tree_position: Position,
-    nf: N,
-    recipient_key_scope: S,
+    nf: Option<sapling::Nullifier>,
+    recipient_key_scope: Option<zip32::Scope>,
 }
 
-impl<N, S, A> WalletSaplingOutput<N, S, A> {
+impl<AccountId> WalletSaplingOutput<AccountId> {
     /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         index: usize,
         cmu: sapling::note::ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        account: A,
+        account_id: AccountId,
         note: sapling::Note,
         is_change: bool,
         note_commitment_tree_position: Position,
-        nf: N,
-        recipient_key_scope: S,
+        nf: Option<sapling::Nullifier>,
+        recipient_key_scope: Option<zip32::Scope>,
     ) -> Self {
         Self {
             index,
             cmu,
             ephemeral_key,
-            account,
             note,
             is_change,
             note_commitment_tree_position,
             nf,
+            account_id,
             recipient_key_scope,
         }
     }
@@ -243,8 +282,8 @@ impl<N, S, A> WalletSaplingOutput<N, S, A> {
     pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
         &self.ephemeral_key
     }
-    pub fn account(&self) -> &A {
-        &self.account
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
     }
     pub fn note(&self) -> &sapling::Note {
         &self.note
@@ -255,11 +294,11 @@ impl<N, S, A> WalletSaplingOutput<N, S, A> {
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
     }
-    pub fn nf(&self) -> &N {
-        &self.nf
+    pub fn nf(&self) -> Option<&sapling::Nullifier> {
+        self.nf.as_ref()
     }
-    pub fn recipient_key_scope(&self) -> &S {
-        &self.recipient_key_scope
+    pub fn recipient_key_scope(&self) -> Option<zip32::Scope> {
+        self.recipient_key_scope
     }
 }
 

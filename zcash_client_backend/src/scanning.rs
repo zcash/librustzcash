@@ -7,12 +7,12 @@ use std::hash::Hash;
 
 use incrementalmerkletree::{Position, Retention};
 use sapling::{
-    note_encryption::{CompactOutputDescription, PreparedIncomingViewingKey, SaplingDomain},
-    zip32::DiversifiableFullViewingKey,
+    note_encryption::{CompactOutputDescription, SaplingDomain},
     SaplingIvk,
 };
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
-use zcash_note_encryption::{batch, BatchDomain, ShieldedOutput};
+use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     transaction::TxId,
@@ -40,139 +40,183 @@ use crate::{
 ///
 /// [`CompactSaplingOutput`]: crate::proto::compact_formats::CompactSaplingOutput
 /// [`scan_block`]: crate::scanning::scan_block
-pub trait ScanningKey {
-    /// The type representing the scope of the scanning key.
-    type Scope: Clone + Eq + std::hash::Hash + Send + 'static;
-
-    /// The type of key that is used to decrypt outputs belonging to the wallet.
-    type IncomingViewingKey: Clone;
-
+pub trait ScanningKey<D: Domain, AccountId> {
     /// The type of key that is used to derive nullifiers.
     type NullifierDerivingKey: Clone;
 
     /// The type of nullifier extracted when a note is successfully obtained by trial decryption.
     type Nf;
 
-    /// The type of notes obtained by trial decryption.
-    type Note;
+    /// Prepare the key for use in batch trial decryption.
+    fn prepare(&self) -> D::IncomingViewingKey;
 
-    /// Obtain the underlying incoming viewing key(s) for this scanning key.
-    fn to_ivks(
-        &self,
-    ) -> Vec<(
-        Self::Scope,
-        Self::IncomingViewingKey,
-        Self::NullifierDerivingKey,
-    )>;
+    /// Returns the account identifier for this key. An account identifier corresponds
+    /// to at most a single unified spending key's worth of spend authority, such that
+    /// both received notes and change spendable by that spending authority will be
+    /// interpreted as belonging to that account.
+    fn account_id(&self) -> &AccountId;
+
+    /// Returns the [`zip32::Scope`] for which this key was derived, if known.
+    fn key_scope(&self) -> Option<Scope>;
 
     /// Produces the nullifier for the specified note and witness, if possible.
     ///
     /// IVK-based implementations of this trait cannot successfully derive
     /// nullifiers, in which case `Self::Nf` should be set to the unit type
     /// and this function is a no-op.
-    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, note_position: Position)
-        -> Self::Nf;
+    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Self::Nf>;
 }
 
-impl<K: ScanningKey> ScanningKey for &K {
-    type Scope = K::Scope;
-    type IncomingViewingKey = K::IncomingViewingKey;
+impl<D: Domain, AccountId, K: ScanningKey<D, AccountId>> ScanningKey<D, AccountId> for &K {
     type NullifierDerivingKey = K::NullifierDerivingKey;
     type Nf = K::Nf;
-    type Note = K::Note;
 
-    fn to_ivks(
-        &self,
-    ) -> Vec<(
-        Self::Scope,
-        Self::IncomingViewingKey,
-        Self::NullifierDerivingKey,
-    )> {
-        (*self).to_ivks()
+    fn prepare(&self) -> D::IncomingViewingKey {
+        (*self).prepare()
     }
 
-    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, position: Position) -> Self::Nf {
-        K::nf(key, note, position)
+    fn account_id(&self) -> &AccountId {
+        (*self).account_id()
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        (*self).key_scope()
+    }
+
+    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Self::Nf> {
+        (*self).nf(note, note_position)
     }
 }
 
-impl ScanningKey for DiversifiableFullViewingKey {
-    type Scope = Scope;
-    type IncomingViewingKey = SaplingIvk;
+pub struct SaplingScanningKey<AccountId> {
+    ivk: SaplingIvk,
+    nk: Option<sapling::NullifierDerivingKey>,
+    account_id: AccountId,
+    key_scope: Option<Scope>,
+}
+
+impl<AccountId> ScanningKey<SaplingDomain, AccountId> for SaplingScanningKey<AccountId> {
     type NullifierDerivingKey = sapling::NullifierDerivingKey;
     type Nf = sapling::Nullifier;
-    type Note = sapling::Note;
 
-    fn to_ivks(
-        &self,
-    ) -> Vec<(
-        Self::Scope,
-        Self::IncomingViewingKey,
-        Self::NullifierDerivingKey,
-    )> {
-        vec![
-            (
-                Scope::External,
-                self.to_ivk(Scope::External),
-                self.to_nk(Scope::External),
-            ),
-            (
-                Scope::Internal,
-                self.to_ivk(Scope::Internal),
-                self.to_nk(Scope::Internal),
-            ),
-        ]
+    fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
+        sapling::note_encryption::PreparedIncomingViewingKey::new(&self.ivk)
     }
 
-    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, position: Position) -> Self::Nf {
-        note.nf(key, position.into())
+    fn nf(&self, note: &sapling::Note, position: Position) -> Option<Self::Nf> {
+        self.nk.as_ref().map(|key| note.nf(key, position.into()))
+    }
+
+    fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.key_scope
     }
 }
 
-impl ScanningKey for (Scope, SaplingIvk, sapling::NullifierDerivingKey) {
-    type Scope = Scope;
-    type IncomingViewingKey = SaplingIvk;
+impl<AccountId> ScanningKey<SaplingDomain, AccountId> for (AccountId, SaplingIvk) {
     type NullifierDerivingKey = sapling::NullifierDerivingKey;
     type Nf = sapling::Nullifier;
-    type Note = sapling::Note;
 
-    fn to_ivks(
-        &self,
-    ) -> Vec<(
-        Self::Scope,
-        Self::IncomingViewingKey,
-        Self::NullifierDerivingKey,
-    )> {
-        vec![self.clone()]
+    fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
+        sapling::note_encryption::PreparedIncomingViewingKey::new(&self.1)
     }
 
-    fn nf(key: &Self::NullifierDerivingKey, note: &Self::Note, position: Position) -> Self::Nf {
-        note.nf(key, position.into())
+    fn nf(&self, _note: &sapling::Note, _position: Position) -> Option<Self::Nf> {
+        None
+    }
+
+    fn account_id(&self) -> &AccountId {
+        &self.0
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        None
     }
 }
 
-/// The [`ScanningKey`] implementation for [`SaplingIvk`]s.
-/// Nullifiers cannot be derived when scanning with these keys.
-///
-/// [`SaplingIvk`]: sapling::SaplingIvk
-impl ScanningKey for SaplingIvk {
-    type Scope = ();
-    type IncomingViewingKey = SaplingIvk;
-    type NullifierDerivingKey = ();
-    type Nf = ();
-    type Note = sapling::Note;
+pub struct ScanningKeys<AccountId, IvkTag> {
+    sapling_keys: HashMap<IvkTag, SaplingScanningKey<AccountId>>,
+    sapling_nullifiers: Vec<(AccountId, sapling::Nullifier)>,
+}
 
-    fn to_ivks(
-        &self,
-    ) -> Vec<(
-        Self::Scope,
-        Self::IncomingViewingKey,
-        Self::NullifierDerivingKey,
-    )> {
-        vec![((), self.clone(), ())]
+impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
+    pub fn empty() -> Self {
+        Self {
+            sapling_keys: HashMap::new(),
+            sapling_nullifiers: vec![],
+        }
     }
 
-    fn nf(_key: &Self::NullifierDerivingKey, _note: &Self::Note, _position: Position) -> Self::Nf {}
+    pub fn sapling_keys(&self) -> &HashMap<IvkTag, SaplingScanningKey<AccountId>> {
+        &self.sapling_keys
+    }
+
+    pub fn sapling_nullifiers(&self) -> &[(AccountId, sapling::Nullifier)] {
+        self.sapling_nullifiers.as_ref()
+    }
+}
+
+impl<AccountId: Copy + Eq + Hash> ScanningKeys<AccountId, (AccountId, zip32::Scope)> {
+    pub fn from_account_ufvks(
+        ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
+    ) -> Self {
+        let sapling_keys = ufvks
+            .into_iter()
+            .flat_map(|(account_id, ufvk)| {
+                if let Some(dfvk) = ufvk.sapling() {
+                    vec![
+                        SaplingScanningKey {
+                            ivk: dfvk.to_ivk(Scope::External),
+                            nk: Some(dfvk.to_nk(Scope::External)),
+                            account_id,
+                            key_scope: Some(Scope::External),
+                        },
+                        SaplingScanningKey {
+                            ivk: dfvk.to_ivk(Scope::Internal),
+                            nk: Some(dfvk.to_nk(Scope::Internal)),
+                            account_id,
+                            key_scope: Some(Scope::Internal),
+                        },
+                    ]
+                } else {
+                    vec![]
+                }
+                .into_iter()
+            })
+            .map(|key| {
+                (
+                    (
+                        *key.account_id(),
+                        key.key_scope()
+                            .expect("Key scope is available for each key"),
+                    ),
+                    key,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        Self {
+            sapling_keys,
+            sapling_nullifiers: vec![],
+        }
+    }
+
+    pub(crate) fn retain_sapling_nullifiers(
+        &mut self,
+        f: impl Fn(&(AccountId, sapling::Nullifier)) -> bool,
+    ) {
+        self.sapling_nullifiers.retain(f);
+    }
+
+    pub(crate) fn extend_sapling_nullifiers(
+        &mut self,
+        nfs: impl IntoIterator<Item = (AccountId, sapling::Nullifier)>,
+    ) {
+        self.sapling_nullifiers.extend(nfs);
+    }
 }
 
 /// Errors that may occur in chain scanning
@@ -266,65 +310,40 @@ impl fmt::Display for ScanError {
     }
 }
 
-/// Scans a [`CompactBlock`] with a set of [`ScanningKey`]s.
+/// Scans a [`CompactBlock`] with a set of [`ScanningKeys`].
 ///
-/// Returns a vector of [`WalletTx`]s belonging to any of the given
-/// [`ScanningKey`]s. If scanning with a full viewing key, the nullifiers
-/// of the resulting [`WalletSaplingOutput`]s will also be computed.
+/// Returns a vector of [`WalletTx`]s decryptable by any of the given keys. If an output is
+/// decrypted by a full viewing key, the nullifiers of that output will also be computed.
 ///
-/// The given [`CommitmentTree`] and existing [`IncrementalWitness`]es are
-/// incremented appropriately.
-///
-/// The implementation of [`ScanningKey`] may either support or omit the computation of
-/// the nullifiers for received notes; the implementation for [`ExtendedFullViewingKey`]
-/// will derive the nullifiers for received notes and return them as part of the resulting
-/// [`WalletSaplingOutput`]s, whereas the implementation for [`SaplingIvk`] cannot
-/// do so and will return the unit value in those outputs instead.
-///
-/// [`ExtendedFullViewingKey`]: sapling::zip32::ExtendedFullViewingKey
-/// [`SaplingIvk`]: sapling::SaplingIvk
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-/// [`ScanningKey`]: crate::scanning::ScanningKey
-/// [`CommitmentTree`]: sapling::CommitmentTree
-/// [`IncrementalWitness`]: sapling::IncrementalWitness
-/// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<P, A, SK>(
+pub fn scan_block<P, AccountId, IvkTag>(
     params: &P,
     block: CompactBlock,
-    sapling_keys: &[(&A, &SK)],
-    sapling_nullifiers: &[(A, sapling::Nullifier)],
+    scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<SK::Nf, SK::Scope, A>, ScanError>
+) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
-    A: Default + Eq + Hash + Send + ConditionallySelectable + 'static,
-    SK: ScanningKey<IncomingViewingKey = SaplingIvk, Note = sapling::Note>,
+    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
+    IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
-    scan_block_with_runner::<_, A, _, ()>(
-        params,
-        block,
-        sapling_keys,
-        sapling_nullifiers,
-        prior_block_metadata,
-        None,
-    )
+    scan_block_with_runner::<_, _, _, ()>(params, block, scanning_keys, prior_block_metadata, None)
 }
 
-type TaggedBatch<A, S> = Batch<(A, S), SaplingDomain, CompactOutputDescription, CompactDecryptor>;
-type TaggedBatchRunner<A, S, T> =
-    BatchRunner<(A, S), SaplingDomain, CompactOutputDescription, CompactDecryptor, T>;
+type TaggedBatch<IvkTag> = Batch<IvkTag, SaplingDomain, CompactOutputDescription, CompactDecryptor>;
+type TaggedBatchRunner<IvkTag, BatchTag> =
+    BatchRunner<IvkTag, SaplingDomain, CompactOutputDescription, CompactDecryptor, BatchTag>;
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn add_block_to_runner<P, S, T, A>(
+pub(crate) fn add_block_to_runner<P, IvkTag, T>(
     params: &P,
     block: CompactBlock,
-    batch_runner: &mut TaggedBatchRunner<A, S, T>,
+    batch_runner: &mut TaggedBatchRunner<IvkTag, T>,
 ) where
     P: consensus::Parameters + Send + 'static,
-    S: Clone + Send + 'static,
-    T: Tasks<TaggedBatch<A, S>>,
-    A: Copy + Default + Eq + Send + 'static,
+    IvkTag: Copy + Send + 'static,
+    T: Tasks<TaggedBatch<IvkTag>>,
 {
     let block_hash = block.hash();
     let block_height = block.height();
@@ -373,19 +392,18 @@ fn check_hash_continuity(
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn scan_block_with_runner<P, A, SK, T>(
+pub(crate) fn scan_block_with_runner<P, AccountId, IvkTag, T>(
     params: &P,
     block: CompactBlock,
-    sapling_keys: &[(&A, SK)],
-    sapling_nullifiers: &[(A, sapling::Nullifier)],
+    scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     prior_block_metadata: Option<&BlockMetadata>,
-    mut sapling_batch_runner: Option<&mut TaggedBatchRunner<A, SK::Scope, T>>,
-) -> Result<ScannedBlock<SK::Nf, SK::Scope, A>, ScanError>
+    mut sapling_batch_runner: Option<&mut TaggedBatchRunner<IvkTag, T>>,
+) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
-    SK: ScanningKey<IncomingViewingKey = SaplingIvk, Note = sapling::Note>,
-    T: Tasks<TaggedBatch<A, SK::Scope>> + Sync,
-    A: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
+    AccountId: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
+    IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
+    T: Tasks<TaggedBatch<IvkTag>> + Sync,
 {
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
@@ -489,7 +507,7 @@ where
         )?;
 
     let compact_block_tx_count = block.vtx.len();
-    let mut wtxs: Vec<WalletTx<SK::Nf, SK::Scope, A>> = vec![];
+    let mut wtxs: Vec<WalletTx<AccountId>> = vec![];
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
@@ -499,7 +517,7 @@ where
 
         let (sapling_spends, sapling_unlinked_nullifiers) = find_spent(
             &tx.spends,
-            sapling_nullifiers,
+            &scanning_keys.sapling_nullifiers,
             |spend| {
                 spend.nf().expect(
                     "Could not deserialize nullifier for spend from protobuf representation.",
@@ -522,7 +540,7 @@ where
             txid,
             tx_idx,
             sapling_commitment_tree_size,
-            sapling_keys,
+            &scanning_keys.sapling_keys,
             &spent_from_accounts,
             &tx.outputs
                 .iter()
@@ -537,31 +555,30 @@ where
             sapling_batch_runner
                 .as_mut()
                 .map(|runner| |txid| runner.collect_results(cur_hash, txid)),
-            PreparedIncomingViewingKey::new,
             |output| sapling::Node::from_cmu(&output.cmu),
-            |output_idx, output, account, note, is_change, position, nf, scope| {
+            |output_idx, output, note, is_change, position, nf, account_id, key_scope| {
                 WalletSaplingOutput::from_parts(
                     output_idx,
                     output.cmu,
                     output.ephemeral_key.clone(),
-                    account,
+                    account_id,
                     note,
                     is_change,
                     position,
                     nf,
-                    scope,
+                    key_scope,
                 )
             },
         );
         sapling_note_commitments.append(&mut sapling_nc);
 
         if !(sapling_spends.is_empty() && sapling_outputs.is_empty()) {
-            wtxs.push(WalletTx {
+            wtxs.push(WalletTx::new(
                 txid,
-                index: tx_index as usize,
+                tx_index as usize,
                 sapling_spends,
                 sapling_outputs,
-            });
+            ));
         }
 
         sapling_commitment_tree_size +=
@@ -615,11 +632,16 @@ where
 
 // Check for spent notes. The comparison against known-unspent nullifiers is done
 // in constant time.
-fn find_spent<A: ConditionallySelectable + Default, Spend, Nf: ConstantTimeEq + Copy, WS>(
+fn find_spent<
+    AccountId: ConditionallySelectable + Default,
+    Spend,
+    Nf: ConstantTimeEq + Copy,
+    WS,
+>(
     spends: &[Spend],
-    nullifiers: &[(A, Nf)],
+    nullifiers: &[(AccountId, Nf)],
     extract_nf: impl Fn(&Spend) -> Nf,
-    construct_wallet_spend: impl Fn(usize, Nf, A) -> WS,
+    construct_wallet_spend: impl Fn(usize, Nf, AccountId) -> WS,
 ) -> (Vec<WS>, Vec<Nf>) {
     // TODO: this is O(|nullifiers| * |notes|); does using constant-time operations here really
     // make sense?
@@ -628,17 +650,18 @@ fn find_spent<A: ConditionallySelectable + Default, Spend, Nf: ConstantTimeEq + 
     for (index, spend) in spends.iter().enumerate() {
         let spend_nf = extract_nf(spend);
 
-        // Find the first tracked nullifier that matches this spend, and produce
-        // a WalletShieldedSpend if there is a match, in constant time.
-        let spend = nullifiers
+        // Find whether any tracked nullifier that matches this spend, and produce a
+        // WalletShieldedSpend in constant time.
+        let ct_spend = nullifiers
             .iter()
             .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
-            .fold(CtOption::new(A::default(), 0.into()), |first, next| {
-                CtOption::conditional_select(&next, &first, first.is_some())
-            })
+            .fold(
+                CtOption::new(AccountId::default(), 0.into()),
+                |first, next| CtOption::conditional_select(&next, &first, first.is_some()),
+            )
             .map(|account| construct_wallet_spend(index, spend_nf, account));
 
-        if let Some(spend) = spend.into() {
+        if let Some(spend) = ct_spend.into() {
             found_spent.push(spend);
         } else {
             // This nullifier didn't match any we are currently tracking; save it in
@@ -646,15 +669,17 @@ fn find_spent<A: ConditionallySelectable + Default, Spend, Nf: ConstantTimeEq + 
             unlinked_nullifiers.push(spend_nf);
         }
     }
+
     (found_spent, unlinked_nullifiers)
 }
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 fn find_received<
-    A: Copy + Eq + Hash,
+    AccountId: Copy + Eq + Hash,
     D: BatchDomain,
-    SK: ScanningKey<Note = D::Note>,
+    IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
+    SK: ScanningKey<D, AccountId>,
     Output: ShieldedOutput<D, 52>,
     WalletOutput,
     NoteCommitment,
@@ -664,23 +689,22 @@ fn find_received<
     txid: TxId,
     tx_idx: usize,
     commitment_tree_size: u32,
-    keys: &[(&A, SK)],
-    spent_from_accounts: &HashSet<A>,
+    keys: &HashMap<IvkTag, SK>,
+    spent_from_accounts: &HashSet<AccountId>,
     decoded: &[(D, Output)],
     batch_results: Option<
-        impl FnOnce(TxId) -> HashMap<(TxId, usize), DecryptedOutput<(A, SK::Scope), D, ()>>,
+        impl FnOnce(TxId) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, ()>>,
     >,
-    prepare_key: impl Fn(&SK::IncomingViewingKey) -> D::IncomingViewingKey,
     extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
     new_wallet_output: impl Fn(
         usize,
         &Output,
-        A,
-        SK::Note,
+        D::Note,
         bool,
         Position,
-        SK::Nf,
-        SK::Scope,
+        Option<SK::Nf>,
+        AccountId,
+        Option<zip32::Scope>,
     ) -> WalletOutput,
 ) -> (
     Vec<WalletOutput>,
@@ -688,45 +712,25 @@ fn find_received<
 ) {
     // Check for incoming notes while incrementing tree and witnesses
     let (decrypted_opts, decrypted_len) = if let Some(collect_results) = batch_results {
-        let tagged_keys = keys
-            .iter()
-            .flat_map(|(a, k)| {
-                k.to_ivks()
-                    .into_iter()
-                    .map(move |(scope, _, nk)| ((**a, scope), nk))
-            })
-            .collect::<HashMap<_, _>>();
-
         let mut decrypted = collect_results(txid);
         let decrypted_len = decrypted.len();
         (
             (0..decoded.len())
                 .map(|i| {
-                    decrypted.remove(&(txid, i)).map(|d_out| {
-                        let nk = tagged_keys.get(&d_out.ivk_tag).expect(
-                            "The batch runner and scan_block must use the same set of IVKs.",
-                        );
-
-                        (d_out.note, d_out.ivk_tag.0, d_out.ivk_tag.1, (*nk).clone())
-                    })
+                    decrypted
+                        .remove(&(txid, i))
+                        .map(|d_out| (d_out.ivk_tag, d_out.note))
                 })
                 .collect::<Vec<_>>(),
             decrypted_len,
         )
     } else {
-        let tagged_keys = keys
-            .iter()
-            .flat_map(|(a, k)| {
-                k.to_ivks()
-                    .into_iter()
-                    .map(move |(scope, ivk, nk)| (**a, scope, ivk, nk))
-            })
-            .collect::<Vec<_>>();
-
-        let ivks = tagged_keys
-            .iter()
-            .map(|(_, _, ivk, _)| prepare_key(ivk))
-            .collect::<Vec<_>>();
+        let mut ivks = Vec::with_capacity(keys.len());
+        let mut ivk_lookup = Vec::with_capacity(keys.len());
+        for (key_id, key) in keys.iter() {
+            ivks.push(key.prepare());
+            ivk_lookup.push(key_id);
+        }
 
         let mut decrypted_len = 0;
         (
@@ -735,8 +739,7 @@ fn find_received<
                 .map(|v| {
                     v.map(|((note, _), ivk_idx)| {
                         decrypted_len += 1;
-                        let (a, scope, _, nk) = &tagged_keys[ivk_idx];
-                        (note, *a, scope.clone(), (*nk).clone())
+                        (*ivk_lookup[ivk_idx], note)
                     })
                 })
                 .collect::<Vec<_>>(),
@@ -746,11 +749,13 @@ fn find_received<
 
     let mut shielded_outputs = Vec::with_capacity(decrypted_len);
     let mut note_commitments = Vec::with_capacity(decoded.len());
-    for (output_idx, ((_, output), dec_output)) in decoded.iter().zip(decrypted_opts).enumerate() {
+    for (output_idx, ((_, output), decrypted_note)) in
+        decoded.iter().zip(decrypted_opts).enumerate()
+    {
         // Collect block note commitments
         let node = extract_note_commitment(output);
         let is_checkpoint = output_idx + 1 == decoded.len() && tx_idx + 1 == block_tx_count;
-        let retention = match (dec_output.is_some(), is_checkpoint) {
+        let retention = match (decrypted_note.is_some(), is_checkpoint) {
             (is_marked, true) => Retention::Checkpoint {
                 id: block_height,
                 is_marked,
@@ -759,28 +764,32 @@ fn find_received<
             (false, false) => Retention::Ephemeral,
         };
 
-        if let Some((note, account, scope, nk)) = dec_output {
+        if let Some((key_id, note)) = decrypted_note {
+            let key = keys
+                .get(&key_id)
+                .expect("Key is available for decrypted output");
+
             // A note is marked as "change" if the account that received it
             // also spent notes in the same transaction. This will catch,
             // for instance:
             // - Change created by spending fractions of notes.
             // - Notes created by consolidation transactions.
             // - Notes sent from one account to itself.
-            let is_change = spent_from_accounts.contains(&account);
+            let is_change = spent_from_accounts.contains(key.account_id());
             let note_commitment_tree_position = Position::from(u64::from(
                 commitment_tree_size + u32::try_from(output_idx).unwrap(),
             ));
-            let nf = SK::nf(&nk, &note, note_commitment_tree_position);
+            let nf = key.nf(&note, note_commitment_tree_position);
 
             shielded_outputs.push(new_wallet_output(
                 output_idx,
                 output,
-                account,
                 note,
                 is_change,
                 note_commitment_tree_position,
                 nf,
-                scope,
+                *key.account_id(),
+                key.key_scope(),
             ));
         }
 
@@ -792,6 +801,7 @@ fn find_received<
 
 #[cfg(test)]
 mod tests {
+
     use group::{
         ff::{Field, PrimeField},
         GroupEncoding,
@@ -800,12 +810,13 @@ mod tests {
     use rand_core::{OsRng, RngCore};
     use sapling::{
         constants::SPENDING_KEY_GENERATOR,
-        note_encryption::{sapling_note_encryption, PreparedIncomingViewingKey, SaplingDomain},
+        note_encryption::{sapling_note_encryption, SaplingDomain},
         util::generate_random_rseed,
         value::NoteValue,
-        zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
-        Nullifier, SaplingIvk,
+        zip32::DiversifiableFullViewingKey,
+        Nullifier,
     };
+    use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_note_encryption::Domain;
     use zcash_primitives::{
         block::BlockHash,
@@ -821,9 +832,10 @@ mod tests {
             self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
         scan::BatchRunner,
+        scanning::{ScanningKey, ScanningKeys},
     };
 
-    use super::{add_block_to_runner, scan_block, scan_block_with_runner, ScanningKey};
+    use super::{add_block_to_runner, scan_block, scan_block_with_runner};
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -946,15 +958,19 @@ mod tests {
     #[test]
     fn scan_block_with_my_tx() {
         fn go(scan_multithreaded: bool) {
+            let network = Network::TestNetwork;
             let account = AccountId::ZERO;
-            let extsk = ExtendedSpendingKey::master(&[]);
-            let dfvk = extsk.to_diversifiable_full_viewing_key();
+            let usk =
+                UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
+            let ufvk = usk.to_unified_full_viewing_key();
+            let sapling_dfvk = ufvk.sapling().expect("Sapling key is present").clone();
+            let scanning_keys = ScanningKeys::from_account_ufvks([(account, ufvk)]);
 
             let cb = fake_compact_block(
                 1u32.into(),
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
-                &dfvk,
+                &sapling_dfvk,
                 NonNegativeAmount::const_from_u64(5),
                 false,
                 None,
@@ -964,10 +980,10 @@ mod tests {
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
-                    dfvk.to_ivks()
+                    scanning_keys
+                        .sapling_keys()
                         .iter()
-                        .map(|(scope, ivk, _)| ((account, *scope), ivk))
-                        .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
+                        .map(|(key_id, key)| (*key_id, key.prepare())),
                 );
 
                 add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
@@ -979,10 +995,9 @@ mod tests {
             };
 
             let scanned_block = scan_block_with_runner(
-                &Network::TestNetwork,
+                &network,
                 cb,
-                &[(&account, &dfvk)],
-                &[],
+                &scanning_keys,
                 Some(&BlockMetadata::from_parts(
                     BlockHeight::from(0),
                     BlockHash([0u8; 32]),
@@ -997,14 +1012,14 @@ mod tests {
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
-            assert_eq!(tx.index, 1);
-            assert_eq!(tx.sapling_spends.len(), 0);
-            assert_eq!(tx.sapling_outputs.len(), 1);
-            assert_eq!(tx.sapling_outputs[0].index(), 0);
-            assert_eq!(*tx.sapling_outputs[0].account(), account);
-            assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
+            assert_eq!(tx.block_index(), 1);
+            assert_eq!(tx.sapling_spends().len(), 0);
+            assert_eq!(tx.sapling_outputs().len(), 1);
+            assert_eq!(tx.sapling_outputs()[0].index(), 0);
+            assert_eq!(tx.sapling_outputs()[0].account_id(), &account);
+            assert_eq!(tx.sapling_outputs()[0].note().value().inner(), 5);
             assert_eq!(
-                tx.sapling_outputs[0].note_commitment_tree_position(),
+                tx.sapling_outputs()[0].note_commitment_tree_position(),
                 Position::from(1)
             );
 
@@ -1033,15 +1048,19 @@ mod tests {
     #[test]
     fn scan_block_with_txs_after_my_tx() {
         fn go(scan_multithreaded: bool) {
+            let network = Network::TestNetwork;
             let account = AccountId::ZERO;
-            let extsk = ExtendedSpendingKey::master(&[]);
-            let dfvk = extsk.to_diversifiable_full_viewing_key();
+            let usk =
+                UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
+            let ufvk = usk.to_unified_full_viewing_key();
+            let sapling_dfvk = ufvk.sapling().expect("Sapling key is present").clone();
+            let scanning_keys = ScanningKeys::from_account_ufvks([(account, ufvk)]);
 
             let cb = fake_compact_block(
                 1u32.into(),
                 BlockHash([0; 32]),
                 Nullifier([0; 32]),
-                &dfvk,
+                &sapling_dfvk,
                 NonNegativeAmount::const_from_u64(5),
                 true,
                 Some((0, 0)),
@@ -1051,10 +1070,10 @@ mod tests {
             let mut batch_runner = if scan_multithreaded {
                 let mut runner = BatchRunner::<_, _, _, _, ()>::new(
                     10,
-                    dfvk.to_ivks()
+                    scanning_keys
+                        .sapling_keys()
                         .iter()
-                        .map(|(scope, ivk, _)| ((account, *scope), ivk))
-                        .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(ivk))),
+                        .map(|(key_id, key)| (*key_id, key.prepare())),
                 );
 
                 add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
@@ -1065,25 +1084,19 @@ mod tests {
                 None
             };
 
-            let scanned_block = scan_block_with_runner(
-                &Network::TestNetwork,
-                cb,
-                &[(&AccountId::ZERO, &dfvk)],
-                &[],
-                None,
-                batch_runner.as_mut(),
-            )
-            .unwrap();
+            let scanned_block =
+                scan_block_with_runner(&network, cb, &scanning_keys, None, batch_runner.as_mut())
+                    .unwrap();
             let txs = scanned_block.transactions();
             assert_eq!(txs.len(), 1);
 
             let tx = &txs[0];
-            assert_eq!(tx.index, 1);
-            assert_eq!(tx.sapling_spends.len(), 0);
-            assert_eq!(tx.sapling_outputs.len(), 1);
-            assert_eq!(tx.sapling_outputs[0].index(), 0);
-            assert_eq!(*tx.sapling_outputs[0].account(), AccountId::ZERO);
-            assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
+            assert_eq!(tx.block_index(), 1);
+            assert_eq!(tx.sapling_spends().len(), 0);
+            assert_eq!(tx.sapling_outputs().len(), 1);
+            assert_eq!(tx.sapling_outputs()[0].index(), 0);
+            assert_eq!(tx.sapling_outputs()[0].account_id(), &AccountId::ZERO);
+            assert_eq!(tx.sapling_outputs()[0].note().value().inner(), 5);
 
             assert_eq!(
                 scanned_block
@@ -1109,41 +1122,37 @@ mod tests {
 
     #[test]
     fn scan_block_with_my_spend() {
-        let extsk = ExtendedSpendingKey::master(&[]);
-        let dfvk = extsk.to_diversifiable_full_viewing_key();
-        let nf = Nullifier([7; 32]);
+        let network = Network::TestNetwork;
         let account = AccountId::try_from(12).unwrap();
+        let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
+        let ufvk = usk.to_unified_full_viewing_key();
+        let mut scanning_keys = ScanningKeys::empty();
+
+        let nf = Nullifier([7; 32]);
+        scanning_keys.extend_sapling_nullifiers([(account, nf)]);
 
         let cb = fake_compact_block(
             1u32.into(),
             BlockHash([0; 32]),
             nf,
-            &dfvk,
+            ufvk.sapling().unwrap(),
             NonNegativeAmount::const_from_u64(5),
             false,
             Some((0, 0)),
         );
         assert_eq!(cb.vtx.len(), 2);
-        let sapling_keys: Vec<(&AccountId, &SaplingIvk)> = vec![];
 
-        let scanned_block = scan_block(
-            &Network::TestNetwork,
-            cb,
-            &sapling_keys[..],
-            &[(account, nf)],
-            None,
-        )
-        .unwrap();
+        let scanned_block = scan_block(&network, cb, &scanning_keys, None).unwrap();
         let txs = scanned_block.transactions();
         assert_eq!(txs.len(), 1);
 
         let tx = &txs[0];
-        assert_eq!(tx.index, 1);
-        assert_eq!(tx.sapling_spends.len(), 1);
-        assert_eq!(tx.sapling_outputs.len(), 0);
-        assert_eq!(tx.sapling_spends[0].index(), 0);
-        assert_eq!(tx.sapling_spends[0].nf(), &nf);
-        assert_eq!(tx.sapling_spends[0].account().to_owned(), account);
+        assert_eq!(tx.block_index(), 1);
+        assert_eq!(tx.sapling_spends().len(), 1);
+        assert_eq!(tx.sapling_outputs().len(), 0);
+        assert_eq!(tx.sapling_spends()[0].index(), 0);
+        assert_eq!(tx.sapling_spends()[0].nf(), &nf);
+        assert_eq!(tx.sapling_spends()[0].account(), &account);
 
         assert_eq!(
             scanned_block

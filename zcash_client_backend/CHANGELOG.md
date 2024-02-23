@@ -84,6 +84,8 @@ and this library adheres to Rust's notion of
   - `ProposalDecodingError`
   - `proposal` module, for parsing and serializing transaction proposals.
   - `impl TryFrom<&CompactSaplingOutput> for CompactOutputDescription`
+- `zcash_client_backend::scanning`:
+  - `ScanningKeys`
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
      wallet::WalletTransparentOutput,
@@ -136,13 +138,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::data_api`:
   - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
     a `u32` for future consistency with Orchard.
-  - `WalletShieldedOutput` has an additional type parameter which is used for
-    key scope. `WalletShieldedOutput::from_parts` now takes an additional
-    argument of this type.
-  - `WalletTx` has an additional type parameter as a consequence of the
-    `WalletShieldedOutput` change.
-  - `ScannedBlock` has an additional type parameter as a consequence of the
-    `WalletTx` change.
+  - `WalletShieldedOutput::from_parts` now takes an additional key source metadata.
+  - `WalletTx` is no longer parameterized by the nullifier type; instead, the 
+    nullifier is present as an optional value.
+  - `ScannedBlock` is no longer parameterized by the nullifier type as a consequence
+    of the `WalletTx` change.
   - `ScannedBlock::metadata` has been renamed to `to_block_metadata` and now
     returns an owned value rather than a reference.
   - Fields of `Balance` and `AccountBalance` have been made private and the values

@@ -145,7 +145,6 @@
 
 use std::ops::Range;
 
-use sapling::note_encryption::PreparedIncomingViewingKey;
 use subtle::ConditionallySelectable;
 use zcash_primitives::consensus::{self, BlockHeight};
 
@@ -153,7 +152,7 @@ use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
-    scanning::{add_block_to_runner, scan_block_with_runner, ScanningKey},
+    scanning::{add_block_to_runner, scan_block_with_runner, ScanningKey, ScanningKeys},
 };
 
 pub mod error;
@@ -280,27 +279,25 @@ where
     <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
-    let ufvks = data_db
-        .get_unified_full_viewing_keys()
-        .map_err(Error::Wallet)?;
-    // TODO: Change `scan_block` to also scan Orchard.
-    // https://github.com/zcash/librustzcash/issues/403
-    let sapling_ivks: Vec<_> = ufvks
-        .iter()
-        .filter_map(|(account, ufvk)| ufvk.sapling().map(move |k| (account, k)))
-        .flat_map(|(account, dfvk)| dfvk.to_ivks().into_iter().map(move |key| (account, key)))
-        .collect::<Vec<_>>();
+    let mut scanning_keys = ScanningKeys::from_account_ufvks(
+        data_db
+            .get_unified_full_viewing_keys()
+            .map_err(Error::Wallet)?,
+    );
 
     // Get the nullifiers for the unspent notes we are tracking
-    let mut sapling_nullifiers = data_db
-        .get_sapling_nullifiers(NullifierQuery::Unspent)
-        .map_err(Error::Wallet)?;
+    scanning_keys.extend_sapling_nullifiers(
+        data_db
+            .get_sapling_nullifiers(NullifierQuery::Unspent)
+            .map_err(Error::Wallet)?,
+    );
 
     let mut sapling_runner = BatchRunner::<_, _, _, _, ()>::new(
         100,
-        sapling_ivks.iter().map(|(account, (scope, ivk, _))| {
-            ((**account, *scope), PreparedIncomingViewingKey::new(ivk))
-        }),
+        scanning_keys
+            .sapling_keys()
+            .iter()
+            .map(|(id, key)| (*id, key.prepare())),
     );
 
     block_source.with_blocks::<_, DbT::Error>(
@@ -335,8 +332,7 @@ where
             let scanned_block = scan_block_with_runner(
                 params,
                 block,
-                &sapling_ivks,
-                &sapling_nullifiers,
+                &scanning_keys,
                 prior_block_metadata.as_ref(),
                 Some(&mut sapling_runner),
             )
@@ -346,7 +342,10 @@ where
                 .transactions
                 .iter()
                 .fold((0, 0), |(s, r), wtx| {
-                    (s + wtx.sapling_spends.len(), r + wtx.sapling_outputs.len())
+                    (
+                        s + wtx.sapling_spends().len(),
+                        r + wtx.sapling_outputs().len(),
+                    )
                 });
             spent_note_count += s;
             received_note_count += r;
@@ -354,15 +353,17 @@ where
             let spent_nf: Vec<&sapling::Nullifier> = scanned_block
                 .transactions
                 .iter()
-                .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf()))
+                .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
                 .collect();
 
-            sapling_nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
-            sapling_nullifiers.extend(scanned_block.transactions.iter().flat_map(|tx| {
-                tx.sapling_outputs
-                    .iter()
-                    .map(|out| (*out.account(), *out.nf()))
-            }));
+            scanning_keys.retain_sapling_nullifiers(|(_, nf)| !spent_nf.contains(&nf));
+            scanning_keys.extend_sapling_nullifiers(scanned_block.transactions.iter().flat_map(
+                |tx| {
+                    tx.sapling_outputs()
+                        .iter()
+                        .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+                },
+            ));
 
             prior_block_metadata = Some(scanned_block.to_block_metadata());
             scanned_blocks.push(scanned_block);

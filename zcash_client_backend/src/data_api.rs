@@ -29,7 +29,6 @@ use zcash_primitives::{
         components::amount::{Amount, BalanceError, NonNegativeAmount},
         Transaction, TxId,
     },
-    zip32::Scope,
 };
 
 #[cfg(feature = "transparent-inputs")]
@@ -713,23 +712,23 @@ pub struct ScannedBlockCommitments {
 /// decrypted and extracted from a [`CompactBlock`].
 ///
 /// [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
-pub struct ScannedBlock<Nf, S, A> {
+pub struct ScannedBlock<A> {
     block_height: BlockHeight,
     block_hash: BlockHash,
     block_time: u32,
-    transactions: Vec<WalletTx<Nf, S, A>>,
+    transactions: Vec<WalletTx<A>>,
     sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
     #[cfg(feature = "orchard")]
     orchard: ScannedBundles<orchard::note::NoteCommitment, orchard::note::Nullifier>,
 }
 
-impl<Nf, S, A> ScannedBlock<Nf, S, A> {
+impl<A> ScannedBlock<A> {
     /// Constructs a new `ScannedBlock`
     pub(crate) fn from_parts(
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
-        transactions: Vec<WalletTx<Nf, S, A>>,
+        transactions: Vec<WalletTx<A>>,
         sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
         #[cfg(feature = "orchard")] orchard: ScannedBundles<
             orchard::note::NoteCommitment,
@@ -763,7 +762,7 @@ impl<Nf, S, A> ScannedBlock<Nf, S, A> {
     }
 
     /// Returns the list of transactions from this block that are relevant to the wallet.
-    pub fn transactions(&self) -> &[WalletTx<Nf, S, A>] {
+    pub fn transactions(&self) -> &[WalletTx<A>] {
         &self.transactions
     }
 
@@ -1057,10 +1056,8 @@ pub trait WalletWrite: WalletRead {
     /// pertaining to this wallet.
     ///
     /// `blocks` must be sequential, in order of increasing block height
-    fn put_blocks(
-        &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope, Self::AccountId>>,
-    ) -> Result<(), Self::Error>;
+    fn put_blocks(&mut self, blocks: Vec<ScannedBlock<Self::AccountId>>)
+        -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
     ///
@@ -1188,7 +1185,6 @@ pub mod testing {
         consensus::{BlockHeight, Network},
         memo::Memo,
         transaction::{components::Amount, Transaction, TxId},
-        zip32::Scope,
     };
 
     use crate::{
@@ -1424,7 +1420,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
-            _blocks: Vec<ScannedBlock<sapling::Nullifier, Scope, Self::AccountId>>,
+            _blocks: Vec<ScannedBlock<Self::AccountId>>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }

@@ -454,7 +454,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope, Self::AccountId>>,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let start_positions = blocks.first().map(|block| {
@@ -491,18 +491,24 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     let tx_row = wallet::put_tx_meta(wdb.conn.0, tx, block.height())?;
 
                     // Mark notes as spent and remove them from the scanning cache
-                    for spend in &tx.sapling_spends {
+                    for spend in tx.sapling_spends() {
                         wallet::sapling::mark_sapling_note_spent(wdb.conn.0, tx_row, spend.nf())?;
                     }
 
-                    for output in &tx.sapling_outputs {
+                    for output in tx.sapling_outputs() {
                         // Check whether this note was spent in a later block range that
                         // we previously scanned.
-                        let spent_in = wallet::query_nullifier_map::<_, Scope>(
-                            wdb.conn.0,
-                            ShieldedProtocol::Sapling,
-                            output.nf(),
-                        )?;
+                        let spent_in = output
+                            .nf()
+                            .map(|nf| {
+                                wallet::query_nullifier_map::<_, Scope>(
+                                    wdb.conn.0,
+                                    ShieldedProtocol::Sapling,
+                                    nf,
+                                )
+                            })
+                            .transpose()?
+                            .flatten();
 
                         wallet::sapling::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
                     }
@@ -517,7 +523,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
-                    wtx.sapling_outputs
+                    wtx.sapling_outputs()
                         .iter()
                         .map(|out| out.note_commitment_tree_position())
                 }));
