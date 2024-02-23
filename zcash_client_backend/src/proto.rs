@@ -161,10 +161,20 @@ impl TryFrom<compact_formats::CompactSaplingOutput>
     type Error = ();
 
     fn try_from(value: compact_formats::CompactSaplingOutput) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&compact_formats::CompactSaplingOutput>
+    for sapling::note_encryption::CompactOutputDescription
+{
+    type Error = ();
+
+    fn try_from(value: &compact_formats::CompactSaplingOutput) -> Result<Self, Self::Error> {
         Ok(sapling::note_encryption::CompactOutputDescription {
             cmu: value.cmu()?,
             ephemeral_key: value.ephemeral_key()?,
-            enc_ciphertext: value.ciphertext.try_into().map_err(|_| ())?,
+            enc_ciphertext: value.ciphertext[..].try_into().map_err(|_| ())?,
         })
     }
 }

@@ -23,6 +23,8 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::fees::ChangeValue::orchard`
 - `zcash_client_backend::wallet`:
   - `Note::Orchard`
+- `zcash_client_backend::proto`:
+  - `service::TreeState::orchard_tree`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -81,7 +83,7 @@ and this library adheres to Rust's notion of
   - `PROPOSAL_SER_V1`
   - `ProposalDecodingError`
   - `proposal` module, for parsing and serializing transaction proposals.
-  - `service::TreeState::orchard_tree` (behind the `orchard` feature flag)
+  - `impl TryFrom<&CompactSaplingOutput> for CompactOutputDescription`
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
      wallet::WalletTransparentOutput,
