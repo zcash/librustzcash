@@ -264,11 +264,11 @@ impl<AccountId> WalletSaplingOutput<AccountId> {
             index,
             cmu,
             ephemeral_key,
+            account_id,
             note,
             is_change,
             note_commitment_tree_position,
             nf,
-            account_id,
             recipient_key_scope,
         }
     }

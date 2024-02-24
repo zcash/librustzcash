@@ -152,7 +152,7 @@ use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scan::BatchRunner,
-    scanning::{add_block_to_runner, scan_block_with_runner, ScanningKey, ScanningKeys},
+    scanning::{add_block_to_runner, scan_block_with_runner, ScanningKeys},
 };
 
 pub mod error;

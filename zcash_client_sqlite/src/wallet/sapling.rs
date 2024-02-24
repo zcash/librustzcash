@@ -60,7 +60,6 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
     fn note_commitment_tree_position(&self) -> Option<Position> {
         Some(WalletSaplingOutput::note_commitment_tree_position(self))
     }
-
     fn recipient_key_scope(&self) -> Option<Scope> {
         self.recipient_key_scope()
     }

@@ -85,6 +85,9 @@ and this library adheres to Rust's notion of
   - `proposal` module, for parsing and serializing transaction proposals.
   - `impl TryFrom<&CompactSaplingOutput> for CompactOutputDescription`
 - `zcash_client_backend::scanning`:
+  - `ScanningKeyOps` has replaced the `ScanningKey` trait.
+  - `ScanningKey` is now a concrete type that bundles an incoming viewing key
+    with an optional nullifier key and key source metadata.
   - `ScanningKeys`
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
@@ -139,7 +142,7 @@ and this library adheres to Rust's notion of
   - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
     a `u32` for future consistency with Orchard.
   - `WalletShieldedOutput::from_parts` now takes an additional key source metadata.
-  - `WalletTx` is no longer parameterized by the nullifier type; instead, the 
+  - `WalletTx` is no longer parameterized by the nullifier type; instead, the
     nullifier is present as an optional value.
   - `ScannedBlock` is no longer parameterized by the nullifier type as a consequence
     of the `WalletTx` change.
@@ -275,7 +278,7 @@ and this library adheres to Rust's notion of
     recipients. This simplifies the handling of wallet-internal outputs.
   - `SentTransactionOutput::from_parts` now takes a `Recipient<Note>`.
   - `SentTransactionOutput::recipient` now returns a `Recipient<Note>`.
-  - `OvkPolicy::Custom` is now a structured variant that can contain independent 
+  - `OvkPolicy::Custom` is now a structured variant that can contain independent
     Sapling and Orchard `OutgoingViewingKey`s.
 - `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
 - `zcash_client_backend::zip321`:

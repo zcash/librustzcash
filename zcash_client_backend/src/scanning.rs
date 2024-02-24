@@ -28,7 +28,7 @@ use crate::{
 };
 
 /// A key that can be used to perform trial decryption and nullifier
-/// computation for a Sapling [`CompactSaplingOutput`]
+/// computation for a [`CompactSaplingOutput`] or [`CompactOrchardAction`].
 ///
 /// The purpose of this trait is to enable [`scan_block`]
 /// and related methods to be used with either incoming viewing keys
@@ -39,14 +39,9 @@ use crate::{
 /// nullifier for the note can also be obtained.
 ///
 /// [`CompactSaplingOutput`]: crate::proto::compact_formats::CompactSaplingOutput
+/// [`CompactOrchardAction`]: crate::proto::compact_formats::CompactOrchardAction
 /// [`scan_block`]: crate::scanning::scan_block
-pub trait ScanningKey<D: Domain, AccountId> {
-    /// The type of key that is used to derive nullifiers.
-    type NullifierDerivingKey: Clone;
-
-    /// The type of nullifier extracted when a note is successfully obtained by trial decryption.
-    type Nf;
-
+pub trait ScanningKeyOps<D: Domain, AccountId, Nf> {
     /// Prepare the key for use in batch trial decryption.
     fn prepare(&self) -> D::IncomingViewingKey;
 
@@ -62,15 +57,13 @@ pub trait ScanningKey<D: Domain, AccountId> {
     /// Produces the nullifier for the specified note and witness, if possible.
     ///
     /// IVK-based implementations of this trait cannot successfully derive
-    /// nullifiers, in which case `Self::Nf` should be set to the unit type
-    /// and this function is a no-op.
-    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Self::Nf>;
+    /// nullifiers, in which this function will always return `None`.
+    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Nf>;
 }
 
-impl<D: Domain, AccountId, K: ScanningKey<D, AccountId>> ScanningKey<D, AccountId> for &K {
-    type NullifierDerivingKey = K::NullifierDerivingKey;
-    type Nf = K::Nf;
-
+impl<D: Domain, AccountId, Nf, K: ScanningKeyOps<D, AccountId, Nf>> ScanningKeyOps<D, AccountId, Nf>
+    for &K
+{
     fn prepare(&self) -> D::IncomingViewingKey {
         (*self).prepare()
     }
@@ -83,27 +76,47 @@ impl<D: Domain, AccountId, K: ScanningKey<D, AccountId>> ScanningKey<D, AccountI
         (*self).key_scope()
     }
 
-    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Self::Nf> {
+    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Nf> {
         (*self).nf(note, note_position)
     }
 }
 
-pub struct SaplingScanningKey<AccountId> {
-    ivk: SaplingIvk,
-    nk: Option<sapling::NullifierDerivingKey>,
+impl<D: Domain, AccountId, Nf> ScanningKeyOps<D, AccountId, Nf>
+    for Box<dyn ScanningKeyOps<D, AccountId, Nf>>
+{
+    fn prepare(&self) -> D::IncomingViewingKey {
+        self.as_ref().prepare()
+    }
+
+    fn account_id(&self) -> &AccountId {
+        self.as_ref().account_id()
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.as_ref().key_scope()
+    }
+
+    fn nf(&self, note: &D::Note, note_position: Position) -> Option<Nf> {
+        self.as_ref().nf(note, note_position)
+    }
+}
+
+/// An incoming viewing key, paired with an optional nullifier key and key source metadata.
+pub struct ScanningKey<Ivk, Nk, AccountId> {
+    ivk: Ivk,
+    nk: Option<Nk>,
     account_id: AccountId,
     key_scope: Option<Scope>,
 }
 
-impl<AccountId> ScanningKey<SaplingDomain, AccountId> for SaplingScanningKey<AccountId> {
-    type NullifierDerivingKey = sapling::NullifierDerivingKey;
-    type Nf = sapling::Nullifier;
-
+impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
+    for ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>
+{
     fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
         sapling::note_encryption::PreparedIncomingViewingKey::new(&self.ivk)
     }
 
-    fn nf(&self, note: &sapling::Note, position: Position) -> Option<Self::Nf> {
+    fn nf(&self, note: &sapling::Note, position: Position) -> Option<sapling::Nullifier> {
         self.nk.as_ref().map(|key| note.nf(key, position.into()))
     }
 
@@ -116,15 +129,14 @@ impl<AccountId> ScanningKey<SaplingDomain, AccountId> for SaplingScanningKey<Acc
     }
 }
 
-impl<AccountId> ScanningKey<SaplingDomain, AccountId> for (AccountId, SaplingIvk) {
-    type NullifierDerivingKey = sapling::NullifierDerivingKey;
-    type Nf = sapling::Nullifier;
-
+impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
+    for (AccountId, SaplingIvk)
+{
     fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
         sapling::note_encryption::PreparedIncomingViewingKey::new(&self.1)
     }
 
-    fn nf(&self, _note: &sapling::Note, _position: Position) -> Option<Self::Nf> {
+    fn nf(&self, _note: &sapling::Note, _position: Position) -> Option<sapling::Nullifier> {
         None
     }
 
@@ -137,12 +149,16 @@ impl<AccountId> ScanningKey<SaplingDomain, AccountId> for (AccountId, SaplingIvk
     }
 }
 
+/// A set of scanning keys, along with the vector of `(Account, Nullifier)` pairs that
+/// notes the wallet is tracking.
 pub struct ScanningKeys<AccountId, IvkTag> {
-    sapling_keys: HashMap<IvkTag, SaplingScanningKey<AccountId>>,
+    sapling_keys:
+        HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>,
     sapling_nullifiers: Vec<(AccountId, sapling::Nullifier)>,
 }
 
 impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
+    /// Constructs a new empty set of scanning keys.
     pub fn empty() -> Self {
         Self {
             sapling_keys: HashMap::new(),
@@ -150,16 +166,23 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
         }
     }
 
-    pub fn sapling_keys(&self) -> &HashMap<IvkTag, SaplingScanningKey<AccountId>> {
+    /// Returns the Sapling keys to be used for incoming note detection.
+    pub fn sapling_keys(
+        &self,
+    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>
+    {
         &self.sapling_keys
     }
 
+    /// Returns the Sapling nullifiers for notes that the wallet is tracking.
     pub fn sapling_nullifiers(&self) -> &[(AccountId, sapling::Nullifier)] {
         self.sapling_nullifiers.as_ref()
     }
 }
 
-impl<AccountId: Copy + Eq + Hash> ScanningKeys<AccountId, (AccountId, zip32::Scope)> {
+impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, Scope)> {
+    /// Constructs a [`ScanningKeys`] from an iterator of [`UnifiedFullViewingKey`]s,
+    /// along with the account identifiers corresponding to those UFVKs.
     pub fn from_account_ufvks(
         ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
     ) -> Self {
@@ -168,13 +191,13 @@ impl<AccountId: Copy + Eq + Hash> ScanningKeys<AccountId, (AccountId, zip32::Sco
             .flat_map(|(account_id, ufvk)| {
                 if let Some(dfvk) = ufvk.sapling() {
                     vec![
-                        SaplingScanningKey {
+                        ScanningKey {
                             ivk: dfvk.to_ivk(Scope::External),
                             nk: Some(dfvk.to_nk(Scope::External)),
                             account_id,
                             key_scope: Some(Scope::External),
                         },
-                        SaplingScanningKey {
+                        ScanningKey {
                             ivk: dfvk.to_ivk(Scope::Internal),
                             nk: Some(dfvk.to_nk(Scope::Internal)),
                             account_id,
@@ -186,17 +209,13 @@ impl<AccountId: Copy + Eq + Hash> ScanningKeys<AccountId, (AccountId, zip32::Sco
                 }
                 .into_iter()
             })
-            .map(|key| {
-                (
-                    (
-                        *key.account_id(),
-                        key.key_scope()
-                            .expect("Key scope is available for each key"),
-                    ),
-                    key,
-                )
+            .map(|k| {
+                let key_id = (k.account_id, k.key_scope.unwrap());
+                let v: Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>> =
+                    Box::new(k);
+                (key_id, v)
             })
-            .collect::<HashMap<_, _>>();
+            .collect();
 
         Self {
             sapling_keys,
@@ -204,6 +223,8 @@ impl<AccountId: Copy + Eq + Hash> ScanningKeys<AccountId, (AccountId, zip32::Sco
         }
     }
 
+    /// Discards Sapling nullifiers from the tracked nullifier set, retaining only those that
+    /// satisfy the given predicate.
     pub(crate) fn retain_sapling_nullifiers(
         &mut self,
         f: impl Fn(&(AccountId, sapling::Nullifier)) -> bool,
@@ -211,6 +232,7 @@ impl<AccountId: Copy + Eq + Hash> ScanningKeys<AccountId, (AccountId, zip32::Sco
         self.sapling_nullifiers.retain(f);
     }
 
+    /// Adds the given nullifiers to the tracked nullifier set.
     pub(crate) fn extend_sapling_nullifiers(
         &mut self,
         nfs: impl IntoIterator<Item = (AccountId, sapling::Nullifier)>,
@@ -678,8 +700,9 @@ fn find_spent<
 fn find_received<
     AccountId: Copy + Eq + Hash,
     D: BatchDomain,
+    Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
-    SK: ScanningKey<D, AccountId>,
+    SK: ScanningKeyOps<D, AccountId, Nf>,
     Output: ShieldedOutput<D, 52>,
     WalletOutput,
     NoteCommitment,
@@ -702,7 +725,7 @@ fn find_received<
         D::Note,
         bool,
         Position,
-        Option<SK::Nf>,
+        Option<Nf>,
         AccountId,
         Option<zip32::Scope>,
     ) -> WalletOutput,
@@ -832,7 +855,7 @@ mod tests {
             self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
         scan::BatchRunner,
-        scanning::{ScanningKey, ScanningKeys},
+        scanning::ScanningKeys,
     };
 
     use super::{add_block_to_runner, scan_block, scan_block_with_runner};
