@@ -336,6 +336,14 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
 /// Errors that may occur in chain scanning
 #[derive(Clone, Debug)]
 pub enum ScanError {
+    /// The encoding of a compact Sapling output or compact Orchard action was invalid.
+    EncodingInvalid {
+        at_height: BlockHeight,
+        txid: TxId,
+        pool_type: ShieldedProtocol,
+        index: usize,
+    },
+
     /// The hash of the parent block given by a proposed new chain tip does not match the hash of
     /// the current chain tip.
     PrevHashMismatch { at_height: BlockHeight },
@@ -378,6 +386,7 @@ impl ScanError {
     pub fn is_continuity_error(&self) -> bool {
         use ScanError::*;
         match self {
+            EncodingInvalid { .. } => false,
             PrevHashMismatch { .. } => true,
             BlockHeightDiscontinuity { .. } => true,
             TreeSizeMismatch { .. } => true,
@@ -390,6 +399,7 @@ impl ScanError {
     pub fn at_height(&self) -> BlockHeight {
         use ScanError::*;
         match self {
+            EncodingInvalid { at_height, .. } => *at_height,
             PrevHashMismatch { at_height } => *at_height,
             BlockHeightDiscontinuity { new_height, .. } => *new_height,
             TreeSizeMismatch { at_height, .. } => *at_height,
@@ -403,6 +413,11 @@ impl fmt::Display for ScanError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ScanError::*;
         match &self {
+            EncodingInvalid { txid, pool_type, index, .. } => write!(
+                f,
+                "{:?} output {} of transaction {} was improperly encoded.",
+                pool_type, index, txid
+            ),
             PrevHashMismatch { at_height } => write!(
                 f,
                 "The parent hash of proposed block does not correspond to the block hash at height {}.",
@@ -536,7 +551,7 @@ where
     }
 
     #[tracing::instrument(skip_all, fields(height = block.height))]
-    pub(crate) fn add_block<P>(&mut self, params: &P, block: CompactBlock)
+    pub(crate) fn add_block<P>(&mut self, params: &P, block: CompactBlock) -> Result<(), ScanError>
     where
         P: consensus::Parameters + Send + 'static,
         IvkTag: Copy + Send + 'static,
@@ -554,11 +569,18 @@ where
                 |_| SaplingDomain::new(zip212_enforcement),
                 &tx.outputs
                     .iter()
-                    .map(|output| {
-                        CompactOutputDescription::try_from(output)
-                            .expect("Invalid output found in compact block decoding.")
+                    .enumerate()
+                    .map(|(i, output)| {
+                        CompactOutputDescription::try_from(output).map_err(|_| {
+                            ScanError::EncodingInvalid {
+                                at_height: block_height,
+                                txid,
+                                pool_type: ShieldedProtocol::Sapling,
+                                index: i,
+                            }
+                        })
                     })
-                    .collect::<Vec<_>>(),
+                    .collect::<Result<Vec<_>, _>>()?,
             );
 
             #[cfg(feature = "orchard")]
@@ -568,13 +590,20 @@ where
                 |action| OrchardDomain::for_nullifier(action.nullifier()),
                 &tx.actions
                     .iter()
-                    .map(|action| {
-                        CompactAction::try_from(action)
-                            .expect("Invalid action found in compact block decoding.")
+                    .enumerate()
+                    .map(|(i, action)| {
+                        CompactAction::try_from(action).map_err(|_| ScanError::EncodingInvalid {
+                            at_height: block_height,
+                            txid,
+                            pool_type: ShieldedProtocol::Sapling,
+                            index: i,
+                        })
                     })
-                    .collect::<Vec<_>>(),
+                    .collect::<Result<Vec<_>, _>>()?,
             );
         }
+
+        Ok(())
     }
 }
 
@@ -777,14 +806,21 @@ where
             &spent_from_accounts,
             &tx.outputs
                 .iter()
-                .map(|output| {
-                    (
+                .enumerate()
+                .map(|(i, output)| {
+                    Ok((
                         SaplingDomain::new(zip212_enforcement),
-                        CompactOutputDescription::try_from(output)
-                            .expect("Invalid output found in compact block decoding."),
-                    )
+                        CompactOutputDescription::try_from(output).map_err(|_| {
+                            ScanError::EncodingInvalid {
+                                at_height: cur_height,
+                                txid,
+                                pool_type: ShieldedProtocol::Sapling,
+                                index: i,
+                            }
+                        })?,
+                    ))
                 })
-                .collect::<Vec<_>>(),
+                .collect::<Result<Vec<_>, _>>()?,
             batch_runners
                 .as_mut()
                 .map(|runners| |txid| runners.sapling.collect_results(cur_hash, txid)),
@@ -804,12 +840,19 @@ where
             &spent_from_accounts,
             &tx.actions
                 .iter()
-                .map(|action| {
-                    let action = CompactAction::try_from(action)
-                        .expect("Invalid output found in compact block decoding.");
-                    (OrchardDomain::for_nullifier(action.nullifier()), action)
+                .enumerate()
+                .map(|(i, action)| {
+                    let action = CompactAction::try_from(action).map_err(|_| {
+                        ScanError::EncodingInvalid {
+                            at_height: cur_height,
+                            txid,
+                            pool_type: ShieldedProtocol::Orchard,
+                            index: i,
+                        }
+                    })?;
+                    Ok((OrchardDomain::for_nullifier(action.nullifier()), action))
                 })
-                .collect::<Vec<_>>(),
+                .collect::<Result<Vec<_>, _>>()?,
             batch_runners
                 .as_mut()
                 .map(|runners| |txid| runners.orchard.collect_results(cur_hash, txid)),
@@ -1223,7 +1266,9 @@ mod tests {
 
             let mut batch_runners = if scan_multithreaded {
                 let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
-                runners.add_block(&Network::TestNetwork, cb.clone());
+                runners
+                    .add_block(&Network::TestNetwork, cb.clone())
+                    .unwrap();
                 runners.flush();
 
                 Some(runners)
@@ -1306,7 +1351,9 @@ mod tests {
 
             let mut batch_runners = if scan_multithreaded {
                 let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
-                runners.add_block(&Network::TestNetwork, cb.clone());
+                runners
+                    .add_block(&Network::TestNetwork, cb.clone())
+                    .unwrap();
                 runners.flush();
 
                 Some(runners)

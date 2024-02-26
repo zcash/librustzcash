@@ -320,15 +320,9 @@ where
 
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
-    block_source.with_blocks::<_, DbT::Error>(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
-            runners.add_block(params, block);
-
-            Ok(())
-        },
-    )?;
+    block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
+        runners.add_block(params, block).map_err(|e| e.into())
+    })?;
 
     runners.flush();
 
