@@ -185,6 +185,47 @@ impl compact_formats::CompactSaplingSpend {
     }
 }
 
+#[cfg(feature = "orchard")]
+impl TryFrom<&compact_formats::CompactOrchardAction> for orchard::note_encryption::CompactAction {
+    type Error = ();
+
+    fn try_from(value: &compact_formats::CompactOrchardAction) -> Result<Self, Self::Error> {
+        Ok(orchard::note_encryption::CompactAction::from_parts(
+            value.nf()?,
+            value.cmx()?,
+            value.ephemeral_key()?,
+            value.ciphertext[..].try_into().map_err(|_| ())?,
+        ))
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl compact_formats::CompactOrchardAction {
+    pub fn cmx(&self) -> Result<orchard::note::ExtractedNoteCommitment, ()> {
+        Option::from(orchard::note::ExtractedNoteCommitment::from_bytes(
+            &self.cmx[..].try_into().map_err(|_| ())?,
+        ))
+        .ok_or(())
+    }
+
+    pub fn nf(&self) -> Result<orchard::note::Nullifier, ()> {
+        let nf_bytes: [u8; 32] = self.nullifier[..].try_into().map_err(|_| ())?;
+        Option::from(orchard::note::Nullifier::from_bytes(&nf_bytes)).ok_or(())
+    }
+
+    /// Returns the ephemeral public key for this output.
+    ///
+    /// A convenience method that parses [`CompactOutput.epk`].
+    ///
+    /// [`CompactOutput.epk`]: #structfield.epk
+    pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
+        self.ephemeral_key[..]
+            .try_into()
+            .map(EphemeralKeyBytes)
+            .map_err(|_| ())
+    }
+}
+
 impl<A: sapling::bundle::Authorization> From<&sapling::bundle::SpendDescription<A>>
     for compact_formats::CompactSaplingSpend
 {

@@ -19,12 +19,24 @@ and this library adheres to Rust's notion of
   - `ScannedBlockCommitments::orchard`
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
-- `zcash_client_backend::fees::orchard`
-- `zcash_client_backend::fees::ChangeValue::orchard`
-- `zcash_client_backend::wallet`:
-  - `Note::Orchard`
+  - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
+- `zcash_client_backend::fees`:
+  - `orchard`
+  - `ChangeValue::orchard`
 - `zcash_client_backend::proto`:
   - `service::TreeState::orchard_tree`
+  - `impl TryFrom<&CompactOrchardAction> for CompactAction`
+  - `CompactOrchardAction::{cmx, nf, ephemeral_key}`
+- `zcash_client_backend::scanning`:
+  - `impl ScanningKeyOps<OrchardDomain, ..> for ScanningKey<..>` for Orchard key types.
+  - `ScanningKeys::orchard`
+  - `TaggedOrchardBatch`
+  - `TaggedOrchardBatchRunner`
+- `zcash_client_backend::wallet`:
+  - `Note::Orchard`
+  - `WalletOrchardSpend`
+  - `WalletOrchardOutput`
+  - `WalletTx::{orchard_spends, orchard_outputs}`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -33,7 +45,7 @@ and this library adheres to Rust's notion of
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
   - `ShieldedProtocol` has a new `Orchard` variant.
-  - `WalletCommitmentTrees` has new members when the `orchard` feature is enabled:
+  - `WalletCommitmentTrees`
     - `type OrchardShardStore`
     - `fn with_orchard_tree_mut`
     - `fn put_orchard_subtree_roots`
@@ -72,7 +84,9 @@ and this library adheres to Rust's notion of
   - `Note`
   - `ReceivedNote`
   - `Recipient::{map_internal_account, internal_account_transpose_option}`
-  - `WalletSaplingOutput::recipient_key_scope`
+  - `WalletOutput`
+  - `WalletSaplingOutput::key_source`
+  - `WalletSpend`
   - `TransparentAddressMetadata` (which replaces `zcash_keys::address::AddressMetadata`).
   - `impl {Debug, Clone} for OvkPolicy`
 - `zcash_client_backend::proposal`:
@@ -280,6 +294,8 @@ and this library adheres to Rust's notion of
   - `SentTransactionOutput::recipient` now returns a `Recipient<Note>`.
   - `OvkPolicy::Custom` is now a structured variant that can contain independent
     Sapling and Orchard `OutgoingViewingKey`s.
+  - `WalletTx::new` now takes additional Orchard spend and output arguments
+    when the `orchard` feature is enabled.
 - `zcash_client_backend::scanning::ScanError` has a new variant, `TreeSizeInvalid`.
 - `zcash_client_backend::zip321`:
   - `TransactionRequest::payments` now returns a `BTreeMap<usize, Payment>`
@@ -321,6 +337,8 @@ and this library adheres to Rust's notion of
     `zcash_client_backend::proposal`).
   - `SentTransactionOutput::sapling_change_to` - the note created by an internal
     transfer is now conveyed in the `recipient` field.
+  - `WalletSaplingSpend` use the generic `WalletSpend` instead.
+  - `WalletSaplingOutput::cmu` obtain `cmu` from the `Note` instead.
 - `zcash_client_backend::data_api`:
   - `{PoolType, ShieldedProtocol}` (moved to `zcash_client_backend`).
   - `{NoteId, Recipient}` (moved to `zcash_client_backend::wallet`).
@@ -331,6 +349,7 @@ and this library adheres to Rust's notion of
     (use `ScannedBlock::into_commitments` instead).
   - `wallet::create_proposed_transaction`
     (use `wallet::create_proposed_transactions` instead).
+  - `chain::ScanSummary::from_parts`
 - `zcash_client_backend::proposal`:
   - `Proposal::min_anchor_height` (use `ShieldedInputs::anchor_height` instead).
   - `Proposal::sapling_inputs` (use `Proposal::shielded_inputs` instead).

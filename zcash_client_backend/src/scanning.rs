@@ -12,20 +12,29 @@ use sapling::{
 };
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput};
+use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     transaction::TxId,
 };
 use zip32::Scope;
 
-use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBundles};
 use crate::{
+    data_api::{BlockMetadata, ScannedBlock, ScannedBundles},
     proto::compact_formats::CompactBlock,
     scan::{Batch, BatchRunner, CompactDecryptor, DecryptedOutput, Tasks},
-    wallet::{WalletSaplingOutput, WalletSaplingSpend, WalletTx},
+    wallet::{WalletOutput, WalletSpend, WalletTx},
     ShieldedProtocol,
 };
+
+#[cfg(feature = "orchard")]
+use orchard::{
+    note_encryption::{CompactAction, OrchardDomain},
+    tree::MerkleHashOrchard,
+};
+
+#[cfg(not(feature = "orchard"))]
+use std::marker::PhantomData;
 
 /// A key that can be used to perform trial decryption and nullifier
 /// computation for a [`CompactSaplingOutput`] or [`CompactOrchardAction`].
@@ -149,12 +158,44 @@ impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
     }
 }
 
+#[cfg(feature = "orchard")]
+impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+    for ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>
+{
+    fn prepare(&self) -> orchard::keys::PreparedIncomingViewingKey {
+        orchard::keys::PreparedIncomingViewingKey::new(&self.ivk)
+    }
+
+    fn nf(
+        &self,
+        note: &orchard::note::Note,
+        _position: Position,
+    ) -> Option<orchard::note::Nullifier> {
+        self.nk.as_ref().map(|key| note.nullifier(key))
+    }
+
+    fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    fn key_scope(&self) -> Option<Scope> {
+        self.key_scope
+    }
+}
+
 /// A set of scanning keys, along with the vector of `(Account, Nullifier)` pairs that
 /// notes the wallet is tracking.
 pub struct ScanningKeys<AccountId, IvkTag> {
     sapling_keys:
         HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>,
     sapling_nullifiers: Vec<(AccountId, sapling::Nullifier)>,
+    #[cfg(feature = "orchard")]
+    orchard_keys: HashMap<
+        IvkTag,
+        Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+    >,
+    #[cfg(feature = "orchard")]
+    orchard_nullifiers: Vec<(AccountId, orchard::note::Nullifier)>,
 }
 
 impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
@@ -163,6 +204,10 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
         Self {
             sapling_keys: HashMap::new(),
             sapling_nullifiers: vec![],
+            #[cfg(feature = "orchard")]
+            orchard_keys: HashMap::new(),
+            #[cfg(feature = "orchard")]
+            orchard_nullifiers: vec![],
         }
     }
 
@@ -178,6 +223,21 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     pub fn sapling_nullifiers(&self) -> &[(AccountId, sapling::Nullifier)] {
         self.sapling_nullifiers.as_ref()
     }
+
+    /// Returns the Orchard keys to be used for incoming note detection.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_keys(
+        &self,
+    ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>>
+    {
+        &self.orchard_keys
+    }
+
+    /// Returns the Orchard nullifiers for notes that the wallet is tracking.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_nullifiers(&self) -> &[(AccountId, orchard::note::Nullifier)] {
+        self.orchard_nullifiers.as_ref()
+    }
 }
 
 impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, Scope)> {
@@ -186,40 +246,56 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
     pub fn from_account_ufvks(
         ufvks: impl IntoIterator<Item = (AccountId, UnifiedFullViewingKey)>,
     ) -> Self {
-        let sapling_keys = ufvks
-            .into_iter()
-            .flat_map(|(account_id, ufvk)| {
-                if let Some(dfvk) = ufvk.sapling() {
-                    vec![
-                        ScanningKey {
-                            ivk: dfvk.to_ivk(Scope::External),
-                            nk: Some(dfvk.to_nk(Scope::External)),
+        #![allow(clippy::type_complexity)]
+
+        let mut sapling_keys: HashMap<
+            (AccountId, Scope),
+            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+        > = HashMap::new();
+        #[cfg(feature = "orchard")]
+        let mut orchard_keys: HashMap<
+            (AccountId, Scope),
+            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+        > = HashMap::new();
+
+        for (account_id, ufvk) in ufvks {
+            if let Some(dfvk) = ufvk.sapling() {
+                for scope in [Scope::External, Scope::Internal] {
+                    sapling_keys.insert(
+                        (account_id, scope),
+                        Box::new(ScanningKey {
+                            ivk: dfvk.to_ivk(scope),
+                            nk: Some(dfvk.to_nk(scope)),
                             account_id,
-                            key_scope: Some(Scope::External),
-                        },
-                        ScanningKey {
-                            ivk: dfvk.to_ivk(Scope::Internal),
-                            nk: Some(dfvk.to_nk(Scope::Internal)),
-                            account_id,
-                            key_scope: Some(Scope::Internal),
-                        },
-                    ]
-                } else {
-                    vec![]
+                            key_scope: Some(scope),
+                        }),
+                    );
                 }
-                .into_iter()
-            })
-            .map(|k| {
-                let key_id = (k.account_id, k.key_scope.unwrap());
-                let v: Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>> =
-                    Box::new(k);
-                (key_id, v)
-            })
-            .collect();
+            }
+
+            #[cfg(feature = "orchard")]
+            if let Some(fvk) = ufvk.orchard() {
+                for scope in [Scope::External, Scope::Internal] {
+                    orchard_keys.insert(
+                        (account_id, scope),
+                        Box::new(ScanningKey {
+                            ivk: fvk.to_ivk(scope),
+                            nk: Some(fvk.clone()),
+                            account_id,
+                            key_scope: Some(scope),
+                        }),
+                    );
+                }
+            }
+        }
 
         Self {
             sapling_keys,
             sapling_nullifiers: vec![],
+            #[cfg(feature = "orchard")]
+            orchard_keys,
+            #[cfg(feature = "orchard")]
+            orchard_nullifiers: vec![],
         }
     }
 
@@ -238,6 +314,22 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
         nfs: impl IntoIterator<Item = (AccountId, sapling::Nullifier)>,
     ) {
         self.sapling_nullifiers.extend(nfs);
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn retain_orchard_nullifiers(
+        &mut self,
+        f: impl Fn(&(AccountId, orchard::note::Nullifier)) -> bool,
+    ) {
+        self.orchard_nullifiers.retain(f);
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn extend_orchard_nullifiers(
+        &mut self,
+        nfs: impl IntoIterator<Item = (AccountId, orchard::note::Nullifier)>,
+    ) {
+        self.orchard_nullifiers.extend(nfs);
     }
 }
 
@@ -350,83 +442,179 @@ where
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
 {
-    scan_block_with_runner::<_, _, _, ()>(params, block, scanning_keys, prior_block_metadata, None)
+    scan_block_with_runners::<_, _, _, (), ()>(
+        params,
+        block,
+        scanning_keys,
+        prior_block_metadata,
+        None,
+    )
 }
 
-type TaggedBatch<IvkTag> = Batch<IvkTag, SaplingDomain, CompactOutputDescription, CompactDecryptor>;
-type TaggedBatchRunner<IvkTag, BatchTag> =
-    BatchRunner<IvkTag, SaplingDomain, CompactOutputDescription, CompactDecryptor, BatchTag>;
+type TaggedSaplingBatch<IvkTag> = Batch<
+    IvkTag,
+    SaplingDomain,
+    sapling::note_encryption::CompactOutputDescription,
+    CompactDecryptor,
+>;
+type TaggedSaplingBatchRunner<IvkTag, Tasks> = BatchRunner<
+    IvkTag,
+    SaplingDomain,
+    sapling::note_encryption::CompactOutputDescription,
+    CompactDecryptor,
+    Tasks,
+>;
 
-#[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn add_block_to_runner<P, IvkTag, T>(
-    params: &P,
-    block: CompactBlock,
-    batch_runner: &mut TaggedBatchRunner<IvkTag, T>,
-) where
-    P: consensus::Parameters + Send + 'static,
-    IvkTag: Copy + Send + 'static,
-    T: Tasks<TaggedBatch<IvkTag>>,
+#[cfg(feature = "orchard")]
+type TaggedOrchardBatch<IvkTag> =
+    Batch<IvkTag, OrchardDomain, orchard::note_encryption::CompactAction, CompactDecryptor>;
+#[cfg(feature = "orchard")]
+type TaggedOrchardBatchRunner<IvkTag, Tasks> = BatchRunner<
+    IvkTag,
+    OrchardDomain,
+    orchard::note_encryption::CompactAction,
+    CompactDecryptor,
+    Tasks,
+>;
+
+pub(crate) trait SaplingTasks<IvkTag>: Tasks<TaggedSaplingBatch<IvkTag>> {}
+impl<IvkTag, T: Tasks<TaggedSaplingBatch<IvkTag>>> SaplingTasks<IvkTag> for T {}
+
+#[cfg(not(feature = "orchard"))]
+pub(crate) trait OrchardTasks<IvkTag> {}
+#[cfg(not(feature = "orchard"))]
+impl<IvkTag, T> OrchardTasks<IvkTag> for T {}
+
+#[cfg(feature = "orchard")]
+pub(crate) trait OrchardTasks<IvkTag>: Tasks<TaggedOrchardBatch<IvkTag>> {}
+#[cfg(feature = "orchard")]
+impl<IvkTag, T: Tasks<TaggedOrchardBatch<IvkTag>>> OrchardTasks<IvkTag> for T {}
+
+pub(crate) struct BatchRunners<IvkTag, TS: SaplingTasks<IvkTag>, TO: OrchardTasks<IvkTag>> {
+    sapling: TaggedSaplingBatchRunner<IvkTag, TS>,
+    #[cfg(feature = "orchard")]
+    orchard: TaggedOrchardBatchRunner<IvkTag, TO>,
+    #[cfg(not(feature = "orchard"))]
+    orchard: PhantomData<TO>,
+}
+
+impl<IvkTag, TS, TO> BatchRunners<IvkTag, TS, TO>
+where
+    IvkTag: Clone + Send + 'static,
+    TS: SaplingTasks<IvkTag>,
+    TO: OrchardTasks<IvkTag>,
 {
-    let block_hash = block.hash();
-    let block_height = block.height();
-    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, block_height);
-
-    for tx in block.vtx.into_iter() {
-        let txid = tx.txid();
-        let outputs = tx
-            .outputs
-            .iter()
-            .map(|output| {
-                CompactOutputDescription::try_from(output)
-                    .expect("Invalid output found in compact block decoding.")
-            })
-            .collect::<Vec<_>>();
-
-        batch_runner.add_outputs(
-            block_hash,
-            txid,
-            || SaplingDomain::new(zip212_enforcement),
-            &outputs,
-        )
-    }
-}
-
-fn check_hash_continuity(
-    block: &CompactBlock,
-    prior_block_metadata: Option<&BlockMetadata>,
-) -> Option<ScanError> {
-    if let Some(prev) = prior_block_metadata {
-        if block.height() != prev.block_height() + 1 {
-            return Some(ScanError::BlockHeightDiscontinuity {
-                prev_height: prev.block_height(),
-                new_height: block.height(),
-            });
-        }
-
-        if block.prev_hash() != prev.block_hash() {
-            return Some(ScanError::PrevHashMismatch {
-                at_height: block.height(),
-            });
+    pub(crate) fn for_keys<AccountId>(
+        batch_size_threshold: usize,
+        scanning_keys: &ScanningKeys<AccountId, IvkTag>,
+    ) -> Self {
+        BatchRunners {
+            sapling: BatchRunner::new(
+                batch_size_threshold,
+                scanning_keys
+                    .sapling_keys()
+                    .iter()
+                    .map(|(id, key)| (id.clone(), key.prepare())),
+            ),
+            #[cfg(feature = "orchard")]
+            orchard: BatchRunner::new(
+                batch_size_threshold,
+                scanning_keys
+                    .orchard_keys()
+                    .iter()
+                    .map(|(id, key)| (id.clone(), key.prepare())),
+            ),
+            #[cfg(not(feature = "orchard"))]
+            orchard: PhantomData,
         }
     }
 
-    None
+    pub(crate) fn flush(&mut self) {
+        self.sapling.flush();
+        #[cfg(feature = "orchard")]
+        self.orchard.flush();
+    }
+
+    #[tracing::instrument(skip_all, fields(height = block.height))]
+    pub(crate) fn add_block<P>(&mut self, params: &P, block: CompactBlock)
+    where
+        P: consensus::Parameters + Send + 'static,
+        IvkTag: Copy + Send + 'static,
+    {
+        let block_hash = block.hash();
+        let block_height = block.height();
+        let zip212_enforcement = consensus::sapling_zip212_enforcement(params, block_height);
+
+        for tx in block.vtx.into_iter() {
+            let txid = tx.txid();
+
+            self.sapling.add_outputs(
+                block_hash,
+                txid,
+                |_| SaplingDomain::new(zip212_enforcement),
+                &tx.outputs
+                    .iter()
+                    .map(|output| {
+                        CompactOutputDescription::try_from(output)
+                            .expect("Invalid output found in compact block decoding.")
+                    })
+                    .collect::<Vec<_>>(),
+            );
+
+            #[cfg(feature = "orchard")]
+            self.orchard.add_outputs(
+                block_hash,
+                txid,
+                |action| OrchardDomain::for_nullifier(action.nullifier()),
+                &tx.actions
+                    .iter()
+                    .map(|action| {
+                        CompactAction::try_from(action)
+                            .expect("Invalid action found in compact block decoding.")
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
 }
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn scan_block_with_runner<P, AccountId, IvkTag, T>(
+pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
     prior_block_metadata: Option<&BlockMetadata>,
-    mut sapling_batch_runner: Option<&mut TaggedBatchRunner<IvkTag, T>>,
+    mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO>>,
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
     P: consensus::Parameters + Send + 'static,
     AccountId: Default + Eq + Hash + ConditionallySelectable + Send + 'static,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
-    T: Tasks<TaggedBatch<IvkTag>> + Sync,
+    TS: SaplingTasks<IvkTag> + Sync,
+    TO: OrchardTasks<IvkTag> + Sync,
 {
+    fn check_hash_continuity(
+        block: &CompactBlock,
+        prior_block_metadata: Option<&BlockMetadata>,
+    ) -> Option<ScanError> {
+        if let Some(prev) = prior_block_metadata {
+            if block.height() != prev.block_height() + 1 {
+                return Some(ScanError::BlockHeightDiscontinuity {
+                    prev_height: prev.block_height(),
+                    new_height: block.height(),
+                });
+            }
+
+            if block.prev_hash() != prev.block_hash() {
+                return Some(ScanError::PrevHashMismatch {
+                    at_height: block.height(),
+                });
+            }
+        }
+
+        None
+    }
+
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
     }
@@ -532,6 +720,12 @@ where
     let mut wtxs: Vec<WalletTx<AccountId>> = vec![];
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
+
+    #[cfg(feature = "orchard")]
+    let mut orchard_nullifier_map = Vec::with_capacity(block.vtx.len());
+    #[cfg(feature = "orchard")]
+    let mut orchard_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
+
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
         let txid = tx.txid();
         let tx_index =
@@ -545,16 +739,33 @@ where
                     "Could not deserialize nullifier for spend from protobuf representation.",
                 )
             },
-            WalletSaplingSpend::from_parts,
+            WalletSpend::from_parts,
         );
 
         sapling_nullifier_map.push((txid, tx_index, sapling_unlinked_nullifiers));
 
+        #[cfg(feature = "orchard")]
+        let orchard_spends = {
+            let (orchard_spends, orchard_unlinked_nullifiers) = find_spent(
+                &tx.actions,
+                &scanning_keys.orchard_nullifiers,
+                |spend| {
+                    spend.nf().expect(
+                        "Could not deserialize nullifier for spend from protobuf representation.",
+                    )
+                },
+                WalletSpend::from_parts,
+            );
+            orchard_nullifier_map.push((txid, tx_index, orchard_unlinked_nullifiers));
+            orchard_spends
+        };
+
         // Collect the set of accounts that were spent from in this transaction
-        let spent_from_accounts: HashSet<_> = sapling_spends
-            .iter()
-            .map(|spend| *spend.account())
-            .collect();
+        let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account());
+        #[cfg(feature = "orchard")]
+        let spent_from_accounts =
+            spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account()));
+        let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
 
         let (sapling_outputs, mut sapling_nc) = find_received(
             cur_height,
@@ -574,32 +785,54 @@ where
                     )
                 })
                 .collect::<Vec<_>>(),
-            sapling_batch_runner
+            batch_runners
                 .as_mut()
-                .map(|runner| |txid| runner.collect_results(cur_hash, txid)),
+                .map(|runners| |txid| runners.sapling.collect_results(cur_hash, txid)),
             |output| sapling::Node::from_cmu(&output.cmu),
-            |output_idx, output, note, is_change, position, nf, account_id, key_scope| {
-                WalletSaplingOutput::from_parts(
-                    output_idx,
-                    output.cmu,
-                    output.ephemeral_key.clone(),
-                    account_id,
-                    note,
-                    is_change,
-                    position,
-                    nf,
-                    key_scope,
-                )
-            },
         );
         sapling_note_commitments.append(&mut sapling_nc);
+        let has_sapling = !(sapling_spends.is_empty() && sapling_outputs.is_empty());
 
-        if !(sapling_spends.is_empty() && sapling_outputs.is_empty()) {
+        #[cfg(feature = "orchard")]
+        let (orchard_outputs, mut orchard_nc) = find_received(
+            cur_height,
+            compact_block_tx_count,
+            txid,
+            tx_idx,
+            orchard_commitment_tree_size,
+            &scanning_keys.orchard_keys,
+            &spent_from_accounts,
+            &tx.actions
+                .iter()
+                .map(|action| {
+                    let action = CompactAction::try_from(action)
+                        .expect("Invalid output found in compact block decoding.");
+                    (OrchardDomain::for_nullifier(action.nullifier()), action)
+                })
+                .collect::<Vec<_>>(),
+            batch_runners
+                .as_mut()
+                .map(|runners| |txid| runners.orchard.collect_results(cur_hash, txid)),
+            |output| MerkleHashOrchard::from_cmx(&output.cmx()),
+        );
+        #[cfg(feature = "orchard")]
+        orchard_note_commitments.append(&mut orchard_nc);
+
+        #[cfg(feature = "orchard")]
+        let has_orchard = !(orchard_spends.is_empty() && orchard_outputs.is_empty());
+        #[cfg(not(feature = "orchard"))]
+        let has_orchard = false;
+
+        if has_sapling || has_orchard {
             wtxs.push(WalletTx::new(
                 txid,
                 tx_index as usize,
                 sapling_spends,
                 sapling_outputs,
+                #[cfg(feature = "orchard")]
+                orchard_spends,
+                #[cfg(feature = "orchard")]
+                orchard_outputs,
             ));
         }
 
@@ -646,8 +879,8 @@ where
         #[cfg(feature = "orchard")]
         ScannedBundles::new(
             orchard_commitment_tree_size,
-            vec![], // FIXME: collect the Orchard nullifiers
-            vec![], // FIXME: collect the Orchard note commitments
+            orchard_note_commitments,
+            orchard_nullifier_map,
         ),
     ))
 }
@@ -703,8 +936,7 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D, 52>,
-    WalletOutput,
+    Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
     NoteCommitment,
 >(
     block_height: BlockHeight,
@@ -719,18 +951,8 @@ fn find_received<
         impl FnOnce(TxId) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, ()>>,
     >,
     extract_note_commitment: impl Fn(&Output) -> NoteCommitment,
-    new_wallet_output: impl Fn(
-        usize,
-        &Output,
-        D::Note,
-        bool,
-        Position,
-        Option<Nf>,
-        AccountId,
-        Option<zip32::Scope>,
-    ) -> WalletOutput,
 ) -> (
-    Vec<WalletOutput>,
+    Vec<WalletOutput<D::Note, Nf, AccountId>>,
     Vec<(NoteCommitment, Retention<BlockHeight>)>,
 ) {
     // Check for incoming notes while incrementing tree and witnesses
@@ -804,9 +1026,9 @@ fn find_received<
             ));
             let nf = key.nf(&note, note_commitment_tree_position);
 
-            shielded_outputs.push(new_wallet_output(
+            shielded_outputs.push(WalletOutput::from_parts(
                 output_idx,
-                output,
+                output.ephemeral_key(),
                 note,
                 is_change,
                 note_commitment_tree_position,
@@ -840,7 +1062,7 @@ mod tests {
         Nullifier,
     };
     use zcash_keys::keys::UnifiedSpendingKey;
-    use zcash_note_encryption::Domain;
+    use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
     use zcash_primitives::{
         block::BlockHash,
         consensus::{sapling_zip212_enforcement, BlockHeight, Network},
@@ -854,11 +1076,10 @@ mod tests {
         proto::compact_formats::{
             self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
         },
-        scan::BatchRunner,
-        scanning::ScanningKeys,
+        scanning::{BatchRunners, ScanningKeys},
     };
 
-    use super::{add_block_to_runner, scan_block, scan_block_with_runner};
+    use super::{scan_block, scan_block_with_runners};
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -881,7 +1102,7 @@ mod tests {
         let cout = CompactSaplingOutput {
             cmu: fake_cmu,
             ephemeral_key: fake_epk,
-            ciphertext: vec![0; 52],
+            ciphertext: vec![0; COMPACT_NOTE_SIZE],
         };
         let mut ctx = CompactTx::default();
         let mut txid = vec![0; 32];
@@ -1000,24 +1221,17 @@ mod tests {
             );
             assert_eq!(cb.vtx.len(), 2);
 
-            let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::<_, _, _, _, ()>::new(
-                    10,
-                    scanning_keys
-                        .sapling_keys()
-                        .iter()
-                        .map(|(key_id, key)| (*key_id, key.prepare())),
-                );
+            let mut batch_runners = if scan_multithreaded {
+                let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
+                runners.add_block(&Network::TestNetwork, cb.clone());
+                runners.flush();
 
-                add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
-                runner.flush();
-
-                Some(runner)
+                Some(runners)
             } else {
                 None
             };
 
-            let scanned_block = scan_block_with_runner(
+            let scanned_block = scan_block_with_runners(
                 &network,
                 cb,
                 &scanning_keys,
@@ -1028,7 +1242,7 @@ mod tests {
                     #[cfg(feature = "orchard")]
                     Some(0),
                 )),
-                batch_runner.as_mut(),
+                batch_runners.as_mut(),
             )
             .unwrap();
             let txs = scanned_block.transactions();
@@ -1090,25 +1304,18 @@ mod tests {
             );
             assert_eq!(cb.vtx.len(), 3);
 
-            let mut batch_runner = if scan_multithreaded {
-                let mut runner = BatchRunner::<_, _, _, _, ()>::new(
-                    10,
-                    scanning_keys
-                        .sapling_keys()
-                        .iter()
-                        .map(|(key_id, key)| (*key_id, key.prepare())),
-                );
+            let mut batch_runners = if scan_multithreaded {
+                let mut runners = BatchRunners::<_, (), ()>::for_keys(10, &scanning_keys);
+                runners.add_block(&Network::TestNetwork, cb.clone());
+                runners.flush();
 
-                add_block_to_runner(&Network::TestNetwork, cb.clone(), &mut runner);
-                runner.flush();
-
-                Some(runner)
+                Some(runners)
             } else {
                 None
             };
 
             let scanned_block =
-                scan_block_with_runner(&network, cb, &scanning_keys, None, batch_runner.as_mut())
+                scan_block_with_runners(&network, cb, &scanning_keys, None, batch_runners.as_mut())
                     .unwrap();
             let txs = scanned_block.transactions();
             assert_eq!(txs.len(), 1);

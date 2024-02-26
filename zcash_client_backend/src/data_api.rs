@@ -705,7 +705,7 @@ pub struct ScannedBlockCommitments {
     /// The ordered vector of note commitments for Orchard outputs of the block.
     /// Present only when the `orchard` feature is enabled.
     #[cfg(feature = "orchard")]
-    pub orchard: Vec<(orchard::note::NoteCommitment, Retention<BlockHeight>)>,
+    pub orchard: Vec<(orchard::tree::MerkleHashOrchard, Retention<BlockHeight>)>,
 }
 
 /// The subset of information that is relevant to this wallet that has been
@@ -719,7 +719,7 @@ pub struct ScannedBlock<A> {
     transactions: Vec<WalletTx<A>>,
     sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
     #[cfg(feature = "orchard")]
-    orchard: ScannedBundles<orchard::note::NoteCommitment, orchard::note::Nullifier>,
+    orchard: ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier>,
 }
 
 impl<A> ScannedBlock<A> {
@@ -731,7 +731,7 @@ impl<A> ScannedBlock<A> {
         transactions: Vec<WalletTx<A>>,
         sapling: ScannedBundles<sapling::Node, sapling::Nullifier>,
         #[cfg(feature = "orchard")] orchard: ScannedBundles<
-            orchard::note::NoteCommitment,
+            orchard::tree::MerkleHashOrchard,
             orchard::note::Nullifier,
         >,
     ) -> Self {
@@ -775,7 +775,7 @@ impl<A> ScannedBlock<A> {
     #[cfg(feature = "orchard")]
     pub fn orchard(
         &self,
-    ) -> &ScannedBundles<orchard::note::NoteCommitment, orchard::note::Nullifier> {
+    ) -> &ScannedBundles<orchard::tree::MerkleHashOrchard, orchard::note::Nullifier> {
         &self.orchard
     }
 

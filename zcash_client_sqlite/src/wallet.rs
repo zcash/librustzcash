@@ -2032,7 +2032,21 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
     // have been created during the same scan that the locator was added to the nullifier
     // map, but it would not happen if the transaction in question spent the note with no
     // change or explicit in-wallet recipient.
-    put_tx_meta(conn, &WalletTx::new(txid, index, vec![], vec![]), height).map(Some)
+    put_tx_meta(
+        conn,
+        &WalletTx::new(
+            txid,
+            index,
+            vec![],
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
+        height,
+    )
+    .map(Some)
 }
 
 /// Deletes from the nullifier map any entries with a locator referencing a block height

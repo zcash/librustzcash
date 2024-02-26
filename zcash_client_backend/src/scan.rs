@@ -404,12 +404,16 @@ where
     /// `replier` will be called with the result of every output.
     fn add_outputs(
         &mut self,
-        domain: impl Fn() -> D,
+        domain: impl Fn(&Output) -> D,
         outputs: &[Output],
         replier: channel::Sender<OutputItem<IvkTag, D, Dec::Memo>>,
     ) {
-        self.outputs
-            .extend(outputs.iter().cloned().map(|output| (domain(), output)));
+        self.outputs.extend(
+            outputs
+                .iter()
+                .cloned()
+                .map(|output| (domain(&output), output)),
+        );
         self.repliers.extend((0..outputs.len()).map(|output_index| {
             OutputReplier(OutputIndex {
                 output_index,
@@ -531,7 +535,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-        domain: impl Fn() -> D,
+        domain: impl Fn(&Output) -> D,
         outputs: &[Output],
     ) {
         let (tx, rx) = channel::unbounded();

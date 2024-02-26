@@ -102,6 +102,10 @@ pub struct WalletTx<AccountId> {
     block_index: usize,
     sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
     sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
+    #[cfg(feature = "orchard")]
+    orchard_spends: Vec<WalletOrchardSpend<AccountId>>,
+    #[cfg(feature = "orchard")]
+    orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
 }
 
 impl<AccountId> WalletTx<AccountId> {
@@ -111,16 +115,26 @@ impl<AccountId> WalletTx<AccountId> {
         block_index: usize,
         sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
         sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
+        #[cfg(feature = "orchard")] orchard_spends: Vec<
+            WalletSpend<orchard::note::Nullifier, AccountId>,
+        >,
+        #[cfg(feature = "orchard")] orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
     ) -> Self {
         Self {
             txid,
             block_index,
             sapling_spends,
             sapling_outputs,
+            #[cfg(feature = "orchard")]
+            orchard_spends,
+            #[cfg(feature = "orchard")]
+            orchard_outputs,
         }
     }
 
     /// Returns the [`TxId`] for the corresponding [`Transaction`]
+    ///
+    /// [`Transaction`]: zcash_primitives::transaction::Transaction
     pub fn txid(&self) -> TxId {
         self.txid
     }
@@ -140,6 +154,20 @@ impl<AccountId> WalletTx<AccountId> {
     /// transaction.
     pub fn sapling_outputs(&self) -> &[WalletSaplingOutput<AccountId>] {
         self.sapling_outputs.as_ref()
+    }
+
+    /// Returns a record for each Orchard note belonging to the wallet that was spent in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_spends(&self) -> &[WalletOrchardSpend<AccountId>] {
+        self.orchard_spends.as_ref()
+    }
+
+    /// Returns a record for each Orchard note belonging to and/or produced by the wallet in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_outputs(&self) -> &[WalletOrchardOutput<AccountId>] {
+        self.orchard_outputs.as_ref()
     }
 }
 
@@ -197,110 +225,124 @@ impl transparent_fees::InputView for WalletTransparentOutput {
     }
 }
 
-/// A subset of a [`SpendDescription`] relevant to wallets and light clients.
-///
-/// [`SpendDescription`]: sapling::bundle::SpendDescription
-pub struct WalletSaplingSpend<AccountId> {
+/// A reference to a spent note belonging to the wallet within a transaction.
+pub struct WalletSpend<Nf, AccountId> {
     index: usize,
-    nf: sapling::Nullifier,
+    nf: Nf,
     account: AccountId,
 }
 
-impl<AccountId> WalletSaplingSpend<AccountId> {
-    pub fn from_parts(index: usize, nf: sapling::Nullifier, account: AccountId) -> Self {
+impl<Nf, AccountId> WalletSpend<Nf, AccountId> {
+    /// Constructs a `WalletSpend` from its constituent parts.
+    pub fn from_parts(index: usize, nf: Nf, account: AccountId) -> Self {
         Self { index, nf, account }
     }
 
+    /// Returns the index of the Sapling spend or Orchard action within the transaction that
+    /// created this spend.
     pub fn index(&self) -> usize {
         self.index
     }
-    pub fn nf(&self) -> &sapling::Nullifier {
+    /// Returns the nullifier of the spent note.
+    pub fn nf(&self) -> &Nf {
         &self.nf
     }
+    /// Returns the identifier to the account to which the note belonged.
     pub fn account(&self) -> &AccountId {
         &self.account
     }
 }
 
-/// A subset of an [`OutputDescription`] relevant to wallets and light clients.
-///
-/// The type parameter `<N>` is used to specify the nullifier type, which may vary between
-/// `Sapling` and `Orchard`, and also may vary depending upon the type of key that was used to
-/// decrypt this output; incoming viewing keys do not have the capability to derive the nullifier
-/// for a note, and the `<N>` will be `()` in these cases.
-///
-/// The type parameter `<S>` is used to specify the type of the scope of the key used to recover
-/// this output; this will usually be [`zcash_primitives::zip32::Scope`] for received notes, and
-/// `()` for sent notes.
-///
-/// [`OutputDescription`]: sapling::bundle::OutputDescription
-pub struct WalletSaplingOutput<AccountId> {
+pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, AccountId>;
+
+#[cfg(feature = "orchard")]
+pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
+
+/// An output that was successfully decrypted in the process of wallet scanning.
+pub struct WalletOutput<Note, Nullifier, AccountId> {
     index: usize,
-    cmu: sapling::note::ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    account_id: AccountId,
-    note: sapling::Note,
+    note: Note,
     is_change: bool,
     note_commitment_tree_position: Position,
-    nf: Option<sapling::Nullifier>,
+    nf: Option<Nullifier>,
+    account_id: AccountId,
     recipient_key_scope: Option<zip32::Scope>,
 }
 
-impl<AccountId> WalletSaplingOutput<AccountId> {
-    /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
+impl<Note, Nullifier, AccountId> WalletOutput<Note, Nullifier, AccountId> {
+    /// Constructs a new `WalletOutput` value from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         index: usize,
-        cmu: sapling::note::ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        account_id: AccountId,
-        note: sapling::Note,
+        note: Note,
         is_change: bool,
         note_commitment_tree_position: Position,
-        nf: Option<sapling::Nullifier>,
+        nf: Option<Nullifier>,
+        account_id: AccountId,
         recipient_key_scope: Option<zip32::Scope>,
     ) -> Self {
         Self {
             index,
-            cmu,
             ephemeral_key,
-            account_id,
             note,
             is_change,
             note_commitment_tree_position,
             nf,
+            account_id,
             recipient_key_scope,
         }
     }
 
+    /// The index of the output or action in the transaction that created this output.
     pub fn index(&self) -> usize {
         self.index
     }
-    pub fn cmu(&self) -> &sapling::note::ExtractedNoteCommitment {
-        &self.cmu
-    }
+    /// The [`EphemeralKeyBytes`] used in the decryption of the note.
     pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
         &self.ephemeral_key
     }
-    pub fn account_id(&self) -> &AccountId {
-        &self.account_id
-    }
-    pub fn note(&self) -> &sapling::Note {
+    /// The note.
+    pub fn note(&self) -> &Note {
         &self.note
     }
+    /// A flag indicating whether the process of note decryption determined that this
+    /// output should be classified as change.
     pub fn is_change(&self) -> bool {
         self.is_change
     }
+    /// The position of the note in the global note commitment tree.
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
     }
-    pub fn nf(&self) -> Option<&sapling::Nullifier> {
+    /// The nullifier for the note, if the key used to decrypt the note was able to compute it.
+    pub fn nf(&self) -> Option<&Nullifier> {
         self.nf.as_ref()
     }
+    /// The identifier for the account to which the output belongs.
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+    /// The ZIP 32 scope for which the viewing key that decrypted this output was derived, if
+    /// known.
     pub fn recipient_key_scope(&self) -> Option<zip32::Scope> {
         self.recipient_key_scope
     }
 }
+
+/// A subset of an [`OutputDescription`] relevant to wallets and light clients.
+///
+/// [`OutputDescription`]: sapling::bundle::OutputDescription
+pub type WalletSaplingOutput<AccountId> =
+    WalletOutput<sapling::Note, sapling::Nullifier, AccountId>;
+
+/// The output part of an Orchard [`Action`] that was decrypted in the process of scanning.
+///
+/// [`Action`]: orchard::Action
+#[cfg(feature = "orchard")]
+pub type WalletOrchardOutput<AccountId> =
+    WalletOutput<orchard::note::Note, orchard::note::Nullifier, AccountId>;
 
 /// An enumeration of supported shielded note types for use in [`ReceivedNote`]
 #[derive(Debug, Clone, PartialEq, Eq)]
