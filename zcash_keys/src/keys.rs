@@ -990,7 +990,7 @@ mod tests {
                 not(feature = "sapling"),
                 feature = "transparent-inputs"
             ))]
-            assert_eq!(decoded_with_t.unknown.len(), 2);
+            assert_eq!(decoded_with_t.unknown.len(), 1);
             #[cfg(all(
                 feature = "orchard",
                 not(feature = "sapling"),
