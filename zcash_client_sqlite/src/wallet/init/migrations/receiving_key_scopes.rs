@@ -284,7 +284,7 @@ mod tests {
         },
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
-        scanning::{scan_block, ScanningKeys},
+        scanning::{scan_block, Nullifiers, ScanningKeys},
         wallet::Recipient,
         PoolType, ShieldedProtocol, TransferType,
     };
@@ -606,6 +606,7 @@ mod tests {
             &params,
             block,
             &scanning_keys,
+            &Nullifiers::empty(),
             Some(&BlockMetadata::from_parts(
                 height - 1,
                 prev_hash,

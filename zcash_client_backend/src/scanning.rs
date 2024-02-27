@@ -183,60 +183,59 @@ impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifie
     }
 }
 
-/// A set of scanning keys, along with the vector of `(Account, Nullifier)` pairs that
-/// notes the wallet is tracking.
+/// A set of keys to be used in scanning for decryptable transaction outputs.
 pub struct ScanningKeys<AccountId, IvkTag> {
-    sapling_keys:
-        HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>,
-    sapling_nullifiers: Vec<(AccountId, sapling::Nullifier)>,
+    sapling: HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>,
     #[cfg(feature = "orchard")]
-    orchard_keys: HashMap<
+    orchard: HashMap<
         IvkTag,
         Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
     >,
-    #[cfg(feature = "orchard")]
-    orchard_nullifiers: Vec<(AccountId, orchard::note::Nullifier)>,
 }
 
 impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
+    /// Constructs a new set of scanning keys.
+    pub fn new(
+        sapling: HashMap<
+            IvkTag,
+            Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
+        >,
+        #[cfg(feature = "orchard")] orchard: HashMap<
+            IvkTag,
+            Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
+        >,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
+
     /// Constructs a new empty set of scanning keys.
     pub fn empty() -> Self {
         Self {
-            sapling_keys: HashMap::new(),
-            sapling_nullifiers: vec![],
+            sapling: HashMap::new(),
             #[cfg(feature = "orchard")]
-            orchard_keys: HashMap::new(),
-            #[cfg(feature = "orchard")]
-            orchard_nullifiers: vec![],
+            orchard: HashMap::new(),
         }
     }
 
     /// Returns the Sapling keys to be used for incoming note detection.
-    pub fn sapling_keys(
+    pub fn sapling(
         &self,
     ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>>
     {
-        &self.sapling_keys
-    }
-
-    /// Returns the Sapling nullifiers for notes that the wallet is tracking.
-    pub fn sapling_nullifiers(&self) -> &[(AccountId, sapling::Nullifier)] {
-        self.sapling_nullifiers.as_ref()
+        &self.sapling
     }
 
     /// Returns the Orchard keys to be used for incoming note detection.
     #[cfg(feature = "orchard")]
-    pub fn orchard_keys(
+    pub fn orchard(
         &self,
     ) -> &HashMap<IvkTag, Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>>
     {
-        &self.orchard_keys
-    }
-
-    /// Returns the Orchard nullifiers for notes that the wallet is tracking.
-    #[cfg(feature = "orchard")]
-    pub fn orchard_nullifiers(&self) -> &[(AccountId, orchard::note::Nullifier)] {
-        self.orchard_nullifiers.as_ref()
+        &self.orchard
     }
 }
 
@@ -248,12 +247,12 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
     ) -> Self {
         #![allow(clippy::type_complexity)]
 
-        let mut sapling_keys: HashMap<
+        let mut sapling: HashMap<
             (AccountId, Scope),
             Box<dyn ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>>,
         > = HashMap::new();
         #[cfg(feature = "orchard")]
-        let mut orchard_keys: HashMap<
+        let mut orchard: HashMap<
             (AccountId, Scope),
             Box<dyn ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>>,
         > = HashMap::new();
@@ -261,7 +260,7 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
         for (account_id, ufvk) in ufvks {
             if let Some(dfvk) = ufvk.sapling() {
                 for scope in [Scope::External, Scope::Internal] {
-                    sapling_keys.insert(
+                    sapling.insert(
                         (account_id, scope),
                         Box::new(ScanningKey {
                             ivk: dfvk.to_ivk(scope),
@@ -276,7 +275,7 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
             #[cfg(feature = "orchard")]
             if let Some(fvk) = ufvk.orchard() {
                 for scope in [Scope::External, Scope::Internal] {
-                    orchard_keys.insert(
+                    orchard.insert(
                         (account_id, scope),
                         Box::new(ScanningKey {
                             ivk: fvk.to_ivk(scope),
@@ -290,46 +289,81 @@ impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, 
         }
 
         Self {
-            sapling_keys,
-            sapling_nullifiers: vec![],
+            sapling,
             #[cfg(feature = "orchard")]
-            orchard_keys,
-            #[cfg(feature = "orchard")]
-            orchard_nullifiers: vec![],
+            orchard,
         }
+    }
+}
+
+/// The set of nullifiers being tracked by a wallet.
+pub struct Nullifiers<AccountId> {
+    sapling: Vec<(AccountId, sapling::Nullifier)>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+}
+
+impl<AccountId> Nullifiers<AccountId> {
+    /// Constructs a new empty set of nullifiers
+    pub fn empty() -> Self {
+        Self {
+            sapling: vec![],
+            #[cfg(feature = "orchard")]
+            orchard: vec![],
+        }
+    }
+
+    /// Construct a nullifier set from its constituent parts.
+    pub(crate) fn new(
+        sapling: Vec<(AccountId, sapling::Nullifier)>,
+        #[cfg(feature = "orchard")] orchard: Vec<(AccountId, orchard::note::Nullifier)>,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
+
+    /// Returns the Sapling nullifiers for notes that the wallet is tracking.
+    pub fn sapling(&self) -> &[(AccountId, sapling::Nullifier)] {
+        self.sapling.as_ref()
+    }
+
+    /// Returns the Orchard nullifiers for notes that the wallet is tracking.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(&self) -> &[(AccountId, orchard::note::Nullifier)] {
+        self.orchard.as_ref()
     }
 
     /// Discards Sapling nullifiers from the tracked nullifier set, retaining only those that
     /// satisfy the given predicate.
-    pub(crate) fn retain_sapling_nullifiers(
-        &mut self,
-        f: impl Fn(&(AccountId, sapling::Nullifier)) -> bool,
-    ) {
-        self.sapling_nullifiers.retain(f);
+    pub(crate) fn retain_sapling(&mut self, f: impl Fn(&(AccountId, sapling::Nullifier)) -> bool) {
+        self.sapling.retain(f);
     }
 
     /// Adds the given nullifiers to the tracked nullifier set.
-    pub(crate) fn extend_sapling_nullifiers(
+    pub(crate) fn extend_sapling(
         &mut self,
         nfs: impl IntoIterator<Item = (AccountId, sapling::Nullifier)>,
     ) {
-        self.sapling_nullifiers.extend(nfs);
+        self.sapling.extend(nfs);
     }
 
     #[cfg(feature = "orchard")]
-    pub(crate) fn retain_orchard_nullifiers(
+    pub(crate) fn retain_orchard(
         &mut self,
         f: impl Fn(&(AccountId, orchard::note::Nullifier)) -> bool,
     ) {
-        self.orchard_nullifiers.retain(f);
+        self.orchard.retain(f);
     }
 
     #[cfg(feature = "orchard")]
-    pub(crate) fn extend_orchard_nullifiers(
+    pub(crate) fn extend_orchard(
         &mut self,
         nfs: impl IntoIterator<Item = (AccountId, orchard::note::Nullifier)>,
     ) {
-        self.orchard_nullifiers.extend(nfs);
+        self.orchard.extend(nfs);
     }
 }
 
@@ -450,6 +484,7 @@ pub fn scan_block<P, AccountId, IvkTag>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
+    nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
 ) -> Result<ScannedBlock<AccountId>, ScanError>
 where
@@ -461,6 +496,7 @@ where
         params,
         block,
         scanning_keys,
+        nullifiers,
         prior_block_metadata,
         None,
     )
@@ -527,7 +563,7 @@ where
             sapling: BatchRunner::new(
                 batch_size_threshold,
                 scanning_keys
-                    .sapling_keys()
+                    .sapling()
                     .iter()
                     .map(|(id, key)| (id.clone(), key.prepare())),
             ),
@@ -535,7 +571,7 @@ where
             orchard: BatchRunner::new(
                 batch_size_threshold,
                 scanning_keys
-                    .orchard_keys()
+                    .orchard()
                     .iter()
                     .map(|(id, key)| (id.clone(), key.prepare())),
             ),
@@ -612,6 +648,7 @@ pub(crate) fn scan_block_with_runners<P, AccountId, IvkTag, TS, TO>(
     params: &P,
     block: CompactBlock,
     scanning_keys: &ScanningKeys<AccountId, IvkTag>,
+    nullifiers: &Nullifiers<AccountId>,
     prior_block_metadata: Option<&BlockMetadata>,
     mut batch_runners: Option<&mut BatchRunners<IvkTag, TS, TO>>,
 ) -> Result<ScannedBlock<AccountId>, ScanError>
@@ -762,7 +799,7 @@ where
 
         let (sapling_spends, sapling_unlinked_nullifiers) = find_spent(
             &tx.spends,
-            &scanning_keys.sapling_nullifiers,
+            &nullifiers.sapling,
             |spend| {
                 spend.nf().expect(
                     "Could not deserialize nullifier for spend from protobuf representation.",
@@ -777,7 +814,7 @@ where
         let orchard_spends = {
             let (orchard_spends, orchard_unlinked_nullifiers) = find_spent(
                 &tx.actions,
-                &scanning_keys.orchard_nullifiers,
+                &nullifiers.orchard,
                 |spend| {
                     spend.nf().expect(
                         "Could not deserialize nullifier for spend from protobuf representation.",
@@ -802,7 +839,7 @@ where
             txid,
             tx_idx,
             sapling_commitment_tree_size,
-            &scanning_keys.sapling_keys,
+            &scanning_keys.sapling,
             &spent_from_accounts,
             &tx.outputs
                 .iter()
@@ -836,7 +873,7 @@ where
             txid,
             tx_idx,
             orchard_commitment_tree_size,
-            &scanning_keys.orchard_keys,
+            &scanning_keys.orchard,
             &spent_from_accounts,
             &tx.actions
                 .iter()
@@ -1090,6 +1127,8 @@ fn find_received<
 #[cfg(test)]
 mod tests {
 
+    use std::convert::Infallible;
+
     use group::{
         ff::{Field, PrimeField},
         GroupEncoding,
@@ -1122,7 +1161,7 @@ mod tests {
         scanning::{BatchRunners, ScanningKeys},
     };
 
-    use super::{scan_block, scan_block_with_runners};
+    use super::{scan_block, scan_block_with_runners, Nullifiers};
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -1280,6 +1319,7 @@ mod tests {
                 &network,
                 cb,
                 &scanning_keys,
+                &Nullifiers::empty(),
                 Some(&BlockMetadata::from_parts(
                     BlockHeight::from(0),
                     BlockHash([0u8; 32]),
@@ -1361,9 +1401,15 @@ mod tests {
                 None
             };
 
-            let scanned_block =
-                scan_block_with_runners(&network, cb, &scanning_keys, None, batch_runners.as_mut())
-                    .unwrap();
+            let scanned_block = scan_block_with_runners(
+                &network,
+                cb,
+                &scanning_keys,
+                &Nullifiers::empty(),
+                None,
+                batch_runners.as_mut(),
+            )
+            .unwrap();
             let txs = scanned_block.transactions();
             assert_eq!(txs.len(), 1);
 
@@ -1403,10 +1449,14 @@ mod tests {
         let account = AccountId::try_from(12).unwrap();
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32], account).expect("Valid USK");
         let ufvk = usk.to_unified_full_viewing_key();
-        let mut scanning_keys = ScanningKeys::empty();
+        let scanning_keys = ScanningKeys::<AccountId, Infallible>::empty();
 
         let nf = Nullifier([7; 32]);
-        scanning_keys.extend_sapling_nullifiers([(account, nf)]);
+        let nullifiers = Nullifiers::new(
+            vec![(account, nf)],
+            #[cfg(feature = "orchard")]
+            vec![],
+        );
 
         let cb = fake_compact_block(
             1u32.into(),
@@ -1419,7 +1469,7 @@ mod tests {
         );
         assert_eq!(cb.vtx.len(), 2);
 
-        let scanned_block = scan_block(&network, cb, &scanning_keys, None).unwrap();
+        let scanned_block = scan_block(&network, cb, &scanning_keys, &nullifiers, None).unwrap();
         let txs = scanned_block.transactions();
         assert_eq!(txs.len(), 1);
 

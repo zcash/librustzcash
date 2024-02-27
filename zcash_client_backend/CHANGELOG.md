@@ -30,6 +30,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::scanning`:
   - `impl ScanningKeyOps<OrchardDomain, ..> for ScanningKey<..>` for Orchard key types.
   - `ScanningKeys::orchard`
+  - `Nullifiers::{orchard, extend_orchard, retain_orchard}`
   - `TaggedOrchardBatch`
   - `TaggedOrchardBatchRunner`
 - `zcash_client_backend::wallet`:
@@ -103,6 +104,7 @@ and this library adheres to Rust's notion of
   - `ScanningKey` is now a concrete type that bundles an incoming viewing key
     with an optional nullifier key and key source metadata.
   - `ScanningKeys`
+  - `Nullifiers`
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
      wallet::WalletTransparentOutput,

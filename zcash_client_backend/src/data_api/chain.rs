@@ -151,7 +151,7 @@ use zcash_primitives::consensus::{self, BlockHeight};
 use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
-    scanning::{scan_block_with_runners, BatchRunners, ScanningKeys},
+    scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
 };
 
 pub mod error;
@@ -303,27 +303,12 @@ where
     let account_ufvks = data_db
         .get_unified_full_viewing_keys()
         .map_err(Error::Wallet)?;
-    let mut scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
-
-    // Get the nullifiers for the unspent notes we are tracking
-    scanning_keys.extend_sapling_nullifiers(
-        data_db
-            .get_sapling_nullifiers(NullifierQuery::Unspent)
-            .map_err(Error::Wallet)?,
-    );
-    #[cfg(feature = "orchard")]
-    scanning_keys.extend_orchard_nullifiers(
-        data_db
-            .get_orchard_nullifiers(NullifierQuery::Unspent)
-            .map_err(Error::Wallet)?,
-    );
-
+    let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
     block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
         runners.add_block(params, block).map_err(|e| e.into())
     })?;
-
     runners.flush();
 
     let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
@@ -333,6 +318,17 @@ where
     } else {
         None
     };
+
+    // Get the nullifiers for the unspent notes we are tracking
+    let mut nullifiers = Nullifiers::new(
+        data_db
+            .get_sapling_nullifiers(NullifierQuery::Unspent)
+            .map_err(Error::Wallet)?,
+        #[cfg(feature = "orchard")]
+        data_db
+            .get_orchard_nullifiers(NullifierQuery::Unspent)
+            .map_err(Error::Wallet)?,
+    );
 
     let mut scanned_blocks = vec![];
     let mut scan_summary = ScanSummary::for_range(from_height..from_height);
@@ -345,6 +341,7 @@ where
                 params,
                 block,
                 &scanning_keys,
+                &nullifiers,
                 prior_block_metadata.as_ref(),
                 Some(&mut runners),
             )
@@ -365,14 +362,12 @@ where
                 .iter()
                 .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
                 .collect();
-            scanning_keys.retain_sapling_nullifiers(|(_, nf)| !sapling_spent_nf.contains(&nf));
-            scanning_keys.extend_sapling_nullifiers(scanned_block.transactions.iter().flat_map(
-                |tx| {
-                    tx.sapling_outputs()
-                        .iter()
-                        .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-                },
-            ));
+            nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
+            nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
+                tx.sapling_outputs()
+                    .iter()
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+            }));
 
             #[cfg(feature = "orchard")]
             {
@@ -382,14 +377,12 @@ where
                     .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
                     .collect();
 
-                scanning_keys.retain_orchard_nullifiers(|(_, nf)| !orchard_spent_nf.contains(&nf));
-                scanning_keys.extend_orchard_nullifiers(
-                    scanned_block.transactions.iter().flat_map(|tx| {
-                        tx.orchard_outputs()
-                            .iter()
-                            .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
-                    }),
-                );
+                nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
+                nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
+                    tx.orchard_outputs()
+                        .iter()
+                        .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+                }));
             }
 
             prior_block_metadata = Some(scanned_block.to_block_metadata());
