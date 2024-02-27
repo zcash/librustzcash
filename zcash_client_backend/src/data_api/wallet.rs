@@ -140,7 +140,7 @@ where
 /// };
 /// use zcash_proofs::prover::LocalTxProver;
 /// use zcash_client_backend::{
-///     keys::UnifiedSpendingKey,
+///     keys::{UnifiedSpendingKey, UnifiedAddressRequest},
 ///     data_api::{wallet::create_spend_to_address, error::Error, testing},
 ///     wallet::OvkPolicy,
 /// };
@@ -166,8 +166,9 @@ where
 /// };
 ///
 /// let account = AccountId::from(0);
+/// let req = UnifiedAddressRequest::new(false, true, true);
 /// let usk = UnifiedSpendingKey::from_seed(&Network::TestNetwork, &[0; 32][..], account).unwrap();
-/// let to = usk.to_unified_full_viewing_key().default_address().0.into();
+/// let to = usk.to_unified_full_viewing_key().default_address(req).0.into();
 ///
 /// let mut db_read = testing::MockWalletDb {
 ///     network: Network::TestNetwork

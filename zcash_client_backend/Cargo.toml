@@ -27,7 +27,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
-zcash_keys.workspace = true
+zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_note_encryption.workspace = true
 zcash_primitives.workspace = true
 zip32.workspace = true
