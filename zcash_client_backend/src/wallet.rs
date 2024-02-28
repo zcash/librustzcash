@@ -109,7 +109,7 @@ pub struct WalletTx<AccountId> {
 }
 
 impl<AccountId> WalletTx<AccountId> {
-    /// Constructs a new [`WalletTx`] from its constituent parts
+    /// Constructs a new [`WalletTx`] from its constituent parts.
     pub fn new(
         txid: TxId,
         block_index: usize,
@@ -132,7 +132,7 @@ impl<AccountId> WalletTx<AccountId> {
         }
     }
 
-    /// Returns the [`TxId`] for the corresponding [`Transaction`]
+    /// Returns the [`TxId`] for the corresponding [`Transaction`].
     ///
     /// [`Transaction`]: zcash_primitives::transaction::Transaction
     pub fn txid(&self) -> TxId {
@@ -150,7 +150,7 @@ impl<AccountId> WalletTx<AccountId> {
         self.sapling_spends.as_ref()
     }
 
-    /// Returns a record for each Sapling note belonging to and/or produced by the wallet in the
+    /// Returns a record for each Sapling note received or produced by the wallet in the
     /// transaction.
     pub fn sapling_outputs(&self) -> &[WalletSaplingOutput<AccountId>] {
         self.sapling_outputs.as_ref()
@@ -163,7 +163,7 @@ impl<AccountId> WalletTx<AccountId> {
         self.orchard_spends.as_ref()
     }
 
-    /// Returns a record for each Orchard note belonging to and/or produced by the wallet in the
+    /// Returns a record for each Orchard note received or produced by the wallet in the
     /// transaction.
     #[cfg(feature = "orchard")]
     pub fn orchard_outputs(&self) -> &[WalletOrchardOutput<AccountId>] {
@@ -229,13 +229,17 @@ impl transparent_fees::InputView for WalletTransparentOutput {
 pub struct WalletSpend<Nf, AccountId> {
     index: usize,
     nf: Nf,
-    account: AccountId,
+    account_id: AccountId,
 }
 
 impl<Nf, AccountId> WalletSpend<Nf, AccountId> {
     /// Constructs a `WalletSpend` from its constituent parts.
-    pub fn from_parts(index: usize, nf: Nf, account: AccountId) -> Self {
-        Self { index, nf, account }
+    pub fn from_parts(index: usize, nf: Nf, account_id: AccountId) -> Self {
+        Self {
+            index,
+            nf,
+            account_id,
+        }
     }
 
     /// Returns the index of the Sapling spend or Orchard action within the transaction that
@@ -247,14 +251,16 @@ impl<Nf, AccountId> WalletSpend<Nf, AccountId> {
     pub fn nf(&self) -> &Nf {
         &self.nf
     }
-    /// Returns the identifier to the account to which the note belonged.
-    pub fn account(&self) -> &AccountId {
-        &self.account
+    /// Returns the identifier to the account_id to which the note belonged.
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
     }
 }
 
+/// A type alias for Sapling [`WalletSpend`]s.
 pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, AccountId>;
 
+/// A type alias for Orchard [`WalletSpend`]s.
 #[cfg(feature = "orchard")]
 pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
 

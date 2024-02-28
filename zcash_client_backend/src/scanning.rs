@@ -827,10 +827,10 @@ where
         };
 
         // Collect the set of accounts that were spent from in this transaction
-        let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account());
+        let spent_from_accounts = sapling_spends.iter().map(|spend| spend.account_id());
         #[cfg(feature = "orchard")]
         let spent_from_accounts =
-            spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account()));
+            spent_from_accounts.chain(orchard_spends.iter().map(|spend| spend.account_id()));
         let spent_from_accounts = spent_from_accounts.copied().collect::<HashSet<_>>();
 
         let (sapling_outputs, mut sapling_nc) = find_received(
@@ -965,8 +965,8 @@ where
     ))
 }
 
-// Check for spent notes. The comparison against known-unspent nullifiers is done
-// in constant time.
+/// Check for spent notes. The comparison against known-unspent nullifiers is done
+/// in constant time.
 fn find_spent<
     AccountId: ConditionallySelectable + Default,
     Spend,
@@ -1479,7 +1479,7 @@ mod tests {
         assert_eq!(tx.sapling_outputs().len(), 0);
         assert_eq!(tx.sapling_spends()[0].index(), 0);
         assert_eq!(tx.sapling_spends()[0].nf(), &nf);
-        assert_eq!(tx.sapling_spends()[0].account(), &account);
+        assert_eq!(tx.sapling_spends()[0].account_id(), &account);
 
         assert_eq!(
             scanned_block

@@ -438,14 +438,16 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let to = output.note().recipient();
     let diversifier = to.diversifier();
 
-    let account = output.account_id();
+    // FIXME: recipient key scope will always be available until IVK import is supported.
+    // Remove this expectation after #1175 merges.
     let scope = output
         .recipient_key_scope()
         .expect("Key import is not yet supported.");
+
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
-        ":account": u32::from(account),
+        ":account": u32::from(output.account_id()),
         ":diversifier": &diversifier.0.as_ref(),
         ":value": output.note().value().inner(),
         ":rcm": &rcm.as_ref(),
