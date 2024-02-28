@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
+use std::hash::Hash;
 
 use incrementalmerkletree::{Position, Retention};
 use sapling::{
@@ -13,10 +14,7 @@ use sapling::{
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 use zcash_note_encryption::batch;
 use zcash_primitives::consensus::{BlockHeight, NetworkUpgrade};
-use zcash_primitives::{
-    consensus,
-    zip32::{AccountId, Scope},
-};
+use zcash_primitives::{consensus, zip32::Scope};
 
 use crate::data_api::{BlockMetadata, ScannedBlock, ScannedBundles};
 use crate::{
@@ -251,14 +249,18 @@ impl fmt::Display for ScanError {
 /// [`IncrementalWitness`]: sapling::IncrementalWitness
 /// [`WalletSaplingOutput`]: crate::wallet::WalletSaplingOutput
 /// [`WalletTx`]: crate::wallet::WalletTx
-pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
+pub fn scan_block<
+    P: consensus::Parameters + Send + 'static,
+    K: ScanningKey,
+    A: Clone + Default + Eq + Hash + Send + ConditionallySelectable + 'static,
+>(
     params: &P,
     block: CompactBlock,
-    vks: &[(&AccountId, &K)],
-    sapling_nullifiers: &[(AccountId, sapling::Nullifier)],
+    vks: &[(&A, &K)],
+    sapling_nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
-    scan_block_with_runner::<_, _, ()>(
+) -> Result<ScannedBlock<K::Nf, K::Scope, A>, ScanError> {
+    scan_block_with_runner::<_, _, (), A>(
         params,
         block,
         vks,
@@ -268,20 +270,20 @@ pub fn scan_block<P: consensus::Parameters + Send + 'static, K: ScanningKey>(
     )
 }
 
-type TaggedBatch<S> =
-    Batch<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor>;
-type TaggedBatchRunner<S, T> =
-    BatchRunner<(AccountId, S), SaplingDomain, CompactOutputDescription, CompactDecryptor, T>;
+type TaggedBatch<A, S> = Batch<(A, S), SaplingDomain, CompactOutputDescription, CompactDecryptor>;
+type TaggedBatchRunner<A, S, T> =
+    BatchRunner<(A, S), SaplingDomain, CompactOutputDescription, CompactDecryptor, T>;
 
 #[tracing::instrument(skip_all, fields(height = block.height))]
-pub(crate) fn add_block_to_runner<P, S, T>(
+pub(crate) fn add_block_to_runner<P, S, T, A>(
     params: &P,
     block: CompactBlock,
-    batch_runner: &mut TaggedBatchRunner<S, T>,
+    batch_runner: &mut TaggedBatchRunner<A, S, T>,
 ) where
     P: consensus::Parameters + Send + 'static,
     S: Clone + Send + 'static,
-    T: Tasks<TaggedBatch<S>>,
+    T: Tasks<TaggedBatch<A, S>>,
+    A: Clone + Default + Eq + Send + 'static,
 {
     let block_hash = block.hash();
     let block_height = block.height();
@@ -333,15 +335,16 @@ fn check_hash_continuity(
 pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,
-    T: Tasks<TaggedBatch<K::Scope>> + Sync,
+    T: Tasks<TaggedBatch<A, K::Scope>> + Sync,
+    A: Send + Clone + Default + Eq + Hash + ConditionallySelectable + 'static,
 >(
     params: &P,
     block: CompactBlock,
-    vks: &[(&AccountId, K)],
-    nullifiers: &[(AccountId, sapling::Nullifier)],
+    vks: &[(&A, K)],
+    nullifiers: &[(A, sapling::Nullifier)],
     prior_block_metadata: Option<&BlockMetadata>,
-    mut batch_runner: Option<&mut TaggedBatchRunner<K::Scope, T>>,
-) -> Result<ScannedBlock<K::Nf, K::Scope>, ScanError> {
+    mut batch_runner: Option<&mut TaggedBatchRunner<A, K::Scope, T>>,
+) -> Result<ScannedBlock<K::Nf, K::Scope, A>, ScanError> {
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
     }
@@ -444,7 +447,7 @@ pub(crate) fn scan_block_with_runner<
         )?;
 
     let compact_block_tx_count = block.vtx.len();
-    let mut wtxs: Vec<WalletTx<K::Nf, K::Scope>> = vec![];
+    let mut wtxs: Vec<WalletTx<K::Nf, K::Scope, A>> = vec![];
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
     for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
@@ -468,7 +471,7 @@ pub(crate) fn scan_block_with_runner<
             let spend = nullifiers
                 .iter()
                 .map(|&(account, nf)| CtOption::new(account, nf.ct_eq(&spend_nf)))
-                .fold(CtOption::new(AccountId::ZERO, 0.into()), |first, next| {
+                .fold(CtOption::new(A::default(), 0.into()), |first, next| {
                     CtOption::conditional_select(&next, &first, first.is_some())
                 })
                 .map(|account| WalletSaplingSpend::from_parts(index, spend_nf, account));
@@ -498,7 +501,7 @@ pub(crate) fn scan_block_with_runner<
             u32::try_from(tx.actions.len()).expect("Orchard action count cannot exceed a u32");
 
         // Check for incoming notes while incrementing tree and witnesses
-        let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf, K::Scope>> = vec![];
+        let mut shielded_outputs: Vec<WalletSaplingOutput<K::Nf, K::Scope, A>> = vec![];
         {
             let decoded = &tx
                 .outputs
@@ -874,7 +877,7 @@ mod tests {
             assert_eq!(tx.sapling_spends.len(), 0);
             assert_eq!(tx.sapling_outputs.len(), 1);
             assert_eq!(tx.sapling_outputs[0].index(), 0);
-            assert_eq!(tx.sapling_outputs[0].account(), account);
+            assert_eq!(*tx.sapling_outputs[0].account(), account);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
             assert_eq!(
                 tx.sapling_outputs[0].note_commitment_tree_position(),
@@ -955,7 +958,7 @@ mod tests {
             assert_eq!(tx.sapling_spends.len(), 0);
             assert_eq!(tx.sapling_outputs.len(), 1);
             assert_eq!(tx.sapling_outputs[0].index(), 0);
-            assert_eq!(tx.sapling_outputs[0].account(), AccountId::ZERO);
+            assert_eq!(*tx.sapling_outputs[0].account(), AccountId::ZERO);
             assert_eq!(tx.sapling_outputs[0].note().value().inner(), 5);
 
             assert_eq!(
@@ -1010,7 +1013,7 @@ mod tests {
         assert_eq!(tx.sapling_outputs.len(), 0);
         assert_eq!(tx.sapling_spends[0].index(), 0);
         assert_eq!(tx.sapling_spends[0].nf(), &nf);
-        assert_eq!(tx.sapling_spends[0].account(), account);
+        assert_eq!(tx.sapling_spends[0].account().to_owned(), account);
 
         assert_eq!(
             scanned_block

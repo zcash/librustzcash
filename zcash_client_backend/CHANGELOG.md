@@ -56,6 +56,7 @@ and this library adheres to Rust's notion of
     }`
   - `WalletSummary::next_sapling_subtree_index`
   - `wallet`:
+    - `Account`
     - `propose_standard_transfer_to_address`
     - `create_proposed_transactions`
     - `input_selection`:
@@ -96,6 +97,40 @@ and this library adheres to Rust's notion of
   - `parse::Param::name`
 
 ### Changed
+- Several structs and functions now take an `AccountId` type parameter
+  parameter in order to decouple the concept of an account identifier from
+  the ZIP 32 account index. Many APIs that previously referenced
+  `zcash_primitives::zip32::AccountId` now reference the generic type.
+  Impacted types and functions are:
+  - `zcash_client_backend::data_api`:
+    - `WalletRead` now has an associated `AccountId` type.
+    - `WalletRead::{
+        get_account_birthday,
+        get_current_address,
+        get_unified_full_viewing_keys,
+        get_account_for_ufvk,
+        get_wallet_summary,
+        get_sapling_nullifiers,
+        get_transparent_receivers,
+        get_transparent_balances,
+        get_account_ids
+      }` now refer to the `WalletRead::AccountId` associated type.
+    - `WalletWrite::{create_account, get_next_available_address}`
+      now refer to the `WalletRead::AccountId` associated type.
+    - `ScannedBlock` now takes an additional `AccountId` type parameter.
+    - `DecryptedTransaction` is now parameterized by `AccountId`
+    - `SentTransaction` is now parameterized by `AccountId`
+    - `SentTransactionOutput` is now parameterized by `AccountId`
+    - `WalletSummary` is now parameterized by `AccountId`
+  - `zcash_client_backend::decrypt`
+    - `DecryptedOutput` is now parameterized by `AccountId`
+    - `decrypt_transaction` is now parameterized by `AccountId`
+  - `zcash_client_backend::scanning::scan_block` is now parameterized by `AccountId`
+  - `zcash_client_backend::wallet`:
+    - `Recipient` now takes an additional `AccountId` type parameter.
+    - `WalletTx` now takes an additional `AccountId` type parameter.
+    - `WalletSaplingSpend` now takes an additional `AccountId` type parameter.
+    - `WalletSaplingOutput` now takes an additional `AccountId` type parameter.
 - `zcash_client_backend::data_api`:
   - `BlockMetadata::sapling_tree_size` now returns an `Option<u32>` instead of
     a `u32` for future consistency with Orchard.
@@ -111,9 +146,13 @@ and this library adheres to Rust's notion of
   - Fields of `Balance` and `AccountBalance` have been made private and the values
     of these fields have been made available via methods having the same names
     as the previously-public fields.
-  - `WalletSummary::new` now takes an additional `next_sapling_subtree_index`
-    argument.
+  - `WalletSummary::new` now takes an additional `next_sapling_subtree_index` argument.
+  - `WalletSummary::new` now takes a `HashMap` instead of a `BTreeMap` for its
+    `account_balances` argument.
+  - `WalletSummary::account_balances` now returns a `HashMap` instead of a `BTreeMap`.
   - Changes to the `WalletRead` trait:
+    - Added associated type `AccountId`.
+    - Added `get_account` function.
     - `get_checkpoint_depth` has been removed without replacement. This is no
       longer needed given the change to use the stored anchor height for
       transaction proposal execution.
@@ -273,7 +312,7 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_client_backend::wallet`:
   - `ReceivedSaplingNote` (use `zcash_client_backend::ReceivedNote` instead).
-  - `input_selection::{Proposal, ProposalError}` (moved to
+  - `input_selection::{Proposal, ShieldedInputs, ProposalError}` (moved to
     `zcash_client_backend::proposal`).
   - `SentTransactionOutput::sapling_change_to` - the note created by an internal
     transfer is now conveyed in the `recipient` field.

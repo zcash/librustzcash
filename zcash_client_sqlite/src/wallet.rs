@@ -67,42 +67,42 @@
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, OptionalExtension};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_client_backend::data_api::{AccountBalance, Ratio, WalletSummary};
-use zcash_client_backend::wallet::Note;
-use zcash_primitives::transaction::components::amount::NonNegativeAmount;
-use zcash_primitives::zip32::Scope;
-
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
-    memo::{Memo, MemoBytes},
-    merkle_tree::read_commitment_tree,
-    transaction::{components::Amount, Transaction, TransactionData, TxId},
-    zip32::{AccountId, DiversifierIndex},
-};
 
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, SentTransactionOutput, SAPLING_SHARD_HEIGHT,
+        wallet::Account,
+        AccountBalance, AccountBirthday, BlockMetadata, Ratio, SentTransactionOutput,
+        WalletSummary, SAPLING_SHARD_HEIGHT,
     },
     encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
-    wallet::{NoteId, Recipient, WalletTx},
+    wallet::{Note, NoteId, Recipient, WalletTx},
     PoolType, ShieldedProtocol,
 };
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    memo::{Memo, MemoBytes},
+    merkle_tree::read_commitment_tree,
+    transaction::{
+        components::{amount::NonNegativeAmount, Amount},
+        Transaction, TransactionData, TxId,
+    },
+    zip32::{AccountId, DiversifierIndex, Scope},
+};
 
-use crate::wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore};
-use crate::DEFAULT_UA_REQUEST;
 use crate::{
-    error::SqliteClientError, SqlTransaction, WalletCommitmentTrees, WalletDb, PRUNING_DEPTH,
+    error::SqliteClientError,
+    wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
+    SqlTransaction, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST, PRUNING_DEPTH,
     SAPLING_TABLES_PREFIX,
 };
 
@@ -603,7 +603,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     params: &P,
     min_confirmations: u32,
     progress: &impl ScanProgress,
-) -> Result<Option<WalletSummary>, SqliteClientError> {
+) -> Result<Option<WalletSummary<AccountId>>, SqliteClientError> {
     let chain_tip_height = match scan_queue_extrema(tx)? {
         Some(range) => *range.end(),
         None => {
@@ -655,7 +655,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
                 .map_err(|_| SqliteClientError::AccountIdOutOfRange)
                 .map(|a| (a, AccountBalance::ZERO))
         })
-        .collect::<Result<BTreeMap<AccountId, AccountBalance>, _>>()?;
+        .collect::<Result<HashMap<AccountId, AccountBalance>, _>>()?;
 
     let sapling_trace = tracing::info_span!("stmt_select_notes").entered();
     let mut stmt_select_notes = tx.prepare_cached(
@@ -983,6 +983,29 @@ pub(crate) fn block_height_extrema(
             .zip(max_height)
             .map(|(min, max)| RangeInclusive::new(min.into(), max.into())))
     })
+}
+
+pub(crate) fn get_account<P: Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account_id: AccountId,
+) -> Result<Option<Account>, SqliteClientError> {
+    conn.query_row(
+        r#"
+        SELECT ufvk
+        FROM accounts
+        WHERE id = :account_id
+        "#,
+        named_params![":account_id": u32::from(account_id)],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()?
+    .map(|ufvk_bytes| {
+        let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_bytes)
+            .map_err(SqliteClientError::CorruptedData)?;
+        Ok(Account::Zip32 { account_id, ufvk })
+    })
+    .transpose()
 }
 
 /// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
@@ -1608,7 +1631,7 @@ pub(crate) fn put_block(
 /// contain a note related to this wallet into the database.
 pub(crate) fn put_tx_meta<N, S>(
     conn: &rusqlite::Connection,
-    tx: &WalletTx<N, S>,
+    tx: &WalletTx<N, S, AccountId>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
@@ -1795,7 +1818,7 @@ pub(crate) fn update_expired_notes(
 // and `put_sent_output`
 fn recipient_params<P: consensus::Parameters>(
     params: &P,
-    to: &Recipient<Note>,
+    to: &Recipient<AccountId, Note>,
 ) -> (Option<String>, Option<u32>, PoolType) {
     match to {
         Recipient::Transparent(addr) => (Some(addr.encode(params)), None, PoolType::Transparent),
@@ -1819,7 +1842,7 @@ pub(crate) fn insert_sent_output<P: consensus::Parameters>(
     params: &P,
     tx_ref: i64,
     from_account: AccountId,
-    output: &SentTransactionOutput,
+    output: &SentTransactionOutput<AccountId>,
 ) -> Result<(), SqliteClientError> {
     let mut stmt_insert_sent_output = conn.prepare_cached(
         "INSERT INTO sent_notes (
@@ -1865,7 +1888,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     from_account: AccountId,
     tx_ref: i64,
     output_index: usize,
-    recipient: &Recipient<Note>,
+    recipient: &Recipient<AccountId, Note>,
     value: NonNegativeAmount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
@@ -2034,7 +2057,7 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
     // change or explicit in-wallet recipient.
     put_tx_meta(
         conn,
-        &WalletTx::<N, S> {
+        &WalletTx::<N, S, AccountId> {
             txid,
             index,
             sapling_spends: vec![],

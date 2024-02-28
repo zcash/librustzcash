@@ -146,6 +146,7 @@
 use std::ops::Range;
 
 use sapling::note_encryption::PreparedIncomingViewingKey;
+use subtle::ConditionallySelectable;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     zip32::Scope,
@@ -160,6 +161,8 @@ use crate::{
 
 pub mod error;
 use error::Error;
+
+use super::WalletRead;
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -277,6 +280,7 @@ where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
     DbT: WalletWrite,
+    <DbT as WalletRead>::AccountId: Clone + ConditionallySelectable + Default + Send + 'static,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data_db
@@ -374,7 +378,7 @@ where
             sapling_nullifiers.extend(scanned_block.transactions.iter().flat_map(|tx| {
                 tx.sapling_outputs
                     .iter()
-                    .map(|out| (out.account(), *out.nf()))
+                    .map(|out| (*out.account(), *out.nf()))
             }));
 
             prior_block_metadata = Some(scanned_block.to_block_metadata());
