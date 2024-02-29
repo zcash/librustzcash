@@ -338,6 +338,10 @@ and this library adheres to Rust's notion of
     - `TransactionBalance::{fee_required, total}`
   - `zcash_client_backend::wallet::WalletTransparentOutput::value`
 
+### Deprecated
+- `zcash_client_backend::data_api::wallet`:
+  - `spend` (use `propose_transfer` and `create_proposed_transactions` instead).
+
 ### Removed
 - `zcash_client_backend::wallet`:
   - `ReceivedSaplingNote` (use `zcash_client_backend::ReceivedNote` instead).

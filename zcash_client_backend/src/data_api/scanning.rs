@@ -1,3 +1,5 @@
+//! Common types used for managing a queue of scanning ranges.
+
 use std::fmt;
 use std::ops::Range;
 
