@@ -5,7 +5,7 @@ use std::io::Write;
 use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use orchard::bundle::{self as orchard};
+use orchard::{bundle, note_encryption_vanilla::OrchardDomainVanilla};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
@@ -335,7 +335,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
+        orchard_bundle: Option<&bundle::Bundle<A::OrchardAuth, Amount, OrchardDomainVanilla>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| b.commitment().0)
     }
@@ -390,7 +390,7 @@ pub(crate) fn to_hash(
     .unwrap();
     h.write_all(
         orchard_digest
-            .unwrap_or_else(orchard::commitments::hash_bundle_txid_empty)
+            .unwrap_or_else(bundle::commitments::hash_bundle_txid_empty)
             .as_bytes(),
     )
     .unwrap();
@@ -492,9 +492,9 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, Amount>>,
+        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, OrchardDomainVanilla>>,
     ) -> Self::OrchardDigest {
-        orchard_bundle.map_or_else(orchard::commitments::hash_bundle_auth_empty, |b| {
+        orchard_bundle.map_or_else(bundle::commitments::hash_bundle_auth_empty, |b| {
             b.authorizing_commitment().0
         })
     }

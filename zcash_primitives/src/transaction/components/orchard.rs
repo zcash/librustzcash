@@ -7,6 +7,7 @@ use nonempty::NonEmpty;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note_encryption_vanilla::{NoteCiphertextBytes, OrchardDomainVanilla, ENC_CIPHERTEXT_SIZE},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
     Action, Anchor,
@@ -47,7 +48,7 @@ impl MapAuth<Authorized, Authorized> for () {
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(
     mut reader: R,
-) -> io::Result<Option<orchard::Bundle<Authorized, Amount>>> {
+) -> io::Result<Option<orchard::Bundle<Authorized, Amount, OrchardDomainVanilla>>> {
     #[allow(clippy::redundant_closure)]
     let actions_without_auth = Vector::read(&mut reader, |r| read_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
@@ -134,21 +135,33 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
     })
 }
 
-pub fn read_note_ciphertext<R: Read>(mut reader: R) -> io::Result<TransmittedNoteCiphertext> {
-    let mut tnc = TransmittedNoteCiphertext {
+pub fn read_note_ciphertext<R: Read>(
+    mut reader: R,
+) -> io::Result<TransmittedNoteCiphertext<OrchardDomainVanilla>> {
+    /*
+            let mut epk_bytes = [0u8; 32]
+            // FIXME: use another ENC_CIPHERTEXT_SIZE for ZSA
+            let enc_ciphertext = [0u8;  ENC_CIPHERTEXT_SIZE];
+            let out_ciphertext = [0u8; 80];
+
+                enc_ciphertext: [0u8;  ENC_CIPHERTEXT_SIZE],
+    */
+    let mut tnc = TransmittedNoteCiphertext::<OrchardDomainVanilla> {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: [0u8; 612],
+        enc_ciphertext: NoteCiphertextBytes([0u8; ENC_CIPHERTEXT_SIZE]),
         out_ciphertext: [0u8; 80],
     };
 
     reader.read_exact(&mut tnc.epk_bytes)?;
-    reader.read_exact(&mut tnc.enc_ciphertext)?;
+    reader.read_exact(&mut tnc.enc_ciphertext.0)?;
     reader.read_exact(&mut tnc.out_ciphertext)?;
 
     Ok(tnc)
 }
 
-pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<()>> {
+pub fn read_action_without_auth<R: Read>(
+    mut reader: R,
+) -> io::Result<Action<(), OrchardDomainVanilla>> {
     let cv_net = read_value_commitment(&mut reader)?;
     let nf_old = read_nullifier(&mut reader)?;
     let rk = read_verification_key(&mut reader)?;
@@ -195,7 +208,7 @@ pub fn read_signature<R: Read, T: SigType>(mut reader: R) -> io::Result<Signatur
 
 /// Writes an [`orchard::Bundle`] in the v5 transaction format.
 pub fn write_v5_bundle<W: Write>(
-    bundle: Option<&orchard::Bundle<Authorized, Amount>>,
+    bundle: Option<&orchard::Bundle<Authorized, Amount, OrchardDomainVanilla>>,
     mut writer: W,
 ) -> io::Result<()> {
     if let Some(bundle) = &bundle {
@@ -247,16 +260,16 @@ pub fn write_cmx<W: Write>(mut writer: W, cmx: &ExtractedNoteCommitment) -> io::
 
 pub fn write_note_ciphertext<W: Write>(
     mut writer: W,
-    nc: &TransmittedNoteCiphertext,
+    nc: &TransmittedNoteCiphertext<OrchardDomainVanilla>,
 ) -> io::Result<()> {
     writer.write_all(&nc.epk_bytes)?;
-    writer.write_all(&nc.enc_ciphertext)?;
+    writer.write_all(nc.enc_ciphertext.as_ref())?;
     writer.write_all(&nc.out_ciphertext)
 }
 
 pub fn write_action_without_auth<W: Write>(
     mut writer: W,
-    act: &Action<<Authorized as Authorization>::SpendAuth>,
+    act: &Action<<Authorized as Authorization>::SpendAuth, OrchardDomainVanilla>,
 ) -> io::Result<()> {
     write_value_commitment(&mut writer, act.cv_net())?;
     write_nullifier(&mut writer, act.nullifier())?;

@@ -49,8 +49,7 @@ use crate::{
     },
 };
 
-use super::components::amount::NonNegativeAmount;
-use super::components::sapling::zip212_enforcement;
+use orchard::{note::AssetBase, note_encryption_vanilla::OrchardDomainVanilla};
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -796,14 +795,17 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let orchard_bundle = unauthed_tx
             .orchard_bundle
             .map(|b| {
-                b.create_proof(&orchard::circuit::ProvingKey::build(), &mut rng)
-                    .and_then(|b| {
-                        b.apply_signatures(
-                            &mut rng,
-                            *shielded_sig_commitment.as_ref(),
-                            &self.orchard_saks,
-                        )
-                    })
+                b.create_proof(
+                    &orchard::circuit::ProvingKey::build::<OrchardDomainVanilla>(),
+                    &mut rng,
+                )
+                .and_then(|b| {
+                    b.apply_signatures(
+                        &mut rng,
+                        *shielded_sig_commitment.as_ref(),
+                        &self.orchard_saks,
+                    )
+                })
             })
             .transpose()
             .map_err(Error::OrchardBuild)?;
