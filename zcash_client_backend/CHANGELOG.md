@@ -81,6 +81,7 @@ and this library adheres to Rust's notion of
   - `PROPOSAL_SER_V1`
   - `ProposalDecodingError`
   - `proposal` module, for parsing and serializing transaction proposals.
+  - `service::TreeState::orchard_tree` (behind the `orchard` feature flag)
 - `impl Clone for zcash_client_backend::{
      zip321::{Payment, TransactionRequest, Zip321Error, parse::Param, parse::IndexedParam},
      wallet::WalletTransparentOutput,
