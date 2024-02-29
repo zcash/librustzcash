@@ -3,12 +3,16 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
+    hash::Hash,
     io,
     num::{NonZeroU32, TryFromIntError},
 };
 
-use self::scanning::ScanRange;
-use self::{chain::CommitmentTreeRoot, wallet::Account};
+use incrementalmerkletree::{frontier::Frontier, Retention};
+use secrecy::SecretVec;
+use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+
+use self::{chain::CommitmentTreeRoot, scanning::ScanRange};
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
@@ -17,9 +21,6 @@ use crate::{
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
     ShieldedProtocol,
 };
-use incrementalmerkletree::{frontier::Frontier, Retention};
-use secrecy::SecretVec;
-use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
@@ -289,7 +290,7 @@ impl<T> Ratio<T> {
 /// this circumstance it is possible that a newly created transaction could conflict with a
 /// not-yet-mined transaction in the mempool.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WalletSummary<AccountId: Eq + std::hash::Hash> {
+pub struct WalletSummary<AccountId: Eq + Hash> {
     account_balances: HashMap<AccountId, AccountBalance>,
     chain_tip_height: BlockHeight,
     fully_scanned_height: BlockHeight,
@@ -297,7 +298,7 @@ pub struct WalletSummary<AccountId: Eq + std::hash::Hash> {
     next_sapling_subtree_index: u64,
 }
 
-impl<AccountId: Eq + std::hash::Hash> WalletSummary<AccountId> {
+impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     /// Constructs a new [`WalletSummary`] from its constituent parts.
     pub fn new(
         account_balances: HashMap<AccountId, AccountBalance>,
@@ -359,13 +360,17 @@ pub trait InputSource {
     /// The type of errors produced by a wallet backend.
     type Error;
 
-    /// The type used to track unique account identifiers.
-    type AccountId;
+    /// Backend-specific account identifier.
+    ///
+    /// An account identifier corresponds to at most a single unified spending key's worth of spend
+    /// authority, such that both received notes and change spendable by that spending authority
+    /// will be interpreted as belonging to that account. This might be a database identifier type
+    /// or a UUID.
+    type AccountId: Copy + Debug + Eq + Hash;
 
     /// Backend-specific note identifier.
     ///
-    /// For example, this might be a database identifier type
-    /// or a UUID.
+    /// For example, this might be a database identifier type or a UUID.
     type NoteRef: Copy + Debug + Eq + Ord;
 
     /// Fetches a spendable note by indexing into a transaction's shielded outputs for the
@@ -426,11 +431,12 @@ pub trait WalletRead {
     /// The type of errors that may be generated when querying a wallet data store.
     type Error;
 
-    /// The type used to track unique account identifiers.
-    type AccountId: Eq + std::hash::Hash;
-
-    /// Gets the parameters that went into creating an account (e.g. seed+index or uvk).
-    fn get_account(&self, account_id: &Self::AccountId) -> Result<Option<Account>, Self::Error>;
+    /// The type of the account identifier.
+    ///
+    /// An account identifier corresponds to at most a single unified spending key's worth of spend
+    /// authority, such that both received notes and change spendable by that spending authority
+    /// will be interpreted as belonging to that account.
+    type AccountId: Copy + Debug + Eq + Hash;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
@@ -1005,8 +1011,9 @@ pub trait WalletWrite: WalletRead {
     /// current set of [ZIP 316] account identifiers known to the wallet database.
     ///
     /// Returns the account identifier for the newly-created wallet database entry, along with the
-    /// associated [`UnifiedSpendingKey`].
-    /// Note that the unique account identifier should *not* be assumed equivalent to the ZIP-32 account index.
+    /// associated [`UnifiedSpendingKey`]. Note that the unique account identifier should *not* be
+    /// assumed equivalent to the ZIP 32 account index. It is an opaque identifier for a pool of
+    /// funds or set of outputs controlled by a single spending authority.
     ///
     /// If `birthday.height()` is below the current chain tip, this operation will
     /// trigger a re-scan of the blocks at and above the provided height. The birthday height is
@@ -1258,13 +1265,6 @@ pub mod testing {
     impl WalletRead for MockWalletDb {
         type Error = ();
         type AccountId = u32;
-
-        fn get_account(
-            &self,
-            _account_id: &Self::AccountId,
-        ) -> Result<Option<super::Account>, Self::Error> {
-            Ok(None)
-        }
 
         fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)

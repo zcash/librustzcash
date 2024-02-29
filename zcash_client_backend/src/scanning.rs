@@ -252,7 +252,7 @@ impl fmt::Display for ScanError {
 pub fn scan_block<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,
-    A: Clone + Default + Eq + Hash + Send + ConditionallySelectable + 'static,
+    A: Default + Eq + Hash + Send + ConditionallySelectable + 'static,
 >(
     params: &P,
     block: CompactBlock,
@@ -283,7 +283,7 @@ pub(crate) fn add_block_to_runner<P, S, T, A>(
     P: consensus::Parameters + Send + 'static,
     S: Clone + Send + 'static,
     T: Tasks<TaggedBatch<A, S>>,
-    A: Clone + Default + Eq + Send + 'static,
+    A: Copy + Default + Eq + Send + 'static,
 {
     let block_hash = block.hash();
     let block_height = block.height();
@@ -336,7 +336,7 @@ pub(crate) fn scan_block_with_runner<
     P: consensus::Parameters + Send + 'static,
     K: ScanningKey,
     T: Tasks<TaggedBatch<A, K::Scope>> + Sync,
-    A: Send + Clone + Default + Eq + Hash + ConditionallySelectable + 'static,
+    A: Send + Default + Eq + Hash + ConditionallySelectable + 'static,
 >(
     params: &P,
     block: CompactBlock,

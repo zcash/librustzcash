@@ -73,7 +73,7 @@ pub enum Recipient<AccountId, N> {
 }
 
 impl<AccountId, N> Recipient<AccountId, N> {
-    pub fn map_internal_note<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<AccountId, B> {
+    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<AccountId, B> {
         match self {
             Recipient::Transparent(t) => Recipient::Transparent(t),
             Recipient::Sapling(s) => Recipient::Sapling(s),
@@ -84,7 +84,7 @@ impl<AccountId, N> Recipient<AccountId, N> {
 }
 
 impl<AccountId, N> Recipient<AccountId, Option<N>> {
-    pub fn internal_note_transpose_option(self) -> Option<Recipient<AccountId, N>> {
+    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N>> {
         match self {
             Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
             Recipient::Sapling(s) => Some(Recipient::Sapling(s)),

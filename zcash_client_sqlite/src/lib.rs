@@ -386,13 +386,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
         wallet::get_account_ids(self.conn.borrow())
     }
-
-    fn get_account(
-        &self,
-        account_id: &Self::AccountId,
-    ) -> Result<Option<data_api::wallet::Account>, Self::Error> {
-        wallet::get_account(self.conn.borrow(), &self.params, *account_id)
-    }
 }
 
 impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P> {

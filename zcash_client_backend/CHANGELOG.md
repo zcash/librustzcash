@@ -56,7 +56,6 @@ and this library adheres to Rust's notion of
     }`
   - `WalletSummary::next_sapling_subtree_index`
   - `wallet`:
-    - `Account`
     - `propose_standard_transfer_to_address`
     - `create_proposed_transactions`
     - `input_selection`:

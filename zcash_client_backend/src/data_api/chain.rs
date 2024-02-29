@@ -280,7 +280,7 @@ where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
     DbT: WalletWrite,
-    <DbT as WalletRead>::AccountId: Clone + ConditionallySelectable + Default + Send + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
     let ufvks = data_db

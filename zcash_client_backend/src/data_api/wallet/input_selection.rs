@@ -314,7 +314,6 @@ impl<DbT, ChangeT: ChangeStrategy> GreedyInputSelector<DbT, ChangeT> {
 impl<DbT, ChangeT> InputSelector for GreedyInputSelector<DbT, ChangeT>
 where
     DbT: InputSource,
-    <DbT as InputSource>::AccountId: Clone,
     ChangeT: ChangeStrategy,
     ChangeT::FeeRule: Clone,
 {

@@ -78,7 +78,6 @@ use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        wallet::Account,
         AccountBalance, AccountBirthday, BlockMetadata, Ratio, SentTransactionOutput,
         WalletSummary, SAPLING_SHARD_HEIGHT,
     },
@@ -983,29 +982,6 @@ pub(crate) fn block_height_extrema(
             .zip(max_height)
             .map(|(min, max)| RangeInclusive::new(min.into(), max.into())))
     })
-}
-
-pub(crate) fn get_account<P: Parameters>(
-    conn: &rusqlite::Connection,
-    params: &P,
-    account_id: AccountId,
-) -> Result<Option<Account>, SqliteClientError> {
-    conn.query_row(
-        r#"
-        SELECT ufvk
-        FROM accounts
-        WHERE id = :account_id
-        "#,
-        named_params![":account_id": u32::from(account_id)],
-        |row| row.get::<_, String>(0),
-    )
-    .optional()?
-    .map(|ufvk_bytes| {
-        let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_bytes)
-            .map_err(SqliteClientError::CorruptedData)?;
-        Ok(Account::Zip32 { account_id, ufvk })
-    })
-    .transpose()
 }
 
 /// Returns the minimum and maximum heights of blocks in the chain which may be scanned.
