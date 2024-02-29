@@ -1,11 +1,11 @@
-use std::num::NonZeroU32;
-
 use nonempty::NonEmpty;
 use rand_core::OsRng;
 use sapling::{
     note_encryption::{try_sapling_note_decryption, PreparedIncomingViewingKey},
     prover::{OutputProver, SpendProver},
 };
+use std::num::NonZeroU32;
+
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
@@ -15,9 +15,10 @@ use zcash_primitives::{
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
-    zip32::{AccountId, Scope},
+    zip32::Scope,
 };
 
+use super::InputSource;
 use crate::{
     address::Address,
     data_api::{
@@ -33,13 +34,6 @@ use crate::{
     PoolType, ShieldedProtocol,
 };
 
-pub mod input_selection;
-use input_selection::{
-    GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
-};
-
-use super::InputSource;
-
 #[cfg(feature = "transparent-inputs")]
 use {
     input_selection::ShieldingSelector,
@@ -47,6 +41,11 @@ use {
     zcash_keys::encoding::AddressCodec,
     zcash_primitives::legacy::TransparentAddress,
     zcash_primitives::transaction::components::{OutPoint, TxOut},
+};
+
+pub mod input_selection;
+use input_selection::{
+    GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
 };
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
@@ -222,8 +221,12 @@ pub fn create_spend_to_address<DbT, ParamsT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
-    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
+    DbT: InputSource,
+    DbT: WalletWrite<
+        Error = <DbT as InputSource>::Error,
+        AccountId = <DbT as InputSource>::AccountId,
+    >,
+    DbT: WalletCommitmentTrees,
 {
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
@@ -328,8 +331,12 @@ pub fn spend<DbT, ParamsT, InputsT>(
     >,
 >
 where
-    DbT: WalletWrite + WalletCommitmentTrees + InputSource<Error = <DbT as WalletRead>::Error>,
-    <DbT as InputSource>::NoteRef: Copy + Eq + Ord,
+    DbT: InputSource,
+    DbT: WalletWrite<
+        Error = <DbT as InputSource>::Error,
+        AccountId = <DbT as InputSource>::AccountId,
+    >,
+    DbT: WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
     InputsT: InputSelector<InputSource = DbT>,
 {
@@ -366,7 +373,7 @@ where
 pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    spend_from_account: AccountId,
+    spend_from_account: <DbT as InputSource>::AccountId,
     input_selector: &InputsT,
     request: zip321::TransactionRequest,
     min_confirmations: NonZeroU32,
@@ -433,7 +440,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     fee_rule: StandardFeeRule,
-    spend_from_account: AccountId,
+    spend_from_account: <DbT as InputSource>::AccountId,
     min_confirmations: NonZeroU32,
     to: &Address,
     amount: NonNegativeAmount,
@@ -451,7 +458,11 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
 >
 where
     ParamsT: consensus::Parameters + Clone,
-    DbT: WalletRead + InputSource<Error = <DbT as WalletRead>::Error>,
+    DbT: InputSource,
+    DbT: WalletRead<
+        Error = <DbT as InputSource>::Error,
+        AccountId = <DbT as InputSource>::AccountId,
+    >,
     DbT::NoteRef: Copy + Eq + Ord,
 {
     let request = zip321::TransactionRequest::new(vec![Payment {
@@ -1057,7 +1068,7 @@ where
                     .expect("An action should exist in the transaction for each Orchard output.");
 
                 let recipient = recipient
-                    .map_internal_account(|pool| {
+                    .map_internal_account_note(|pool| {
                         assert!(pool == PoolType::Shielded(ShieldedProtocol::Orchard));
                         build_result
                             .transaction()
@@ -1068,7 +1079,7 @@ where
                                     .map(|(note, _, _)| Note::Orchard(note))
                             })
                     })
-                    .internal_account_transpose_option()
+                    .internal_account_note_transpose_option()
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
 
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo)
@@ -1087,7 +1098,7 @@ where
                     .expect("An output should exist in the transaction for each Sapling payment.");
 
                 let recipient = recipient
-                    .map_internal_account(|pool| {
+                    .map_internal_account_note(|pool| {
                         assert!(pool == PoolType::Shielded(ShieldedProtocol::Sapling));
                         build_result
                             .transaction()
@@ -1104,7 +1115,7 @@ where
                                 .map(|(note, _, _)| Note::Sapling(note))
                             })
                     })
-                    .internal_account_transpose_option()
+                    .internal_account_note_transpose_option()
                     .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
 
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo)

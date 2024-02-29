@@ -17,7 +17,6 @@ use zcash_primitives::{
         },
         fees::FeeRule,
     },
-    zip32::AccountId,
 };
 
 use crate::{
@@ -149,7 +148,7 @@ pub trait InputSelector {
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
         anchor_height: BlockHeight,
-        account: AccountId,
+        account: <Self::InputSource as InputSource>::AccountId,
         transaction_request: TransactionRequest,
     ) -> Result<
         Proposal<Self::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
@@ -329,7 +328,7 @@ where
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
         anchor_height: BlockHeight,
-        account: AccountId,
+        account: <DbT as InputSource>::AccountId,
         transaction_request: TransactionRequest,
     ) -> Result<
         Proposal<Self::FeeRule, DbT::NoteRef>,

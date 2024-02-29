@@ -7,7 +7,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
     transaction::Transaction,
-    zip32::{AccountId, Scope},
+    zip32::Scope,
 };
 
 use crate::keys::UnifiedFullViewingKey;
@@ -27,7 +27,7 @@ pub enum TransferType {
 }
 
 /// A decrypted shielded output.
-pub struct DecryptedOutput<Note> {
+pub struct DecryptedOutput<Note, AccountId> {
     /// The index of the output within [`shielded_outputs`].
     ///
     /// [`shielded_outputs`]: zcash_primitives::transaction::TransactionData
@@ -47,12 +47,12 @@ pub struct DecryptedOutput<Note> {
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
 /// [`UnifiedFullViewingKey`]s.
-pub fn decrypt_transaction<P: consensus::Parameters>(
+pub fn decrypt_transaction<P: consensus::Parameters, A: Clone>(
     params: &P,
     height: BlockHeight,
     tx: &Transaction,
-    ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
-) -> Vec<DecryptedOutput<sapling::Note>> {
+    ufvks: &HashMap<A, UnifiedFullViewingKey>,
+) -> Vec<DecryptedOutput<sapling::Note, A>> {
     let zip212_enforcement = consensus::sapling_zip212_enforcement(params, height);
     tx.sapling_bundle()
         .iter()
@@ -60,7 +60,9 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
             ufvks
                 .iter()
                 .flat_map(move |(account, ufvk)| {
-                    ufvk.sapling().into_iter().map(|dfvk| (*account, dfvk))
+                    ufvk.sapling()
+                        .into_iter()
+                        .map(|dfvk| (account.to_owned(), dfvk))
                 })
                 .flat_map(move |(account, dfvk)| {
                     let ivk_external =
@@ -74,6 +76,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                         .iter()
                         .enumerate()
                         .flat_map(move |(index, output)| {
+                            let account = account.clone();
                             try_sapling_note_decryption(&ivk_external, output, zip212_enforcement)
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {
@@ -92,7 +95,7 @@ pub fn decrypt_transaction<P: consensus::Parameters>(
                                 .map(move |((note, _, memo), transfer_type)| DecryptedOutput {
                                     index,
                                     note,
-                                    account,
+                                    account: account.clone(),
                                     memo: MemoBytes::from_bytes(&memo).expect("correct length"),
                                     transfer_type,
                                 })

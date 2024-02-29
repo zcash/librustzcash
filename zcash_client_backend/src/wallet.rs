@@ -14,7 +14,7 @@ use zcash_primitives::{
         fees::transparent as transparent_fees,
         TxId,
     },
-    zip32::{AccountId, Scope},
+    zip32::Scope,
 };
 
 use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
@@ -65,15 +65,15 @@ impl NoteId {
 /// internal account ID and the pool to which funds were sent in the case of a wallet-internal
 /// output.
 #[derive(Debug, Clone)]
-pub enum Recipient<N> {
+pub enum Recipient<AccountId, N> {
     Transparent(TransparentAddress),
     Sapling(sapling::PaymentAddress),
     Unified(UnifiedAddress, PoolType),
     InternalAccount(AccountId, N),
 }
 
-impl<N> Recipient<N> {
-    pub fn map_internal_account<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<B> {
+impl<AccountId, N> Recipient<AccountId, N> {
+    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<AccountId, B> {
         match self {
             Recipient::Transparent(t) => Recipient::Transparent(t),
             Recipient::Sapling(s) => Recipient::Sapling(s),
@@ -83,8 +83,8 @@ impl<N> Recipient<N> {
     }
 }
 
-impl<N> Recipient<Option<N>> {
-    pub fn internal_account_transpose_option(self) -> Option<Recipient<N>> {
+impl<AccountId, N> Recipient<AccountId, Option<N>> {
+    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N>> {
         match self {
             Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
             Recipient::Sapling(s) => Some(Recipient::Sapling(s)),
@@ -97,11 +97,11 @@ impl<N> Recipient<Option<N>> {
 /// A subset of a [`Transaction`] relevant to wallets and light clients.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
-pub struct WalletTx<N, S> {
+pub struct WalletTx<N, S, A> {
     pub txid: TxId,
     pub index: usize,
-    pub sapling_spends: Vec<WalletSaplingSpend>,
-    pub sapling_outputs: Vec<WalletSaplingOutput<N, S>>,
+    pub sapling_spends: Vec<WalletSaplingSpend<A>>,
+    pub sapling_outputs: Vec<WalletSaplingOutput<N, S, A>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,13 +161,13 @@ impl transparent_fees::InputView for WalletTransparentOutput {
 /// A subset of a [`SpendDescription`] relevant to wallets and light clients.
 ///
 /// [`SpendDescription`]: sapling::bundle::SpendDescription
-pub struct WalletSaplingSpend {
+pub struct WalletSaplingSpend<AccountId> {
     index: usize,
     nf: sapling::Nullifier,
     account: AccountId,
 }
 
-impl WalletSaplingSpend {
+impl<AccountId> WalletSaplingSpend<AccountId> {
     pub fn from_parts(index: usize, nf: sapling::Nullifier, account: AccountId) -> Self {
         Self { index, nf, account }
     }
@@ -178,8 +178,8 @@ impl WalletSaplingSpend {
     pub fn nf(&self) -> &sapling::Nullifier {
         &self.nf
     }
-    pub fn account(&self) -> AccountId {
-        self.account
+    pub fn account(&self) -> &AccountId {
+        &self.account
     }
 }
 
@@ -195,11 +195,11 @@ impl WalletSaplingSpend {
 /// `()` for sent notes.
 ///
 /// [`OutputDescription`]: sapling::bundle::OutputDescription
-pub struct WalletSaplingOutput<N, S> {
+pub struct WalletSaplingOutput<N, S, A> {
     index: usize,
     cmu: sapling::note::ExtractedNoteCommitment,
     ephemeral_key: EphemeralKeyBytes,
-    account: AccountId,
+    account: A,
     note: sapling::Note,
     is_change: bool,
     note_commitment_tree_position: Position,
@@ -207,14 +207,14 @@ pub struct WalletSaplingOutput<N, S> {
     recipient_key_scope: S,
 }
 
-impl<N, S> WalletSaplingOutput<N, S> {
+impl<N, S, A> WalletSaplingOutput<N, S, A> {
     /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         index: usize,
         cmu: sapling::note::ExtractedNoteCommitment,
         ephemeral_key: EphemeralKeyBytes,
-        account: AccountId,
+        account: A,
         note: sapling::Note,
         is_change: bool,
         note_commitment_tree_position: Position,
@@ -243,8 +243,8 @@ impl<N, S> WalletSaplingOutput<N, S> {
     pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
         &self.ephemeral_key
     }
-    pub fn account(&self) -> AccountId {
-        self.account
+    pub fn account(&self) -> &A {
+        &self.account
     }
     pub fn note(&self) -> &sapling::Note {
         &self.note

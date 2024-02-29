@@ -179,6 +179,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for WalletDb<C, P> {
     type Error = SqliteClientError;
     type NoteRef = ReceivedNoteId;
+    type AccountId = AccountId;
 
     fn get_spendable_note(
         &self,
@@ -242,6 +243,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
+    type AccountId = AccountId;
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
@@ -322,7 +324,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_wallet_summary(
         &self,
         min_confirmations: u32,
-    ) -> Result<Option<WalletSummary>, Self::Error> {
+    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
         // This will return a runtime error if we call `get_wallet_summary` from two
         // threads at the same time, as transactions cannot nest.
         wallet::get_wallet_summary(
@@ -356,29 +358,29 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
-    #[cfg(feature = "transparent-inputs")]
-    fn get_transparent_receivers(
-        &self,
-        _account: AccountId,
-    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
-        wallet::get_transparent_receivers(self.conn.borrow(), &self.params, _account)
-    }
-
-    #[cfg(feature = "transparent-inputs")]
-    fn get_transparent_balances(
-        &self,
-        _account: AccountId,
-        _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
-        wallet::get_transparent_balances(self.conn.borrow(), &self.params, _account, _max_height)
-    }
-
     #[cfg(feature = "orchard")]
     fn get_orchard_nullifiers(
         &self,
         _query: NullifierQuery,
     ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
         todo!()
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_receivers(
+        &self,
+        account: AccountId,
+    ) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, Self::Error> {
+        wallet::get_transparent_receivers(self.conn.borrow(), &self.params, account)
+    }
+
+    #[cfg(feature = "transparent-inputs")]
+    fn get_transparent_balances(
+        &self,
+        account: AccountId,
+        max_height: BlockHeight,
+    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        wallet::get_transparent_balances(self.conn.borrow(), &self.params, account, max_height)
     }
 
     fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
@@ -452,7 +454,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
-        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope>>,
+        blocks: Vec<ScannedBlock<sapling::Nullifier, Scope, Self::AccountId>>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let start_positions = blocks.first().map(|block| {
@@ -591,7 +593,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         Ok(())
     }
 
-    fn store_decrypted_tx(&mut self, d_tx: DecryptedTransaction) -> Result<(), Self::Error> {
+    fn store_decrypted_tx(
+        &mut self,
+        d_tx: DecryptedTransaction<AccountId>,
+    ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None)?;
 
@@ -683,7 +688,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         })
     }
 
-    fn store_sent_tx(&mut self, sent_tx: &SentTransaction) -> Result<(), Self::Error> {
+    fn store_sent_tx(&mut self, sent_tx: &SentTransaction<AccountId>) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(
                 wdb.conn.0,

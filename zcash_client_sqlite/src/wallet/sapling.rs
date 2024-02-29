@@ -38,12 +38,12 @@ pub(crate) trait ReceivedSaplingOutput {
     fn recipient_key_scope(&self) -> Scope;
 }
 
-impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope> {
+impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope, AccountId> {
     fn index(&self) -> usize {
         self.index()
     }
     fn account(&self) -> AccountId {
-        WalletSaplingOutput::account(self)
+        *WalletSaplingOutput::account(self)
     }
     fn note(&self) -> &sapling::Note {
         WalletSaplingOutput::note(self)
@@ -66,7 +66,7 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope> {
     }
 }
 
-impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note> {
+impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
     fn index(&self) -> usize {
         self.index
     }

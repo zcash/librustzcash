@@ -731,7 +731,10 @@ impl<Cache> TestState<Cache> {
         })
     }
 
-    pub(crate) fn get_wallet_summary(&self, min_confirmations: u32) -> Option<WalletSummary> {
+    pub(crate) fn get_wallet_summary(
+        &self,
+        min_confirmations: u32,
+    ) -> Option<WalletSummary<AccountId>> {
         get_wallet_summary(
             &self.wallet().conn.unchecked_transaction().unwrap(),
             &self.wallet().params,
