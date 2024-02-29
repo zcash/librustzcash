@@ -7,6 +7,7 @@ use nonempty::NonEmpty;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note_encryption_vanilla::{NoteCiphertextBytes, OrchardDomainVanilla, ENC_CIPHERTEXT_SIZE},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
     Action, Anchor,
