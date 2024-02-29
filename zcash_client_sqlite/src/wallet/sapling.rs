@@ -29,21 +29,21 @@ use super::{memo_repr, parse_scope, scope_code, wallet_birthday};
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedSaplingOutput {
     fn index(&self) -> usize;
-    fn account(&self) -> AccountId;
+    fn account_id(&self) -> AccountId;
     fn note(&self) -> &sapling::Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> bool;
     fn nullifier(&self) -> Option<&sapling::Nullifier>;
     fn note_commitment_tree_position(&self) -> Option<Position>;
-    fn recipient_key_scope(&self) -> Scope;
+    fn recipient_key_scope(&self) -> Option<Scope>;
 }
 
-impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope, AccountId> {
+impl ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
     fn index(&self) -> usize {
         self.index()
     }
-    fn account(&self) -> AccountId {
-        *WalletSaplingOutput::account(self)
+    fn account_id(&self) -> AccountId {
+        *WalletSaplingOutput::account_id(self)
     }
     fn note(&self) -> &sapling::Note {
         WalletSaplingOutput::note(self)
@@ -55,14 +55,13 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<sapling::Nullifier, Scope, Ac
         WalletSaplingOutput::is_change(self)
     }
     fn nullifier(&self) -> Option<&sapling::Nullifier> {
-        Some(self.nf())
+        self.nf()
     }
     fn note_commitment_tree_position(&self) -> Option<Position> {
         Some(WalletSaplingOutput::note_commitment_tree_position(self))
     }
-
-    fn recipient_key_scope(&self) -> Scope {
-        *self.recipient_key_scope()
+    fn recipient_key_scope(&self) -> Option<Scope> {
+        self.recipient_key_scope()
     }
 }
 
@@ -70,7 +69,7 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
     fn index(&self) -> usize {
         self.index
     }
-    fn account(&self) -> AccountId {
+    fn account_id(&self) -> AccountId {
         self.account
     }
     fn note(&self) -> &sapling::Note {
@@ -88,11 +87,11 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
     fn note_commitment_tree_position(&self) -> Option<Position> {
         None
     }
-    fn recipient_key_scope(&self) -> Scope {
+    fn recipient_key_scope(&self) -> Option<Scope> {
         if self.transfer_type == TransferType::WalletInternal {
-            Scope::Internal
+            Some(Scope::Internal)
         } else {
-            Scope::External
+            Some(Scope::External)
         }
     }
 }
@@ -439,10 +438,16 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let to = output.note().recipient();
     let diversifier = to.diversifier();
 
+    // FIXME: recipient key scope will always be available until IVK import is supported.
+    // Remove this expectation after #1175 merges.
+    let scope = output
+        .recipient_key_scope()
+        .expect("Key import is not yet supported.");
+
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
-        ":account": u32::from(output.account()),
+        ":account": u32::from(output.account_id()),
         ":diversifier": &diversifier.0.as_ref(),
         ":value": output.note().value().inner(),
         ":rcm": &rcm.as_ref(),
@@ -451,7 +456,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":is_change": output.is_change(),
         ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
-        ":recipient_key_scope": scope_code(output.recipient_key_scope()),
+        ":recipient_key_scope": scope_code(scope),
     ];
 
     stmt_upsert_received_note

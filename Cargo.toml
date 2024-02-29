@@ -53,7 +53,7 @@ sapling = { package = "sapling-crypto", version = "0.1.1" }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.7", default-features = false }
+orchard = { version = "0.7.1", default-features = false }
 
 # - Transparent
 hdwallet = "0.4"

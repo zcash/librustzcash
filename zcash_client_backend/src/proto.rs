@@ -161,10 +161,20 @@ impl TryFrom<compact_formats::CompactSaplingOutput>
     type Error = ();
 
     fn try_from(value: compact_formats::CompactSaplingOutput) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+
+impl TryFrom<&compact_formats::CompactSaplingOutput>
+    for sapling::note_encryption::CompactOutputDescription
+{
+    type Error = ();
+
+    fn try_from(value: &compact_formats::CompactSaplingOutput) -> Result<Self, Self::Error> {
         Ok(sapling::note_encryption::CompactOutputDescription {
             cmu: value.cmu()?,
             ephemeral_key: value.ephemeral_key()?,
-            enc_ciphertext: value.ciphertext.try_into().map_err(|_| ())?,
+            enc_ciphertext: value.ciphertext[..].try_into().map_err(|_| ())?,
         })
     }
 }
@@ -172,6 +182,57 @@ impl TryFrom<compact_formats::CompactSaplingOutput>
 impl compact_formats::CompactSaplingSpend {
     pub fn nf(&self) -> Result<sapling::Nullifier, ()> {
         sapling::Nullifier::from_slice(&self.nf).map_err(|_| ())
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl TryFrom<&compact_formats::CompactOrchardAction> for orchard::note_encryption::CompactAction {
+    type Error = ();
+
+    fn try_from(value: &compact_formats::CompactOrchardAction) -> Result<Self, Self::Error> {
+        Ok(orchard::note_encryption::CompactAction::from_parts(
+            value.nf()?,
+            value.cmx()?,
+            value.ephemeral_key()?,
+            value.ciphertext[..].try_into().map_err(|_| ())?,
+        ))
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl compact_formats::CompactOrchardAction {
+    /// Returns the note commitment for the output of this action.
+    ///
+    /// A convenience method that parses [`CompactOrchardAction.cmx`].
+    ///
+    /// [`CompactOrchardAction.cmx`]: #structfield.cmx
+    pub fn cmx(&self) -> Result<orchard::note::ExtractedNoteCommitment, ()> {
+        Option::from(orchard::note::ExtractedNoteCommitment::from_bytes(
+            &self.cmx[..].try_into().map_err(|_| ())?,
+        ))
+        .ok_or(())
+    }
+
+    /// Returns the nullifier for the spend of this action.
+    ///
+    /// A convenience method that parses [`CompactOrchardAction.nullifier`].
+    ///
+    /// [`CompactOrchardAction.nullifier`]: #structfield.nullifier
+    pub fn nf(&self) -> Result<orchard::note::Nullifier, ()> {
+        let nf_bytes: [u8; 32] = self.nullifier[..].try_into().map_err(|_| ())?;
+        Option::from(orchard::note::Nullifier::from_bytes(&nf_bytes)).ok_or(())
+    }
+
+    /// Returns the ephemeral public key for the output of this action.
+    ///
+    /// A convenience method that parses [`CompactOrchardAction.ephemeral_key`].
+    ///
+    /// [`CompactOrchardAction.ephemeral_key`]: #structfield.ephemeral_key
+    pub fn ephemeral_key(&self) -> Result<EphemeralKeyBytes, ()> {
+        self.ephemeral_key[..]
+            .try_into()
+            .map(EphemeralKeyBytes)
+            .map_err(|_| ())
     }
 }
 

@@ -1605,9 +1605,9 @@ pub(crate) fn put_block(
 
 /// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
-pub(crate) fn put_tx_meta<N, S>(
+pub(crate) fn put_tx_meta(
     conn: &rusqlite::Connection,
-    tx: &WalletTx<N, S, AccountId>,
+    tx: &WalletTx<AccountId>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
@@ -1620,10 +1620,11 @@ pub(crate) fn put_tx_meta<N, S>(
         RETURNING id_tx",
     )?;
 
+    let txid_bytes = tx.txid();
     let tx_params = named_params![
-        ":txid": &tx.txid.as_ref()[..],
+        ":txid": &txid_bytes.as_ref()[..],
         ":block": u32::from(height),
-        ":tx_index": i64::try_from(tx.index).expect("transaction indices are representable as i64"),
+        ":tx_index": i64::try_from(tx.block_index()).expect("transaction indices are representable as i64"),
     ];
 
     stmt_upsert_tx_meta
@@ -2033,12 +2034,16 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
     // change or explicit in-wallet recipient.
     put_tx_meta(
         conn,
-        &WalletTx::<N, S, AccountId> {
+        &WalletTx::new(
             txid,
             index,
-            sapling_spends: vec![],
-            sapling_outputs: vec![],
-        },
+            vec![],
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
         height,
     )
     .map(Some)
