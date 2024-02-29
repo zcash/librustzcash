@@ -1,5 +1,7 @@
 //! Generated code for handling light client protobuf structs.
 
+use incrementalmerkletree::frontier::CommitmentTree;
+use nonempty::NonEmpty;
 use std::{
     array::TryFromSliceError,
     collections::BTreeMap,
@@ -7,10 +9,8 @@ use std::{
     io,
 };
 
-use incrementalmerkletree::frontier::CommitmentTree;
-
-use nonempty::NonEmpty;
-use sapling::{self, note::ExtractedNoteCommitment, Node, Nullifier, NOTE_COMMITMENT_TREE_DEPTH};
+use sapling::{self, note::ExtractedNoteCommitment, Node};
+use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 use zcash_primitives::{
     block::{BlockHash, BlockHeader},
     consensus::{self, BlockHeight, Parameters},
@@ -18,8 +18,6 @@ use zcash_primitives::{
     merkle_tree::read_commitment_tree,
     transaction::{components::amount::NonNegativeAmount, fees::StandardFeeRule, TxId},
 };
-
-use zcash_note_encryption::{EphemeralKeyBytes, COMPACT_NOTE_SIZE};
 
 use crate::{
     data_api::InputSource,
@@ -31,6 +29,9 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::transaction::components::OutPoint;
+
+#[cfg(feature = "orchard")]
+use orchard::tree::MerkleHashOrchard;
 
 #[rustfmt::skip]
 #[allow(unknown_lints)]
@@ -169,8 +170,8 @@ impl TryFrom<compact_formats::CompactSaplingOutput>
 }
 
 impl compact_formats::CompactSaplingSpend {
-    pub fn nf(&self) -> Result<Nullifier, ()> {
-        Nullifier::from_slice(&self.nf).map_err(|_| ())
+    pub fn nf(&self) -> Result<sapling::Nullifier, ()> {
+        sapling::Nullifier::from_slice(&self.nf).map_err(|_| ())
     }
 }
 
@@ -198,14 +199,35 @@ impl<SpendAuth> From<&orchard::Action<SpendAuth>> for compact_formats::CompactOr
 
 impl service::TreeState {
     /// Deserializes and returns the Sapling note commitment tree field of the tree state.
-    pub fn sapling_tree(&self) -> io::Result<CommitmentTree<Node, NOTE_COMMITMENT_TREE_DEPTH>> {
+    pub fn sapling_tree(
+        &self,
+    ) -> io::Result<CommitmentTree<Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>> {
         let sapling_tree_bytes = hex::decode(&self.sapling_tree).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Hex decoding of Sapling tree bytes failed: {:?}", e),
             )
         })?;
-        read_commitment_tree::<Node, _, NOTE_COMMITMENT_TREE_DEPTH>(&sapling_tree_bytes[..])
+        read_commitment_tree::<Node, _, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(
+            &sapling_tree_bytes[..],
+        )
+    }
+
+    /// Deserializes and returns the Sapling note commitment tree field of the tree state.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_tree(
+        &self,
+    ) -> io::Result<CommitmentTree<MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>>
+    {
+        let orchard_tree_bytes = hex::decode(&self.orchard_tree).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Hex decoding of Orchard tree bytes failed: {:?}", e),
+            )
+        })?;
+        read_commitment_tree::<MerkleHashOrchard, _, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>(
+            &orchard_tree_bytes[..],
+        )
     }
 }
 
