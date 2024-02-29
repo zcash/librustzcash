@@ -53,7 +53,7 @@ sapling = { package = "sapling-crypto", version = "0.1.1" }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.7", default-features = false }
+orchard = { version = "0.7.1", default-features = false }
 
 # - Transparent
 hdwallet = "0.4"
@@ -115,6 +115,3 @@ zip32 = "0.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
-
-[patch.crates-io]
-orchard = { git = "https://github.com/nuttycom/orchard", rev = "9729cd8d266a6121bd8c7f3b43053440b787d413" }
