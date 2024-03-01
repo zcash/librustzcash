@@ -110,8 +110,6 @@ zcash_keys = { workspace = true, features = ["test-dependencies"] }
 time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 
 [features]
-orchard = ["dep:orchard", "zcash_keys/orchard"]
-
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic"]
 
@@ -121,6 +119,9 @@ transparent-inputs = [
     "zcash_keys/transparent-inputs",
     "zcash_primitives/transparent-inputs",
 ]
+
+## Enables receiving and spending Orchard funds.
+orchard = ["dep:orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
