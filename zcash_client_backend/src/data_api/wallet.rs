@@ -1,3 +1,33 @@
+//! # Functions for creating Zcash transactions that spend funds belonging to the wallet
+//!
+//! This module contains several different ways of creating Zcash transactions. This module is
+//! designed around the idea that a Zcash wallet holds its funds in notes in either the Orchard
+//! or Sapling shielded pool. In order to better preserve users' privacy, it does not provide any
+//! functionality that allows users to directly spend transparent funds except by sending them to a
+//! shielded internal address belonging to their wallet.
+//!
+//! The important high-level operations provided by this module are [`propose_transfer`],
+//! [`propose_shielding`], and [`create_proposed_transactions`].
+//!
+//! [`propose_transfer`] takes a [`TransactionRequest`] object, selects inputs notes and
+//! computes the fees required to satisfy that request, and returns a [`Proposal`] object that
+//! describes the transaction to be made.
+//!
+//! [`propose_shielding`] takes a set of transparent source addresses, and constructs a
+//! [`Proposal`] to send those funds to a wallet-internal shielded address, as described in
+//! [ZIP 316](https://zips.z.cash/zip-0316).
+//!
+//! [`create_proposed_transactions`] constructs one or more Zcash [`Transaction`]s based upon a
+//! provided [`Proposal`], stores them to the wallet database, and returns the [`TxId`] for each
+//! constructed transaction to the caller. The caller can then use the
+//! [`WalletRead::get_transaction`] method to retrieve the newly constructed transactions. It is
+//! the responsibility of the caller to retrieve and serialize the transactions and submit them for
+//! inclusion into the Zcash blockchain.
+//!
+//! [`TransactionRequest`]: crate::zip321::TransactionRequest
+//! [`propose_transfer`]: crate::data_api::wallet::propose_transfer
+//! [`propose_shielding`]: crate::data_api::wallet::propose_shielding
+
 use nonempty::NonEmpty;
 use rand_core::OsRng;
 use sapling::{
@@ -195,7 +225,7 @@ where
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 #[deprecated(
-    note = "Use `spend` instead. `create_spend_to_address` uses a fixed fee of 10000 zatoshis, which is not compliant with ZIP 317."
+    note = "Use `propose_transfer` and `create_proposed_transactions` instead. `create_spend_to_address` uses a fixed fee of 10000 zatoshis, which is not compliant with ZIP 317."
 )]
 pub fn create_spend_to_address<DbT, ParamsT>(
     wallet_db: &mut DbT,
@@ -311,6 +341,7 @@ where
 /// [`sapling::OutputProver`]: sapling::prover::OutputProver
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
+#[deprecated(note = "Use `propose_transfer` and `create_proposed_transactions` instead.")]
 pub fn spend<DbT, ParamsT, InputsT>(
     wallet_db: &mut DbT,
     params: &ParamsT,

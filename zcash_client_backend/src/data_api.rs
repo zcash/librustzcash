@@ -1,4 +1,59 @@
-//! Interfaces for wallet data persistence & low-level wallet utilities.
+//! # Utilities for Zcash wallet construction
+//!
+//! This module defines a set of APIs for wallet data persistence, and provides a suite of methods
+//! based upon these APIs that can be used to implement a fully functional Zcash wallet. At
+//! present, the interfaces provided here are built primarily around the use of a source of
+//! [`CompactBlock`] data such as the Zcash Light Client Protocol as defined in
+//! [ZIP 307](https://zips.z.cash/zip-0307) but they may be generalized to full-block use cases in
+//! the future.
+//!
+//! ## Important Concepts
+//!
+//! There are several important operations that a Zcash wallet must perform that distinguish Zcash
+//! wallet design from wallets for other cryptocurrencies.
+//!
+//! * Viewing Keys: Wallets based upon this module are built around the capabilities of Zcash
+//!   [`UnifiedFullViewingKey`]s; the wallet backend provides no facilities for the storage
+//!   of spending keys, and spending keys must be provided by the caller in order to perform
+//!   transaction creation operations.
+//! * Blockchain Scanning: A Zcash wallet must download and trial-decrypt each transaction on the
+//!   Zcash blockchain using one or more Viewing Keys in order to find new shielded transaction
+//!   outputs (generally termed "notes") belonging to the wallet. The primary entrypoint for this
+//!   functionality is the [`scan_cached_blocks`] method. See the [`chain`] module for additional
+//!   details.
+//! * Witness Updates: In order to spend a shielded note, the wallet must be able to compute the
+//!   Merkle path to that note in the global note commitment tree. When [`scan_cached_blocks`] is
+//!   used to process a range of blocks, the note commitment tree is updated with the note
+//!   commitments for the blocks in that range.
+//! * Transaction Construction: The [`wallet`] module provides functions for creating Zcash
+//!   transactions that spend funds belonging to the wallet.
+//!
+//! ## Core Traits
+//!
+//! The utility functions described above depend upon four important traits defined in this
+//! module, which between them encompass the data storage requirements of a light wallet.
+//! The relevant traits are [`InputSource`], [`WalletRead`], [`WalletWrite`], and
+//! [`WalletCommitmentTrees`]. A complete implementation of the data storage layer for a wallet
+//! will include an implementation of all four of these traits. See the [`zcash_client_sqlite`]
+//! crate for a complete example of the implementation of these traits.
+//!
+//! ## Accounts
+//!
+//! The operation of the [`InputSource`], [`WalletRead`] and [`WalletWrite`] traits is built around
+//! the concept of a wallet having one or more accounts, with a unique `AccountId` for each
+//! account.
+//!
+//! An account identifier corresponds to at most a single [`UnifiedSpendingKey`]'s worth of spend
+//! authority, with the received and spent notes of that account tracked via the corresponding
+//! [`UnifiedFullViewingKey`]. Both received notes and change spendable by that spending authority
+//! (both the external and internal parts of that key, as defined by
+//! [ZIP 316](https://zips.z.cash/zip-0316)) will be interpreted as belonging to that account.
+//!
+//! [`CompactBlock`]: crate::proto::compact_formats::CompactBlock
+//! [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
+//! [`zcash_client_sqlite`]: https://crates.io/crates/zcash_client_sqlite
+//! [`TransactionRequest`]: crate::zip321::TransactionRequest
+//! [`propose_shielding`]: crate::data_api::wallet::propose_shielding
 
 use std::{
     collections::HashMap,
