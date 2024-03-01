@@ -450,6 +450,9 @@ pub struct UnifiedAddressRequest {
 }
 
 impl UnifiedAddressRequest {
+    /// Construct a new unified address request from its constituent parts.
+    ///
+    /// Returns `None` if the resulting unified address would not include at least one shielded receiver.
     pub fn new(has_orchard: bool, has_sapling: bool, has_p2pkh: bool) -> Option<Self> {
         let has_shielded_receiver = has_orchard || has_sapling;
 
@@ -462,6 +465,24 @@ impl UnifiedAddressRequest {
                 has_p2pkh,
             })
         }
+    }
+
+    /// Constructs a new unified address request that includes a request for a receiver of each
+    /// type that is supported given the active feature flags.
+    pub fn all() -> Option<Self> {
+        let _has_orchard = false;
+        #[cfg(feature = "orchard")]
+        let _has_orchard = true;
+
+        let _has_sapling = false;
+        #[cfg(feature = "sapling")]
+        let _has_sapling = true;
+
+        let _has_p2pkh = false;
+        #[cfg(feature = "transparent-inputs")]
+        let _has_p2pkh = true;
+
+        Self::new(_has_orchard, _has_sapling, _has_p2pkh)
     }
 
     /// Construct a new unified address request from its constituent parts.

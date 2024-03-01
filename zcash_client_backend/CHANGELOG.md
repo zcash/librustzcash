@@ -20,6 +20,7 @@ and this library adheres to Rust's notion of
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
+  - `WalletRead::validate_seed`
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`

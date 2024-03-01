@@ -492,6 +492,17 @@ pub trait WalletRead {
     /// will be interpreted as belonging to that account.
     type AccountId: Copy + Debug + Eq + Hash;
 
+    /// Verifies that the given seed corresponds to the viewing key for the specified account.
+    ///
+    /// Returns `Ok(true)` if the viewing key for the specified account can be derived from
+    /// the provided seed, `Ok(false)` if the derived seed does not match or the specified
+    /// account is not present in the database, or an error in the case
+    fn validate_seed(
+        &self,
+        account_id: Self::AccountId,
+        seed: &SecretVec<u8>,
+    ) -> Result<bool, Self::Error>;
+
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
     ///
@@ -1317,14 +1328,15 @@ pub mod testing {
         type Error = ();
         type AccountId = u32;
 
-        fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-            Ok(None)
+        fn validate_seed(
+            &self,
+            _account_id: Self::AccountId,
+            _seed: &SecretVec<u8>,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
         }
 
-        fn get_target_and_anchor_heights(
-            &self,
-            _min_confirmations: NonZeroU32,
-        ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)
         }
 
@@ -1345,6 +1357,13 @@ pub mod testing {
 
         fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
             Ok(vec![])
+        }
+
+        fn get_target_and_anchor_heights(
+            &self,
+            _min_confirmations: NonZeroU32,
+        ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+            Ok(None)
         }
 
         fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
