@@ -11,7 +11,10 @@ and this library adheres to Rust's notion of
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
 
+## [0.9.0] - 2024-03-01
+
 ### Changed
+- Migrated to `orchard 0.7`, `zcash_primitives 0.14`, `zcash_client_backend 0.11`.
 - `zcash_client_sqlite::error::SqliteClientError` has new error variants:
   - `SqliteClientError::UnsupportedPoolType`
   - `SqliteClientError::BalanceError`

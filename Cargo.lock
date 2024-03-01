@@ -3051,7 +3051,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "assert_matches",
  "bs58",
