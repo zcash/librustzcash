@@ -494,6 +494,7 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
     {
+        #![allow(deprecated)]
         let params = self.network();
         let prover = test_prover();
         spend(
