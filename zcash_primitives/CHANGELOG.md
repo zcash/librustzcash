@@ -6,8 +6,10 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.14.0] - 2024-03-01
 ### Added
-- Dependency on `bellman 0.14`.
+- Dependency on `bellman 0.14`, `sapling-crypto 0.1`.
 - `zcash_primitives::consensus::sapling_zip212_enforcement`
 - `zcash_primitives::legacy::keys`:
   - `AccountPrivKey::derive_secret_key`
@@ -68,6 +70,7 @@ and this library adheres to Rust's notion of
 - `impl {Clone, PartialEq, Eq} for zcash_primitives::memo::Error`
 
 ### Changed
+- Migrated to `orchard 0.7`.
 - `zcash_primitives::legacy`:
   - `TransparentAddress` variants have changed:
     - `TransparentAddress::PublicKey` has been renamed to `PublicKeyHash`
