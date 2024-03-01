@@ -84,13 +84,10 @@ zcash_address = { workspace = true, features = ["test-dependencies"] }
 
 [features]
 default = ["multicore"]
+orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
 ## Enables multithreading support for creating proofs and building subtrees.
 multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
-
-## Enables support for storing data related to the sending and receiving of 
-## Orchard funds.
-orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
