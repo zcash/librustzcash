@@ -29,7 +29,7 @@ categories = ["cryptography::cryptocurrencies"]
 # Intra-workspace dependencies
 equihash = { version = "0.2", path = "components/equihash" }
 zcash_address = { version = "0.3", path = "components/zcash_address" }
-zcash_client_backend = { version = "0.10", path = "zcash_client_backend" }
+zcash_client_backend = { version = "0.11", path = "zcash_client_backend" }
 zcash_encoding = { version = "0.2", path = "components/zcash_encoding" }
 zcash_keys = { version = "0.1", path = "zcash_keys" }
 zcash_note_encryption = "0.4"
