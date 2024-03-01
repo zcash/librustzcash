@@ -261,12 +261,15 @@ impl MetadataItem {
                         "Expiry time must be a 64-bit little-endian value.".to_string(),
                     )
                 }),
+            (R0, ExpiryHeight | ExpiryTime) => Err(ParseError::NotUnderstood(typecode.into())),
             (R0 | R1, MustUnderstand(tc)) => Err(ParseError::NotUnderstood(tc)),
+            // This implementation treats the 0xC0..OxFD range as unknown metadata for both R0 and
+            // R1, as no typecodes were specified in this range for R0 and were "reclaimed" as
+            // metadata codes by ZIP 316 at the time R1 was introduced.
             (R0 | R1, Unknown(typecode)) => Ok(MetadataItem::Unknown {
                 typecode,
                 data: data.to_vec(),
             }),
-            (R0, ExpiryHeight | ExpiryTime) => Err(ParseError::NotUnderstood(typecode.into())),
         }
     }
 
@@ -512,6 +515,9 @@ pub(crate) mod private {
                         length
                     )));
                 }
+                // The "as usize" casts cannot change the values, because both
+                // cursor.position() and addr_end are u64 values <= buf.len()
+                // which is usize.
                 let data = &buf[cursor.position() as usize..addr_end as usize];
                 let result = match Typecode::try_from(typecode)? {
                     Typecode::Data(tc) => Item::Data(R::parse(tc, data)?),
@@ -572,9 +578,7 @@ pub(crate) mod private {
                     return Err(ParseError::InvalidTypecodeOrder);
                 } else if t_code == prev_code {
                     return Err(ParseError::DuplicateTypecode(t));
-                } else if t == Typecode::Data(DataTypecode::P2sh)
-                    && prev_code == Some(u32::from(DataTypecode::P2pkh))
-                {
+                } else if t == Typecode::P2SH && prev_code == Some(u32::from(DataTypecode::P2pkh)) {
                     // P2pkh and P2sh can only be in that order and next to each other,
                     // otherwise we would detect an out-of-order or duplicate typecode.
                     return Err(ParseError::BothP2phkAndP2sh);
@@ -628,7 +632,6 @@ pub trait Encoding: private::SealedContainer {
     /// invariants concerning the composition of a unified container are
     /// violated:
     /// * the item list may not contain two items having the same typecode
-    /// * the item list may not contain only transparent items (or no items)
     /// * the item list may not contain both P2PKH and P2SH items.
     fn try_from_items(
         revision: Revision,
