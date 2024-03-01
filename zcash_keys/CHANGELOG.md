@@ -5,6 +5,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.0] - 2024-03-01
 The entries below are relative to the `zcash_client_backend` crate as of
 `zcash_client_backend 0.10.0`.
 
