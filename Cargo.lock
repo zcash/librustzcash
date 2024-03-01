@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "assert_matches",
  "base64",
@@ -3051,7 +3051,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "assert_matches",
  "bs58",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bech32",
  "bls12_381",
@@ -3163,7 +3163,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "aes",
  "assert_matches",
@@ -3205,7 +3205,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bellman",
  "blake2b_simd",

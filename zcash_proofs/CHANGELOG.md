@@ -6,11 +6,14 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.14.0] - 2024-03-01
 ### Added
 - `impl zcash_primitives::sapling::prover::{SpendProver, OutputProver}` for
   `zcash_proofs::prover::LocalTxProver`
 
 ### Changed
+- Migrated to `zcash_primitives 0.14`.
 - The `zcash_proofs::ZcashParameters` Sapling fields now use the parameter and
   viewing key newtypes defined in `zcash_primitives::sapling::circuit`.
 

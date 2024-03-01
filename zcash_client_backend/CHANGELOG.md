@@ -53,7 +53,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 
-## [0.11.0-pre-release] Unreleased
+## [0.11.0] - 2024-03-01
 
 ### Added
 - `zcash_client_backend`:
@@ -122,6 +122,7 @@ and this library adheres to Rust's notion of
   - `parse::Param::name`
 
 ### Changed
+- Migrated to `zcash_primitives 0.14`, `orchard 0.7`.
 - Several structs and functions now take an `AccountId` type parameter
   parameter in order to decouple the concept of an account identifier from
   the ZIP 32 account index. Many APIs that previously referenced
