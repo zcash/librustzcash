@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.4.0] - 2023-03-01
 ### Changed
 - MSRV is now 1.65.0.
 - Bumped dependencies to `primitive-types 0.12`.

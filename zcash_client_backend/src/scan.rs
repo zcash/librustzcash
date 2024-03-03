@@ -14,9 +14,9 @@ use zcash_note_encryption::{
 use zcash_primitives::{block::BlockHash, transaction::TxId};
 
 /// A decrypted transaction output.
-pub(crate) struct DecryptedOutput<A, D: Domain, M> {
+pub(crate) struct DecryptedOutput<IvkTag, D: Domain, M> {
     /// The tag corresponding to the incoming viewing key used to decrypt the note.
-    pub(crate) ivk_tag: A,
+    pub(crate) ivk_tag: IvkTag,
     /// The recipient of the note.
     pub(crate) recipient: D::Recipient,
     /// The note!
@@ -25,9 +25,9 @@ pub(crate) struct DecryptedOutput<A, D: Domain, M> {
     pub(crate) memo: M,
 }
 
-impl<A, D: Domain, M> fmt::Debug for DecryptedOutput<A, D, M>
+impl<IvkTag, D: Domain, M> fmt::Debug for DecryptedOutput<IvkTag, D, M>
 where
-    A: fmt::Debug,
+    IvkTag: fmt::Debug,
     D::IncomingViewingKey: fmt::Debug,
     D::Recipient: fmt::Debug,
     D::Note: fmt::Debug,
@@ -48,11 +48,11 @@ pub(crate) trait Decryptor<D: BatchDomain, Output> {
     type Memo;
 
     // Once we reach MSRV 1.75.0, this can return `impl Iterator`.
-    fn batch_decrypt<A: Clone>(
-        tags: &[A],
+    fn batch_decrypt<IvkTag: Clone>(
+        tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<A, D, Self::Memo>>>;
+    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>>;
 }
 
 /// A decryptor of outputs as encoded in transactions.
@@ -63,11 +63,11 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D
 {
     type Memo = D::Memo;
 
-    fn batch_decrypt<A: Clone>(
-        tags: &[A],
+    fn batch_decrypt<IvkTag: Clone>(
+        tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<A, D, Self::Memo>>> {
+    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_note_decryption(ivks, outputs)
             .into_iter()
             .map(|res| {
@@ -90,11 +90,11 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D, 
 {
     type Memo = ();
 
-    fn batch_decrypt<A: Clone>(
-        tags: &[A],
+    fn batch_decrypt<IvkTag: Clone>(
+        tags: &[IvkTag],
         ivks: &[D::IncomingViewingKey],
         outputs: &[(D, Output)],
-    ) -> Vec<Option<DecryptedOutput<A, D, Self::Memo>>> {
+    ) -> Vec<Option<DecryptedOutput<IvkTag, D, Self::Memo>>> {
         batch::try_compact_note_decryption(ivks, outputs)
             .into_iter()
             .map(|res| {
@@ -117,12 +117,12 @@ struct OutputIndex<V> {
     value: V,
 }
 
-type OutputItem<A, D, M> = OutputIndex<DecryptedOutput<A, D, M>>;
+type OutputItem<IvkTag, D, M> = OutputIndex<DecryptedOutput<IvkTag, D, M>>;
 
 /// The sender for the result of batch scanning a specific transaction output.
-struct OutputReplier<A, D: Domain, M>(OutputIndex<channel::Sender<OutputItem<A, D, M>>>);
+struct OutputReplier<IvkTag, D: Domain, M>(OutputIndex<channel::Sender<OutputItem<IvkTag, D, M>>>);
 
-impl<A, D: Domain, M> DynamicUsage for OutputReplier<A, D, M> {
+impl<IvkTag, D: Domain, M> DynamicUsage for OutputReplier<IvkTag, D, M> {
     #[inline(always)]
     fn dynamic_usage(&self) -> usize {
         // We count the memory usage of items in the channel on the receiver side.
@@ -136,9 +136,9 @@ impl<A, D: Domain, M> DynamicUsage for OutputReplier<A, D, M> {
 }
 
 /// The receiver for the result of batch scanning a specific transaction.
-struct BatchReceiver<A, D: Domain, M>(channel::Receiver<OutputItem<A, D, M>>);
+struct BatchReceiver<IvkTag, D: Domain, M>(channel::Receiver<OutputItem<IvkTag, D, M>>);
 
-impl<A, D: Domain, M> DynamicUsage for BatchReceiver<A, D, M> {
+impl<IvkTag, D: Domain, M> DynamicUsage for BatchReceiver<IvkTag, D, M> {
     fn dynamic_usage(&self) -> usize {
         // We count the memory usage of items in the channel on the receiver side.
         let num_items = self.0.len();
@@ -155,7 +155,7 @@ impl<A, D: Domain, M> DynamicUsage for BatchReceiver<A, D, M> {
         //   - Space for an item.
         //   - The state of the slot, stored as an AtomicUsize.
         const PTR_SIZE: usize = std::mem::size_of::<usize>();
-        let item_size = std::mem::size_of::<OutputItem<A, D, M>>();
+        let item_size = std::mem::size_of::<OutputItem<IvkTag, D, M>>();
         const ATOMIC_USIZE_SIZE: usize = std::mem::size_of::<AtomicUsize>();
         let block_size = PTR_SIZE + ITEMS_PER_BLOCK * (item_size + ATOMIC_USIZE_SIZE);
 
@@ -279,8 +279,8 @@ impl<Item: Task> Task for WithUsageTask<Item> {
 }
 
 /// A batch of outputs to trial decrypt.
-pub(crate) struct Batch<A, D: BatchDomain, Output, Dec: Decryptor<D, Output>> {
-    tags: Vec<A>,
+pub(crate) struct Batch<IvkTag, D: BatchDomain, Output, Dec: Decryptor<D, Output>> {
+    tags: Vec<IvkTag>,
     ivks: Vec<D::IncomingViewingKey>,
     /// We currently store outputs and repliers as parallel vectors, because
     /// [`batch::try_note_decryption`] accepts a slice of domain/output pairs
@@ -290,12 +290,12 @@ pub(crate) struct Batch<A, D: BatchDomain, Output, Dec: Decryptor<D, Output>> {
     /// all be part of the same struct, which would also track the output index
     /// (that is captured in the outer `OutputIndex` of each `OutputReplier`).
     outputs: Vec<(D, Output)>,
-    repliers: Vec<OutputReplier<A, D, Dec::Memo>>,
+    repliers: Vec<OutputReplier<IvkTag, D, Dec::Memo>>,
 }
 
-impl<A, D, Output, Dec> DynamicUsage for Batch<A, D, Output, Dec>
+impl<IvkTag, D, Output, Dec> DynamicUsage for Batch<IvkTag, D, Output, Dec>
 where
-    A: DynamicUsage,
+    IvkTag: DynamicUsage,
     D: BatchDomain + DynamicUsage,
     D::IncomingViewingKey: DynamicUsage,
     Output: DynamicUsage,
@@ -325,14 +325,14 @@ where
     }
 }
 
-impl<A, D, Output, Dec> Batch<A, D, Output, Dec>
+impl<IvkTag, D, Output, Dec> Batch<IvkTag, D, Output, Dec>
 where
-    A: Clone,
+    IvkTag: Clone,
     D: BatchDomain,
     Dec: Decryptor<D, Output>,
 {
     /// Constructs a new batch.
-    fn new(tags: Vec<A>, ivks: Vec<D::IncomingViewingKey>) -> Self {
+    fn new(tags: Vec<IvkTag>, ivks: Vec<D::IncomingViewingKey>) -> Self {
         assert_eq!(tags.len(), ivks.len());
         Self {
             tags,
@@ -348,9 +348,9 @@ where
     }
 }
 
-impl<A, D, Output, Dec> Task for Batch<A, D, Output, Dec>
+impl<IvkTag, D, Output, Dec> Task for Batch<IvkTag, D, Output, Dec>
 where
-    A: Clone + Send + 'static,
+    IvkTag: Clone + Send + 'static,
     D: BatchDomain + Send + 'static,
     D::IncomingViewingKey: Send,
     D::Memo: Send,
@@ -393,7 +393,7 @@ where
     }
 }
 
-impl<A, D, Output, Dec> Batch<A, D, Output, Dec>
+impl<IvkTag, D, Output, Dec> Batch<IvkTag, D, Output, Dec>
 where
     D: BatchDomain,
     Output: Clone,
@@ -404,12 +404,16 @@ where
     /// `replier` will be called with the result of every output.
     fn add_outputs(
         &mut self,
-        domain: impl Fn() -> D,
+        domain: impl Fn(&Output) -> D,
         outputs: &[Output],
-        replier: channel::Sender<OutputItem<A, D, Dec::Memo>>,
+        replier: channel::Sender<OutputItem<IvkTag, D, Dec::Memo>>,
     ) {
-        self.outputs
-            .extend(outputs.iter().cloned().map(|output| (domain(), output)));
+        self.outputs.extend(
+            outputs
+                .iter()
+                .cloned()
+                .map(|output| (domain(&output), output)),
+        );
         self.repliers.extend((0..outputs.len()).map(|output_index| {
             OutputReplier(OutputIndex {
                 output_index,
@@ -436,29 +440,29 @@ impl DynamicUsage for ResultKey {
 }
 
 /// Logic to run batches of trial decryptions on the global threadpool.
-pub(crate) struct BatchRunner<A, D, Output, Dec, T>
+pub(crate) struct BatchRunner<IvkTag, D, Output, Dec, T>
 where
     D: BatchDomain,
     Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<A, D, Output, Dec>>,
+    T: Tasks<Batch<IvkTag, D, Output, Dec>>,
 {
     batch_size_threshold: usize,
     // The batch currently being accumulated.
-    acc: Batch<A, D, Output, Dec>,
+    acc: Batch<IvkTag, D, Output, Dec>,
     // The running batches.
     running_tasks: T,
     // Receivers for the results of the running batches.
-    pending_results: HashMap<ResultKey, BatchReceiver<A, D, Dec::Memo>>,
+    pending_results: HashMap<ResultKey, BatchReceiver<IvkTag, D, Dec::Memo>>,
 }
 
-impl<A, D, Output, Dec, T> DynamicUsage for BatchRunner<A, D, Output, Dec, T>
+impl<IvkTag, D, Output, Dec, T> DynamicUsage for BatchRunner<IvkTag, D, Output, Dec, T>
 where
-    A: DynamicUsage,
+    IvkTag: DynamicUsage,
     D: BatchDomain + DynamicUsage,
     D::IncomingViewingKey: DynamicUsage,
     Output: DynamicUsage,
     Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<A, D, Output, Dec>> + DynamicUsage,
+    T: Tasks<Batch<IvkTag, D, Output, Dec>> + DynamicUsage,
 {
     fn dynamic_usage(&self) -> usize {
         self.acc.dynamic_usage()
@@ -484,17 +488,17 @@ where
     }
 }
 
-impl<A, D, Output, Dec, T> BatchRunner<A, D, Output, Dec, T>
+impl<IvkTag, D, Output, Dec, T> BatchRunner<IvkTag, D, Output, Dec, T>
 where
-    A: Clone,
+    IvkTag: Clone,
     D: BatchDomain,
     Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<A, D, Output, Dec>>,
+    T: Tasks<Batch<IvkTag, D, Output, Dec>>,
 {
     /// Constructs a new batch runner for the given incoming viewing keys.
     pub(crate) fn new(
         batch_size_threshold: usize,
-        ivks: impl Iterator<Item = (A, D::IncomingViewingKey)>,
+        ivks: impl Iterator<Item = (IvkTag, D::IncomingViewingKey)>,
     ) -> Self {
         let (tags, ivks) = ivks.unzip();
         Self {
@@ -506,9 +510,9 @@ where
     }
 }
 
-impl<A, D, Output, Dec, T> BatchRunner<A, D, Output, Dec, T>
+impl<IvkTag, D, Output, Dec, T> BatchRunner<IvkTag, D, Output, Dec, T>
 where
-    A: Clone + Send + 'static,
+    IvkTag: Clone + Send + 'static,
     D: BatchDomain + Send + 'static,
     D::IncomingViewingKey: Clone + Send,
     D::Memo: Send,
@@ -516,7 +520,7 @@ where
     D::Recipient: Send,
     Output: Clone + Send + 'static,
     Dec: Decryptor<D, Output>,
-    T: Tasks<Batch<A, D, Output, Dec>>,
+    T: Tasks<Batch<IvkTag, D, Output, Dec>>,
 {
     /// Batches the given outputs for trial decryption.
     ///
@@ -531,7 +535,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-        domain: impl Fn() -> D,
+        domain: impl Fn(&Output) -> D,
         outputs: &[Output],
     ) {
         let (tx, rx) = channel::unbounded();
@@ -564,7 +568,7 @@ where
         &mut self,
         block_tag: BlockHash,
         txid: TxId,
-    ) -> HashMap<(TxId, usize), DecryptedOutput<A, D, Dec::Memo>> {
+    ) -> HashMap<(TxId, usize), DecryptedOutput<IvkTag, D, Dec::Memo>> {
         self.pending_results
             .remove(&ResultKey(block_tag, txid))
             // We won't have a pending result if the transaction didn't have outputs of

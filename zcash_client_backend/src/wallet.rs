@@ -65,21 +65,110 @@ impl NoteId {
 /// internal account ID and the pool to which funds were sent in the case of a wallet-internal
 /// output.
 #[derive(Debug, Clone)]
-pub enum Recipient<AccountId> {
+pub enum Recipient<AccountId, N> {
     Transparent(TransparentAddress),
     Sapling(sapling::PaymentAddress),
     Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, PoolType),
+    InternalAccount(AccountId, N),
 }
 
-/// A subset of a [`Transaction`] relevant to wallets and light clients.
+impl<AccountId, N> Recipient<AccountId, N> {
+    pub fn map_internal_account_note<B, F: FnOnce(N) -> B>(self, f: F) -> Recipient<AccountId, B> {
+        match self {
+            Recipient::Transparent(t) => Recipient::Transparent(t),
+            Recipient::Sapling(s) => Recipient::Sapling(s),
+            Recipient::Unified(u, p) => Recipient::Unified(u, p),
+            Recipient::InternalAccount(a, n) => Recipient::InternalAccount(a, f(n)),
+        }
+    }
+}
+
+impl<AccountId, N> Recipient<AccountId, Option<N>> {
+    pub fn internal_account_note_transpose_option(self) -> Option<Recipient<AccountId, N>> {
+        match self {
+            Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
+            Recipient::Sapling(s) => Some(Recipient::Sapling(s)),
+            Recipient::Unified(u, p) => Some(Recipient::Unified(u, p)),
+            Recipient::InternalAccount(a, n) => n.map(|n0| Recipient::InternalAccount(a, n0)),
+        }
+    }
+}
+
+/// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
-pub struct WalletTx<N, S, A> {
-    pub txid: TxId,
-    pub index: usize,
-    pub sapling_spends: Vec<WalletSaplingSpend<A>>,
-    pub sapling_outputs: Vec<WalletSaplingOutput<N, S, A>>,
+pub struct WalletTx<AccountId> {
+    txid: TxId,
+    block_index: usize,
+    sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
+    sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
+    #[cfg(feature = "orchard")]
+    orchard_spends: Vec<WalletOrchardSpend<AccountId>>,
+    #[cfg(feature = "orchard")]
+    orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
+}
+
+impl<AccountId> WalletTx<AccountId> {
+    /// Constructs a new [`WalletTx`] from its constituent parts.
+    pub fn new(
+        txid: TxId,
+        block_index: usize,
+        sapling_spends: Vec<WalletSaplingSpend<AccountId>>,
+        sapling_outputs: Vec<WalletSaplingOutput<AccountId>>,
+        #[cfg(feature = "orchard")] orchard_spends: Vec<
+            WalletSpend<orchard::note::Nullifier, AccountId>,
+        >,
+        #[cfg(feature = "orchard")] orchard_outputs: Vec<WalletOrchardOutput<AccountId>>,
+    ) -> Self {
+        Self {
+            txid,
+            block_index,
+            sapling_spends,
+            sapling_outputs,
+            #[cfg(feature = "orchard")]
+            orchard_spends,
+            #[cfg(feature = "orchard")]
+            orchard_outputs,
+        }
+    }
+
+    /// Returns the [`TxId`] for the corresponding [`Transaction`].
+    ///
+    /// [`Transaction`]: zcash_primitives::transaction::Transaction
+    pub fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    /// Returns the index of the transaction in the containing block.
+    pub fn block_index(&self) -> usize {
+        self.block_index
+    }
+
+    /// Returns a record for each Sapling note belonging to the wallet that was spent in the
+    /// transaction.
+    pub fn sapling_spends(&self) -> &[WalletSaplingSpend<AccountId>] {
+        self.sapling_spends.as_ref()
+    }
+
+    /// Returns a record for each Sapling note received or produced by the wallet in the
+    /// transaction.
+    pub fn sapling_outputs(&self) -> &[WalletSaplingOutput<AccountId>] {
+        self.sapling_outputs.as_ref()
+    }
+
+    /// Returns a record for each Orchard note belonging to the wallet that was spent in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_spends(&self) -> &[WalletOrchardSpend<AccountId>] {
+        self.orchard_spends.as_ref()
+    }
+
+    /// Returns a record for each Orchard note received or produced by the wallet in the
+    /// transaction.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_outputs(&self) -> &[WalletOrchardOutput<AccountId>] {
+        self.orchard_outputs.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,110 +225,130 @@ impl transparent_fees::InputView for WalletTransparentOutput {
     }
 }
 
-/// A subset of a [`SpendDescription`] relevant to wallets and light clients.
-///
-/// [`SpendDescription`]: sapling::bundle::SpendDescription
-pub struct WalletSaplingSpend<AccountId> {
+/// A reference to a spent note belonging to the wallet within a transaction.
+pub struct WalletSpend<Nf, AccountId> {
     index: usize,
-    nf: sapling::Nullifier,
-    account: AccountId,
+    nf: Nf,
+    account_id: AccountId,
 }
 
-impl<AccountId> WalletSaplingSpend<AccountId> {
-    pub fn from_parts(index: usize, nf: sapling::Nullifier, account: AccountId) -> Self {
-        Self { index, nf, account }
+impl<Nf, AccountId> WalletSpend<Nf, AccountId> {
+    /// Constructs a `WalletSpend` from its constituent parts.
+    pub fn from_parts(index: usize, nf: Nf, account_id: AccountId) -> Self {
+        Self {
+            index,
+            nf,
+            account_id,
+        }
     }
 
+    /// Returns the index of the Sapling spend or Orchard action within the transaction that
+    /// created this spend.
     pub fn index(&self) -> usize {
         self.index
     }
-    pub fn nf(&self) -> &sapling::Nullifier {
+    /// Returns the nullifier of the spent note.
+    pub fn nf(&self) -> &Nf {
         &self.nf
     }
-    pub fn account(&self) -> &AccountId {
-        &self.account
+    /// Returns the identifier to the account_id to which the note belonged.
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+}
+
+/// A type alias for Sapling [`WalletSpend`]s.
+pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, AccountId>;
+
+/// A type alias for Orchard [`WalletSpend`]s.
+#[cfg(feature = "orchard")]
+pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
+
+/// An output that was successfully decrypted in the process of wallet scanning.
+pub struct WalletOutput<Note, Nullifier, AccountId> {
+    index: usize,
+    ephemeral_key: EphemeralKeyBytes,
+    note: Note,
+    is_change: bool,
+    note_commitment_tree_position: Position,
+    nf: Option<Nullifier>,
+    account_id: AccountId,
+    recipient_key_scope: Option<zip32::Scope>,
+}
+
+impl<Note, Nullifier, AccountId> WalletOutput<Note, Nullifier, AccountId> {
+    /// Constructs a new `WalletOutput` value from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        index: usize,
+        ephemeral_key: EphemeralKeyBytes,
+        note: Note,
+        is_change: bool,
+        note_commitment_tree_position: Position,
+        nf: Option<Nullifier>,
+        account_id: AccountId,
+        recipient_key_scope: Option<zip32::Scope>,
+    ) -> Self {
+        Self {
+            index,
+            ephemeral_key,
+            note,
+            is_change,
+            note_commitment_tree_position,
+            nf,
+            account_id,
+            recipient_key_scope,
+        }
+    }
+
+    /// The index of the output or action in the transaction that created this output.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+    /// The [`EphemeralKeyBytes`] used in the decryption of the note.
+    pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
+        &self.ephemeral_key
+    }
+    /// The note.
+    pub fn note(&self) -> &Note {
+        &self.note
+    }
+    /// A flag indicating whether the process of note decryption determined that this
+    /// output should be classified as change.
+    pub fn is_change(&self) -> bool {
+        self.is_change
+    }
+    /// The position of the note in the global note commitment tree.
+    pub fn note_commitment_tree_position(&self) -> Position {
+        self.note_commitment_tree_position
+    }
+    /// The nullifier for the note, if the key used to decrypt the note was able to compute it.
+    pub fn nf(&self) -> Option<&Nullifier> {
+        self.nf.as_ref()
+    }
+    /// The identifier for the account to which the output belongs.
+    pub fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+    /// The ZIP 32 scope for which the viewing key that decrypted this output was derived, if
+    /// known.
+    pub fn recipient_key_scope(&self) -> Option<zip32::Scope> {
+        self.recipient_key_scope
     }
 }
 
 /// A subset of an [`OutputDescription`] relevant to wallets and light clients.
 ///
-/// The type parameter `<N>` is used to specify the nullifier type, which may vary between
-/// `Sapling` and `Orchard`, and also may vary depending upon the type of key that was used to
-/// decrypt this output; incoming viewing keys do not have the capability to derive the nullifier
-/// for a note, and the `<N>` will be `()` in these cases.
-///
-/// The type parameter `<S>` is used to specify the type of the scope of the key used to recover
-/// this output; this will usually be [`zcash_primitives::zip32::Scope`] for received notes, and
-/// `()` for sent notes.
-///
 /// [`OutputDescription`]: sapling::bundle::OutputDescription
-pub struct WalletSaplingOutput<N, S, A> {
-    index: usize,
-    cmu: sapling::note::ExtractedNoteCommitment,
-    ephemeral_key: EphemeralKeyBytes,
-    account: A,
-    note: sapling::Note,
-    is_change: bool,
-    note_commitment_tree_position: Position,
-    nf: N,
-    recipient_key_scope: S,
-}
+pub type WalletSaplingOutput<AccountId> =
+    WalletOutput<sapling::Note, sapling::Nullifier, AccountId>;
 
-impl<N, S, A> WalletSaplingOutput<N, S, A> {
-    /// Constructs a new `WalletSaplingOutput` value from its constituent parts.
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_parts(
-        index: usize,
-        cmu: sapling::note::ExtractedNoteCommitment,
-        ephemeral_key: EphemeralKeyBytes,
-        account: A,
-        note: sapling::Note,
-        is_change: bool,
-        note_commitment_tree_position: Position,
-        nf: N,
-        recipient_key_scope: S,
-    ) -> Self {
-        Self {
-            index,
-            cmu,
-            ephemeral_key,
-            account,
-            note,
-            is_change,
-            note_commitment_tree_position,
-            nf,
-            recipient_key_scope,
-        }
-    }
-
-    pub fn index(&self) -> usize {
-        self.index
-    }
-    pub fn cmu(&self) -> &sapling::note::ExtractedNoteCommitment {
-        &self.cmu
-    }
-    pub fn ephemeral_key(&self) -> &EphemeralKeyBytes {
-        &self.ephemeral_key
-    }
-    pub fn account(&self) -> &A {
-        &self.account
-    }
-    pub fn note(&self) -> &sapling::Note {
-        &self.note
-    }
-    pub fn is_change(&self) -> bool {
-        self.is_change
-    }
-    pub fn note_commitment_tree_position(&self) -> Position {
-        self.note_commitment_tree_position
-    }
-    pub fn nf(&self) -> &N {
-        &self.nf
-    }
-    pub fn recipient_key_scope(&self) -> &S {
-        &self.recipient_key_scope
-    }
-}
+/// The output part of an Orchard [`Action`] that was decrypted in the process of scanning.
+///
+/// [`Action`]: orchard::Action
+#[cfg(feature = "orchard")]
+pub type WalletOrchardOutput<AccountId> =
+    WalletOutput<orchard::note::Note, orchard::note::Nullifier, AccountId>;
 
 /// An enumeration of supported shielded note types for use in [`ReceivedNote`]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,24 +489,41 @@ impl<NoteRef> orchard_fees::InputView<NoteRef> for ReceivedNote<NoteRef, orchard
 /// [ZIP 310]: https://zips.z.cash/zip-0310
 #[derive(Debug, Clone)]
 pub enum OvkPolicy {
-    /// Use the outgoing viewing key from the sender's [`ExtendedFullViewingKey`].
+    /// Use the outgoing viewing key from the sender's [`UnifiedFullViewingKey`].
     ///
     /// Transaction outputs will be decryptable by the sender, in addition to the
     /// recipients.
     ///
-    /// [`ExtendedFullViewingKey`]: sapling::zip32::ExtendedFullViewingKey
+    /// [`UnifiedFullViewingKey`]: zcash_keys::keys::UnifiedFullViewingKey
     Sender,
 
-    /// Use a custom outgoing viewing key. This might for instance be derived from a
-    /// separate seed than the wallet's spending keys.
+    /// Use custom outgoing viewing keys. These might for instance be derived from a
+    /// different seed than the wallet's spending keys.
     ///
     /// Transaction outputs will be decryptable by the recipients, and whoever controls
-    /// the provided outgoing viewing key.
-    Custom(sapling::keys::OutgoingViewingKey),
-
-    /// Use no outgoing viewing key. Transaction outputs will be decryptable by their
+    /// the provided outgoing viewing keys.
+    Custom {
+        sapling: sapling::keys::OutgoingViewingKey,
+        #[cfg(feature = "orchard")]
+        orchard: orchard::keys::OutgoingViewingKey,
+    },
+    /// Use no outgoing viewing keys. Transaction outputs will be decryptable by their
     /// recipients, but not by the sender.
     Discard,
+}
+
+impl OvkPolicy {
+    /// Constructs an [`OvkPolicy::Custom`] value from a single arbitrary 32-byte key.
+    ///
+    /// Outputs of transactions created with this OVK policy will be recoverable using
+    /// this key irrespective of the output pool.
+    pub fn custom_from_common_bytes(key: &[u8; 32]) -> Self {
+        OvkPolicy::Custom {
+            sapling: sapling::keys::OutgoingViewingKey(*key),
+            #[cfg(feature = "orchard")]
+            orchard: orchard::keys::OutgoingViewingKey::from(*key),
+        }
+    }
 }
 
 /// Metadata related to the ZIP 32 derivation of a transparent address.

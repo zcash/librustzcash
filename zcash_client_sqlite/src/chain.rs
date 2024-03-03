@@ -340,6 +340,7 @@ mod tests {
         scanning::ScanError,
         wallet::OvkPolicy,
         zip321::{Payment, TransactionRequest},
+        ShieldedProtocol,
     };
 
     use crate::{
@@ -521,7 +522,7 @@ mod tests {
         }])
         .unwrap();
         let input_selector = GreedyInputSelector::new(
-            SingleOutputChangeStrategy::new(FeeRule::standard(), None),
+            SingleOutputChangeStrategy::new(FeeRule::standard(), None, ShieldedProtocol::Sapling),
             DustOutputPolicy::default(),
         );
         assert_matches!(

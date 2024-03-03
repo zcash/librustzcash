@@ -13,6 +13,8 @@ use zcash_primitives::{
     },
 };
 
+use crate::ShieldedProtocol;
+
 use super::{
     common::single_change_output_balance, sapling as sapling_fees, ChangeError, ChangeStrategy,
     DustOutputPolicy, TransactionBalance,
@@ -26,15 +28,24 @@ use super::orchard as orchard_fees;
 pub struct SingleOutputChangeStrategy {
     fee_rule: Zip317FeeRule,
     change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
 }
 
 impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
     /// fee parameters and change memo.
-    pub fn new(fee_rule: Zip317FeeRule, change_memo: Option<MemoBytes>) -> Self {
+    ///
+    /// `fallback_change_pool` is used when more than one shielded pool is enabled via
+    /// feature flags, and the transaction has no shielded inputs.
+    pub fn new(
+        fee_rule: Zip317FeeRule,
+        change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
+    ) -> Self {
         Self {
             fee_rule,
             change_memo,
+            fallback_change_pool,
         }
     }
 }
@@ -145,6 +156,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             dust_output_policy,
             self.fee_rule.marginal_fee(),
             self.change_memo.clone(),
+            self.fallback_change_pool,
         )
     }
 }
@@ -170,11 +182,16 @@ mod tests {
             tests::{TestSaplingInput, TestTransparentInput},
             ChangeError, ChangeStrategy, ChangeValue, DustOutputPolicy,
         },
+        ShieldedProtocol,
     };
 
     #[test]
     fn change_without_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -213,7 +230,11 @@ mod tests {
 
     #[test]
     fn change_with_transparent_payments() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -252,7 +273,11 @@ mod tests {
 
     #[test]
     fn change_with_allowable_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(
@@ -296,7 +321,11 @@ mod tests {
 
     #[test]
     fn change_with_disallowed_dust() {
-        let change_strategy = SingleOutputChangeStrategy::new(Zip317FeeRule::standard(), None);
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Sapling,
+        );
 
         // spend a single Sapling note that is sufficient to pay the fee
         let result = change_strategy.compute_balance(

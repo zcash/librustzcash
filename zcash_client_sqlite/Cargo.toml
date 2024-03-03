@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.8.1"
+version = "0.9.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -22,7 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 zcash_address.workspace = true
 zcash_client_backend = { workspace = true, features = ["unstable-serialization", "unstable-spanning-tree"] }
 zcash_encoding.workspace = true
-zcash_keys = { workspace = true, features = ["orchard"] }
+zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
 zcash_primitives.workspace = true
 zip32.workspace = true
 
@@ -46,7 +46,7 @@ secrecy.workspace = true
 subtle.workspace = true
 
 # - Shielded protocols
-orchard.workspace = true
+orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
 # - Note commitment trees
@@ -92,7 +92,7 @@ multicore = ["maybe-rayon/threads", "zcash_primitives/multicore"]
 
 ## Enables support for storing data related to the sending and receiving of 
 ## Orchard funds.
-orchard = ["zcash_client_backend/orchard"]
+orchard = ["dep:orchard", "zcash_client_backend/orchard", "zcash_keys/orchard"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
@@ -102,8 +102,12 @@ test-dependencies = [
     "incrementalmerkletree/test-dependencies",
 ]
 
-## Enables receiving transparent funds and shielding them.
-transparent-inputs = ["dep:hdwallet", "zcash_client_backend/transparent-inputs"]
+## Enables receiving transparent funds and sending to transparent recipients
+transparent-inputs = [
+  "dep:hdwallet", 
+  "zcash_keys/transparent-inputs",
+  "zcash_client_backend/transparent-inputs"
+]
 
 #! ### Experimental features
 

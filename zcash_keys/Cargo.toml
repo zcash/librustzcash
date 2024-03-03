@@ -1,7 +1,7 @@
 [package]
 name = "zcash_keys"
 description = "Zcash key and address management"
-version = "0.0.0"
+version = "0.1.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -49,7 +49,7 @@ subtle.workspace = true
 bls12_381.workspace = true
 group.workspace = true
 orchard = { workspace = true, optional = true }
-sapling.workspace = true
+sapling = { workspace = true, optional = true }
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
@@ -78,6 +78,9 @@ transparent-inputs = ["dep:hdwallet", "zcash_primitives/transparent-inputs"]
 
 ## Enables use of Orchard key parts and addresses
 orchard = ["dep:orchard"]
+
+## Enables use of Sapling key parts and addresses
+sapling = ["dep:sapling"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [

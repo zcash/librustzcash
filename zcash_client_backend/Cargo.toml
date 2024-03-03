@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.10.0"
+version = "0.11.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -27,7 +27,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
-zcash_keys.workspace = true
+zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_note_encryption.workspace = true
 zcash_primitives.workspace = true
 zip32.workspace = true
@@ -105,6 +105,7 @@ rand_core.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
 zcash_proofs.workspace = true
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_keys = { workspace = true, features = ["test-dependencies"] }
 
 time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 

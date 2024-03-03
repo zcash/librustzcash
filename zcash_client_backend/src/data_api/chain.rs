@@ -145,17 +145,13 @@
 
 use std::ops::Range;
 
-use sapling::note_encryption::PreparedIncomingViewingKey;
-use zcash_primitives::{
-    consensus::{self, BlockHeight},
-    zip32::Scope,
-};
+use subtle::ConditionallySelectable;
+use zcash_primitives::consensus::{self, BlockHeight};
 
 use crate::{
     data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
-    scan::BatchRunner,
-    scanning::{add_block_to_runner, scan_block_with_runner, ScanningKey},
+    scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
 };
 
 pub mod error;
@@ -219,22 +215,26 @@ pub trait BlockSource {
 /// blocks.
 #[derive(Clone, Debug)]
 pub struct ScanSummary {
-    scanned_range: Range<BlockHeight>,
-    spent_sapling_note_count: usize,
-    received_sapling_note_count: usize,
+    pub(crate) scanned_range: Range<BlockHeight>,
+    pub(crate) spent_sapling_note_count: usize,
+    pub(crate) received_sapling_note_count: usize,
+    #[cfg(feature = "orchard")]
+    pub(crate) spent_orchard_note_count: usize,
+    #[cfg(feature = "orchard")]
+    pub(crate) received_orchard_note_count: usize,
 }
 
 impl ScanSummary {
-    /// Constructs a new [`ScanSummary`] from its constituent parts.
-    pub fn from_parts(
-        scanned_range: Range<BlockHeight>,
-        spent_sapling_note_count: usize,
-        received_sapling_note_count: usize,
-    ) -> Self {
+    /// Constructs a new [`ScanSummary`] for the provided block range.
+    pub(crate) fn for_range(scanned_range: Range<BlockHeight>) -> Self {
         Self {
             scanned_range,
-            spent_sapling_note_count,
-            received_sapling_note_count,
+            spent_sapling_note_count: 0,
+            received_sapling_note_count: 0,
+            #[cfg(feature = "orchard")]
+            spent_orchard_note_count: 0,
+            #[cfg(feature = "orchard")]
+            received_orchard_note_count: 0,
         }
     }
 
@@ -251,12 +251,30 @@ impl ScanSummary {
         self.spent_sapling_note_count
     }
 
-    /// Returns the number of notes belonging to the wallet that were received in blocks in the
-    /// scanned range. Note that depending upon the scanning order, it is possible that some of the
-    /// received notes counted here may already have been spent in later blocks closer to the chain
-    /// tip.
+    /// Returns the number of Sapling notes belonging to the wallet that were received in blocks in
+    /// the scanned range. Note that depending upon the scanning order, it is possible that some of
+    /// the received notes counted here may already have been spent in later blocks closer to the
+    /// chain tip.
     pub fn received_sapling_note_count(&self) -> usize {
         self.received_sapling_note_count
+    }
+
+    /// Returns the number of our previously-detected Orchard notes that were spent in transactions
+    /// in blocks in the scanned range. If we have not yet detected a particular note as ours, for
+    /// example because we are scanning the chain in reverse height order, we will not detect it
+    /// being spent at this time.
+    #[cfg(feature = "orchard")]
+    pub fn spent_orchard_note_count(&self) -> usize {
+        self.spent_orchard_note_count
+    }
+
+    /// Returns the number of Orchard notes belonging to the wallet that were received in blocks in
+    /// the scanned range. Note that depending upon the scanning order, it is possible that some of
+    /// the received notes counted here may already have been spent in later blocks closer to the
+    /// chain tip.
+    #[cfg(feature = "orchard")]
+    pub fn received_orchard_note_count(&self) -> usize {
+        self.received_orchard_note_count
     }
 }
 
@@ -279,45 +297,19 @@ where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
     DbT: WalletWrite,
-    <DbT as WalletRead>::AccountId: Clone + Default + Eq + Send + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
 {
     // Fetch the UnifiedFullViewingKeys we are tracking
-    let ufvks = data_db
+    let account_ufvks = data_db
         .get_unified_full_viewing_keys()
         .map_err(Error::Wallet)?;
-    // TODO: Change `scan_block` to also scan Orchard.
-    // https://github.com/zcash/librustzcash/issues/403
-    let dfvks: Vec<_> = ufvks
-        .iter()
-        .filter_map(|(account, ufvk)| ufvk.sapling().map(move |k| (account, k)))
-        .collect();
-    // Precompute the IVKs instead of doing so per block.
-    let ivks = dfvks
-        .iter()
-        .flat_map(|(account, dfvk)| {
-            dfvk.to_sapling_keys()
-                .into_iter()
-                .map(|key| (*account, key))
-        })
-        .collect::<Vec<_>>();
+    let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
+    let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
-    // Get the nullifiers for the unspent notes we are tracking
-    let mut sapling_nullifiers = data_db
-        .get_sapling_nullifiers(NullifierQuery::Unspent)
-        .map_err(Error::Wallet)?;
-
-    let mut batch_runner = BatchRunner::<_, _, _, _, ()>::new(
-        100,
-        dfvks
-            .iter()
-            .flat_map(|(account, dfvk)| {
-                [
-                    ((**account, Scope::External), dfvk.to_ivk(Scope::External)),
-                    ((**account, Scope::Internal), dfvk.to_ivk(Scope::Internal)),
-                ]
-            })
-            .map(|(tag, ivk)| (tag, PreparedIncomingViewingKey::new(&ivk))),
-    );
+    block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
+        runners.add_block(params, block).map_err(|e| e.into())
+    })?;
+    runners.flush();
 
     let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
         data_db
@@ -327,58 +319,71 @@ where
         None
     };
 
-    block_source.with_blocks::<_, DbT::Error>(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
-            add_block_to_runner(params, block, &mut batch_runner);
-
-            Ok(())
-        },
-    )?;
-
-    batch_runner.flush();
+    // Get the nullifiers for the unspent notes we are tracking
+    let mut nullifiers = Nullifiers::new(
+        data_db
+            .get_sapling_nullifiers(NullifierQuery::Unspent)
+            .map_err(Error::Wallet)?,
+        #[cfg(feature = "orchard")]
+        data_db
+            .get_orchard_nullifiers(NullifierQuery::Unspent)
+            .map_err(Error::Wallet)?,
+    );
 
     let mut scanned_blocks = vec![];
-    let mut scan_end_height = from_height;
-    let mut received_note_count = 0;
-    let mut spent_note_count = 0;
+    let mut scan_summary = ScanSummary::for_range(from_height..from_height);
     block_source.with_blocks::<_, DbT::Error>(
         Some(from_height),
         Some(limit),
         |block: CompactBlock| {
-            scan_end_height = block.height() + 1;
-            let scanned_block = scan_block_with_runner(
+            scan_summary.scanned_range.end = block.height() + 1;
+            let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
                 params,
                 block,
-                &ivks,
-                &sapling_nullifiers,
+                &scanning_keys,
+                &nullifiers,
                 prior_block_metadata.as_ref(),
-                Some(&mut batch_runner),
+                Some(&mut runners),
             )
             .map_err(Error::Scan)?;
 
-            let (s, r) = scanned_block
-                .transactions
-                .iter()
-                .fold((0, 0), |(s, r), wtx| {
-                    (s + wtx.sapling_spends.len(), r + wtx.sapling_outputs.len())
-                });
-            spent_note_count += s;
-            received_note_count += r;
+            for wtx in &scanned_block.transactions {
+                scan_summary.spent_sapling_note_count += wtx.sapling_spends().len();
+                scan_summary.received_sapling_note_count += wtx.sapling_outputs().len();
+                #[cfg(feature = "orchard")]
+                {
+                    scan_summary.spent_orchard_note_count += wtx.orchard_spends().len();
+                    scan_summary.received_orchard_note_count += wtx.orchard_outputs().len();
+                }
+            }
 
-            let spent_nf: Vec<&sapling::Nullifier> = scanned_block
+            let sapling_spent_nf: Vec<&sapling::Nullifier> = scanned_block
                 .transactions
                 .iter()
-                .flat_map(|tx| tx.sapling_spends.iter().map(|spend| spend.nf()))
+                .flat_map(|tx| tx.sapling_spends().iter().map(|spend| spend.nf()))
                 .collect();
-
-            sapling_nullifiers.retain(|(_, nf)| !spent_nf.contains(&nf));
-            sapling_nullifiers.extend(scanned_block.transactions.iter().flat_map(|tx| {
-                tx.sapling_outputs
+            nullifiers.retain_sapling(|(_, nf)| !sapling_spent_nf.contains(&nf));
+            nullifiers.extend_sapling(scanned_block.transactions.iter().flat_map(|tx| {
+                tx.sapling_outputs()
                     .iter()
-                    .map(|out| (*out.account(), *out.nf()))
+                    .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
             }));
+
+            #[cfg(feature = "orchard")]
+            {
+                let orchard_spent_nf: Vec<&orchard::note::Nullifier> = scanned_block
+                    .transactions
+                    .iter()
+                    .flat_map(|tx| tx.orchard_spends().iter().map(|spend| spend.nf()))
+                    .collect();
+
+                nullifiers.retain_orchard(|(_, nf)| !orchard_spent_nf.contains(&nf));
+                nullifiers.extend_orchard(scanned_block.transactions.iter().flat_map(|tx| {
+                    tx.orchard_outputs()
+                        .iter()
+                        .flat_map(|out| out.nf().into_iter().map(|nf| (*out.account_id(), *nf)))
+                }));
+            }
 
             prior_block_metadata = Some(scanned_block.to_block_metadata());
             scanned_blocks.push(scanned_block);
@@ -388,11 +393,7 @@ where
     )?;
 
     data_db.put_blocks(scanned_blocks).map_err(Error::Wallet)?;
-    Ok(ScanSummary::from_parts(
-        from_height..scan_end_height,
-        spent_note_count,
-        received_note_count,
-    ))
+    Ok(scan_summary)
 }
 
 #[cfg(feature = "test-dependencies")]

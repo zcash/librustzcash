@@ -1475,9 +1475,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "orchard"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92c801aeaccd19bb6916d71f25694b62d223061872900e8022221c1ad8dcad2d"
+checksum = "1fb255c3ffdccd3c84fe9ebed72aef64fdc72e6a3e4180dd411002d47abaad42"
 dependencies = [
  "aes",
  "bitvec",
@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "assert_matches",
  "base64",
@@ -3051,7 +3051,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "assert_matches",
  "bs58",
@@ -3114,7 +3114,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_history"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assert_matches",
  "blake2b_simd",
@@ -3125,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -3167,7 +3167,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "aes",
  "assert_matches",
@@ -3209,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bellman",
  "blake2b_simd",

@@ -15,9 +15,6 @@ and this library adheres to Rust's notion of
 ### Changed
 - Many places that `AccountId` appeared in the API changed from getting that type from `zcash_primitives::zip32::AccountId` to `zcash_client_sqlite::AccountId`. This impacts the following APIs:
   - `zcash_client_sqlite::error::SqliteClientError::AccountUnknown`
-- `zcash_client_sqlite::error::SqliteClientError` has new error variants:
-  - `SqliteClientError::UnsupportedPoolType`
-  - `SqliteClientError::BalanceError`
   - Changes to the implementation of the `WalletWrite` trait:
     - `create_account` function returns a unique identifier for the new account (as before),
       except that this ID no longer happens to match the ZIP-32 account index.
@@ -25,6 +22,14 @@ and this library adheres to Rust's notion of
   - Two columns in the `transactions` view were renamed:
     - `to_account` -> `to_account_id`
     - `from_account` -> `from_account_id`
+
+## [0.9.0] - 2024-03-01
+
+### Changed
+- Migrated to `orchard 0.7`, `zcash_primitives 0.14`, `zcash_client_backend 0.11`.
+- `zcash_client_sqlite::error::SqliteClientError` has new error variants:
+  - `SqliteClientError::UnsupportedPoolType`
+  - `SqliteClientError::BalanceError`
 
 ## [0.8.1] - 2023-10-18
 

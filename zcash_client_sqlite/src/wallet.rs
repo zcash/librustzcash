@@ -73,40 +73,38 @@ use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_client_backend::data_api::{
-    wallet::{Account, HDSeedAccount, ImportedAccount},
-    AccountBalance, Ratio, WalletSummary,
-};
 use zcash_keys::keys::HDSeedFingerprint;
-use zcash_primitives::transaction::components::amount::NonNegativeAmount;
-use zcash_primitives::zip32::{self, Scope};
-
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
-    memo::{Memo, MemoBytes},
-    merkle_tree::read_commitment_tree,
-    transaction::{components::Amount, Transaction, TransactionData, TxId},
-    zip32::DiversifierIndex,
-};
 
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, SentTransactionOutput, SAPLING_SHARD_HEIGHT,
+        wallet::{Account, HDSeedAccount, ImportedAccount},
+        AccountBalance, AccountBirthday, BlockMetadata, Ratio, SentTransactionOutput,
+        WalletSummary, SAPLING_SHARD_HEIGHT,
     },
     encoding::AddressCodec,
     keys::UnifiedFullViewingKey,
-    wallet::{NoteId, Recipient, WalletTx},
+    wallet::{Note, NoteId, Recipient, WalletTx},
     PoolType, ShieldedProtocol,
 };
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight, BranchId, NetworkUpgrade, Parameters},
+    memo::{Memo, MemoBytes},
+    merkle_tree::read_commitment_tree,
+    transaction::{
+        components::{amount::NonNegativeAmount, Amount},
+        Transaction, TransactionData, TxId,
+    },
+    zip32::{self, DiversifierIndex, Scope},
+};
 
-use crate::wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore};
-use crate::DEFAULT_UA_REQUEST;
 use crate::{
-    error::SqliteClientError, AccountId, SqlTransaction, WalletCommitmentTrees, WalletDb,
-    PRUNING_DEPTH, SAPLING_TABLES_PREFIX,
+    error::SqliteClientError,
+    wallet::commitment_tree::{get_max_checkpointed_height, SqliteShardStore},
+    AccountId, SqlTransaction, WalletCommitmentTrees, WalletDb, DEFAULT_UA_REQUEST, PRUNING_DEPTH,
+    SAPLING_TABLES_PREFIX,
 };
 
 use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
@@ -166,7 +164,6 @@ pub(crate) fn pool_code(pool_type: PoolType) -> i64 {
     match pool_type {
         PoolType::Transparent => 0i64,
         PoolType::Shielded(ShieldedProtocol::Sapling) => 2i64,
-        #[cfg(zcash_unstable = "orchard")]
         PoolType::Shielded(ShieldedProtocol::Orchard) => 3i64,
     }
 }
@@ -708,7 +705,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
     let mut stmt_accounts = tx.prepare_cached("SELECT id FROM accounts")?;
     let mut account_balances = stmt_accounts
         .query([])?
-        .and_then(|row| Ok::<_, rusqlite::Error>((AccountId(row.get(0)?), AccountBalance::ZERO)))
+        .and_then(|row| {
+            Ok::<_, SqliteClientError>((AccountId(row.get::<_, u32>(0)?), AccountBalance::ZERO))
+        })
         .collect::<Result<HashMap<AccountId, AccountBalance>, _>>()?;
 
     let sapling_trace = tracing::info_span!("stmt_select_notes").entered();
@@ -869,7 +868,6 @@ pub(crate) fn get_received_memo(
             )
             .optional()?
             .flatten(),
-        #[cfg(zcash_unstable = "orchard")]
         _ => {
             return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
                 note_id.protocol(),
@@ -1698,9 +1696,9 @@ pub(crate) fn put_block(
 
 /// Inserts information about a mined transaction that was observed to
 /// contain a note related to this wallet into the database.
-pub(crate) fn put_tx_meta<N, S>(
+pub(crate) fn put_tx_meta(
     conn: &rusqlite::Connection,
-    tx: &WalletTx<N, S, AccountId>,
+    tx: &WalletTx<AccountId>,
     height: BlockHeight,
 ) -> Result<i64, SqliteClientError> {
     // It isn't there, so insert our transaction into the database.
@@ -1713,10 +1711,11 @@ pub(crate) fn put_tx_meta<N, S>(
         RETURNING id_tx",
     )?;
 
+    let txid_bytes = tx.txid();
     let tx_params = named_params![
-        ":txid": &tx.txid.as_ref()[..],
+        ":txid": &txid_bytes.as_ref()[..],
         ":block": u32::from(height),
-        ":tx_index": i64::try_from(tx.index).expect("transaction indices are representable as i64"),
+        ":tx_index": i64::try_from(tx.block_index()).expect("transaction indices are representable as i64"),
     ];
 
     stmt_upsert_tx_meta
@@ -1882,7 +1881,7 @@ pub(crate) fn update_expired_notes(
 // and `put_sent_output`
 fn recipient_params<P: consensus::Parameters>(
     params: &P,
-    to: &Recipient<AccountId>,
+    to: &Recipient<AccountId, Note>,
 ) -> (Option<String>, Option<AccountId>, PoolType) {
     match to {
         Recipient::Transparent(addr) => (Some(addr.encode(params)), None, PoolType::Transparent),
@@ -1892,7 +1891,11 @@ fn recipient_params<P: consensus::Parameters>(
             PoolType::Shielded(ShieldedProtocol::Sapling),
         ),
         Recipient::Unified(addr, pool) => (Some(addr.encode(params)), None, *pool),
-        Recipient::InternalAccount(id, pool) => (None, Some(id.to_owned()), *pool),
+        Recipient::InternalAccount(id, note) => (
+            None,
+            Some(id.to_owned()),
+            PoolType::Shielded(note.protocol()),
+        ),
     }
 }
 
@@ -1948,7 +1951,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
     from_account: AccountId,
     tx_ref: i64,
     output_index: usize,
-    recipient: &Recipient<AccountId>,
+    recipient: &Recipient<AccountId, Note>,
     value: NonNegativeAmount,
     memo: Option<&MemoBytes>,
 ) -> Result<(), SqliteClientError> {
@@ -2117,12 +2120,16 @@ pub(crate) fn query_nullifier_map<N: AsRef<[u8]>, S>(
     // change or explicit in-wallet recipient.
     put_tx_meta(
         conn,
-        &WalletTx::<N, S, AccountId> {
+        &WalletTx::new(
             txid,
             index,
-            sapling_spends: vec![],
-            sapling_outputs: vec![],
-        },
+            vec![],
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        ),
         height,
     )
     .map(Some)
@@ -2316,6 +2323,8 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn transparent_balance_across_shielding() {
+        use zcash_client_backend::ShieldedProtocol;
+
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
@@ -2400,6 +2409,7 @@ mod tests {
             fixed::SingleOutputChangeStrategy::new(
                 FixedFeeRule::non_standard(NonNegativeAmount::ZERO),
                 None,
+                ShieldedProtocol::Sapling,
             ),
             DustOutputPolicy::default(),
         );

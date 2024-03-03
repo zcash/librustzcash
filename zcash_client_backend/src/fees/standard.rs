@@ -14,6 +14,8 @@ use zcash_primitives::{
     },
 };
 
+use crate::ShieldedProtocol;
+
 use super::{
     fixed, sapling as sapling_fees, zip317, ChangeError, ChangeStrategy, DustOutputPolicy,
     TransactionBalance,
@@ -27,15 +29,24 @@ use super::orchard as orchard_fees;
 pub struct SingleOutputChangeStrategy {
     fee_rule: StandardFeeRule,
     change_memo: Option<MemoBytes>,
+    fallback_change_pool: ShieldedProtocol,
 }
 
 impl SingleOutputChangeStrategy {
     /// Constructs a new [`SingleOutputChangeStrategy`] with the specified ZIP 317
     /// fee parameters.
-    pub fn new(fee_rule: StandardFeeRule, change_memo: Option<MemoBytes>) -> Self {
+    ///
+    /// `fallback_change_pool` is used when more than one shielded pool is enabled via
+    /// feature flags, and the transaction has no shielded inputs.
+    pub fn new(
+        fee_rule: StandardFeeRule,
+        change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
+    ) -> Self {
         Self {
             fee_rule,
             change_memo,
+            fallback_change_pool,
         }
     }
 }
@@ -63,6 +74,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             StandardFeeRule::PreZip313 => fixed::SingleOutputChangeStrategy::new(
                 FixedFeeRule::non_standard(NonNegativeAmount::const_from_u64(10000)),
                 self.change_memo.clone(),
+                self.fallback_change_pool,
             )
             .compute_balance(
                 params,
@@ -78,6 +90,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             StandardFeeRule::Zip313 => fixed::SingleOutputChangeStrategy::new(
                 FixedFeeRule::non_standard(NonNegativeAmount::const_from_u64(1000)),
                 self.change_memo.clone(),
+                self.fallback_change_pool,
             )
             .compute_balance(
                 params,
@@ -93,6 +106,7 @@ impl ChangeStrategy for SingleOutputChangeStrategy {
             StandardFeeRule::Zip317 => zip317::SingleOutputChangeStrategy::new(
                 Zip317FeeRule::standard(),
                 self.change_memo.clone(),
+                self.fallback_change_pool,
             )
             .compute_balance(
                 params,

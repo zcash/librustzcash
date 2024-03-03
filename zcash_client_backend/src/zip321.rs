@@ -223,7 +223,7 @@ impl TransactionRequest {
 
     /// A utility for use in tests to help check round-trip serialization properties.
     /// by comparing a two transaction requests for equality after normalization.
-    #[cfg(all(test, feature = "test-dependencies"))]
+    #[cfg(test)]
     pub(in crate::zip321) fn normalize_and_eq(
         a: &mut TransactionRequest,
         b: &mut TransactionRequest,
@@ -735,7 +735,7 @@ mod parse {
     }
 }
 
-#[cfg(feature = "test-dependencies")]
+#[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {
     use proptest::collection::btree_map;
     use proptest::collection::vec;
@@ -825,12 +825,16 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::{any, proptest};
     use std::str::FromStr;
+
     use zcash_keys::address::testing::arb_addr;
     use zcash_primitives::{
         consensus::{Parameters, TEST_NETWORK},
         memo::Memo,
-        transaction::components::amount::{Amount, NonNegativeAmount},
+        transaction::components::amount::{
+            testing::arb_nonnegative_amount, Amount, NonNegativeAmount,
+        },
     };
 
     #[cfg(feature = "local-consensus")]
@@ -841,20 +845,9 @@ mod tests {
     use super::{
         memo_from_base64, memo_to_base64,
         parse::{parse_amount, zcashparam, Param},
-        render::amount_str,
-        MemoBytes, Payment, TransactionRequest,
-    };
-
-    #[cfg(all(test, feature = "test-dependencies"))]
-    use proptest::prelude::{any, proptest};
-
-    #[cfg(all(test, feature = "test-dependencies"))]
-    use zcash_primitives::transaction::components::amount::testing::arb_nonnegative_amount;
-
-    #[cfg(all(test, feature = "test-dependencies"))]
-    use super::{
-        render::{memo_param, str_param},
+        render::{amount_str, memo_param, str_param},
         testing::{arb_addr_str, arb_valid_memo, arb_zip321_request, arb_zip321_uri},
+        MemoBytes, Payment, TransactionRequest,
     };
 
     fn check_roundtrip(req: TransactionRequest) {
@@ -1099,7 +1092,6 @@ mod tests {
         assert!(i10r.is_err());
     }
 
-    #[cfg(all(test, feature = "test-dependencies"))]
     proptest! {
         #[test]
         fn prop_zip321_roundtrip_address(addr in arb_addr(UA_REQUEST)) {

@@ -22,7 +22,6 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier, PaymentAddress,
 };
-use zcash_client_backend::fees::{standard, DustOutputPolicy};
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
@@ -44,6 +43,10 @@ use zcash_client_backend::{
     proto::proposal,
     wallet::OvkPolicy,
     zip321,
+};
+use zcash_client_backend::{
+    fees::{standard, DustOutputPolicy},
+    ShieldedProtocol,
 };
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
@@ -442,6 +445,7 @@ impl<Cache> TestState<Cache> {
         ovk_policy: OvkPolicy,
         min_confirmations: NonZeroU32,
         change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
     ) -> Result<
         NonEmpty<TxId>,
         data_api::error::Error<
@@ -465,6 +469,7 @@ impl<Cache> TestState<Cache> {
             ovk_policy,
             min_confirmations,
             change_memo,
+            fallback_change_pool,
         )
     }
 
@@ -489,6 +494,7 @@ impl<Cache> TestState<Cache> {
     where
         InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
     {
+        #![allow(deprecated)]
         let params = self.network();
         let prover = test_prover();
         spend(
@@ -547,6 +553,7 @@ impl<Cache> TestState<Cache> {
         amount: NonNegativeAmount,
         memo: Option<MemoBytes>,
         change_memo: Option<MemoBytes>,
+        fallback_change_pool: ShieldedProtocol,
     ) -> Result<
         Proposal<StandardFeeRule, ReceivedNoteId>,
         data_api::error::Error<
@@ -567,6 +574,7 @@ impl<Cache> TestState<Cache> {
             amount,
             memo,
             change_memo,
+            fallback_change_pool,
         );
 
         if let Ok(proposal) = &result {
@@ -1056,12 +1064,14 @@ impl TestCache for FsBlockCache {
 pub(crate) fn input_selector(
     fee_rule: StandardFeeRule,
     change_memo: Option<&str>,
+    fallback_change_pool: ShieldedProtocol,
 ) -> GreedyInputSelector<
     WalletDb<rusqlite::Connection, Network>,
     standard::SingleOutputChangeStrategy,
 > {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
-    let change_strategy = standard::SingleOutputChangeStrategy::new(fee_rule, change_memo);
+    let change_strategy =
+        standard::SingleOutputChangeStrategy::new(fee_rule, change_memo, fallback_change_pool);
     GreedyInputSelector::new(change_strategy, DustOutputPolicy::default())
 }
 
