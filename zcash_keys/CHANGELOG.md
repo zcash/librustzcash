@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.1] - 2024-03-04
+
 ### Added
 - `zcash_keys::keys::UnifiedAddressRequest::all`
 
