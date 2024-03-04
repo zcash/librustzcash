@@ -143,7 +143,11 @@ impl UnifiedAddress {
 
     /// Returns whether this address has a Sapling receiver.
     pub fn has_sapling(&self) -> bool {
-        self.sapling.is_some()
+        #[cfg(not(feature = "sapling"))]
+        return false;
+
+        #[cfg(feature = "sapling")]
+        return self.sapling.is_some();
     }
 
     /// Returns the Sapling receiver within this Unified Address, if any.
@@ -213,6 +217,7 @@ impl UnifiedAddress {
         let result = std::iter::empty();
         #[cfg(feature = "orchard")]
         let result = result.chain(self.orchard.map(|_| Typecode::Orchard));
+        #[cfg(feature = "sapling")]
         let result = result.chain(self.sapling.map(|_| Typecode::Sapling));
         let result = result.chain(self.transparent.map(|taddr| match taddr {
             TransparentAddress::PublicKeyHash(_) => Typecode::P2pkh,
@@ -353,16 +358,13 @@ mod tests {
     use zcash_address::test_vectors;
     use zcash_primitives::consensus::MAIN_NETWORK;
 
-    use super::Address;
+    use super::{Address, UnifiedAddress};
 
     #[cfg(feature = "sapling")]
     use crate::keys::sapling;
 
     #[cfg(any(feature = "orchard", feature = "sapling"))]
     use zcash_primitives::zip32::AccountId;
-
-    #[cfg(any(feature = "orchard", feature = "sapling"))]
-    use super::UnifiedAddress;
 
     #[test]
     #[cfg(any(feature = "orchard", feature = "sapling"))]
