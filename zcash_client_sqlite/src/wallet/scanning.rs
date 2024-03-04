@@ -517,7 +517,7 @@ pub(crate) mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::{AddressType, BlockCache, TestBuilder, TestState},
+        testing::{AddressType, TestBlockCache, TestBuilder, TestState},
         wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
         VERIFY_LOOKAHEAD,
     };
@@ -649,7 +649,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn test_with_canopy_birthday() -> (
-        TestState<BlockCache>,
+        TestState<TestBlockCache>,
         DiversifiableFullViewingKey,
         AccountBirthday,
         u32,

@@ -1124,16 +1124,12 @@ fn find_received<
     (shielded_outputs, note_commitments)
 }
 
-#[cfg(test)]
-mod tests {
-
-    use std::convert::Infallible;
-
+#[cfg(any(test, feature = "test-dependencies"))]
+pub mod testing {
     use group::{
         ff::{Field, PrimeField},
         GroupEncoding,
     };
-    use incrementalmerkletree::{Position, Retention};
     use rand_core::{OsRng, RngCore};
     use sapling::{
         constants::SPENDING_KEY_GENERATOR,
@@ -1143,25 +1139,17 @@ mod tests {
         zip32::DiversifiableFullViewingKey,
         Nullifier,
     };
-    use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
     use zcash_primitives::{
         block::BlockHash,
         consensus::{sapling_zip212_enforcement, BlockHeight, Network},
         memo::MemoBytes,
         transaction::components::amount::NonNegativeAmount,
-        zip32::AccountId,
     };
 
-    use crate::{
-        data_api::BlockMetadata,
-        proto::compact_formats::{
-            self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
-        },
-        scanning::{BatchRunners, ScanningKeys},
+    use crate::proto::compact_formats::{
+        self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
     };
-
-    use super::{scan_block, scan_block_with_runners, Nullifiers};
 
     fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
         let fake_nf = {
@@ -1201,7 +1189,7 @@ mod tests {
     ///
     /// Set `initial_tree_sizes` to `None` to simulate a `CompactBlock` retrieved
     /// from a `lightwalletd` that is not currently tracking note commitment tree sizes.
-    fn fake_compact_block(
+    pub fn fake_compact_block(
         height: BlockHeight,
         prev_hash: BlockHash,
         nf: Nullifier,
@@ -1280,6 +1268,29 @@ mod tests {
 
         cb
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::convert::Infallible;
+
+    use incrementalmerkletree::{Position, Retention};
+    use sapling::Nullifier;
+    use zcash_keys::keys::UnifiedSpendingKey;
+    use zcash_primitives::{
+        block::BlockHash,
+        consensus::{BlockHeight, Network},
+        transaction::components::amount::NonNegativeAmount,
+        zip32::AccountId,
+    };
+
+    use crate::{
+        data_api::BlockMetadata,
+        scanning::{BatchRunners, ScanningKeys},
+    };
+
+    use super::{scan_block, scan_block_with_runners, testing::fake_compact_block, Nullifiers};
 
     #[test]
     fn scan_block_with_my_tx() {

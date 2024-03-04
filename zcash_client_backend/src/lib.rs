@@ -75,6 +75,9 @@ pub mod scanning;
 pub mod wallet;
 pub mod zip321;
 
+#[cfg(feature = "sync")]
+pub mod sync;
+
 #[cfg(feature = "unstable-serialization")]
 pub mod serialization;
 

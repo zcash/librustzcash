@@ -68,15 +68,23 @@ group.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Sync engine
+anyhow = { version = "1", optional = true }
+futures-util = { version = "0.3", optional = true }
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree.workspace = true
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
 
 # - ZIP 321
 nom = "7"
+
+# - Runtime
+tokio.workspace = true
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -123,9 +131,17 @@ transparent-inputs = [
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "zcash_keys/orchard"]
 
+## Exposes a wallet synchronization function that implements the necessary state machine.
+sync = [
+    "lightwalletd-tonic",
+    "dep:anyhow",
+    "dep:futures-util",
+]
+
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
+    "dep:jubjub",
     "orchard?/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",
