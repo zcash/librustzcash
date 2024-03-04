@@ -20,7 +20,6 @@ and this library adheres to Rust's notion of
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
-  - `WalletRead::validate_seed`
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`
@@ -51,6 +50,7 @@ and this library adheres to Rust's notion of
     - `type OrchardShardStore`
     - `fn with_orchard_tree_mut`
     - `fn put_orchard_subtree_roots`
+  - Added method `WalletRead::validate_seed`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 

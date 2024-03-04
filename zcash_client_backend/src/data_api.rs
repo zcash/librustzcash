@@ -494,9 +494,13 @@ pub trait WalletRead {
 
     /// Verifies that the given seed corresponds to the viewing key for the specified account.
     ///
-    /// Returns `Ok(true)` if the viewing key for the specified account can be derived from
-    /// the provided seed, `Ok(false)` if the derived seed does not match or the specified
-    /// account is not present in the database, or an error in the case
+    /// Returns:
+    /// - `Ok(true)` if the viewing key for the specified account can be derived from the
+    ///   provided seed.
+    /// - `Ok(false)` if the derived seed does not match, or the specified account is not
+    ///   present in the database.
+    /// - `Err(_)` if a Unified Spending Key cannot be derived from the seed for the
+    ///   specified account.
     fn validate_seed(
         &self,
         account_id: Self::AccountId,
