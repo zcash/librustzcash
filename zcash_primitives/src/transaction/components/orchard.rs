@@ -283,9 +283,12 @@ pub fn write_action_without_auth<W: Write>(
 pub mod testing {
     use proptest::prelude::*;
 
-    use orchard::bundle::{
-        testing::{self as t_orch},
-        Authorized, Bundle,
+    use orchard::{
+        bundle::{
+            testing::{self as t_orch},
+            Authorized, Bundle,
+        },
+        note_encryption_vanilla::OrchardDomainVanilla,
     };
 
     use crate::transaction::{
@@ -296,8 +299,8 @@ pub mod testing {
     prop_compose! {
         pub fn arb_bundle(n_actions: usize)(
             orchard_value_balance in arb_amount(),
-            bundle in t_orch::arb_bundle(n_actions)
-        ) -> Bundle<Authorized, Amount> {
+            bundle in t_orch::BundleArb::arb_bundle(n_actions)
+        ) -> Bundle<Authorized, Amount, OrchardDomainVanilla> {
             // overwrite the value balance, as we can't guarantee that the
             // value doesn't exceed the MAX_MONEY bounds.
             bundle.try_map_value_balance::<_, (), _>(|_| Ok(orchard_value_balance)).unwrap()
@@ -306,7 +309,7 @@ pub mod testing {
 
     pub fn arb_bundle_for_version(
         v: TxVersion,
-    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount>>> {
+    ) -> impl Strategy<Value = Option<Bundle<Authorized, Amount, OrchardDomainVanilla>>> {
         if v.has_orchard() {
             Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_bundle(n))))
         } else {
