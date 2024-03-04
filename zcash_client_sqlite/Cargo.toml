@@ -24,6 +24,7 @@ zcash_client_backend = { workspace = true, features = ["unstable-serialization",
 zcash_encoding.workspace = true
 zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
 zcash_primitives.workspace = true
+zip32.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)

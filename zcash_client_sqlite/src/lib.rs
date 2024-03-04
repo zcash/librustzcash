@@ -245,6 +245,32 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     type Error = SqliteClientError;
     type AccountId = AccountId;
 
+    fn validate_seed(
+        &self,
+        account_id: Self::AccountId,
+        seed: &SecretVec<u8>,
+    ) -> Result<bool, Self::Error> {
+        self.get_unified_full_viewing_keys().and_then(|keys| {
+            keys.get(&account_id).map_or(Ok(false), |ufvk| {
+                let usk = UnifiedSpendingKey::from_seed(
+                    &self.params,
+                    &seed.expose_secret()[..],
+                    account_id,
+                )
+                .map_err(|_| SqliteClientError::KeyDerivationError(account_id))?;
+
+                // Keys are not comparable with `Eq`, but addresses are, so we derive what should
+                // be equivalent addresses for each key and use those to check for key equality.
+                UnifiedAddressRequest::all().map_or(Ok(false), |ua_request| {
+                    Ok(usk
+                        .to_unified_full_viewing_key()
+                        .default_address(ua_request)
+                        == ufvk.default_address(ua_request))
+                })
+            })
+        })
+    }
+
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
             .map(|h| h.map(|range| *range.end()))
@@ -1204,9 +1230,11 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
+    use secrecy::SecretVec;
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
 
-    use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
+    use crate::{testing::TestBuilder, DEFAULT_UA_REQUEST};
+    use zip32::AccountId;
 
     #[cfg(feature = "unstable")]
     use {
@@ -1216,6 +1244,36 @@ mod tests {
             consensus::Parameters, transaction::components::amount::NonNegativeAmount,
         },
     };
+
+    #[test]
+    fn validate_seed() {
+        let st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+
+        assert!({
+            let account = st.test_account().unwrap().0;
+            st.wallet()
+                .validate_seed(account, st.test_seed().unwrap())
+                .unwrap()
+        });
+
+        // check that passing an invalid account results in a failure
+        assert!({
+            let account = AccountId::try_from(1u32).unwrap();
+            !st.wallet()
+                .validate_seed(account, st.test_seed().unwrap())
+                .unwrap()
+        });
+
+        // check that passing an invalid seed results in a failure
+        assert!({
+            let account = st.test_account().unwrap().0;
+            !st.wallet()
+                .validate_seed(account, &SecretVec::new(vec![1u8; 32]))
+                .unwrap()
+        });
+    }
 
     #[test]
     pub(crate) fn get_next_available_address() {

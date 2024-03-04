@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::UnifiedAddressRequest::all`
+
 ## [0.1.0] - 2024-03-01
 The entries below are relative to the `zcash_client_backend` crate as of
 `zcash_client_backend 0.10.0`.
