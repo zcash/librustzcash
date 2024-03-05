@@ -133,7 +133,7 @@ pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
 enum AccountType {
     Zip32,
-    Imported,
+    ImportedUfvk,
 }
 
 impl TryFrom<u32> for AccountType {
@@ -142,7 +142,7 @@ impl TryFrom<u32> for AccountType {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(AccountType::Zip32),
-            1 => Ok(AccountType::Imported),
+            1 => Ok(AccountType::ImportedUfvk),
             _ => Err(()),
         }
     }
@@ -152,7 +152,7 @@ impl From<AccountType> for u32 {
     fn from(value: AccountType) -> Self {
         match value {
             AccountType::Zip32 => 0,
-            AccountType::Imported => 1,
+            AccountType::ImportedUfvk => 1,
         }
     }
 }
@@ -224,7 +224,7 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
             ufvk.encode(params),
         ),
         Account::Imported(ImportedAccount::Full(ufvk)) => (
-            AccountType::Imported.into(),
+            AccountType::ImportedUfvk.into(),
             None,
             None,
             ufvk.encode(params),
@@ -1070,7 +1070,9 @@ pub(crate) fn get_account<P: Parameters>(
                     })?,
                     ufvk,
                 )))),
-                AccountType::Imported => Ok(Some(Account::Imported(ImportedAccount::Full(ufvk)))),
+                AccountType::ImportedUfvk => {
+                    Ok(Some(Account::Imported(ImportedAccount::Full(ufvk))))
+                }
             }
         }
         None => Ok(None),

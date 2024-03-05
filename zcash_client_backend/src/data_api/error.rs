@@ -5,11 +5,9 @@ use std::fmt::{self, Debug, Display};
 
 use shardtree::error::ShardTreeError;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
-use zcash_primitives::{
-    transaction::{
-        builder,
-        components::{amount::BalanceError, transparent},
-    },
+use zcash_primitives::transaction::{
+    builder,
+    components::{amount::BalanceError, transparent},
 };
 
 use crate::address::UnifiedAddress;
