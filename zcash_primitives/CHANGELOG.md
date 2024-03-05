@@ -17,7 +17,9 @@ and this library adheres to Rust's notion of
   - `zcash_primitives::consensus` re-exports `zcash_protocol::consensus`.
   - `zcash_primitives::constants` re-exports `zcash_protocol::constants`.
   - `zcash_primitives::transaction::components::amount` re-exports
-    `zcash_protocol::value`.
+    `zcash_protocol::value`. Many of the conversions to and from the
+    `Amount` and `NonNegativeAmount` value types now return
+    `Result<_, BalanceError>` instead of `Result<_, ()>`.
   - `zcash_primitives::memo` re-exports `zcash_protocol::memo`.
 
 ### Removed

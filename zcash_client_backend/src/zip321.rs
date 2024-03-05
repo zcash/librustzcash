@@ -19,7 +19,7 @@ use zcash_primitives::{
     memo::{self, MemoBytes},
     transaction::components::amount::NonNegativeAmount,
 };
-use zcash_protocol::consensus;
+use zcash_protocol::{consensus, value::BalanceError};
 
 use crate::address::Address;
 
@@ -206,11 +206,13 @@ impl TransactionRequest {
     ///
     /// Returns `Err` in the case of overflow, or if the value is
     /// outside the range `0..=MAX_MONEY` zatoshis.
-    pub fn total(&self) -> Result<NonNegativeAmount, ()> {
+    pub fn total(&self) -> Result<NonNegativeAmount, BalanceError> {
         self.payments
             .values()
             .map(|p| p.amount)
-            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))
+            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
+                (acc? + a).ok_or(BalanceError::Overflow)
+            })
     }
 
     /// A utility for use in tests to help check round-trip serialization properties.
@@ -469,6 +471,7 @@ mod parse {
         consensus, transaction::components::amount::NonNegativeAmount,
         transaction::components::amount::COIN,
     };
+    use zcash_protocol::value::BalanceError;
 
     use crate::address::Address;
 
@@ -666,7 +669,7 @@ mod parse {
                 coins
                     .checked_mul(COIN)
                     .and_then(|coin_zats| coin_zats.checked_add(zats))
-                    .ok_or(())
+                    .ok_or(BalanceError::Overflow)
                     .and_then(NonNegativeAmount::from_u64)
                     .map_err(|_| format!("Not a valid zat amount: {}.{}", coins, zats))
             },

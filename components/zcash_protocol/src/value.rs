@@ -47,40 +47,44 @@ impl ZatBalance {
     /// Creates an ZatBalance from an i64.
     ///
     /// Returns an error if the amount is outside the range `{-MAX_BALANCE..MAX_BALANCE}`.
-    pub fn from_i64(amount: i64) -> Result<Self, ()> {
+    pub fn from_i64(amount: i64) -> Result<Self, BalanceError> {
         if (-MAX_BALANCE..=MAX_BALANCE).contains(&amount) {
             Ok(ZatBalance(amount))
+        } else if amount < -MAX_BALANCE {
+            Err(BalanceError::Underflow)
         } else {
-            Err(())
+            Err(BalanceError::Overflow)
         }
     }
 
     /// Creates a non-negative ZatBalance from an i64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_BALANCE}`.
-    pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
+    pub fn from_nonnegative_i64(amount: i64) -> Result<Self, BalanceError> {
         if (0..=MAX_BALANCE).contains(&amount) {
             Ok(ZatBalance(amount))
+        } else if amount < 0 {
+            Err(BalanceError::Underflow)
         } else {
-            Err(())
+            Err(BalanceError::Overflow)
         }
     }
 
     /// Creates an ZatBalance from a u64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
-    pub fn from_u64(amount: u64) -> Result<Self, ()> {
+    pub fn from_u64(amount: u64) -> Result<Self, BalanceError> {
         if amount <= MAX_MONEY {
             Ok(ZatBalance(amount as i64))
         } else {
-            Err(())
+            Err(BalanceError::Overflow)
         }
     }
 
     /// Reads an ZatBalance from a signed 64-bit little-endian integer.
     ///
     /// Returns an error if the amount is outside the range `{-MAX_BALANCE..MAX_BALANCE}`.
-    pub fn from_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
+    pub fn from_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, BalanceError> {
         let amount = i64::from_le_bytes(bytes);
         ZatBalance::from_i64(amount)
     }
@@ -88,7 +92,7 @@ impl ZatBalance {
     /// Reads a non-negative ZatBalance from a signed 64-bit little-endian integer.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_BALANCE}`.
-    pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
+    pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, BalanceError> {
         let amount = i64::from_le_bytes(bytes);
         ZatBalance::from_nonnegative_i64(amount)
     }
@@ -96,7 +100,7 @@ impl ZatBalance {
     /// Reads an ZatBalance from an unsigned 64-bit little-endian integer.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_BALANCE}`.
-    pub fn from_u64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
+    pub fn from_u64_le_bytes(bytes: [u8; 8]) -> Result<Self, BalanceError> {
         let amount = u64::from_le_bytes(bytes);
         ZatBalance::from_u64(amount)
     }
@@ -128,9 +132,9 @@ impl ZatBalance {
 }
 
 impl TryFrom<i64> for ZatBalance {
-    type Error = ();
+    type Error = BalanceError;
 
-    fn try_from(value: i64) -> Result<Self, ()> {
+    fn try_from(value: i64) -> Result<Self, BalanceError> {
         ZatBalance::from_i64(value)
     }
 }
@@ -148,10 +152,10 @@ impl From<&ZatBalance> for i64 {
 }
 
 impl TryFrom<ZatBalance> for u64 {
-    type Error = ();
+    type Error = BalanceError;
 
     fn try_from(value: ZatBalance) -> Result<Self, Self::Error> {
-        value.0.try_into().map_err(|_| ())
+        value.0.try_into().map_err(|_| BalanceError::Overflow)
     }
 }
 
@@ -237,11 +241,11 @@ impl Zatoshis {
     /// Creates a Zatoshis from a u64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
-    pub fn from_u64(amount: u64) -> Result<Self, ()> {
+    pub fn from_u64(amount: u64) -> Result<Self, BalanceError> {
         if (0..=MAX_MONEY).contains(&amount) {
             Ok(Zatoshis(amount))
         } else {
-            Err(())
+            Err(BalanceError::Overflow)
         }
     }
 
@@ -256,14 +260,18 @@ impl Zatoshis {
     /// Creates a Zatoshis from an i64.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
-    pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
-        Self::from_u64(u64::try_from(amount).map_err(|_| ())?)
+    pub fn from_nonnegative_i64(amount: i64) -> Result<Self, BalanceError> {
+        if amount >= 0 {
+            Self::from_u64(u64::try_from(amount).unwrap())
+        } else {
+            Err(BalanceError::Underflow)
+        }
     }
 
     /// Reads an Zatoshis from an unsigned 64-bit little-endian integer.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
-    pub fn from_u64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
+    pub fn from_u64_le_bytes(bytes: [u8; 8]) -> Result<Self, BalanceError> {
         let amount = u64::from_le_bytes(bytes);
         Self::from_u64(amount)
     }
@@ -272,7 +280,7 @@ impl Zatoshis {
     /// complement 64-bit little-endian value.
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
-    pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, ()> {
+    pub fn from_nonnegative_i64_le_bytes(bytes: [u8; 8]) -> Result<Self, BalanceError> {
         let amount = i64::from_le_bytes(bytes);
         Self::from_nonnegative_i64(amount)
     }
@@ -313,7 +321,7 @@ impl From<Zatoshis> for u64 {
 }
 
 impl TryFrom<u64> for Zatoshis {
-    type Error = ();
+    type Error = BalanceError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
         Zatoshis::from_u64(value)
@@ -321,7 +329,7 @@ impl TryFrom<u64> for Zatoshis {
 }
 
 impl TryFrom<ZatBalance> for Zatoshis {
-    type Error = ();
+    type Error = BalanceError;
 
     fn try_from(value: ZatBalance) -> Result<Self, Self::Error> {
         Zatoshis::from_nonnegative_i64(value.0)

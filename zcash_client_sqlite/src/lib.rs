@@ -1238,8 +1238,7 @@ mod tests {
 
     #[cfg(feature = "unstable")]
     use {
-        crate::testing::AddressType,
-        zcash_client_backend::keys::sapling,
+        crate::testing::AddressType, zcash_client_backend::keys::sapling,
         zcash_primitives::transaction::components::amount::NonNegativeAmount,
     };
 
