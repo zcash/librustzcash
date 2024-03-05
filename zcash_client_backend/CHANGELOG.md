@@ -20,6 +20,7 @@ and this library adheres to Rust's notion of
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
+  - `chain::BlockCache` trait
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`
@@ -33,6 +34,8 @@ and this library adheres to Rust's notion of
   - `Nullifiers::{orchard, extend_orchard, retain_orchard}`
   - `TaggedOrchardBatch`
   - `TaggedOrchardBatchRunner`
+  - `testing` module
+  - `testing::{'fake_compact_block`, `random_compact_tx`} (moved from `tests` module).
 - `zcash_client_backend::wallet`:
   - `Note::Orchard`
   - `WalletOrchardSpend`
@@ -52,6 +55,8 @@ and this library adheres to Rust's notion of
     - `fn put_orchard_subtree_roots`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
+- `zcash_client_backend::scanning`:
+  - `testing::fake_compact_block` is now public.
 
 ## [0.11.0] - 2024-03-01
 
