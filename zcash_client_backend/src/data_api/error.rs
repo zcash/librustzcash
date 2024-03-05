@@ -10,7 +10,6 @@ use zcash_primitives::{
         builder,
         components::{amount::BalanceError, transparent},
     },
-    zip32::AccountId,
 };
 
 use crate::address::UnifiedAddress;
@@ -44,9 +43,6 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
 
     /// No account could be found corresponding to a provided spending key.
     KeyNotRecognized,
-
-    /// No account with the given identifier was found in the wallet.
-    AccountNotFound(AccountId),
 
     /// Zcash amount computation encountered an overflow or underflow.
     BalanceError(BalanceError),
@@ -127,9 +123,6 @@ where
                     f,
                     "Wallet does not contain an account corresponding to the provided spending key"
                 )
-            }
-            Error::AccountNotFound(account) => {
-                write!(f, "Wallet does not contain account {}", u32::from(*account))
             }
             Error::BalanceError(e) => write!(
                 f,
