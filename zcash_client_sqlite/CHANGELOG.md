@@ -13,7 +13,9 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::AccountId` struct.
 
 ### Changed
-- Many places that `AccountId` appeared in the API changed from getting that type from `zcash_primitives::zip32::AccountId` to `zcash_client_sqlite::AccountId`. This impacts the following APIs:
+- Many places that `AccountId` appeared in the API changed from
+  using `zcash_primitives::zip32::AccountId` to using an opaque `zcash_client_sqlite::AccountId`
+  type. This impacts the following APIs:
   - `zcash_client_sqlite::error::SqliteClientError::AccountUnknown`
   - Changes to the implementation of the `WalletWrite` trait:
     - `create_account` function returns a unique identifier for the new account (as before),

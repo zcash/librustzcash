@@ -38,7 +38,7 @@ and this library adheres to Rust's notion of
   - `WalletOrchardSpend`
   - `WalletOrchardOutput`
   - `WalletTx::{orchard_spends, orchard_outputs}`
-  - `HDSeedAccount`
+  - `HdSeedAccount`
   - `ImportedAccount`
   - `Account`
 

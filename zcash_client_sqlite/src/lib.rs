@@ -63,7 +63,7 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        wallet::{Account, HDSeedAccount},
+        wallet::{Account, HdSeedAccount},
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
@@ -265,7 +265,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = self.get_account(account_id)? {
-            if let Account::Zip32(HDSeedAccount(_, account_index, ufvk)) = account {
+            if let Account::Zip32(HdSeedAccount(_, account_index, ufvk)) = account {
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
                     &seed.expose_secret()[..],
@@ -448,7 +448,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let seed_id = HdSeedFingerprint::from_seed(seed);
-            let account_index = wallet::get_max_account_id(wdb.conn.0, &seed_id)?
+            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_id)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
                 .unwrap_or(zip32::AccountId::ZERO);
@@ -458,7 +458,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let account = Account::Zip32(HDSeedAccount(seed_id, account_index, ufvk));
+            let account = Account::Zip32(HdSeedAccount(seed_id, account_index, ufvk));
             let account_id = wallet::add_account(wdb.conn.0, &wdb.params, account, birthday)?;
 
             Ok((account_id, usk))

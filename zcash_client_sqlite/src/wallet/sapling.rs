@@ -848,7 +848,7 @@ pub(crate) mod tests {
         let to = dfvk.default_address().1.into();
 
         // Create a USK that doesn't exist in the wallet
-        let acct1 = zcash_primitives::zip32::AccountId::try_from(1).unwrap();
+        let acct1 = zip32::AccountId::try_from(1).unwrap();
         let usk1 = UnifiedSpendingKey::from_seed(&st.network(), &[1u8; 32], acct1).unwrap();
 
         // Attempting to spend with a USK that is not in the wallet results in an error

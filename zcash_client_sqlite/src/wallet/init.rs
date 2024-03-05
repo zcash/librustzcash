@@ -1076,7 +1076,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
         use zcash_client_backend::data_api::{
-            wallet::{Account, HDSeedAccount},
+            wallet::{Account, HdSeedAccount},
             AccountBirthday, WalletRead,
         };
 
@@ -1095,7 +1095,7 @@ mod tests {
             .unwrap();
         assert_matches!(
             db_data.get_account(account_id),
-            Ok(Some(Account::Zip32(HDSeedAccount(
+            Ok(Some(Account::Zip32(HdSeedAccount(
                 _,
                 zip32::AccountId::ZERO,
                 _

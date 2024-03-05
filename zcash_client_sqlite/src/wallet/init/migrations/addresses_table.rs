@@ -182,8 +182,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 }
 
 /// Adds the given address and diversifier index to the addresses table.
-///
-/// Returns the database row for the newly-inserted address.
 fn insert_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,

@@ -85,7 +85,7 @@ use input_selection::{
 
 /// Describes the key inputs and UFVK for an account that was derived from a ZIP-32 HD seed and account index.
 #[derive(Debug, Clone)]
-pub struct HDSeedAccount(
+pub struct HdSeedAccount(
     pub HdSeedFingerprint,
     pub zip32::AccountId,
     pub UnifiedFullViewingKey,
@@ -103,7 +103,7 @@ pub enum ImportedAccount {
 #[derive(Debug, Clone)]
 pub enum Account {
     /// Inputs for a ZIP-32 HD account.
-    Zip32(HDSeedAccount),
+    Zip32(HdSeedAccount),
     /// Inputs for an imported account.
     Imported(ImportedAccount),
 }
@@ -119,7 +119,7 @@ impl Account {
         request: UnifiedAddressRequest,
     ) -> (UnifiedAddress, DiversifierIndex) {
         match self {
-            Account::Zip32(HDSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
+            Account::Zip32(HdSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
             Account::Imported(ImportedAccount::Full(ufvk)) => ufvk.default_address(request),
         }
     }
@@ -129,7 +129,7 @@ impl Account {
     /// Accounts initialized with an incoming viewing key will not have a unified full viewing key.
     pub fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         match self {
-            Account::Zip32(HDSeedAccount(_, _, ufvk)) => Some(ufvk),
+            Account::Zip32(HdSeedAccount(_, _, ufvk)) => Some(ufvk),
             Account::Imported(ImportedAccount::Full(ufvk)) => Some(ufvk),
         }
     }

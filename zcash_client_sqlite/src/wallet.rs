@@ -79,7 +79,7 @@ use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        wallet::{Account, HDSeedAccount, ImportedAccount},
+        wallet::{Account, HdSeedAccount, ImportedAccount},
         AccountBalance, AccountBirthday, BlockMetadata, Ratio, SentTransactionOutput,
         WalletSummary, SAPLING_SHARD_HEIGHT,
     },
@@ -131,28 +131,28 @@ pub(crate) mod scanning;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
-enum AccountTypes {
+enum AccountType {
     Zip32,
     Imported,
 }
 
-impl TryFrom<u32> for AccountTypes {
+impl TryFrom<u32> for AccountType {
     type Error = ();
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(AccountTypes::Zip32),
-            1 => Ok(AccountTypes::Imported),
+            0 => Ok(AccountType::Zip32),
+            1 => Ok(AccountType::Imported),
             _ => Err(()),
         }
     }
 }
 
-impl From<AccountTypes> for u32 {
-    fn from(value: AccountTypes) -> Self {
+impl From<AccountType> for u32 {
+    fn from(value: AccountType) -> Self {
         match value {
-            AccountTypes::Zip32 => 0,
-            AccountTypes::Imported => 1,
+            AccountType::Zip32 => 0,
+            AccountType::Imported => 1,
         }
     }
 }
@@ -194,8 +194,8 @@ pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
     })
 }
 
-// Returns the most recently generated account index for a given seed.
-pub(crate) fn get_max_account_id(
+// Returns the highest used account index for a given seed.
+pub(crate) fn max_zip32_account_index(
     conn: &rusqlite::Connection,
     seed_id: &HdSeedFingerprint,
 ) -> Result<Option<zip32::AccountId>, SqliteClientError> {
@@ -217,14 +217,14 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
     params: &P,
 ) -> (u32, Option<&'a [u8]>, Option<u32>, String) {
     match account {
-        Account::Zip32(HDSeedAccount(fingerprint, account_index, ufvk)) => (
-            AccountTypes::Zip32.into(),
+        Account::Zip32(HdSeedAccount(fingerprint, account_index, ufvk)) => (
+            AccountType::Zip32.into(),
             Some(fingerprint.as_bytes()),
             Some((*account_index).into()),
             ufvk.encode(params),
         ),
         Account::Imported(ImportedAccount::Full(ufvk)) => (
-            AccountTypes::Imported.into(),
+            AccountType::Imported.into(),
             None,
             None,
             ufvk.encode(params),
@@ -1053,7 +1053,7 @@ pub(crate) fn get_account<P: Parameters>(
     let row = result.next()?;
     match row {
         Some(row) => {
-            let account_type: AccountTypes = row.get::<_, u32>(0)?.try_into().map_err(|_| {
+            let account_type: AccountType = row.get::<_, u32>(0)?.try_into().map_err(|_| {
                 SqliteClientError::CorruptedData("Unrecognized account_type".to_string())
             })?;
             let uvk: String = row.get(1)?;
@@ -1061,7 +1061,7 @@ pub(crate) fn get_account<P: Parameters>(
                 .map_err(SqliteClientError::CorruptedData)?;
 
             match account_type {
-                AccountTypes::Zip32 => Ok(Some(Account::Zip32(HDSeedAccount(
+                AccountType::Zip32 => Ok(Some(Account::Zip32(HdSeedAccount(
                     HdSeedFingerprint::from_bytes(row.get(2)?),
                     zip32::AccountId::try_from(row.get::<_, u32>(3)?).map_err(|_| {
                         SqliteClientError::CorruptedData(
@@ -1070,7 +1070,7 @@ pub(crate) fn get_account<P: Parameters>(
                     })?,
                     ufvk,
                 )))),
-                AccountTypes::Imported => Ok(Some(Account::Imported(ImportedAccount::Full(ufvk)))),
+                AccountType::Imported => Ok(Some(Account::Imported(ImportedAccount::Full(ufvk)))),
             }
         }
         None => Ok(None),
@@ -2157,7 +2157,7 @@ mod tests {
 
     use sapling::zip32::ExtendedSpendingKey;
     use zcash_client_backend::data_api::{
-        wallet::{Account, HDSeedAccount},
+        wallet::{Account, HdSeedAccount},
         AccountBirthday, WalletRead,
     };
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
@@ -2316,7 +2316,7 @@ mod tests {
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(
             account_parameters,
-            Account::Zip32(HDSeedAccount(_,actual_account_index,_)) if actual_account_index == expected_account_index
+            Account::Zip32(HdSeedAccount(_,actual_account_index,_)) if actual_account_index == expected_account_index
         );
     }
 
