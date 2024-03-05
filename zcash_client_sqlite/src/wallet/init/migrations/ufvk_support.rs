@@ -1,5 +1,5 @@
 //! Migration that adds support for unified full viewing keys.
-use std::collections::HashSet;
+use std::{collections::HashSet, rc::Rc};
 
 use rusqlite::{self, named_params, params};
 use schemer;
@@ -31,7 +31,7 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
-    pub(super) seed: Option<SecretVec<u8>>,
+    pub(super) seed: Rc<Option<SecretVec<u8>>>,
 }
 
 impl<P> schemer::Migration for Migration<P> {
@@ -75,7 +75,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             // We only need to check for the presence of the seed if we have keys that
             // need to be migrated; otherwise, it's fine to not supply the seed if this
             // migration is being used to initialize an empty database.
-            if let Some(seed) = &self.seed {
+            if let Some(seed) = &self.seed.as_ref() {
                 let account: u32 = row.get(0)?;
                 let account = AccountId::try_from(account).map_err(|_| {
                     WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())

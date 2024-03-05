@@ -12,7 +12,6 @@ use zcash_primitives::zip32;
 use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
 
 use crate::wallet::commitment_tree;
-use crate::AccountId;
 use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
@@ -72,7 +71,7 @@ pub enum SqliteClientError {
     DiversifierIndexOutOfRange,
 
     /// The account for which information was requested does not belong to the wallet.
-    AccountUnknown(AccountId),
+    AccountUnknown,
 
     /// An error occurred deriving a spending key from a seed and an account
     /// identifier.
@@ -147,7 +146,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
-            SqliteClientError::AccountUnknown(acct_id) => write!(f, "Account {} does not belong to this wallet.", acct_id.0),
+            SqliteClientError::AccountUnknown => write!(f, "The account with the given ID does not belong to this wallet."),
 
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),

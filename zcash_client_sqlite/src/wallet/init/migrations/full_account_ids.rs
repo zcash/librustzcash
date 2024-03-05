@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, rc::Rc};
 
 use rusqlite::{params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
 use uuid::Uuid;
-use zcash_keys::keys::HDSeedFingerprint;
+use zcash_keys::keys::HdSeedFingerprint;
 
 use crate::wallet::init::WalletMigrationError;
 
@@ -15,7 +15,7 @@ use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uni
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x1b104345_f27e_42da_a9e3_1de22694da43);
 
 pub(crate) struct Migration {
-    pub(super) seed: Option<SecretVec<u8>>,
+    pub(super) seed: Rc<Option<SecretVec<u8>>>,
 }
 
 impl schemer::Migration for Migration {
@@ -69,8 +69,8 @@ impl RusqliteMigration for Migration {
         if transaction.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
             Ok(row.get::<_, u32>(0)? > 0)
         })? {
-            if let Some(seed) = &self.seed {
-                let seed_id = HDSeedFingerprint::from_seed(seed);
+            if let Some(seed) = &self.seed.as_ref() {
+                let seed_id = HdSeedFingerprint::from_seed(seed);
                 // Although 'id' is an AUTOINCREMENT column, we'll set it explicitly to match the old account value
                 // strictly as a matter of convenience to make this migration script easier,
                 // specifically around updating tables with foreign keys to this one.

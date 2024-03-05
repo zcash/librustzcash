@@ -8,7 +8,7 @@ and this library adheres to Rust's notion of
 
 ### Added
 - `zcash_keys::keys`
-  - `HDSeedFingerprint`
+  - `HdSeedFingerprint`
 
 ## [0.1.0] - 2024-03-01
 The entries below are relative to the `zcash_client_backend` crate as of

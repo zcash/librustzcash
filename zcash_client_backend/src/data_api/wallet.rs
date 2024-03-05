@@ -38,7 +38,7 @@ use std::num::NonZeroU32;
 
 use zcash_keys::{
     address::UnifiedAddress,
-    keys::{HDSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey},
+    keys::{HdSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey},
 };
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
@@ -83,10 +83,10 @@ use input_selection::{
     GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
 };
 
-/// Represents the identifier for an account that was derived from a ZIP-32 HD seed and account index.
+/// Describes the key inputs and UFVK for an account that was derived from a ZIP-32 HD seed and account index.
 #[derive(Debug, Clone)]
 pub struct HDSeedAccount(
-    pub HDSeedFingerprint,
+    pub HdSeedFingerprint,
     pub zip32::AccountId,
     pub UnifiedFullViewingKey,
 );
@@ -99,7 +99,7 @@ pub enum ImportedAccount {
     Full(UnifiedFullViewingKey),
 }
 
-/// The inputs for adding an account to a wallet.
+/// Describes an account in terms of its UVK or ZIP-32 origins.
 #[derive(Debug, Clone)]
 pub enum Account {
     /// Inputs for a ZIP-32 HD account.
@@ -109,7 +109,11 @@ pub enum Account {
 }
 
 impl Account {
-    /// Gets the default UA for the account.
+    /// Returns the default Unified Address for the account,
+    /// along with the diversifier index that generated it.
+    ///
+    /// The diversifier index may be non-zero if the Unified Address includes a Sapling  
+    /// receiver, and there was no valid Sapling receiver at diversifier index zero.
     pub fn default_address(
         &self,
         request: UnifiedAddressRequest,

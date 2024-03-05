@@ -1075,7 +1075,10 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::data_api::AccountBirthday;
+        use zcash_client_backend::data_api::{
+            wallet::{Account, HDSeedAccount},
+            AccountBirthday, WalletRead,
+        };
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1087,24 +1090,33 @@ mod tests {
         );
 
         let birthday = AccountBirthday::from_sapling_activation(&network);
-        let (account, _usk) = db_data
+        let (account_id, _usk) = db_data
             .create_account(&Secret::new(seed.to_vec()), birthday)
             .unwrap();
+        assert_matches!(
+            db_data.get_account(account_id),
+            Ok(Some(Account::Zip32(HDSeedAccount(
+                _,
+                zip32::AccountId::ZERO,
+                _
+            ))))
+        );
 
         for tv in &test_vectors::UNIFIED[..3] {
             if let Some(Address::Unified(tvua)) =
                 Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
-                let (ua, di) = wallet::get_current_address(&db_data.conn, &db_data.params, account)
-                    .unwrap()
-                    .expect("create_account generated the first address");
+                let (ua, di) =
+                    wallet::get_current_address(&db_data.conn, &db_data.params, account_id)
+                        .unwrap()
+                        .expect("create_account generated the first address");
                 assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 db_data
-                    .get_next_available_address(account, DEFAULT_UA_REQUEST)
+                    .get_next_available_address(account_id, DEFAULT_UA_REQUEST)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

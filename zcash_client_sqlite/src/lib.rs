@@ -45,7 +45,7 @@ use std::{
     path::Path,
 };
 use subtle::ConditionallySelectable;
-use zcash_keys::keys::HDSeedFingerprint;
+use zcash_keys::keys::HdSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -416,7 +416,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let seed_id = HDSeedFingerprint::from_seed(seed);
+            let seed_id = HdSeedFingerprint::from_seed(seed);
             let account_index = wallet::get_max_account_id(wdb.conn.0, &seed_id)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
@@ -427,9 +427,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let account_parameters = Account::Zip32(HDSeedAccount(seed_id, account_index, ufvk));
-            let account_id =
-                wallet::add_account(wdb.conn.0, &wdb.params, account_parameters, birthday)?;
+            let account = Account::Zip32(HDSeedAccount(seed_id, account_index, ufvk));
+            let account_id = wallet::add_account(wdb.conn.0, &wdb.params, account, birthday)?;
 
             Ok((account_id, usk))
         })

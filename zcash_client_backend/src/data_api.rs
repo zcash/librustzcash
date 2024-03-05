@@ -492,7 +492,8 @@ pub trait WalletRead {
     /// will be interpreted as belonging to that account.
     type AccountId: Copy + Debug + Eq + Hash;
 
-    /// Gets the parameters that went into creating an account (e.g. seed+index or uvk).
+    /// Gets some of the account details (e.g. seed fingerprint+index and/or uvk) for a given account id.
+    /// Returns `Ok(None)` if no account by the given ID is known.
     fn get_account(&self, account_id: Self::AccountId) -> Result<Option<Account>, Self::Error>;
 
     /// Returns the height of the chain as known to the wallet as of the most recent call to

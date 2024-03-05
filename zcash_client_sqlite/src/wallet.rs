@@ -73,7 +73,7 @@ use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_keys::keys::HDSeedFingerprint;
+use zcash_keys::keys::HdSeedFingerprint;
 
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
@@ -197,7 +197,7 @@ pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
 // Returns the most recently generated account index for a given seed.
 pub(crate) fn get_max_account_id(
     conn: &rusqlite::Connection,
-    seed_id: &HDSeedFingerprint,
+    seed_id: &HdSeedFingerprint,
 ) -> Result<Option<zip32::AccountId>, SqliteClientError> {
     conn.query_row_and_then(
         "SELECT MAX(hd_account_index) FROM accounts WHERE hd_seed_fingerprint = :hd_seed",
@@ -1020,7 +1020,7 @@ pub(crate) fn account_birthday(
     )
     .optional()
     .map_err(SqliteClientError::from)
-    .and_then(|opt| opt.ok_or(SqliteClientError::AccountUnknown(account)))
+    .and_then(|opt| opt.ok_or(SqliteClientError::AccountUnknown))
 }
 
 /// Returns the minimum and maximum heights for blocks stored in the wallet database.
@@ -1062,7 +1062,7 @@ pub(crate) fn get_account<P: Parameters>(
 
             match account_type {
                 AccountTypes::Zip32 => Ok(Some(Account::Zip32(HDSeedAccount(
-                    HDSeedFingerprint::from_bytes(row.get(2)?),
+                    HdSeedFingerprint::from_bytes(row.get(2)?),
                     zip32::AccountId::try_from(row.get::<_, u32>(3)?).map_err(|_| {
                         SqliteClientError::CorruptedData(
                             "ZIP-32 account ID from db is out of range.".to_string(),

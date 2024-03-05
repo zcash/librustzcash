@@ -10,7 +10,7 @@ and this library adheres to Rust's notion of
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
-- `AccountId` struct.
+- `zcash_client_sqlite::AccountId` struct.
 
 ### Changed
 - Many places that `AccountId` appeared in the API changed from getting that type from `zcash_primitives::zip32::AccountId` to `zcash_client_sqlite::AccountId`. This impacts the following APIs:

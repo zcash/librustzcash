@@ -20,8 +20,10 @@ mod v_transactions_transparent_history;
 mod v_tx_outputs_use_legacy_false;
 mod wallet_summaries;
 
+use std::rc::Rc;
+
 use schemer_rusqlite::RusqliteMigration;
-use secrecy::{ExposeSecret, SecretVec};
+use secrecy::SecretVec;
 use zcash_primitives::consensus;
 
 use super::WalletMigrationError;
@@ -30,6 +32,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     params: &P,
     seed: Option<SecretVec<u8>>,
 ) -> Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>> {
+    let seed = Rc::new(seed);
     //                                   initial_setup
     //                                   /           \
     //                          utxos_table         ufvk_support
@@ -61,14 +64,7 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(utxos_table::Migration {}),
         Box::new(ufvk_support::Migration {
             params: params.clone(),
-            seed: seed
-                .as_ref()
-                .map(|s| SecretVec::new(s.expose_secret().clone())),
-        }),
-        Box::new(full_account_ids::Migration {
-            seed: seed
-                .as_ref()
-                .map(|s| SecretVec::new(s.expose_secret().clone())),
+            seed: seed.clone(),
         }),
         Box::new(addresses_table::Migration {
             params: params.clone(),
@@ -101,5 +97,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(receiving_key_scopes::Migration {
             params: params.clone(),
         }),
+        Box::new(full_account_ids::Migration { seed: seed.clone() }),
     ]
 }
