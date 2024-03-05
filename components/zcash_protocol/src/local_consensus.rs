@@ -198,30 +198,25 @@ mod tests {
             z_future: Some(expected_z_future),
         };
 
+        assert_eq!(regtest.coin_type(), constants::regtest::COIN_TYPE);
         assert_eq!(
-            regtest.network_type().coin_type(),
-            constants::regtest::COIN_TYPE
-        );
-        assert_eq!(
-            regtest.network_type().hrp_sapling_extended_spending_key(),
+            regtest.hrp_sapling_extended_spending_key(),
             constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY
         );
         assert_eq!(
-            regtest
-                .network_type()
-                .hrp_sapling_extended_full_viewing_key(),
+            regtest.hrp_sapling_extended_full_viewing_key(),
             constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
         );
         assert_eq!(
-            regtest.network_type().hrp_sapling_payment_address(),
+            regtest.hrp_sapling_payment_address(),
             constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS
         );
         assert_eq!(
-            regtest.network_type().b58_pubkey_address_prefix(),
+            regtest.b58_pubkey_address_prefix(),
             constants::regtest::B58_PUBKEY_ADDRESS_PREFIX
         );
         assert_eq!(
-            regtest.network_type().b58_script_address_prefix(),
+            regtest.b58_script_address_prefix(),
             constants::regtest::B58_SCRIPT_ADDRESS_PREFIX
         );
     }

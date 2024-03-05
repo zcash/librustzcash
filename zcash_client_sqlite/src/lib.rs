@@ -1240,9 +1240,7 @@ mod tests {
     use {
         crate::testing::AddressType,
         zcash_client_backend::keys::sapling,
-        zcash_primitives::{
-            consensus::Parameters, transaction::components::amount::NonNegativeAmount,
-        },
+        zcash_primitives::transaction::components::amount::NonNegativeAmount,
     };
 
     #[test]
@@ -1341,11 +1339,7 @@ mod tests {
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
         let account = AccountId::ZERO;
-        let extsk = sapling::spending_key(
-            &seed,
-            st.wallet().params.network_type().coin_type(),
-            account,
-        );
+        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,

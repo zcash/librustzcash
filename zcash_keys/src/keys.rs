@@ -190,11 +190,11 @@ impl UnifiedSpendingKey {
             transparent: legacy::AccountPrivKey::from_seed(_params, seed, _account)
                 .map_err(DerivationError::Transparent)?,
             #[cfg(feature = "sapling")]
-            sapling: sapling::spending_key(seed, _params.network_type().coin_type(), _account),
+            sapling: sapling::spending_key(seed, _params.coin_type(), _account),
             #[cfg(feature = "orchard")]
             orchard: orchard::keys::SpendingKey::from_zip32_seed(
                 seed,
-                _params.network_type().coin_type(),
+                _params.coin_type(),
                 _account,
             )
             .map_err(DerivationError::Orchard)?,
