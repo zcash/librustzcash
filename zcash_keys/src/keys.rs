@@ -15,7 +15,10 @@ use {
     zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey, NonHardenedChildIndex},
 };
 
-#[cfg(all(feature = "test-dependencies", feature = "transparent-inputs"))]
+#[cfg(all(
+    feature = "transparent-inputs",
+    any(test, feature = "test-dependencies")
+))]
 use zcash_primitives::legacy::TransparentAddress;
 
 #[cfg(feature = "unstable")]
@@ -497,6 +500,9 @@ pub struct UnifiedAddressRequest {
 }
 
 impl UnifiedAddressRequest {
+    /// Construct a new unified address request from its constituent parts.
+    ///
+    /// Returns `None` if the resulting unified address would not include at least one shielded receiver.
     pub fn new(has_orchard: bool, has_sapling: bool, has_p2pkh: bool) -> Option<Self> {
         let has_shielded_receiver = has_orchard || has_sapling;
 
@@ -509,6 +515,24 @@ impl UnifiedAddressRequest {
                 has_p2pkh,
             })
         }
+    }
+
+    /// Constructs a new unified address request that includes a request for a receiver of each
+    /// type that is supported given the active feature flags.
+    pub fn all() -> Option<Self> {
+        let _has_orchard = false;
+        #[cfg(feature = "orchard")]
+        let _has_orchard = true;
+
+        let _has_sapling = false;
+        #[cfg(feature = "sapling")]
+        let _has_sapling = true;
+
+        let _has_p2pkh = false;
+        #[cfg(feature = "transparent-inputs")]
+        let _has_p2pkh = true;
+
+        Self::new(_has_orchard, _has_sapling, _has_p2pkh)
     }
 
     /// Construct a new unified address request from its constituent parts.
@@ -873,13 +897,15 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use super::UnifiedFullViewingKey;
     use proptest::prelude::proptest;
 
-    use super::UnifiedFullViewingKey;
-    use zcash_primitives::consensus::MAIN_NETWORK;
-
-    #[cfg(any(feature = "orchard", feature = "sapling"))]
-    use zip32::AccountId;
+    #[cfg(any(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ))]
+    use {zcash_primitives::consensus::MAIN_NETWORK, zip32::AccountId};
 
     #[cfg(feature = "sapling")]
     use super::sapling;
@@ -966,7 +992,7 @@ mod tests {
         );
 
         #[cfg(not(any(feature = "orchard", feature = "sapling")))]
-        assert_eq!(ufvk, None);
+        assert!(ufvk.is_none());
 
         #[cfg(any(feature = "orchard", feature = "sapling"))]
         {
@@ -1081,6 +1107,7 @@ mod tests {
 
             // The test vectors contain some diversifier indices that do not generate
             // valid Sapling addresses, so skip those.
+            #[cfg(feature = "sapling")]
             if ufvk.sapling().unwrap().address(d_idx).is_none() {
                 continue;
             }
@@ -1101,6 +1128,7 @@ mod tests {
                     if tvua.transparent().is_some() {
                         assert_eq!(tvua.transparent(), ua.transparent());
                     }
+                    #[cfg(feature = "sapling")]
                     if tvua.sapling().is_some() {
                         assert_eq!(tvua.sapling(), ua.sapling());
                     }

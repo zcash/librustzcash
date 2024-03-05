@@ -73,6 +73,9 @@ pub enum SqliteClientError {
     /// The account for which information was requested does not belong to the wallet.
     AccountUnknown,
 
+    /// The account was imported, and ZIP-32 derivation information is not known for it.
+    UnknownZip32Derivation,
+
     /// An error occurred deriving a spending key from a seed and an account
     /// identifier.
     KeyDerivationError(zip32::AccountId),
@@ -147,6 +150,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
             SqliteClientError::AccountUnknown => write!(f, "The account with the given ID does not belong to this wallet."),
+            SqliteClientError::UnknownZip32Derivation => write!(f, "ZIP-32 derivation information is not known for this account."),
 
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),

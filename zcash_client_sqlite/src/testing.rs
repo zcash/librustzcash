@@ -9,7 +9,7 @@ use nonempty::NonEmpty;
 use prost::Message;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, Connection};
-use secrecy::Secret;
+use secrecy::{Secret, SecretVec};
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
@@ -142,7 +142,7 @@ impl<Cache> TestBuilder<Cache> {
         let test_account = if let Some(birthday) = self.test_account_birthday {
             let seed = Secret::new(vec![0u8; 32]);
             let (account, usk) = db_data.create_account(&seed, birthday.clone()).unwrap();
-            Some((account, usk, birthday))
+            Some((seed, account, usk, birthday))
         } else {
             None
         };
@@ -163,7 +163,12 @@ pub(crate) struct TestState<Cache> {
     latest_cached_block: Option<(BlockHeight, BlockHash, u32)>,
     _data_file: NamedTempFile,
     db_data: WalletDb<Connection, Network>,
-    test_account: Option<(AccountId, UnifiedSpendingKey, AccountBirthday)>,
+    test_account: Option<(
+        SecretVec<u8>,
+        AccountId,
+        UnifiedSpendingKey,
+        AccountBirthday,
+    )>,
 }
 
 impl<Cache: TestCache> TestState<Cache>
@@ -420,16 +425,23 @@ impl<Cache> TestState<Cache> {
             .expect("Sapling activation height must be known.")
     }
 
+    /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
+    pub(crate) fn test_seed(&self) -> Option<&SecretVec<u8>> {
+        self.test_account.as_ref().map(|(seed, _, _, _)| seed)
+    }
+
     /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_account(&self) -> Option<(AccountId, UnifiedSpendingKey, AccountBirthday)> {
-        self.test_account.as_ref().cloned()
+        self.test_account
+            .as_ref()
+            .map(|(_, a, k, b)| (*a, k.clone(), b.clone()))
     }
 
     /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_account_sapling(&self) -> Option<DiversifiableFullViewingKey> {
         self.test_account
             .as_ref()
-            .and_then(|(_, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
+            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.

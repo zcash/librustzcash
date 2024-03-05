@@ -22,6 +22,7 @@ and this library adheres to Rust's notion of
   - Two columns in the `transactions` view were renamed:
     - `to_account` -> `to_account_id`
     - `from_account` -> `from_account_id`
+  - `zcash_client_sqlite::error::SqliteClientError::UnknownZip32Derivation` variant added.
 
 ## [0.9.0] - 2024-03-01
 

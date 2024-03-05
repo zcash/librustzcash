@@ -496,6 +496,21 @@ pub trait WalletRead {
     /// Returns `Ok(None)` if no account by the given ID is known.
     fn get_account(&self, account_id: Self::AccountId) -> Result<Option<Account>, Self::Error>;
 
+    /// Verifies that the given seed corresponds to the viewing key for the specified account.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if the viewing key for the specified account can be derived from the
+    ///   provided seed.
+    /// - `Ok(false)` if the derived seed does not match, or the specified account is not
+    ///   present in the database.
+    /// - `Err(_)` if a Unified Spending Key cannot be derived from the seed for the
+    ///   specified account or the account has no known ZIP-32 derivation.
+    fn validate_seed(
+        &self,
+        account_id: Self::AccountId,
+        seed: &SecretVec<u8>,
+    ) -> Result<bool, Self::Error>;
+
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
     ///
@@ -1328,14 +1343,15 @@ pub mod testing {
             Ok(None)
         }
 
-        fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-            Ok(None)
+        fn validate_seed(
+            &self,
+            _account_id: Self::AccountId,
+            _seed: &SecretVec<u8>,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
         }
 
-        fn get_target_and_anchor_heights(
-            &self,
-            _min_confirmations: NonZeroU32,
-        ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+        fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
             Ok(None)
         }
 
@@ -1356,6 +1372,13 @@ pub mod testing {
 
         fn suggest_scan_ranges(&self) -> Result<Vec<ScanRange>, Self::Error> {
             Ok(vec![])
+        }
+
+        fn get_target_and_anchor_heights(
+            &self,
+            _min_confirmations: NonZeroU32,
+        ) -> Result<Option<(BlockHeight, BlockHeight)>, Self::Error> {
+            Ok(None)
         }
 
         fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error> {

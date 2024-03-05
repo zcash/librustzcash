@@ -97,6 +97,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(receiving_key_scopes::Migration {
             params: params.clone(),
         }),
-        Box::new(full_account_ids::Migration { seed: seed.clone() }),
+        Box::new(full_account_ids::Migration { seed }),
     ]
 }

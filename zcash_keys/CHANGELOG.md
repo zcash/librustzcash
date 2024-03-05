@@ -10,6 +10,16 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys`
   - `HdSeedFingerprint`
 
+## [0.1.1] - 2024-03-04
+
+### Added
+- `zcash_keys::keys::UnifiedAddressRequest::all`
+
+### Fixed
+- A missing application of the `sapling` feature flag was remedied; 
+  prior to this fix it was not possible to use this crate without the
+  `sapling` feature enabled.
+
 ## [0.1.0] - 2024-03-01
 The entries below are relative to the `zcash_client_backend` crate as of
 `zcash_client_backend 0.10.0`.
