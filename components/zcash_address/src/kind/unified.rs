@@ -505,6 +505,9 @@ pub(crate) mod private {
                         length
                     )));
                 }
+                // The "as usize" casts cannot change the values, because both
+                // cursor.position() and addr_end are u64 values <= buf.len()
+                // which is usize.
                 let data = &buf[cursor.position() as usize..addr_end as usize];
                 let result = match Typecode::try_from(typecode)? {
                     Typecode::Data(tc) => Item::Data(R::parse(tc, data)?),
