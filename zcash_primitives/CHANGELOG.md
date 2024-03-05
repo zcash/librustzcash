@@ -11,13 +11,14 @@ and this library adheres to Rust's notion of
 - `zcash_primitives::transaction::components::sapling::zip212_enforcement`
 
 ### Changed
-- `zcash_primitives::consensus` is now a reexport of the
-  `zcash_protocol::consensus` module.
-- `zcash_primitives::constants` is now a reexport of the
-  `zcash_protocol::constants` module.
-- `zcash_primitives::transaction::components::amount` is now a reexport of the
-  `zcash_protocol::value` module.
-- `zcash_primitives::memo` is now a reexport of the `zcash_protocol::memo` module.
+- The following modules are now re-exported from the `zcash_protocol` crate.
+  Additional changes have also been made therein; refer to the `zcash_protocol`
+  changelog for details.
+  - `zcash_primitives::consensus` re-exports `zcash_protocol::consensus`.
+  - `zcash_primitives::constants` re-exports `zcash_protocol::constants`.
+  - `zcash_primitives::transaction::components::amount` re-exports
+    `zcash_protocol::value`.
+  - `zcash_primitives::memo` re-exports `zcash_protocol::memo`.
 
 ### Removed
 - `zcash_primitives::consensus::sapling_zip212_enforcement` instead use
@@ -28,6 +29,8 @@ and this library adheres to Rust's notion of
   - `impl From<NonNegativeAmount> for sapling::value::NoteValue`
   - `impl TryFrom<orchard::ValueSum> for Amount`
   - `impl From<NonNegativeAmount> for orchard::NoteValue`
+- The `local_consensus` module and feature flag have been removed; use the module
+  from the `zcash_protocol` crate instead.
 
 ## [0.14.0] - 2024-03-01
 ### Added

@@ -264,15 +264,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 // Keys are not comparable with `Eq`, but addresses are, so we derive what should
                 // be equivalent addresses for each key and use those to check for key equality.
                 UnifiedAddressRequest::all().map_or(Ok(false), |ua_request| {
-                    match (
-                        usk.to_unified_full_viewing_key()
-                            .default_address(ua_request),
-                        ufvk.default_address(ua_request),
-                    ) {
-                        (Ok(a), Ok(b)) => Ok(a == b),
-                        (Err(e), _) => Err(e.into()),
-                        (_, Err(e)) => Err(e.into()),
-                    }
+                    Ok(usk
+                        .to_unified_full_viewing_key()
+                        .default_address(ua_request)?
+                        == ufvk.default_address(ua_request)?)
                 })
             })
         })

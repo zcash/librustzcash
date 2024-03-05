@@ -1,7 +1,7 @@
 use std::convert::{Infallible, TryFrom};
 use std::error;
 use std::iter::Sum;
-use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
+use std::ops::{Add, Mul, Neg, Sub};
 
 use memuse::DynamicUsage;
 
@@ -12,12 +12,9 @@ pub const MAX_BALANCE: i64 = MAX_MONEY as i64;
 /// A type-safe representation of a Zcash value delta, in zatoshis.
 ///
 /// An ZatBalance can only be constructed from an integer that is within the valid monetary
-/// range of `{-MAX_MONEY..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
-/// However, this range is not preserved as an invariant internally; it is possible to
-/// add two valid ZatBalances together to obtain an invalid ZatBalance. It is the user's
-/// responsibility to handle the result of serializing potentially-invalid ZatBalances. In
-/// particular, a [`Transaction`] containing serialized invalid ZatBalances will be rejected
-/// by the network consensus rules.
+/// range of `{-MAX_MONEY..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis),
+/// and this is preserved as an invariant internally. (A [`Transaction`] containing serialized
+/// invalid ZatBalances would also be rejected by the network consensus rules.)
 ///
 /// [`Transaction`]: https://docs.rs/zcash_primitives/latest/zcash_primitives/transaction/struct.Transaction.html
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
@@ -174,12 +171,6 @@ impl Add<ZatBalance> for Option<ZatBalance> {
     }
 }
 
-impl AddAssign<ZatBalance> for ZatBalance {
-    fn add_assign(&mut self, rhs: ZatBalance) {
-        *self = (*self + rhs).expect("Addition must produce a valid amount value.")
-    }
-}
-
 impl Sub<ZatBalance> for ZatBalance {
     type Output = Option<ZatBalance>;
 
@@ -193,12 +184,6 @@ impl Sub<ZatBalance> for Option<ZatBalance> {
 
     fn sub(self, rhs: ZatBalance) -> Option<ZatBalance> {
         self.and_then(|lhs| lhs - rhs)
-    }
-}
-
-impl SubAssign<ZatBalance> for ZatBalance {
-    fn sub_assign(&mut self, rhs: ZatBalance) {
-        *self = (*self - rhs).expect("Subtraction must produce a valid amount value.")
     }
 }
 
@@ -272,7 +257,7 @@ impl Zatoshis {
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64(amount: i64) -> Result<Self, ()> {
-        u64::try_from(amount).map(Zatoshis).map_err(|_| ())
+        Self::from_u64(u64::try_from(amount).map_err(|_| ())?)
     }
 
     /// Reads an Zatoshis from an unsigned 64-bit little-endian integer.
@@ -517,22 +502,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn add_assign_panics_on_overflow() {
-        let mut a = ZatBalance(MAX_BALANCE);
-        a += ZatBalance(1);
-    }
-
-    #[test]
     fn sub_underflow() {
         let v = ZatBalance(-MAX_BALANCE);
         assert_eq!(v - ZatBalance(1), None)
-    }
-
-    #[test]
-    #[should_panic]
-    fn sub_assign_panics_on_underflow() {
-        let mut a = ZatBalance(-MAX_BALANCE);
-        a -= ZatBalance(1);
     }
 }

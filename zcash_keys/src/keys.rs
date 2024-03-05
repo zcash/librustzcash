@@ -448,6 +448,7 @@ pub enum AddressGenerationError {
 impl fmt::Display for AddressGenerationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
+            #[cfg(feature = "transparent-inputs")]
             AddressGenerationError::InvalidTransparentChildIndex(i) => {
                 write!(
                     f,
@@ -826,7 +827,8 @@ impl UnifiedFullViewingKey {
     /// produce a valid diversifier, and return the Unified Address constructed using that
     /// diversifier along with the index at which the valid diversifier was found.
     ///
-    /// Returns `None` if no valid diversifier exists
+    /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
+    /// required to satisfy the unified address request are not properly enabled.
     #[allow(unused_mut)]
     pub fn find_address(
         &self,
@@ -864,8 +866,11 @@ impl UnifiedFullViewingKey {
         }
     }
 
-    /// Returns the Unified Address corresponding to the smallest valid diversifier index,
-    /// along with that index.
+    /// Find the Unified Address corresponding to the smallest valid diversifier index, along with
+    /// that index.
+    ///
+    /// Returns an `Err(AddressGenerationError)` if no valid diversifier exists or if the features
+    /// required to satisfy the unified address request are not properly enabled.
     pub fn default_address(
         &self,
         request: UnifiedAddressRequest,

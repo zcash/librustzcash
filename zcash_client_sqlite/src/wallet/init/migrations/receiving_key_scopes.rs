@@ -172,17 +172,25 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             );
 
             let ufvk_str: String = row.get(5)?;
-            let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
-                .expect("Stored UFVKs must be valid");
-            let dfvk = ufvk
-                .sapling()
-                .expect("UFVK must have a Sapling component to have received Sapling notes");
+            let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
+                WalletMigrationError::CorruptedData(format!("Stored UFVK was invalid: {:?}", e))
+            })?;
+
+            let dfvk = ufvk.sapling().ok_or_else(|| {
+                WalletMigrationError::CorruptedData(
+                    "UFVK must have a Sapling component to have received Sapling notes.".to_owned(),
+                )
+            })?;
 
             // We previously set the default to external scope, so we now verify whether the output
             // is decryptable using the intenally-scoped IVK and, if so, mark it as such.
             if let Some(tx_data) = tx_data_opt {
-                let tx = Transaction::read(&tx_data[..], BranchId::Canopy)
-                    .expect("Transaction must be valid");
+                let tx = Transaction::read(&tx_data[..], BranchId::Canopy).map_err(|e| {
+                    WalletMigrationError::CorruptedData(format!(
+                        "Unable to parse raw transaction: {:?}",
+                        e
+                    ))
+                })?;
                 let output = tx
                     .sapling_bundle()
                     .and_then(|b| b.shielded_outputs().get(output_index))

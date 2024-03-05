@@ -8,9 +8,6 @@ use std::ops::{Add, Bound, RangeBounds, Sub};
 
 use crate::constants::{mainnet, regtest, testnet};
 
-#[cfg(feature = "local-consensus")]
-use crate::local_consensus::LocalNetwork;
-
 /// A wrapper type representing blockchain heights.
 ///
 /// Safe conversion from various integer types, as well as addition and subtraction, are
@@ -146,7 +143,7 @@ pub trait NetworkConstants: Clone {
     fn coin_type(&self) -> u32;
 
     /// Returns the human-readable prefix for Bech32-encoded Sapling extended spending keys
-    /// the network to which this NetworkConstants value applies.
+    /// for the network to which this NetworkConstants value applies.
     ///
     /// Defined in [ZIP 32].
     ///
@@ -164,7 +161,7 @@ pub trait NetworkConstants: Clone {
     fn hrp_sapling_extended_full_viewing_key(&self) -> &'static str;
 
     /// Returns the Bech32-encoded human-readable prefix for Sapling payment addresses
-    /// viewing keys for the network to which this NetworkConstants value applies.
+    /// for the network to which this NetworkConstants value applies.
     ///
     /// Defined in section 5.6.4 of the [Zcash Protocol Specification].
     ///
@@ -382,9 +379,6 @@ pub enum Network {
     MainNetwork,
     /// Zcash Testnet.
     TestNetwork,
-    /// Private integration / regression testing, used in `zcashd`.
-    #[cfg(feature = "local-consensus")]
-    Regtest(LocalNetwork),
 }
 
 memuse::impl_no_dynamic_usage!(Network);
@@ -394,8 +388,6 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => NetworkType::Main,
             Network::TestNetwork => NetworkType::Test,
-            #[cfg(feature = "local-consensus")]
-            Network::Regtest(_) => NetworkType::Regtest,
         }
     }
 
@@ -403,8 +395,6 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => MAIN_NETWORK.activation_height(nu),
             Network::TestNetwork => TEST_NETWORK.activation_height(nu),
-            #[cfg(feature = "local-consensus")]
-            Network::Regtest(network_params) => network_params.activation_height(nu),
         }
     }
 }

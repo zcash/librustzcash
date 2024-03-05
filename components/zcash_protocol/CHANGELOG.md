@@ -16,9 +16,13 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
   - `constants`
   - `zcash_protocol::value` replaces `zcash_primitives::transaction::components::amount`
 - `zcash_protocol::consensus`:
-  - `NetworkConstants` has been extracted from the `Parameters` trait.
+  - `NetworkConstants` has been extracted from the `Parameters` trait. Relative to the
+    state prior to the extraction, the bech32 prefixes now return `&'static str` instead
+    of `&str`.
   - `NetworkType`
   - `Parameters::b58_sprout_address_prefix`
+- `zcash_protocol::consensus`:
+  - `impl Hash for LocalNetwork`
 - `zcash_protocol::constants::{mainnet, testnet}::B58_SPROUT_ADDRESS_PREFIX`
 - Added in `zcash_protocol::value`:
   - `Zatoshis`
@@ -40,6 +44,8 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
     - `TryFrom<orchard::ValueSum> for Amount`
     - `From<NonNegativeAmount> for sapling::value::NoteValue>`
     - `TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+  - `impl AddAssign for NonNegativeAmount`
+  - `impl SubAssign for NonNegativeAmount`
 - `zcash_protocol::consensus::Parameters` has been split into two traits, with
   the `NetworkConstants` trait providing all network constant accessors. Also,
   the `address_network` method has been replaced with a new `network_type`
