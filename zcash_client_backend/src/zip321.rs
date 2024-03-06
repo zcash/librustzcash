@@ -1078,6 +1078,11 @@ mod tests {
             "zcash:?amount.10000=1.23&address.10000=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
         let i10r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_10);
         assert!(i10r.is_err());
+
+        // invalid: bad amount format
+        let invalid_11 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.";
+        let i11r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_11);
+        assert!(i11r.is_err());
     }
 
     proptest! {
