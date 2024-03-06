@@ -67,7 +67,7 @@ impl InputView<()> for SpendInfo {
     }
 
     fn value(&self) -> NonNegativeAmount {
-        NonNegativeAmount::try_from(self.value())
+        NonNegativeAmount::try_from(self.value().inner())
             .expect("An existing note to be spent must have a valid amount value.")
     }
 }
@@ -81,7 +81,7 @@ pub trait OutputView {
 
 impl OutputView for OutputInfo {
     fn value(&self) -> NonNegativeAmount {
-        NonNegativeAmount::try_from(self.value())
+        NonNegativeAmount::try_from(self.value().inner())
             .expect("Output values should be checked at construction.")
     }
 }

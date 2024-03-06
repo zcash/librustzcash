@@ -10,6 +10,14 @@ and this library adheres to Rust's notion of
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
+- `impl From<zcash_keys::keys::AddressGenerationError> for SqliteClientError`
+
+### Changed
+- `zcash_client_sqlite::error::SqliteClientError` has changed variants:
+  - Added `AddressGeneration`
+  - Removed `DiversifierIndexOutOfRange`
+- `zcash_client_sqlite::wallet::init::WalletMigrationError` has added variant
+  `AddressGeneration`
 
 ## [0.9.0] - 2024-03-01
 

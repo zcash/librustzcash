@@ -66,7 +66,9 @@ use zcash_client_backend::{
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+    },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, ShieldedProtocol, TransferType,
@@ -264,8 +266,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 UnifiedAddressRequest::all().map_or(Ok(false), |ua_request| {
                     Ok(usk
                         .to_unified_full_viewing_key()
-                        .default_address(ua_request)
-                        == ufvk.default_address(ua_request))
+                        .default_address(ua_request)?
+                        == ufvk.default_address(ua_request)?)
                 })
             })
         })
@@ -450,17 +452,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     let search_from =
                         match wallet::get_current_address(wdb.conn.0, &wdb.params, account)? {
                             Some((_, mut last_diversifier_index)) => {
-                                last_diversifier_index
-                                    .increment()
-                                    .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
+                                last_diversifier_index.increment().map_err(|_| {
+                                    AddressGenerationError::DiversifierSpaceExhausted
+                                })?;
                                 last_diversifier_index
                             }
                             None => DiversifierIndex::default(),
                         };
 
-                    let (addr, diversifier_index) = ufvk
-                        .find_address(search_from, request)
-                        .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
+                    let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
 
                     wallet::insert_address(
                         wdb.conn.0,
@@ -1238,11 +1238,8 @@ mod tests {
 
     #[cfg(feature = "unstable")]
     use {
-        crate::testing::AddressType,
-        zcash_client_backend::keys::sapling,
-        zcash_primitives::{
-            consensus::Parameters, transaction::components::amount::NonNegativeAmount,
-        },
+        crate::testing::AddressType, zcash_client_backend::keys::sapling,
+        zcash_primitives::transaction::components::amount::NonNegativeAmount,
     };
 
     #[test]
@@ -1318,6 +1315,7 @@ mod tests {
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
             ufvk.default_address(DEFAULT_UA_REQUEST)
+                .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()
                 .unwrap()
@@ -1330,6 +1328,8 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
+        use zcash_primitives::consensus::NetworkConstants;
+
         let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.

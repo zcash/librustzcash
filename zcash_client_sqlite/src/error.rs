@@ -8,6 +8,7 @@ use zcash_client_backend::{
     encoding::{Bech32DecodeError, TransparentCodecError},
     PoolType,
 };
+use zcash_keys::keys::AddressGenerationError;
 use zcash_primitives::{
     consensus::BlockHeight, transaction::components::amount::BalanceError, zip32::AccountId,
 };
@@ -68,8 +69,8 @@ pub enum SqliteClientError {
     /// this error is (safe rewind height, requested height).
     RequestedRewindInvalid(BlockHeight, BlockHeight),
 
-    /// The space of allocatable diversifier indices has been exhausted for the given account.
-    DiversifierIndexOutOfRange,
+    /// An error occurred in generating a Zcash address.
+    AddressGeneration(AddressGenerationError),
 
     /// The account for which information was requested does not belong to the wallet.
     AccountUnknown(AccountId),
@@ -119,6 +120,7 @@ impl error::Error for SqliteClientError {
             SqliteClientError::DbError(e) => Some(e),
             SqliteClientError::Io(e) => Some(e),
             SqliteClientError::BalanceError(e) => Some(e),
+            SqliteClientError::AddressGeneration(e) => Some(e),
             _ => None,
         }
     }
@@ -146,7 +148,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidMemo(e) => write!(f, "{}", e),
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
-            SqliteClientError::DiversifierIndexOutOfRange => write!(f, "The space of available diversifier indices is exhausted"),
+            SqliteClientError::AddressGeneration(e) => write!(f, "{}", e),
             SqliteClientError::AccountUnknown(acct_id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*acct_id)),
 
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
@@ -215,5 +217,11 @@ impl From<ShardTreeError<commitment_tree::Error>> for SqliteClientError {
 impl From<BalanceError> for SqliteClientError {
     fn from(e: BalanceError) -> Self {
         SqliteClientError::BalanceError(e)
+    }
+}
+
+impl From<AddressGenerationError> for SqliteClientError {
+    fn from(e: AddressGenerationError) -> Self {
+        SqliteClientError::AddressGeneration(e)
     }
 }

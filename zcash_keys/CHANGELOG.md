@@ -6,6 +6,23 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::address::Address::has_receiver`
+- `impl Display for zcash_keys::keys::AddressGenerationError`
+- `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
+
+### Changed
+- `zcash_keys::keys::AddressGenerationError` has a new variant
+  `DiversifierSpaceExhausted`.
+- `zcash_keys::keys::UnifiedFullViewingKey::{find_address, default_address}` 
+  now return `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`
+  (instead of `Option<(UnifiedAddress, DiversifierIndex)>` for `find_address`).
+
+### Fixed
+- `UnifiedFullViewingKey::find_address` can now find an address for a diversifier
+  index outside the valid transparent range if you aren't requesting a
+  transparent receiver.
+
 ## [0.1.1] - 2024-03-04
 
 ### Added

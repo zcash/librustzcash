@@ -41,7 +41,10 @@ use zcash_primitives::{
     memo::MemoBytes,
     transaction::{
         builder::{BuildConfig, BuildResult, Builder},
-        components::amount::{Amount, NonNegativeAmount},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            sapling::zip212_enforcement,
+        },
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
@@ -1138,10 +1141,7 @@ where
                                 try_sapling_note_decryption(
                                     &sapling_internal_ivk,
                                     &bundle.shielded_outputs()[output_index],
-                                    consensus::sapling_zip212_enforcement(
-                                        params,
-                                        min_target_height,
-                                    ),
+                                    zip212_enforcement(params, min_target_height),
                                 )
                                 .map(|(note, _, _)| Note::Sapling(note))
                             })
