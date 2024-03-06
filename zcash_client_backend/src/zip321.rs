@@ -458,7 +458,7 @@ mod parse {
     use nom::{
         bytes::complete::{tag, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
-        combinator::{map_opt, map_res, opt, recognize},
+        combinator::{all_consuming, map_opt, map_res, opt, recognize},
         sequence::{preceded, separated_pair, tuple},
         AsChar, IResult, InputTakeAtPosition,
     };
@@ -642,13 +642,13 @@ mod parse {
     /// Parses a value in decimal ZEC.
     pub fn parse_amount(input: &str) -> IResult<&str, NonNegativeAmount> {
         map_res(
-            tuple((
+            all_consuming(tuple((
                 digit1,
                 opt(preceded(
                     char('.'),
                     map_opt(digit1, |s: &str| if s.len() > 8 { None } else { Some(s) }),
                 )),
-            )),
+            ))),
             |(whole_s, decimal_s): (&str, Option<&str>)| {
                 let coins: u64 = whole_s
                     .to_string()
@@ -667,7 +667,7 @@ mod parse {
                     .and_then(|coin_zats| coin_zats.checked_add(zats))
                     .ok_or(BalanceError::Overflow)
                     .and_then(NonNegativeAmount::from_u64)
-                    .map_err(|_| format!("Not a valid amount: {}.{:0>8} ZEC", coins, zats))
+                    .map_err(|_| format!("Not a valid amount: {} ZEC", input))
             },
         )(input)
     }

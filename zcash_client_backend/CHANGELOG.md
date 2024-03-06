@@ -64,6 +64,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::PoolType::is_receiver`: use
   `zcash_keys::Address::has_receiver` instead.
 
+### Fixed
+- This release fixes an error in amount parsing in `zip321` that previously
+  allowed amounts having a decimal point but no decimal value to be parsed
+  as valid.
+
 ## [0.11.0] - 2024-03-01
 
 ### Added
