@@ -38,7 +38,9 @@ use std::num::NonZeroU32;
 
 use zcash_keys::{
     address::UnifiedAddress,
-    keys::{HdSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey, AddressGenerationError},
+    keys::{
+        AddressGenerationError, HdSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey,
+    },
 };
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},

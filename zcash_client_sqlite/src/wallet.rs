@@ -1386,17 +1386,11 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             tree.truncate_removing_checkpoint(&block_height).map(|_| ())
         })?;
 
-        // Remove any legacy Sapling witnesses
-        conn.execute(
-            "DELETE FROM sapling_witnesses WHERE block > ?",
-            [u32::from(block_height)],
-        )?;
-
         // Rewind received notes
         conn.execute(
             "DELETE FROM sapling_received_notes
-            WHERE id_note IN (
-                SELECT rn.id_note
+            WHERE id IN (
+                SELECT rn.id
                 FROM sapling_received_notes rn
                 LEFT OUTER JOIN transactions tx
                 ON tx.id_tx = rn.tx
@@ -1847,7 +1841,7 @@ pub(crate) fn put_legacy_transparent_utxo<P: consensus::Parameters>(
             address = :address,
             script = :script,
             value_zat = :value_zat
-        RETURNING id_utxo",
+        RETURNING id",
     )?;
 
     let sql_args = named_params![

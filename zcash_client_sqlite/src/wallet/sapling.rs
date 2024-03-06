@@ -179,7 +179,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     index: u32,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     let mut stmt_select_note = conn.prepare_cached(
-        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+        "SELECT sapling_received_notes.id, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                 accounts.uvk, recipient_key_scope
          FROM sapling_received_notes
          INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
@@ -267,9 +267,9 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     let mut stmt_select_notes = conn.prepare_cached(
         "WITH eligible AS (
              SELECT
-                 id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+                 sapling_received_notes.id AS id, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
-                    OVER (PARTITION BY sapling_received_notes.account_id, spent ORDER BY id_note) AS so_far,
+                    OVER (PARTITION BY sapling_received_notes.account_id, spent ORDER BY sapling_received_notes.id) AS so_far,
                  accounts.uvk as uvk, recipient_key_scope
              FROM sapling_received_notes
              INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
@@ -279,7 +279,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
-             AND id_note NOT IN rarray(:exclude)
+             AND sapling_received_notes.id NOT IN rarray(:exclude)
              AND NOT EXISTS (
                 SELECT 1 FROM v_sapling_shard_unscanned_ranges unscanned
                 -- select all the unscanned ranges involving the shard containing this note
@@ -291,10 +291,10 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
                 AND unscanned.block_range_end > :wallet_birthday
              )
          )
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, uvk, recipient_key_scope
+         SELECT id, txid, output_index, diversifier, value, rcm, commitment_tree_position, uvk, recipient_key_scope
          FROM eligible WHERE so_far < :target_value
          UNION
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, uvk, recipient_key_scope
+         SELECT id, txid, output_index, diversifier, value, rcm, commitment_tree_position, uvk, recipient_key_scope
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
@@ -326,7 +326,7 @@ pub(crate) fn get_sapling_nullifiers(
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = conn.prepare(
-        "SELECT rn.id_note, rn.account_id, rn.nf, tx.block as block
+        "SELECT rn.id, rn.account_id, rn.nf, tx.block as block
          FROM sapling_received_notes rn
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = rn.spent
@@ -349,7 +349,7 @@ pub(crate) fn get_all_sapling_nullifiers(
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = conn.prepare(
-        "SELECT rn.id_note, rn.account_id, rn.nf
+        "SELECT rn.id, rn.account_id, rn.nf
          FROM sapling_received_notes rn
          WHERE nf IS NOT NULL",
     )?;

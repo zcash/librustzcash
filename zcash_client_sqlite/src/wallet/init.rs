@@ -257,7 +257,7 @@ mod tests {
                 CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
             )",
             r#"CREATE TABLE "sapling_received_notes" (
-                id_note INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
                 account_id INTEGER NOT NULL,
@@ -300,15 +300,6 @@ mod tests {
                 contains_marked INTEGER,
                 CONSTRAINT root_unique UNIQUE (root_hash)
             )",
-            "CREATE TABLE sapling_witnesses (
-                id_witness INTEGER PRIMARY KEY,
-                note INTEGER NOT NULL,
-                block INTEGER NOT NULL,
-                witness BLOB NOT NULL,
-                FOREIGN KEY (note) REFERENCES sapling_received_notes(id_note),
-                FOREIGN KEY (block) REFERENCES blocks(height),
-                CONSTRAINT witness_height UNIQUE (note, block)
-            )",
             "CREATE TABLE scan_queue (
                 block_range_start INTEGER NOT NULL,
                 block_range_end INTEGER NOT NULL,
@@ -323,7 +314,7 @@ mod tests {
                 id blob PRIMARY KEY
             )",
             r#"CREATE TABLE "sent_notes" (
-                id_note INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_pool INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
@@ -359,7 +350,7 @@ mod tests {
                 PRIMARY KEY (block_height, tx_index)
             )",
             r#"CREATE TABLE "utxos" (
-                id_utxo INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
                 received_by_account_id INTEGER NOT NULL,
                 address TEXT NOT NULL,
                 prevout_txid BLOB NOT NULL,
@@ -459,7 +450,7 @@ mod tests {
             "CREATE VIEW v_transactions AS
             WITH
             notes AS (
-                SELECT sapling_received_notes.id_note        AS id,
+                SELECT sapling_received_notes.id             AS id,
                        sapling_received_notes.account_id     AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
@@ -482,7 +473,7 @@ mod tests {
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.tx
                 UNION
-                SELECT utxos.id_utxo                 AS id,
+                SELECT utxos.id                      AS id,
                        utxos.received_by_account_id  AS account_id,
                        utxos.height                  AS block,
                        utxos.prevout_txid            AS txid,
@@ -493,7 +484,7 @@ mod tests {
                        0                             AS memo_present
                 FROM utxos
                 UNION
-                SELECT sapling_received_notes.id_note        AS id,
+                SELECT sapling_received_notes.id             AS id,
                        sapling_received_notes.account_id     AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
@@ -506,7 +497,7 @@ mod tests {
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.spent
                 UNION
-                SELECT utxos.id_utxo                 AS id,
+                SELECT utxos.id                      AS id,
                        utxos.received_by_account_id  AS account_id,
                        transactions.block            AS block,
                        transactions.txid             AS txid,
@@ -522,7 +513,7 @@ mod tests {
             sent_note_counts AS (
                 SELECT sent_notes.from_account_id AS account_id,
                        transactions.txid       AS txid,
-                       COUNT(DISTINCT sent_notes.id_note) as sent_notes,
+                       COUNT(DISTINCT sent_notes.id) as sent_notes,
                        SUM(
                          CASE
                            WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR sapling_received_notes.tx IS NOT NULL)

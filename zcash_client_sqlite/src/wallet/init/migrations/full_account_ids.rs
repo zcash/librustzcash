@@ -110,7 +110,7 @@ impl RusqliteMigration for Migration {
 
             -- Migrate sapling_received_notes table
             CREATE TABLE sapling_received_notes_new (
-                id_note INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
                 account_id INTEGER NOT NULL,
@@ -137,7 +137,7 @@ impl RusqliteMigration for Migration {
             CREATE INDEX "sapling_received_notes_spent" ON "sapling_received_notes_new" (
                 "spent" ASC
             );
-            INSERT INTO sapling_received_notes_new (id_note, tx, output_index, account_id, diversifier, value, rcm, nf, is_change, memo, spent, commitment_tree_position, recipient_key_scope)
+            INSERT INTO sapling_received_notes_new (id, tx, output_index, account_id, diversifier, value, rcm, nf, is_change, memo, spent, commitment_tree_position, recipient_key_scope)
             SELECT id_note, tx, output_index, account, diversifier, value, rcm, nf, is_change, memo, spent, commitment_tree_position, recipient_key_scope
             FROM sapling_received_notes;
 
@@ -146,7 +146,7 @@ impl RusqliteMigration for Migration {
 
             -- Migrate sent_notes table
             CREATE TABLE sent_notes_new (
-                id_note INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_pool INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
@@ -166,16 +166,19 @@ impl RusqliteMigration for Migration {
             CREATE INDEX sent_notes_tx ON sent_notes_new (tx);
             CREATE INDEX sent_notes_from_account ON sent_notes_new (from_account_id);
             CREATE INDEX sent_notes_to_account ON sent_notes_new (to_account_id);
-            INSERT INTO sent_notes_new (id_note, tx, output_pool, output_index, from_account_id, to_address, to_account_id, value, memo)
+            INSERT INTO sent_notes_new (id, tx, output_pool, output_index, from_account_id, to_address, to_account_id, value, memo)
             SELECT id_note, tx, output_pool, output_index, from_account, to_address, to_account, value, memo
             FROM sent_notes;
 
             DROP TABLE sent_notes;
             ALTER TABLE sent_notes_new RENAME TO sent_notes;
 
+            -- No one uses this table any more, and it contains a reference to columns we renamed.
+            DROP TABLE sapling_witnesses;
+
             -- Migrate utxos table
             CREATE TABLE utxos_new (
-                id_utxo INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
                 received_by_account_id INTEGER NOT NULL,
                 address TEXT NOT NULL,
                 prevout_txid BLOB NOT NULL,
@@ -190,7 +193,7 @@ impl RusqliteMigration for Migration {
             );
             CREATE INDEX utxos_received_by_account ON utxos_new (received_by_account_id);
             CREATE INDEX utxos_spent_in_tx ON utxos_new (spent_in_tx);
-            INSERT INTO utxos_new (id_utxo, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height, spent_in_tx)
+            INSERT INTO utxos_new (id, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height, spent_in_tx)
             SELECT id_utxo, received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height, spent_in_tx
             FROM utxos;
 
@@ -205,7 +208,7 @@ impl RusqliteMigration for Migration {
                 CREATE VIEW v_transactions AS
                 WITH
                 notes AS (
-                    SELECT sapling_received_notes.id_note        AS id,
+                    SELECT sapling_received_notes.id             AS id,
                            sapling_received_notes.account_id     AS account_id,
                            transactions.block                    AS block,
                            transactions.txid                     AS txid,
@@ -228,7 +231,7 @@ impl RusqliteMigration for Migration {
                     JOIN transactions
                          ON transactions.id_tx = sapling_received_notes.tx
                     UNION
-                    SELECT utxos.id_utxo                 AS id,
+                    SELECT utxos.id                      AS id,
                            utxos.received_by_account_id  AS account_id,
                            utxos.height                  AS block,
                            utxos.prevout_txid            AS txid,
@@ -239,7 +242,7 @@ impl RusqliteMigration for Migration {
                            0                             AS memo_present
                     FROM utxos
                     UNION
-                    SELECT sapling_received_notes.id_note        AS id,
+                    SELECT sapling_received_notes.id             AS id,
                            sapling_received_notes.account_id     AS account_id,
                            transactions.block                    AS block,
                            transactions.txid                     AS txid,
@@ -252,7 +255,7 @@ impl RusqliteMigration for Migration {
                     JOIN transactions
                          ON transactions.id_tx = sapling_received_notes.spent
                     UNION
-                    SELECT utxos.id_utxo                 AS id,
+                    SELECT utxos.id                      AS id,
                            utxos.received_by_account_id  AS account_id,
                            transactions.block            AS block,
                            transactions.txid             AS txid,
@@ -268,7 +271,7 @@ impl RusqliteMigration for Migration {
                 sent_note_counts AS (
                     SELECT sent_notes.from_account_id AS account_id,
                            transactions.txid       AS txid,
-                           COUNT(DISTINCT sent_notes.id_note) as sent_notes,
+                           COUNT(DISTINCT sent_notes.id) as sent_notes,
                            SUM(
                              CASE
                                WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR sapling_received_notes.tx IS NOT NULL)
