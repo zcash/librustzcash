@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.0] - 2024-03-06
 The entries below are relative to the `zcash_primitives` crate as of the tag
 `zcash_primitives-0.14.0`.
 
@@ -17,8 +19,9 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
   - `zcash_protocol::value` replaces `zcash_primitives::transaction::components::amount`
 - `zcash_protocol::consensus`:
   - `NetworkConstants` has been extracted from the `Parameters` trait. Relative to the
-    state prior to the extraction, the bech32 prefixes now return `&'static str` instead
-    of `&str`.
+    state prior to the extraction:
+    - The Bech32 prefixes now return `&'static str` instead of `&str`.
+    - Added `NetworkConstants::hrp_tex_address`.
   - `NetworkType`
   - `Parameters::b58_sprout_address_prefix`
 - `zcash_protocol::consensus`:

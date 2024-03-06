@@ -1,7 +1,7 @@
 [package]
 name = "zcash_protocol"
 description = "Zcash protocol network constants and value types."
-version = "0.0.0"
+version = "0.1.0"
 authors = [
     "Jack Grigg <jack@electriccoin.co>",
     "Kris Nuttycombe <kris@nutty.land>",

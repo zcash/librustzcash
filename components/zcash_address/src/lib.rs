@@ -158,6 +158,7 @@ enum AddressKind {
     Unified(unified::Address),
     P2pkh([u8; 20]),
     P2sh([u8; 20]),
+    Tex([u8; 20]),
 }
 
 impl ZcashAddress {
@@ -222,6 +223,7 @@ impl ZcashAddress {
             AddressKind::Unified(data) => T::try_from_unified(self.net, data),
             AddressKind::P2pkh(data) => T::try_from_transparent_p2pkh(self.net, data),
             AddressKind::P2sh(data) => T::try_from_transparent_p2sh(self.net, data),
+            AddressKind::Tex(data) => T::try_from_tex(self.net, data),
         }
     }
 
@@ -257,6 +259,7 @@ impl ZcashAddress {
                 T::try_from_raw_transparent_p2pkh(data)
             }
             AddressKind::P2sh(data) if regtest_exception => T::try_from_raw_transparent_p2sh(data),
+            AddressKind::Tex(data) if network_matches => T::try_from_raw_tex(data),
             _ => Err(ConversionError::IncorrectNetwork {
                 expected: net,
                 actual: self.net,

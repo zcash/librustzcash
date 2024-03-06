@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.3.2] - 2024-03-06
+### Added
+- `zcash_address::convert`:
+  - `TryFromRawAddress::try_from_raw_tex`
+  - `TryFromAddress::try_from_tex`
+  - `ToAddress::from_tex`
+
 ## [0.3.1] - 2024-01-12
 ### Fixed
 - Stubs for `zcash_address::convert` traits that are created by `rust-analyzer`
