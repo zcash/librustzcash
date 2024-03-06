@@ -2,21 +2,18 @@
 
 use std::fmt;
 
-use rusqlite::{self};
 use schemer::{Migrator, MigratorError};
 use schemer_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
-use zcash_primitives::{
-    consensus::{self},
-    transaction::components::amount::BalanceError,
-};
+use zcash_client_backend::keys::AddressGenerationError;
+use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
 
 use crate::WalletDb;
 
-use super::commitment_tree::{self};
+use super::commitment_tree;
 
 mod migrations;
 
@@ -27,6 +24,9 @@ pub enum WalletMigrationError {
 
     /// Decoding of an existing value from its serialized form has failed.
     CorruptedData(String),
+
+    /// An error occurred in migrating a Zcash address or key.
+    AddressGeneration(AddressGenerationError),
 
     /// Wrapper for rusqlite errors.
     DbError(rusqlite::Error),
@@ -56,6 +56,12 @@ impl From<ShardTreeError<commitment_tree::Error>> for WalletMigrationError {
     }
 }
 
+impl From<AddressGenerationError> for WalletMigrationError {
+    fn from(e: AddressGenerationError) -> Self {
+        WalletMigrationError::AddressGeneration(e)
+    }
+}
+
 impl fmt::Display for WalletMigrationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
@@ -71,6 +77,9 @@ impl fmt::Display for WalletMigrationError {
             WalletMigrationError::DbError(e) => write!(f, "{}", e),
             WalletMigrationError::BalanceError(e) => write!(f, "Balance error: {:?}", e),
             WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {:?}", e),
+            WalletMigrationError::AddressGeneration(e) => {
+                write!(f, "Address generation error: {:?}", e)
+            }
         }
     }
 }
@@ -79,6 +88,9 @@ impl std::error::Error for WalletMigrationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self {
             WalletMigrationError::DbError(e) => Some(e),
+            WalletMigrationError::BalanceError(e) => Some(e),
+            WalletMigrationError::CommitmentTree(e) => Some(e),
+            WalletMigrationError::AddressGeneration(e) => Some(e),
             _ => None,
         }
     }
@@ -176,7 +188,9 @@ mod tests {
 
     use ::sapling::zip32::ExtendedFullViewingKey;
     use zcash_primitives::{
-        consensus::{self, BlockHeight, BranchId, Network, NetworkUpgrade, Parameters},
+        consensus::{
+            self, BlockHeight, BranchId, Network, NetworkConstants, NetworkUpgrade, Parameters,
+        },
         transaction::{TransactionData, TxVersion},
         zip32::AccountId,
     };
@@ -1013,8 +1027,12 @@ mod tests {
             )?;
 
             let ufvk_str = ufvk.encode(&wdb.params);
-            let address_str =
-                Address::Unified(ufvk.default_address(DEFAULT_UA_REQUEST).0).encode(&wdb.params);
+            let address_str = Address::Unified(
+                ufvk.default_address(DEFAULT_UA_REQUEST)
+                    .expect("A valid default address exists for the UFVK")
+                    .0,
+            )
+            .encode(&wdb.params);
             wdb.conn.execute(
                 "INSERT INTO accounts (account, ufvk, address, transparent_address)
                 VALUES (?, ?, ?, '')",
@@ -1031,6 +1049,7 @@ mod tests {
                 let taddr = Address::Transparent(
                     *ufvk
                         .default_address(DEFAULT_UA_REQUEST)
+                        .expect("A valid default address exists for the UFVK")
                         .0
                         .transparent()
                         .unwrap(),

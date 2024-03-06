@@ -10,7 +10,8 @@ and this library adheres to Rust's notion of
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
-- `zcash_client_sqlite::AccountId` struct.
+- `zcash_client_sqlite::AccountId` 
+- `impl From<zcash_keys::keys::AddressGenerationError> for SqliteClientError`
 
 ### Changed
 - Many places that `AccountId` appeared in the API changed from
@@ -24,7 +25,12 @@ and this library adheres to Rust's notion of
   - Two columns in the `transactions` view were renamed:
     - `to_account` -> `to_account_id`
     - `from_account` -> `from_account_id`
-  - `zcash_client_sqlite::error::SqliteClientError::UnknownZip32Derivation` variant added.
+- `zcash_client_sqlite::error::SqliteClientError` has changed variants:
+  - Added `AddressGeneration`
+  - Added `UnknownZip32Derivation`
+  - Removed `DiversifierIndexOutOfRange`
+- `zcash_client_sqlite::wallet::init::WalletMigrationError` has added variant
+  `AddressGeneration`
 
 ## [0.9.0] - 2024-03-01
 

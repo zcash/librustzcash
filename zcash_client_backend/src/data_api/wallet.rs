@@ -38,14 +38,17 @@ use std::num::NonZeroU32;
 
 use zcash_keys::{
     address::UnifiedAddress,
-    keys::{HdSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey},
+    keys::{HdSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey, AddressGenerationError},
 };
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
     transaction::{
         builder::{BuildConfig, BuildResult, Builder},
-        components::amount::{Amount, NonNegativeAmount},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            sapling::zip212_enforcement,
+        },
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
@@ -117,7 +120,7 @@ impl Account {
     pub fn default_address(
         &self,
         request: UnifiedAddressRequest,
-    ) -> (UnifiedAddress, DiversifierIndex) {
+    ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         match self {
             Account::Zip32(HdSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
             Account::Imported(ImportedAccount::Full(ufvk)) => ufvk.default_address(request),
@@ -1199,10 +1202,7 @@ where
                                 try_sapling_note_decryption(
                                     &sapling_internal_ivk,
                                     &bundle.shielded_outputs()[output_index],
-                                    consensus::sapling_zip212_enforcement(
-                                        params,
-                                        min_target_height,
-                                    ),
+                                    zip212_enforcement(params, min_target_height),
                                 )
                                 .map(|(note, _, _)| Note::Sapling(note))
                             })

@@ -18,8 +18,11 @@ use sapling::{
 };
 use zcash_client_backend::{data_api::SAPLING_SHARD_HEIGHT, keys::UnifiedFullViewingKey};
 use zcash_primitives::{
-    consensus::{self, sapling_zip212_enforcement, BlockHeight, BranchId},
-    transaction::{components::amount::NonNegativeAmount, Transaction},
+    consensus::{self, BlockHeight, BranchId},
+    transaction::{
+        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+        Transaction,
+    },
     zip32::Scope,
 };
 
@@ -165,21 +168,29 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     // be mined under ZIP 212 enforcement rules, so we default to `On`
                     Zip212Enforcement::On
                 },
-                |h| sapling_zip212_enforcement(&self.params, h),
+                |h| zip212_enforcement(&self.params, h),
             );
 
             let ufvk_str: String = row.get(5)?;
-            let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str)
-                .expect("Stored UFVKs must be valid");
-            let dfvk = ufvk
-                .sapling()
-                .expect("UFVK must have a Sapling component to have received Sapling notes");
+            let ufvk = UnifiedFullViewingKey::decode(&self.params, &ufvk_str).map_err(|e| {
+                WalletMigrationError::CorruptedData(format!("Stored UFVK was invalid: {:?}", e))
+            })?;
+
+            let dfvk = ufvk.sapling().ok_or_else(|| {
+                WalletMigrationError::CorruptedData(
+                    "UFVK must have a Sapling component to have received Sapling notes.".to_owned(),
+                )
+            })?;
 
             // We previously set the default to external scope, so we now verify whether the output
             // is decryptable using the intenally-scoped IVK and, if so, mark it as such.
             if let Some(tx_data) = tx_data_opt {
-                let tx = Transaction::read(&tx_data[..], BranchId::Canopy)
-                    .expect("Transaction must be valid");
+                let tx = Transaction::read(&tx_data[..], BranchId::Canopy).map_err(|e| {
+                    WalletMigrationError::CorruptedData(format!(
+                        "Unable to parse raw transaction: {:?}",
+                        e
+                    ))
+                })?;
                 let output = tx
                     .sapling_bundle()
                     .and_then(|b| b.shielded_outputs().get(output_index))
@@ -241,7 +252,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     &mut commitment_tree,
                     dfvk,
                     &diversifier,
-                    &note_value.try_into().unwrap(),
+                    &sapling::value::NoteValue::from_raw(note_value.into_u64()),
                     &rseed,
                     note_commitment_tree_position,
                 )?;

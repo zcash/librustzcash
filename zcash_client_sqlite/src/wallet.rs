@@ -321,7 +321,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     // Always derive the default Unified Address for the account.
-    let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST);
+    let (address, d_idx) = account.default_address(DEFAULT_UA_REQUEST)?;
     insert_address(conn, params, account_id, d_idx, &address)?;
 
     Ok(account_id)
