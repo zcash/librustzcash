@@ -355,7 +355,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             #[cfg(zcash_unstable = "nu6")]
-            NetworkUpgrade::Nu6 => None,
+            NetworkUpgrade::Nu6 => Some(BlockHeight(1_687_104)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -385,7 +385,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
             #[cfg(zcash_unstable = "nu6")]
-            NetworkUpgrade::Nu6 => None,
+            NetworkUpgrade::Nu6 => Some(BlockHeight(1_842_420)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -662,6 +662,13 @@ impl BranchId {
                 let upper = params.activation_height(NetworkUpgrade::ZFuture);
                 #[cfg(not(zcash_unstable = "zfuture"))]
                 let upper = None;
+                (lower, upper)
+            }),
+            BranchId::V6 => params.activation_height(NetworkUpgrade::V6).map(|lower| {
+                #[cfg(feature = "zfuture")]
+                    let upper = params.activation_height(NetworkUpgrade::ZFuture);
+                #[cfg(not(feature = "zfuture"))]
+                    let upper = None;
                 (lower, upper)
             }),
             #[cfg(zcash_unstable = "nu6")]

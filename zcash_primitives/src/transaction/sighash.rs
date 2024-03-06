@@ -11,6 +11,7 @@ use crate::{
     sapling::{self, bundle::GrothProofBytes},
 };
 
+use crate::transaction::sighash_v5::v6_signature_hash;
 #[cfg(zcash_unstable = "zfuture")]
 use {super::components::Amount, crate::extensions::transparent::Precondition};
 
@@ -90,6 +91,8 @@ pub fn signature_hash<
         }
 
         TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
+
+        TxVersion::Zsa => v6_signature_hash(tx, signable_input, txid_parts),
 
         #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),

@@ -53,6 +53,7 @@ use crate::transaction::components::amount::NonNegativeAmount;
 use crate::transaction::components::sapling::zip212_enforcement;
 
 use orchard::{note::AssetBase, note_encryption_vanilla::OrchardDomainVanilla};
+use orchard::issuance::{IssueBundle, Signed};
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -739,6 +740,9 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             None => (None, orchard::builder::BundleMetadata::empty()),
         };
 
+
+        let issue_bundle: Option<IssueBundle<Signed>> = None; // TODO
+
         #[cfg(zcash_unstable = "zfuture")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
 
@@ -751,6 +755,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
+            issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };
@@ -813,6 +818,8 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             .transpose()
             .map_err(Error::OrchardBuild)?;
 
+        let issue_bundle = None; // TODO
+
         let authorized_tx = TransactionData {
             version: unauthed_tx.version,
             consensus_branch_id: unauthed_tx.consensus_branch_id,
@@ -822,6 +829,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
+            issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
         };

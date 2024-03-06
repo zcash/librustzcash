@@ -19,6 +19,7 @@ pub mod transparent;
 #[cfg(zcash_unstable = "zfuture")]
 pub mod tze;
 pub mod note;
+pub mod issuance;
 
 pub use self::{
     amount::Amount,
