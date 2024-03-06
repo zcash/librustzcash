@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.3.2] - 2024-03-06
 ### Added
 - `zcash_address::convert`:
   - `TryFromRawAddress::try_from_raw_tex`
