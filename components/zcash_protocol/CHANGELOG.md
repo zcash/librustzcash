@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.0] - 2024-03-06
 The entries below are relative to the `zcash_primitives` crate as of the tag
 `zcash_primitives-0.14.0`.
 
