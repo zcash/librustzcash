@@ -245,7 +245,7 @@ impl TransactionRequest {
             payment_index: Option<usize>,
         ) -> impl IntoIterator<Item = String> + '_ {
             std::iter::empty()
-                .chain(render::amount_param(payment.amount, payment_index))
+                .chain(Some(render::amount_param(payment.amount, payment_index)))
                 .chain(
                     payment
                         .memo
@@ -414,28 +414,24 @@ mod render {
         format!("address{}={}", param_index(idx), addr.encode(params))
     }
 
-    /// Converts an [`NonNegativeAmount`] value to a correctly formatted decimal ZEC
-    /// value for inclusion in a ZIP 321 URI.
-    pub fn amount_str(amount: NonNegativeAmount) -> Option<String> {
-        if amount.is_positive() {
-            let coins = u64::from(amount) / COIN;
-            let zats = u64::from(amount) % COIN;
-            Some(if zats == 0 {
-                format!("{}", coins)
-            } else {
-                format!("{}.{:0>8}", coins, zats)
-                    .trim_end_matches('0')
-                    .to_string()
-            })
+    /// Converts a [`NonNegativeAmount`] value to a correctly formatted decimal ZEC
+    /// string for inclusion in a ZIP 321 URI.
+    pub fn amount_str(amount: NonNegativeAmount) -> String {
+        let coins = u64::from(amount) / COIN;
+        let zats = u64::from(amount) % COIN;
+        if zats == 0 {
+            format!("{}", coins)
         } else {
-            None
+            format!("{}.{:0>8}", coins, zats)
+                .trim_end_matches('0')
+                .to_string()
         }
     }
 
     /// Constructs an "amount" key/value pair containing the encoded ZEC amount
     /// at the specified parameter index.
-    pub fn amount_param(amount: NonNegativeAmount, idx: Option<usize>) -> Option<String> {
-        amount_str(amount).map(|s| format!("amount{}={}", param_index(idx), s))
+    pub fn amount_param(amount: NonNegativeAmount, idx: Option<usize>) -> String {
+        format!("amount{}={}", param_index(idx), amount_str(amount))
     }
 
     /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
@@ -650,7 +646,7 @@ mod parse {
                 digit1,
                 opt(preceded(
                     char('.'),
-                    map_opt(digit0, |s: &str| if s.len() > 8 { None } else { Some(s) }),
+                    map_opt(digit1, |s: &str| if s.len() > 8 { None } else { Some(s) }),
                 )),
             )),
             |(whole_s, decimal_s): (&str, Option<&str>)| {
@@ -671,7 +667,7 @@ mod parse {
                     .and_then(|coin_zats| coin_zats.checked_add(zats))
                     .ok_or(BalanceError::Overflow)
                     .and_then(NonNegativeAmount::from_u64)
-                    .map_err(|_| format!("Not a valid zat amount: {}.{}", coins, zats))
+                    .map_err(|_| format!("Not a valid amount: {}.{:0>8} ZEC", coins, zats))
             },
         )(input)
     }
@@ -854,7 +850,7 @@ mod tests {
 
         for amt_u64 in amounts {
             let amt = NonNegativeAmount::from_u64(amt_u64).unwrap();
-            let amt_str = amount_str(amt).unwrap();
+            let amt_str = amount_str(amt);
             assert_eq!(amt, parse_amount(&amt_str).unwrap().1);
         }
     }
@@ -1099,7 +1095,7 @@ mod tests {
 
         #[test]
         fn prop_zip321_roundtrip_amount(amt in arb_nonnegative_amount()) {
-            let amt_str = amount_str(amt).unwrap();
+            let amt_str = amount_str(amt);
             assert_eq!(amt, parse_amount(&amt_str).unwrap().1);
         }
 

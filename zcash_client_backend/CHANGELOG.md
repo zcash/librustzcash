@@ -57,9 +57,11 @@ and this library adheres to Rust's notion of
   `NonNegativeAmount` rather than a signed `Amount` as its argument.
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a
   `NonNegativeAmount` rather than a signed `Amount`.
+- `zcash_client_backend::zip321::TransactionRequest::total` now
+  returns `Result<_, BalanceError>` instead of `Result<_, ()>`.
 
 ### Removed
-- `zcash_client_backend::PoolType::is_receiver` use 
+- `zcash_client_backend::PoolType::is_receiver`: use
   `zcash_keys::Address::has_receiver` instead.
 
 ## [0.11.0] - 2024-03-01

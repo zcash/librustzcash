@@ -155,7 +155,7 @@ impl TryFrom<ZatBalance> for u64 {
     type Error = BalanceError;
 
     fn try_from(value: ZatBalance) -> Result<Self, Self::Error> {
-        value.0.try_into().map_err(|_| BalanceError::Overflow)
+        value.0.try_into().map_err(|_| BalanceError::Underflow)
     }
 }
 
@@ -261,11 +261,9 @@ impl Zatoshis {
     ///
     /// Returns an error if the amount is outside the range `{0..MAX_MONEY}`.
     pub fn from_nonnegative_i64(amount: i64) -> Result<Self, BalanceError> {
-        if amount >= 0 {
-            Self::from_u64(u64::try_from(amount).unwrap())
-        } else {
-            Err(BalanceError::Underflow)
-        }
+        u64::try_from(amount)
+            .map_err(|_| BalanceError::Underflow)
+            .and_then(Self::from_u64)
     }
 
     /// Reads an Zatoshis from an unsigned 64-bit little-endian integer.
@@ -435,6 +433,12 @@ pub mod testing {
 
     prop_compose! {
         pub fn arb_positive_zat_balance()(amt in 1i64..MAX_BALANCE) -> ZatBalance {
+            ZatBalance::from_i64(amt).unwrap()
+        }
+    }
+
+    prop_compose! {
+        pub fn arb_nonnegative_zat_balance()(amt in 0i64..MAX_BALANCE) -> ZatBalance {
             ZatBalance::from_i64(amt).unwrap()
         }
     }
