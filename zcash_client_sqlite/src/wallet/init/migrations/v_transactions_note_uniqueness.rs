@@ -154,7 +154,7 @@ impl RusqliteMigration for Migration {
     }
 
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), Self::Error> {
-        panic!("This migration cannot be reverted.");
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }
 

@@ -104,6 +104,6 @@ impl RusqliteMigration for Migration {
     fn down(&self, _transaction: &rusqlite::Transaction) -> Result<(), WalletMigrationError> {
         // We should never down-migrate the first migration, as that can irreversibly
         // destroy data.
-        panic!("Cannot revert the initial migration.");
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }

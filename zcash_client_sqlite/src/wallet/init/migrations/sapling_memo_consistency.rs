@@ -212,6 +212,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     }
 
     fn down(&self, _: &rusqlite::Transaction) -> Result<(), Self::Error> {
-        panic!("Reversing this migration is not supported.");
+        Err(WalletMigrationError::CannotRevert(MIGRATION_ID))
     }
 }
