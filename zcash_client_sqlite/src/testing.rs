@@ -907,7 +907,7 @@ fn fake_compact_block_spending<P: consensus::Parameters>(
         compact_sapling_output(
             params,
             height,
-            dfvk.default_address().1,
+            dfvk.change_address().1,
             (in_value - value).unwrap(),
             dfvk.fvk().ovk,
             &mut rng,
