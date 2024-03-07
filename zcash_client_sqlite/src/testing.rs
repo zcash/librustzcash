@@ -186,12 +186,12 @@ where
 
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
-    pub(crate) fn generate_next_block(
+    pub(crate) fn generate_next_block<Fvk: TestFvk>(
         &mut self,
-        dfvk: &DiversifiableFullViewingKey,
+        fvk: &Fvk,
         req: AddressType,
         value: NonNegativeAmount,
-    ) -> (BlockHeight, Cache::InsertResult, Nullifier) {
+    ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
         let (height, prev_hash, initial_sapling_tree_size) = self
             .latest_cached_block
             .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
@@ -200,7 +200,7 @@ where
         let (res, nf) = self.generate_block_at(
             height,
             prev_hash,
-            dfvk,
+            fvk,
             req,
             value,
             initial_sapling_tree_size,
@@ -214,20 +214,20 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
-    pub(crate) fn generate_block_at(
+    pub(crate) fn generate_block_at<Fvk: TestFvk>(
         &mut self,
         height: BlockHeight,
         prev_hash: BlockHash,
-        dfvk: &DiversifiableFullViewingKey,
+        fvk: &Fvk,
         req: AddressType,
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
-    ) -> (Cache::InsertResult, Nullifier) {
+    ) -> (Cache::InsertResult, Fvk::Nullifier) {
         let (cb, nf) = fake_compact_block(
             &self.network(),
             height,
             prev_hash,
-            dfvk,
+            fvk,
             req,
             value,
             initial_sapling_tree_size,
@@ -246,10 +246,10 @@ where
 
     /// Creates a fake block at the expected next height spending the given note, and
     /// inserts it into the cache.
-    pub(crate) fn generate_next_block_spending(
+    pub(crate) fn generate_next_block_spending<Fvk: TestFvk>(
         &mut self,
-        dfvk: &DiversifiableFullViewingKey,
-        note: (Nullifier, NonNegativeAmount),
+        fvk: &Fvk,
+        note: (Fvk::Nullifier, NonNegativeAmount),
         to: PaymentAddress,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult) {
@@ -263,7 +263,7 @@ where
             height,
             prev_hash,
             note,
-            dfvk,
+            fvk,
             to,
             value,
             initial_sapling_tree_size,
@@ -757,6 +757,64 @@ impl<Cache> TestState<Cache> {
     }
 }
 
+/// Trait used by tests that require a full viewing key.
+pub(crate) trait TestFvk {
+    type Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey>;
+
+    fn add_compact_spend(&self, ctx: &mut CompactTx, nf: Self::Nullifier);
+
+    fn add_compact_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        req: AddressType,
+        value: NonNegativeAmount,
+        initial_sapling_tree_size: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier;
+}
+
+impl TestFvk for DiversifiableFullViewingKey {
+    type Nullifier = Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+        Some(self.fvk().ovk)
+    }
+
+    fn add_compact_spend(&self, ctx: &mut CompactTx, nf: Self::Nullifier) {
+        let cspend = CompactSaplingSpend { nf: nf.to_vec() };
+        ctx.spends.push(cspend);
+    }
+
+    fn add_compact_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        req: AddressType,
+        value: NonNegativeAmount,
+        initial_sapling_tree_size: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        let recipient = match req {
+            AddressType::DefaultExternal => self.default_address().1,
+            AddressType::DiversifiedExternal(idx) => self.find_address(idx).unwrap().1,
+            AddressType::Internal => self.change_address().1,
+        };
+
+        let position = initial_sapling_tree_size + ctx.outputs.len() as u32;
+
+        let (cout, note) =
+            compact_sapling_output(params, height, recipient, value, self.sapling_ovk(), rng);
+        ctx.outputs.push(cout);
+
+        note.nf(&self.fvk().vk.nk, position as u64)
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) enum AddressType {
     DefaultExternal,
@@ -772,7 +830,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
     height: BlockHeight,
     recipient: sapling::PaymentAddress,
     value: NonNegativeAmount,
-    ovk: sapling::keys::OutgoingViewingKey,
+    ovk: Option<sapling::keys::OutgoingViewingKey>,
     rng: &mut R,
 ) -> (CompactSaplingOutput, sapling::Note) {
     let rseed = generate_random_rseed(zip212_enforcement(params, height), rng);
@@ -781,8 +839,7 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         sapling::value::NoteValue::from_raw(value.into_u64()),
         rseed,
     );
-    let encryptor =
-        sapling_note_encryption(Some(ovk), note.clone(), *MemoBytes::empty().as_array(), rng);
+    let encryptor = sapling_note_encryption(ovk, note.clone(), *MemoBytes::empty().as_array(), rng);
     let cmu = note.cmu().to_bytes().to_vec();
     let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
@@ -809,32 +866,33 @@ fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
 
 /// Create a fake CompactBlock at the given height, containing a single output paying
 /// an address. Returns the CompactBlock and the nullifier for the new note.
-fn fake_compact_block<P: consensus::Parameters>(
+fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    dfvk: &DiversifiableFullViewingKey,
+    fvk: &Fvk,
     req: AddressType,
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
-) -> (CompactBlock, Nullifier) {
-    let to = match req {
-        AddressType::DefaultExternal => dfvk.default_address().1,
-        AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
-        AddressType::Internal => dfvk.change_address().1,
-    };
-
+) -> (CompactBlock, Fvk::Nullifier) {
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let (cout, note) = compact_sapling_output(params, height, to, value, dfvk.fvk().ovk, &mut rng);
 
     // Create a fake CompactBlock containing the note
     let mut ctx = fake_compact_tx(&mut rng);
-    ctx.outputs.push(cout);
+    let nf = fvk.add_compact_output(
+        &mut ctx,
+        params,
+        height,
+        req,
+        value,
+        initial_sapling_tree_size,
+        &mut rng,
+    );
 
     let cb =
         fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0);
-    (cb, note.nf(&dfvk.fvk().vk.nk, 0))
+    (cb, nf)
 }
 
 /// Create a fake CompactBlock at the given height containing only the given transaction.
@@ -881,12 +939,12 @@ fn fake_compact_block_from_tx(
 /// Create a fake CompactBlock at the given height, spending a single note from the
 /// given address.
 #[allow(clippy::too_many_arguments)]
-fn fake_compact_block_spending<P: consensus::Parameters>(
+fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    (nf, in_value): (Nullifier, NonNegativeAmount),
-    dfvk: &DiversifiableFullViewingKey,
+    (nf, in_value): (Fvk::Nullifier, NonNegativeAmount),
+    fvk: &Fvk,
     to: PaymentAddress,
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
@@ -895,24 +953,21 @@ fn fake_compact_block_spending<P: consensus::Parameters>(
     let mut ctx = fake_compact_tx(&mut rng);
 
     // Create a fake spend
-    let cspend = CompactSaplingSpend { nf: nf.to_vec() };
-    ctx.spends.push(cspend);
+    fvk.add_compact_spend(&mut ctx, nf);
 
     // Create a fake Note for the payment
     ctx.outputs
-        .push(compact_sapling_output(params, height, to, value, dfvk.fvk().ovk, &mut rng).0);
+        .push(compact_sapling_output(params, height, to, value, fvk.sapling_ovk(), &mut rng).0);
 
     // Create a fake Note for the change
-    ctx.outputs.push(
-        compact_sapling_output(
-            params,
-            height,
-            dfvk.change_address().1,
-            (in_value - value).unwrap(),
-            dfvk.fvk().ovk,
-            &mut rng,
-        )
-        .0,
+    fvk.add_compact_output(
+        &mut ctx,
+        params,
+        height,
+        AddressType::Internal,
+        (in_value - value).unwrap(),
+        initial_sapling_tree_size,
+        &mut rng,
     );
 
     fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
