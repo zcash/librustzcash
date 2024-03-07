@@ -66,7 +66,9 @@ use zcash_client_backend::{
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
     },
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
+    },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, ShieldedProtocol, TransferType,
@@ -244,6 +246,32 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
     type AccountId = AccountId;
+
+    fn validate_seed(
+        &self,
+        account_id: Self::AccountId,
+        seed: &SecretVec<u8>,
+    ) -> Result<bool, Self::Error> {
+        self.get_unified_full_viewing_keys().and_then(|keys| {
+            keys.get(&account_id).map_or(Ok(false), |ufvk| {
+                let usk = UnifiedSpendingKey::from_seed(
+                    &self.params,
+                    &seed.expose_secret()[..],
+                    account_id,
+                )
+                .map_err(|_| SqliteClientError::KeyDerivationError(account_id))?;
+
+                // Keys are not comparable with `Eq`, but addresses are, so we derive what should
+                // be equivalent addresses for each key and use those to check for key equality.
+                UnifiedAddressRequest::all().map_or(Ok(false), |ua_request| {
+                    Ok(usk
+                        .to_unified_full_viewing_key()
+                        .default_address(ua_request)?
+                        == ufvk.default_address(ua_request)?)
+                })
+            })
+        })
+    }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
@@ -424,17 +452,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     let search_from =
                         match wallet::get_current_address(wdb.conn.0, &wdb.params, account)? {
                             Some((_, mut last_diversifier_index)) => {
-                                last_diversifier_index
-                                    .increment()
-                                    .map_err(|_| SqliteClientError::DiversifierIndexOutOfRange)?;
+                                last_diversifier_index.increment().map_err(|_| {
+                                    AddressGenerationError::DiversifierSpaceExhausted
+                                })?;
                                 last_diversifier_index
                             }
                             None => DiversifierIndex::default(),
                         };
 
-                    let (addr, diversifier_index) = ufvk
-                        .find_address(search_from, request)
-                        .ok_or(SqliteClientError::DiversifierIndexOutOfRange)?;
+                    let (addr, diversifier_index) = ufvk.find_address(search_from, request)?;
 
                     wallet::insert_address(
                         wdb.conn.0,
@@ -1204,18 +1230,47 @@ extern crate assert_matches;
 
 #[cfg(test)]
 mod tests {
+    use secrecy::SecretVec;
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
 
-    use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
+    use crate::{testing::TestBuilder, DEFAULT_UA_REQUEST};
+    use zip32::AccountId;
 
     #[cfg(feature = "unstable")]
     use {
-        crate::testing::AddressType,
-        zcash_client_backend::keys::sapling,
-        zcash_primitives::{
-            consensus::Parameters, transaction::components::amount::NonNegativeAmount,
-        },
+        crate::testing::AddressType, zcash_client_backend::keys::sapling,
+        zcash_primitives::transaction::components::amount::NonNegativeAmount,
     };
+
+    #[test]
+    fn validate_seed() {
+        let st = TestBuilder::new()
+            .with_test_account(AccountBirthday::from_sapling_activation)
+            .build();
+
+        assert!({
+            let account = st.test_account().unwrap().0;
+            st.wallet()
+                .validate_seed(account, st.test_seed().unwrap())
+                .unwrap()
+        });
+
+        // check that passing an invalid account results in a failure
+        assert!({
+            let account = AccountId::try_from(1u32).unwrap();
+            !st.wallet()
+                .validate_seed(account, st.test_seed().unwrap())
+                .unwrap()
+        });
+
+        // check that passing an invalid seed results in a failure
+        assert!({
+            let account = st.test_account().unwrap().0;
+            !st.wallet()
+                .validate_seed(account, &SecretVec::new(vec![1u8; 32]))
+                .unwrap()
+        });
+    }
 
     #[test]
     pub(crate) fn get_next_available_address() {
@@ -1260,6 +1315,7 @@ mod tests {
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
             ufvk.default_address(DEFAULT_UA_REQUEST)
+                .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()
                 .unwrap()
@@ -1272,6 +1328,8 @@ mod tests {
     #[cfg(feature = "unstable")]
     #[test]
     pub(crate) fn fsblockdb_api() {
+        use zcash_primitives::consensus::NetworkConstants;
+
         let mut st = TestBuilder::new().with_fs_block_cache().build();
 
         // The BlockMeta DB starts off empty.

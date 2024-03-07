@@ -7,9 +7,10 @@ use hdwallet::{
 use secp256k1::PublicKey;
 use sha2::{Digest, Sha256};
 use subtle::{Choice, ConstantTimeEq};
-use zcash_spec::PrfExpand;
 
-use crate::{consensus, zip32::AccountId};
+use zcash_protocol::consensus::{self, NetworkConstants};
+use zcash_spec::PrfExpand;
+use zip32::AccountId;
 
 use super::TransparentAddress;
 

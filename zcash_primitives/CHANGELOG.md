@@ -7,6 +7,33 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_primitives::transaction::components::sapling::zip212_enforcement`
+
+### Changed
+- The following modules are now re-exported from the `zcash_protocol` crate.
+  Additional changes have also been made therein; refer to the `zcash_protocol`
+  changelog for details.
+  - `zcash_primitives::consensus` re-exports `zcash_protocol::consensus`.
+  - `zcash_primitives::constants` re-exports `zcash_protocol::constants`.
+  - `zcash_primitives::transaction::components::amount` re-exports
+    `zcash_protocol::value`. Many of the conversions to and from the
+    `Amount` and `NonNegativeAmount` value types now return
+    `Result<_, BalanceError>` instead of `Result<_, ()>`.
+  - `zcash_primitives::memo` re-exports `zcash_protocol::memo`.
+
+### Removed
+- `zcash_primitives::consensus::sapling_zip212_enforcement` instead use
+  `zcash_primitives::transaction::components::sapling::zip212_enforcement`.
+- From `zcash_primitive::components::transaction`:
+  - `impl From<Amount> for u64`
+  - `impl TryFrom<sapling::value::NoteValue> for NonNegativeAmount`
+  - `impl From<NonNegativeAmount> for sapling::value::NoteValue`
+  - `impl TryFrom<orchard::ValueSum> for Amount`
+  - `impl From<NonNegativeAmount> for orchard::NoteValue`
+- The `local_consensus` module and feature flag have been removed; use the module
+  from the `zcash_protocol` crate instead.
+
 ## [0.14.0] - 2024-03-01
 ### Added
 - Dependency on `bellman 0.14`, `sapling-crypto 0.1`.

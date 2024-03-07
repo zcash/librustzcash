@@ -64,7 +64,6 @@
 pub use zcash_keys::address;
 pub mod data_api;
 mod decrypt;
-use zcash_keys::address::Address;
 pub use zcash_keys::encoding;
 pub mod fees;
 pub use zcash_keys::keys;
@@ -78,9 +77,8 @@ pub mod zip321;
 #[cfg(feature = "unstable-serialization")]
 pub mod serialization;
 
-use std::fmt;
-
 pub use decrypt::{decrypt_transaction, DecryptedOutput, TransferType};
+pub use zcash_protocol::{PoolType, ShieldedProtocol};
 
 #[cfg(test)]
 #[macro_use]
@@ -90,51 +88,3 @@ extern crate assert_matches;
 core::compile_error!(
     "The `orchard` feature flag requires the `zcash_unstable=\"orchard\"` RUSTFLAG."
 );
-
-/// A shielded transfer protocol known to the wallet.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ShieldedProtocol {
-    /// The Sapling protocol
-    Sapling,
-    /// The Orchard protocol
-    Orchard,
-}
-
-/// A value pool to which the wallet supports sending transaction outputs.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PoolType {
-    /// The transparent value pool
-    Transparent,
-    /// A shielded value pool.
-    Shielded(ShieldedProtocol),
-}
-
-impl PoolType {
-    pub fn is_receiver(&self, addr: &Address) -> bool {
-        match addr {
-            Address::Sapling(_) => matches!(self, PoolType::Shielded(ShieldedProtocol::Sapling)),
-            Address::Transparent(_) => matches!(self, PoolType::Transparent),
-            Address::Unified(ua) => match self {
-                PoolType::Transparent => ua.transparent().is_some(),
-                PoolType::Shielded(ShieldedProtocol::Sapling) => ua.sapling().is_some(),
-                PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                    #[cfg(feature = "orchard")]
-                    return ua.orchard().is_some();
-
-                    #[cfg(not(feature = "orchard"))]
-                    return false;
-                }
-            },
-        }
-    }
-}
-
-impl fmt::Display for PoolType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PoolType::Transparent => f.write_str("Transparent"),
-            PoolType::Shielded(ShieldedProtocol::Sapling) => f.write_str("Sapling"),
-            PoolType::Shielded(ShieldedProtocol::Orchard) => f.write_str("Orchard"),
-        }
-    }
-}

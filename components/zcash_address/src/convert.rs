@@ -137,6 +137,13 @@ pub trait TryFromRawAddress: Sized {
             "transparent P2SH",
         )))
     }
+
+    fn try_from_raw_tex(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+        let _ = data;
+        Err(ConversionError::Unsupported(UnsupportedAddress(
+            "transparent-source restricted P2PKH",
+        )))
+    }
 }
 
 /// A helper trait for converting a [`ZcashAddress`] into another type.
@@ -225,6 +232,13 @@ pub trait TryFromAddress: Sized {
             "transparent P2SH",
         )))
     }
+
+    fn try_from_tex(net: Network, data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+        let _ = (net, data);
+        Err(ConversionError::Unsupported(UnsupportedAddress(
+            "transparent-source restricted P2PKH",
+        )))
+    }
 }
 
 impl<T: TryFromRawAddress> TryFromAddress for (Network, T) {
@@ -260,6 +274,10 @@ impl<T: TryFromRawAddress> TryFromAddress for (Network, T) {
         data: [u8; 20],
     ) -> Result<Self, ConversionError<Self::Error>> {
         T::try_from_raw_transparent_p2sh(data).map(|addr| (net, addr))
+    }
+
+    fn try_from_tex(net: Network, data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+        T::try_from_raw_tex(data).map(|addr| (net, addr))
     }
 }
 
@@ -304,6 +322,8 @@ pub trait ToAddress: private::Sealed {
     fn from_transparent_p2pkh(net: Network, data: [u8; 20]) -> Self;
 
     fn from_transparent_p2sh(net: Network, data: [u8; 20]) -> Self;
+
+    fn from_tex(net: Network, data: [u8; 20]) -> Self;
 }
 
 impl ToAddress for ZcashAddress {
@@ -351,6 +371,13 @@ impl ToAddress for ZcashAddress {
                 net
             },
             kind: AddressKind::P2sh(data),
+        }
+    }
+
+    fn from_tex(net: Network, data: [u8; 20]) -> Self {
+        ZcashAddress {
+            net,
+            kind: AddressKind::Tex(data),
         }
     }
 }

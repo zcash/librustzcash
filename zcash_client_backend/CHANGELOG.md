@@ -53,10 +53,26 @@ and this library adheres to Rust's notion of
     - `type OrchardShardStore`
     - `fn with_orchard_tree_mut`
     - `fn put_orchard_subtree_roots`
+  - Added method `WalletRead::validate_seed`
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 - `zcash_client_backend::scanning`:
   - `testing::fake_compact_block` is now public.
+- `zcash_client_backend::zip321::render::amount_str` now takes a
+  `NonNegativeAmount` rather than a signed `Amount` as its argument.
+- `zcash_client_backend::zip321::parse::parse_amount` now parses a
+  `NonNegativeAmount` rather than a signed `Amount`.
+- `zcash_client_backend::zip321::TransactionRequest::total` now
+  returns `Result<_, BalanceError>` instead of `Result<_, ()>`.
+
+### Removed
+- `zcash_client_backend::PoolType::is_receiver`: use
+  `zcash_keys::Address::has_receiver` instead.
+
+### Fixed
+- This release fixes an error in amount parsing in `zip321` that previously
+  allowed amounts having a decimal point but no decimal value to be parsed
+  as valid.
 
 ## [0.11.0] - 2024-03-01
 

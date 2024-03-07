@@ -1,9 +1,11 @@
 use std::{convert::TryInto, error::Error, fmt, str::FromStr};
 
 use bech32::{self, FromBase32, ToBase32, Variant};
+use zcash_protocol::consensus::{NetworkConstants, NetworkType};
+use zcash_protocol::constants::{mainnet, regtest, testnet};
 
 use crate::kind::unified::Encoding;
-use crate::{kind::*, AddressKind, Network, ZcashAddress};
+use crate::{kind::*, AddressKind, ZcashAddress};
 
 /// An error while attempting to parse a string as a Zcash address.
 #[derive(Debug, PartialEq, Eq)]
@@ -54,55 +56,87 @@ impl FromStr for ZcashAddress {
                     kind: AddressKind::Unified(data),
                 });
             }
-            Err(unified::ParseError::NotUnified) => {
-                // allow decoding to fall through to Sapling/Transparent
+            Err(unified::ParseError::NotUnified | unified::ParseError::UnknownPrefix(_)) => {
+                // allow decoding to fall through to Sapling/TEX/Transparent
             }
             Err(e) => {
                 return Err(ParseError::from(e));
             }
         }
 
-        // Try decoding as a Sapling address (Bech32)
-        if let Ok((hrp, data, Variant::Bech32)) = bech32::decode(s) {
-            // If we reached this point, the encoding is supposed to be valid Bech32.
+        // Try decoding as a Sapling or TEX address (Bech32/Bech32m)
+        if let Ok((hrp, data, variant)) = bech32::decode(s) {
+            // If we reached this point, the encoding is found to be valid Bech32 or Bech32m.
             let data = Vec::<u8>::from_base32(&data).map_err(|_| ParseError::InvalidEncoding)?;
 
-            let net = match hrp.as_str() {
-                sapling::MAINNET => Network::Main,
-                sapling::TESTNET => Network::Test,
-                sapling::REGTEST => Network::Regtest,
-                // We will not define new Bech32 address encodings.
-                _ => {
-                    return Err(ParseError::NotZcash);
-                }
-            };
+            match variant {
+                Variant::Bech32 => {
+                    let net = match hrp.as_str() {
+                        mainnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Main,
+                        testnet::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Test,
+                        regtest::HRP_SAPLING_PAYMENT_ADDRESS => NetworkType::Regtest,
+                        // We will not define new Bech32 address encodings.
+                        _ => {
+                            return Err(ParseError::NotZcash);
+                        }
+                    };
 
-            return data[..]
-                .try_into()
-                .map(AddressKind::Sapling)
-                .map_err(|_| ParseError::InvalidEncoding)
-                .map(|kind| ZcashAddress { net, kind });
+                    return data[..]
+                        .try_into()
+                        .map(AddressKind::Sapling)
+                        .map_err(|_| ParseError::InvalidEncoding)
+                        .map(|kind| ZcashAddress { net, kind });
+                }
+                Variant::Bech32m => {
+                    // Try decoding as a TEX address (Bech32m)
+                    let net = match hrp.as_str() {
+                        mainnet::HRP_TEX_ADDRESS => NetworkType::Main,
+                        testnet::HRP_TEX_ADDRESS => NetworkType::Test,
+                        regtest::HRP_TEX_ADDRESS => NetworkType::Regtest,
+                        // Not recognized as a Zcash address type
+                        _ => {
+                            return Err(ParseError::NotZcash);
+                        }
+                    };
+
+                    return data[..]
+                        .try_into()
+                        .map(AddressKind::Tex)
+                        .map_err(|_| ParseError::InvalidEncoding)
+                        .map(|kind| ZcashAddress { net, kind });
+                }
+            }
         }
 
         // The rest use Base58Check.
         if let Ok(decoded) = bs58::decode(s).with_check(None).into_vec() {
-            let net = match decoded[..2].try_into().unwrap() {
-                sprout::MAINNET | p2pkh::MAINNET | p2sh::MAINNET => Network::Main,
-                sprout::TESTNET | p2pkh::TESTNET | p2sh::TESTNET => Network::Test,
-                // We will not define new Base58Check address encodings.
-                _ => return Err(ParseError::NotZcash),
-            };
+            if decoded.len() >= 2 {
+                let (prefix, net) = match decoded[..2].try_into().unwrap() {
+                    prefix @ (mainnet::B58_PUBKEY_ADDRESS_PREFIX
+                    | mainnet::B58_SCRIPT_ADDRESS_PREFIX
+                    | mainnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Main),
+                    prefix @ (testnet::B58_PUBKEY_ADDRESS_PREFIX
+                    | testnet::B58_SCRIPT_ADDRESS_PREFIX
+                    | testnet::B58_SPROUT_ADDRESS_PREFIX) => (prefix, NetworkType::Test),
+                    // We will not define new Base58Check address encodings.
+                    _ => return Err(ParseError::NotZcash),
+                };
 
-            return match decoded[..2].try_into().unwrap() {
-                sprout::MAINNET | sprout::TESTNET => {
-                    decoded[2..].try_into().map(AddressKind::Sprout)
+                return match prefix {
+                    mainnet::B58_SPROUT_ADDRESS_PREFIX | testnet::B58_SPROUT_ADDRESS_PREFIX => {
+                        decoded[2..].try_into().map(AddressKind::Sprout)
+                    }
+                    mainnet::B58_PUBKEY_ADDRESS_PREFIX | testnet::B58_PUBKEY_ADDRESS_PREFIX => {
+                        decoded[2..].try_into().map(AddressKind::P2pkh)
+                    }
+                    mainnet::B58_SCRIPT_ADDRESS_PREFIX | testnet::B58_SCRIPT_ADDRESS_PREFIX => {
+                        decoded[2..].try_into().map(AddressKind::P2sh)
+                    }
+                    _ => unreachable!(),
                 }
-                p2pkh::MAINNET | p2pkh::TESTNET => decoded[2..].try_into().map(AddressKind::P2pkh),
-                p2sh::MAINNET | p2sh::TESTNET => decoded[2..].try_into().map(AddressKind::P2sh),
-                _ => unreachable!(),
+                .map_err(|_| ParseError::InvalidEncoding)
+                .map(|kind| ZcashAddress { kind, net });
             }
-            .map_err(|_| ParseError::InvalidEncoding)
-            .map(|kind| ZcashAddress { kind, net });
         };
 
         // If it's not valid Bech32, Bech32m, or Base58Check, it's not a Zcash address.
@@ -110,8 +144,8 @@ impl FromStr for ZcashAddress {
     }
 }
 
-fn encode_bech32(hrp: &str, data: &[u8]) -> String {
-    bech32::encode(hrp, data.to_base32(), Variant::Bech32).expect("hrp is invalid")
+fn encode_bech32(hrp: &str, data: &[u8], variant: Variant) -> String {
+    bech32::encode(hrp, data.to_base32(), variant).expect("hrp is invalid")
 }
 
 fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
@@ -124,36 +158,18 @@ fn encode_b58(prefix: [u8; 2], data: &[u8]) -> String {
 impl fmt::Display for ZcashAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let encoded = match &self.kind {
-            AddressKind::Sprout(data) => encode_b58(
-                match self.net {
-                    Network::Main => sprout::MAINNET,
-                    Network::Test | Network::Regtest => sprout::TESTNET,
-                },
-                data,
-            ),
+            AddressKind::Sprout(data) => encode_b58(self.net.b58_sprout_address_prefix(), data),
             AddressKind::Sapling(data) => encode_bech32(
-                match self.net {
-                    Network::Main => sapling::MAINNET,
-                    Network::Test => sapling::TESTNET,
-                    Network::Regtest => sapling::REGTEST,
-                },
+                self.net.hrp_sapling_payment_address(),
                 data,
+                Variant::Bech32,
             ),
             AddressKind::Unified(addr) => addr.encode(&self.net),
-            AddressKind::P2pkh(data) => encode_b58(
-                match self.net {
-                    Network::Main => p2pkh::MAINNET,
-                    Network::Test | Network::Regtest => p2pkh::TESTNET,
-                },
-                data,
-            ),
-            AddressKind::P2sh(data) => encode_b58(
-                match self.net {
-                    Network::Main => p2sh::MAINNET,
-                    Network::Test | Network::Regtest => p2sh::TESTNET,
-                },
-                data,
-            ),
+            AddressKind::P2pkh(data) => encode_b58(self.net.b58_pubkey_address_prefix(), data),
+            AddressKind::P2sh(data) => encode_b58(self.net.b58_script_address_prefix(), data),
+            AddressKind::Tex(data) => {
+                encode_bech32(self.net.hrp_tex_address(), data, Variant::Bech32m)
+            }
         };
         write!(f, "{}", encoded)
     }
@@ -161,8 +177,10 @@ impl fmt::Display for ZcashAddress {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
+
     use super::*;
-    use crate::kind::unified;
+    use crate::{kind::unified, Network};
 
     fn encoding(encoded: &str, decoded: ZcashAddress) {
         assert_eq!(decoded.to_string(), encoded);
@@ -267,6 +285,74 @@ mod tests {
                 kind: AddressKind::P2sh([0; 20]),
             },
         );
+    }
+
+    #[test]
+    fn tex() {
+        let p2pkh_str = "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC";
+        let tex_str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+        // Transcode P2PKH to TEX
+        let p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
+        assert_matches!(p2pkh_zaddr.net, Network::Main);
+        if let AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
+            let tex_zaddr = ZcashAddress {
+                net: p2pkh_zaddr.net,
+                kind: AddressKind::Tex(zaddr_data),
+            };
+
+            assert_eq!(tex_zaddr.to_string(), tex_str);
+        } else {
+            panic!("Decoded address should have been a P2PKH address.");
+        }
+
+        // Transcode TEX to P2PKH
+        let tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
+        assert_matches!(tex_zaddr.net, Network::Main);
+        if let AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
+            let p2pkh_zaddr = ZcashAddress {
+                net: tex_zaddr.net,
+                kind: AddressKind::P2pkh(zaddr_data),
+            };
+
+            assert_eq!(p2pkh_zaddr.to_string(), p2pkh_str);
+        } else {
+            panic!("Decoded address should have been a TEX address.");
+        }
+    }
+
+    #[test]
+    fn tex_testnet() {
+        let p2pkh_str = "tm9ofD7kHR7AF8MsJomEzLqGcrLCBkD9gDj";
+        let tex_str = "textest1qyqszqgpqyqszqgpqyqszqgpqyqszqgpfcjgfy";
+
+        // Transcode P2PKH to TEX
+        let p2pkh_zaddr: ZcashAddress = p2pkh_str.parse().unwrap();
+        assert_matches!(p2pkh_zaddr.net, Network::Test);
+        if let AddressKind::P2pkh(zaddr_data) = p2pkh_zaddr.kind {
+            let tex_zaddr = ZcashAddress {
+                net: p2pkh_zaddr.net,
+                kind: AddressKind::Tex(zaddr_data),
+            };
+
+            assert_eq!(tex_zaddr.to_string(), tex_str);
+        } else {
+            panic!("Decoded address should have been a P2PKH address.");
+        }
+
+        // Transcode TEX to P2PKH
+        let tex_zaddr: ZcashAddress = tex_str.parse().unwrap();
+        assert_matches!(tex_zaddr.net, Network::Test);
+        if let AddressKind::Tex(zaddr_data) = tex_zaddr.kind {
+            let p2pkh_zaddr = ZcashAddress {
+                net: tex_zaddr.net,
+                kind: AddressKind::P2pkh(zaddr_data),
+            };
+
+            assert_eq!(p2pkh_zaddr.to_string(), p2pkh_str);
+        } else {
+            panic!("Decoded address should have been a TEX address.");
+        }
     }
 
     #[test]

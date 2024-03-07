@@ -11,11 +11,12 @@ use sapling::{
     SaplingIvk,
 };
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
+
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
-    transaction::TxId,
+    transaction::{components::sapling::zip212_enforcement, TxId},
 };
 use zip32::Scope;
 
@@ -594,7 +595,7 @@ where
     {
         let block_hash = block.hash();
         let block_height = block.height();
-        let zip212_enforcement = consensus::sapling_zip212_enforcement(params, block_height);
+        let zip212_enforcement = zip212_enforcement(params, block_height);
 
         for tx in block.vtx.into_iter() {
             let txid = tx.txid();
@@ -687,7 +688,7 @@ where
 
     let cur_height = block.height();
     let cur_hash = block.hash();
-    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, cur_height);
+    let zip212_enforcement = zip212_enforcement(params, cur_height);
 
     let mut sapling_commitment_tree_size = prior_block_metadata
         .and_then(|m| m.sapling_tree_size())
@@ -1142,9 +1143,9 @@ pub mod testing {
     use zcash_note_encryption::{Domain, COMPACT_NOTE_SIZE};
     use zcash_primitives::{
         block::BlockHash,
-        consensus::{sapling_zip212_enforcement, BlockHeight, Network},
+        consensus::{BlockHeight, Network},
         memo::MemoBytes,
-        transaction::components::amount::NonNegativeAmount,
+        transaction::components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
     };
 
     use crate::proto::compact_formats::{
@@ -1198,13 +1199,13 @@ pub mod testing {
         tx_after: bool,
         initial_tree_sizes: Option<(u32, u32)>,
     ) -> CompactBlock {
-        let zip212_enforcement = sapling_zip212_enforcement(&Network::TestNetwork, height);
+        let zip212_enforcement = zip212_enforcement(&Network::TestNetwork, height);
         let to = dfvk.default_address().1;
 
         // Create a fake Note for the account
         let mut rng = OsRng;
         let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
-        let note = sapling::Note::from_parts(to, NoteValue::from(value), rseed);
+        let note = sapling::Note::from_parts(to, NoteValue::from_raw(value.into()), rseed);
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),

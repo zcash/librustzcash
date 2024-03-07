@@ -263,7 +263,9 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     }
 
     // Always derive the default Unified Address for the account.
-    let (address, d_idx) = key.default_address(DEFAULT_UA_REQUEST);
+    let (address, d_idx) = key
+        .default_address(DEFAULT_UA_REQUEST)
+        .expect("A valid default address exists for the UFVK");
     insert_address(conn, params, account, d_idx, &address)?;
 
     Ok(())

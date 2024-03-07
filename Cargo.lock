@@ -2995,7 +2995,7 @@ checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
 
 [[package]]
 name = "zcash_address"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "assert_matches",
  "bech32",
@@ -3003,6 +3003,7 @@ dependencies = [
  "f4jumble",
  "proptest",
  "zcash_encoding",
+ "zcash_protocol",
 ]
 
 [[package]]
@@ -3048,6 +3049,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
+ "zcash_protocol",
  "zip32",
 ]
 
@@ -3087,6 +3089,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
+ "zip32",
 ]
 
 [[package]]
@@ -3125,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bech32",
  "bls12_381",
@@ -3147,6 +3150,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_primitives",
+ "zcash_protocol",
  "zip32",
 ]
 
@@ -3201,6 +3205,7 @@ dependencies = [
  "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",
+ "zcash_protocol",
  "zcash_spec",
  "zip32",
 ]
@@ -3227,6 +3232,16 @@ dependencies = [
  "wagyu-zcash-parameters",
  "xdg",
  "zcash_primitives",
+]
+
+[[package]]
+name = "zcash_protocol"
+version = "0.1.0"
+dependencies = [
+ "document-features",
+ "incrementalmerkletree",
+ "memuse",
+ "proptest",
 ]
 
 [[package]]

@@ -9,7 +9,7 @@ use nonempty::NonEmpty;
 use prost::Message;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, Connection};
-use secrecy::Secret;
+use secrecy::{Secret, SecretVec};
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
@@ -54,7 +54,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     transaction::{
-        components::amount::NonNegativeAmount,
+        components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
         fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
         Transaction, TxId,
     },
@@ -142,7 +142,7 @@ impl<Cache> TestBuilder<Cache> {
         let test_account = if let Some(birthday) = self.test_account_birthday {
             let seed = Secret::new(vec![0u8; 32]);
             let (account, usk) = db_data.create_account(&seed, birthday.clone()).unwrap();
-            Some((account, usk, birthday))
+            Some((seed, account, usk, birthday))
         } else {
             None
         };
@@ -163,7 +163,12 @@ pub(crate) struct TestState<Cache> {
     latest_cached_block: Option<(BlockHeight, BlockHash, u32)>,
     _data_file: NamedTempFile,
     db_data: WalletDb<Connection, Network>,
-    test_account: Option<(AccountId, UnifiedSpendingKey, AccountBirthday)>,
+    test_account: Option<(
+        SecretVec<u8>,
+        AccountId,
+        UnifiedSpendingKey,
+        AccountBirthday,
+    )>,
 }
 
 impl<Cache: TestCache> TestState<Cache>
@@ -420,16 +425,23 @@ impl<Cache> TestState<Cache> {
             .expect("Sapling activation height must be known.")
     }
 
+    /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
+    pub(crate) fn test_seed(&self) -> Option<&SecretVec<u8>> {
+        self.test_account.as_ref().map(|(seed, _, _, _)| seed)
+    }
+
     /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_account(&self) -> Option<(AccountId, UnifiedSpendingKey, AccountBirthday)> {
-        self.test_account.as_ref().cloned()
+        self.test_account
+            .as_ref()
+            .map(|(_, a, k, b)| (*a, k.clone(), b.clone()))
     }
 
     /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_account_sapling(&self) -> Option<DiversifiableFullViewingKey> {
         self.test_account
             .as_ref()
-            .and_then(|(_, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
+            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.
@@ -772,11 +784,8 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(
-        consensus::sapling_zip212_enforcement(params, height),
-        &mut rng,
-    );
-    let note = Note::from_parts(to, NoteValue::from(value), rseed);
+    let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
+    let note = Note::from_parts(to, NoteValue::from_raw(value.into_u64()), rseed);
     let encryptor = sapling_note_encryption(
         Some(dfvk.fvk().ovk),
         note.clone(),
@@ -871,7 +880,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
-    let zip212_enforcement = consensus::sapling_zip212_enforcement(params, height);
+    let zip212_enforcement = zip212_enforcement(params, height);
     let mut rng = OsRng;
     let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
 
@@ -885,7 +894,11 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
 
     // Create a fake Note for the payment
     ctx.outputs.push({
-        let note = Note::from_parts(to, NoteValue::from(value), rseed);
+        let note = Note::from_parts(
+            to,
+            sapling::value::NoteValue::from_raw(value.into_u64()),
+            rseed,
+        );
         let encryptor = sapling_note_encryption(
             Some(dfvk.fvk().ovk),
             note.clone(),
@@ -909,7 +922,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
         let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
         let note = Note::from_parts(
             change_addr,
-            NoteValue::from((in_value - value).unwrap()),
+            NoteValue::from_raw((in_value - value).unwrap().into_u64()),
             rseed,
         );
         let encryptor = sapling_note_encryption(

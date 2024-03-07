@@ -6,6 +6,7 @@
 use crate::address::UnifiedAddress;
 use bs58::{self, decode::Error as Bs58Error};
 use std::fmt;
+use zcash_primitives::consensus::NetworkConstants;
 
 use zcash_address::unified::{self, Encoding};
 use zcash_primitives::{consensus, legacy::TransparentAddress};
@@ -173,7 +174,7 @@ impl<P: consensus::Parameters> AddressCodec<P> for UnifiedAddress {
         unified::Address::decode(address)
             .map_err(|e| format!("{}", e))
             .and_then(|(network, addr)| {
-                if params.address_network() == Some(network) {
+                if params.network_type() == network {
                     UnifiedAddress::try_from(addr).map_err(|e| e.to_owned())
                 } else {
                     Err(format!(
@@ -312,7 +313,7 @@ pub fn encode_payment_address_p<P: consensus::Parameters>(
 ///     encoding::decode_payment_address,
 /// };
 /// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, Parameters},
+///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
 /// };
 ///
 /// let pa = PaymentAddress::from_bytes(&[
@@ -357,7 +358,7 @@ pub fn decode_payment_address(
 ///     encoding::encode_transparent_address,
 /// };
 /// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, Parameters},
+///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
 ///     legacy::TransparentAddress,
 /// };
 ///
@@ -422,12 +423,12 @@ pub fn encode_transparent_address_p<P: consensus::Parameters>(
 ///
 /// ```
 /// use zcash_primitives::{
-///     consensus::{TEST_NETWORK, Parameters},
+///     consensus::{TEST_NETWORK, NetworkConstants, Parameters},
+///     legacy::TransparentAddress,
 /// };
 /// use zcash_keys::{
 ///     encoding::decode_transparent_address,
 /// };
-/// use zcash_primitives::legacy::TransparentAddress;
 ///
 /// assert_eq!(
 ///     decode_transparent_address(

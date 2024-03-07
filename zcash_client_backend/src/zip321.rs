@@ -16,10 +16,10 @@ use nom::{
     sequence::preceded,
 };
 use zcash_primitives::{
-    consensus,
     memo::{self, MemoBytes},
     transaction::components::amount::NonNegativeAmount,
 };
+use zcash_protocol::{consensus, value::BalanceError};
 
 use crate::address::Address;
 
@@ -206,11 +206,13 @@ impl TransactionRequest {
     ///
     /// Returns `Err` in the case of overflow, or if the value is
     /// outside the range `0..=MAX_MONEY` zatoshis.
-    pub fn total(&self) -> Result<NonNegativeAmount, ()> {
+    pub fn total(&self) -> Result<NonNegativeAmount, BalanceError> {
         self.payments
             .values()
             .map(|p| p.amount)
-            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| (acc? + a).ok_or(()))
+            .fold(Ok(NonNegativeAmount::ZERO), |acc, a| {
+                (acc? + a).ok_or(BalanceError::Overflow)
+            })
     }
 
     /// A utility for use in tests to help check round-trip serialization properties.
@@ -243,7 +245,7 @@ impl TransactionRequest {
             payment_index: Option<usize>,
         ) -> impl IntoIterator<Item = String> + '_ {
             std::iter::empty()
-                .chain(render::amount_param(payment.amount, payment_index))
+                .chain(Some(render::amount_param(payment.amount, payment_index)))
                 .chain(
                     payment
                         .memo
@@ -306,8 +308,8 @@ impl TransactionRequest {
     /// Parse the provided URI to a payment request value.
     pub fn from_uri<P: consensus::Parameters>(params: &P, uri: &str) -> Result<Self, Zip321Error> {
         // Parse the leading zcash:<address>
-        let (rest, primary_addr_param) =
-            parse::lead_addr(params)(uri).map_err(|e| Zip321Error::ParseError(e.to_string()))?;
+        let (rest, primary_addr_param) = parse::lead_addr(params)(uri)
+            .map_err(|e| Zip321Error::ParseError(format!("Error parsing lead address: {}", e)))?;
 
         // Parse the remaining parameters as an undifferentiated list
         let (_, xs) = if rest.is_empty() {
@@ -317,7 +319,9 @@ impl TransactionRequest {
                 char('?'),
                 separated_list0(char('&'), parse::zcashparam(params)),
             ))(rest)
-            .map_err(|e| Zip321Error::ParseError(e.to_string()))?
+            .map_err(|e| {
+                Zip321Error::ParseError(format!("Error parsing query parameters: {}", e))
+            })?
         };
 
         // Construct sets of payment parameters, keyed by the payment index.
@@ -358,9 +362,8 @@ mod render {
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 
     use zcash_primitives::{
-        consensus,
+        consensus, transaction::components::amount::NonNegativeAmount,
         transaction::components::amount::COIN,
-        transaction::components::{amount::NonNegativeAmount, Amount},
     };
 
     use super::{memo_to_base64, Address, MemoBytes};
@@ -411,28 +414,24 @@ mod render {
         format!("address{}={}", param_index(idx), addr.encode(params))
     }
 
-    /// Converts an [`Amount`] value to a correctly formatted decimal ZEC
-    /// value for inclusion in a ZIP 321 URI.
-    pub fn amount_str(amount: Amount) -> Option<String> {
-        if amount.is_positive() {
-            let coins = i64::from(amount) / COIN;
-            let zats = i64::from(amount) % COIN;
-            Some(if zats == 0 {
-                format!("{}", coins)
-            } else {
-                format!("{}.{:0>8}", coins, zats)
-                    .trim_end_matches('0')
-                    .to_string()
-            })
+    /// Converts a [`NonNegativeAmount`] value to a correctly formatted decimal ZEC
+    /// string for inclusion in a ZIP 321 URI.
+    pub fn amount_str(amount: NonNegativeAmount) -> String {
+        let coins = u64::from(amount) / COIN;
+        let zats = u64::from(amount) % COIN;
+        if zats == 0 {
+            format!("{}", coins)
         } else {
-            None
+            format!("{}.{:0>8}", coins, zats)
+                .trim_end_matches('0')
+                .to_string()
         }
     }
 
     /// Constructs an "amount" key/value pair containing the encoded ZEC amount
     /// at the specified parameter index.
-    pub fn amount_param(amount: NonNegativeAmount, idx: Option<usize>) -> Option<String> {
-        amount_str(amount.into()).map(|s| format!("amount{}={}", param_index(idx), s))
+    pub fn amount_param(amount: NonNegativeAmount, idx: Option<usize>) -> String {
+        format!("amount{}={}", param_index(idx), amount_str(amount))
     }
 
     /// Constructs a "memo" key/value pair containing the base64URI-encoded memo
@@ -459,16 +458,16 @@ mod parse {
     use nom::{
         bytes::complete::{tag, take_till},
         character::complete::{alpha1, char, digit0, digit1, one_of},
-        combinator::{map_opt, map_res, opt, recognize},
+        combinator::{all_consuming, map_opt, map_res, opt, recognize},
         sequence::{preceded, separated_pair, tuple},
         AsChar, IResult, InputTakeAtPosition,
     };
     use percent_encoding::percent_decode;
     use zcash_primitives::{
-        consensus,
+        consensus, transaction::components::amount::NonNegativeAmount,
         transaction::components::amount::COIN,
-        transaction::components::{amount::NonNegativeAmount, Amount},
     };
+    use zcash_protocol::value::BalanceError;
 
     use crate::address::Address;
 
@@ -641,39 +640,34 @@ mod parse {
     }
 
     /// Parses a value in decimal ZEC.
-    pub fn parse_amount(input: &str) -> IResult<&str, Amount> {
+    pub fn parse_amount(input: &str) -> IResult<&str, NonNegativeAmount> {
         map_res(
-            tuple((
+            all_consuming(tuple((
                 digit1,
                 opt(preceded(
                     char('.'),
-                    map_opt(digit0, |s: &str| if s.len() > 8 { None } else { Some(s) }),
+                    map_opt(digit1, |s: &str| if s.len() > 8 { None } else { Some(s) }),
                 )),
-            )),
+            ))),
             |(whole_s, decimal_s): (&str, Option<&str>)| {
-                let coins: i64 = whole_s
+                let coins: u64 = whole_s
                     .to_string()
-                    .parse::<i64>()
+                    .parse::<u64>()
                     .map_err(|e| e.to_string())?;
 
-                let zats: i64 = match decimal_s {
+                let zats: u64 = match decimal_s {
                     Some(d) => format!("{:0<8}", d)
-                        .parse::<i64>()
+                        .parse::<u64>()
                         .map_err(|e| e.to_string())?,
                     None => 0,
                 };
 
-                if coins >= 21000000 && (coins > 21000000 || zats > 0) {
-                    return Err(format!(
-                        "{} coins exceeds the maximum possible Zcash value.",
-                        coins
-                    ));
-                }
-
-                let amt = coins * COIN + zats;
-
-                Amount::from_nonnegative_i64(amt)
-                    .map_err(|_| format!("Not a valid zat amount: {}", amt))
+                coins
+                    .checked_mul(COIN)
+                    .and_then(|coin_zats| coin_zats.checked_add(zats))
+                    .ok_or(BalanceError::Overflow)
+                    .and_then(NonNegativeAmount::from_u64)
+                    .map_err(|_| format!("Not a valid amount: {} ZEC", input))
             },
         )(input)
     }
@@ -693,11 +687,7 @@ mod parse {
 
             "amount" => parse_amount(value)
                 .map_err(|e| e.to_string())
-                .and_then(|(_, a)| {
-                    NonNegativeAmount::try_from(a)
-                        .map_err(|_| "Payment amount must be nonnegative.".to_owned())
-                })
-                .map(Param::Amount),
+                .map(|(_, amt)| Param::Amount(amt)),
 
             "label" => percent_decode(value.as_bytes())
                 .decode_utf8()
@@ -830,12 +820,10 @@ mod tests {
 
     use zcash_keys::address::testing::arb_addr;
     use zcash_primitives::{
-        consensus::{Parameters, TEST_NETWORK},
         memo::Memo,
-        transaction::components::amount::{
-            testing::arb_nonnegative_amount, Amount, NonNegativeAmount,
-        },
+        transaction::components::amount::{testing::arb_nonnegative_amount, NonNegativeAmount},
     };
+    use zcash_protocol::consensus::{NetworkConstants, NetworkType, TEST_NETWORK};
 
     #[cfg(feature = "local-consensus")]
     use zcash_primitives::{local_consensus::LocalNetwork, BlockHeight};
@@ -861,8 +849,8 @@ mod tests {
         let amounts = vec![1u64, 1000u64, 100000u64, 100000000u64, 100000000000u64];
 
         for amt_u64 in amounts {
-            let amt = Amount::from_u64(amt_u64).unwrap();
-            let amt_str = amount_str(amt).unwrap();
+            let amt = NonNegativeAmount::from_u64(amt_u64).unwrap();
+            let amt_str = amount_str(amt);
             assert_eq!(amt, parse_amount(&amt_str).unwrap().1);
         }
     }
@@ -883,7 +871,7 @@ mod tests {
         let expected = TransactionRequest::new(
             vec![
                 Payment {
-                    recipient_address: Address::Sapling(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: Address::Sapling(decode_payment_address(NetworkType::Test.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::const_from_u64(376876902796286),
                     memo: None,
                     label: None,
@@ -904,7 +892,7 @@ mod tests {
         let expected = TransactionRequest::new(
             vec![
                 Payment {
-                    recipient_address: Address::Sapling(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: Address::Sapling(decode_payment_address(NetworkType::Test.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::ZERO,
                     memo: None,
                     label: None,
@@ -922,7 +910,7 @@ mod tests {
         let req = TransactionRequest::new(
             vec![
                 Payment {
-                    recipient_address: Address::Sapling(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: Address::Sapling(decode_payment_address(NetworkType::Test.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::ZERO,
                     memo: None,
                     label: None,
@@ -1090,6 +1078,11 @@ mod tests {
             "zcash:?amount.10000=1.23&address.10000=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU";
         let i10r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_10);
         assert!(i10r.is_err());
+
+        // invalid: bad amount format
+        let invalid_11 = "zcash:?address=tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU&amount=123.";
+        let i11r = TransactionRequest::from_uri(&TEST_NETWORK, invalid_11);
+        assert!(i11r.is_err());
     }
 
     proptest! {
@@ -1106,9 +1099,8 @@ mod tests {
         }
 
         #[test]
-        fn prop_zip321_roundtrip_amount(nn_amt in arb_nonnegative_amount()) {
-            let amt = Amount::from(nn_amt);
-            let amt_str = amount_str(amt).unwrap();
+        fn prop_zip321_roundtrip_amount(amt in arb_nonnegative_amount()) {
+            let amt_str = amount_str(amt);
             assert_eq!(amt, parse_amount(&amt_str).unwrap().1);
         }
 
