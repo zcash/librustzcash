@@ -550,6 +550,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     for spend in tx.sapling_spends() {
                         wallet::sapling::mark_sapling_note_spent(wdb.conn.0, tx_row, spend.nf())?;
                     }
+                    #[cfg(feature = "orchard")]
+                    for spend in tx.orchard_spends() {
+                        wallet::orchard::mark_orchard_note_spent(wdb.conn.0, tx_row, spend.nf())?;
+                    }
 
                     for output in tx.sapling_outputs() {
                         // Check whether this note was spent in a later block range that
@@ -568,6 +572,24 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::sapling::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
                     }
+                    #[cfg(feature = "orchard")]
+                    for output in tx.orchard_outputs() {
+                        // Check whether this note was spent in a later block range that
+                        // we previously scanned.
+                        let spent_in = output
+                            .nf()
+                            .map(|nf| {
+                                wallet::query_nullifier_map::<_, Scope>(
+                                    wdb.conn.0,
+                                    ShieldedProtocol::Orchard,
+                                    &nf.to_bytes(),
+                                )
+                            })
+                            .transpose()?
+                            .flatten();
+
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
+                    }
                 }
 
                 // Insert the new nullifiers from this block into the nullifier map.
@@ -577,14 +599,37 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     ShieldedProtocol::Sapling,
                     block.sapling().nullifier_map(),
                 )?;
+                #[cfg(feature = "orchard")]
+                wallet::insert_nullifier_map(
+                    wdb.conn.0,
+                    block.height(),
+                    ShieldedProtocol::Orchard,
+                    &block
+                        .orchard()
+                        .nullifier_map()
+                        .iter()
+                        .map(|(txid, idx, nfs)| {
+                            (*txid, *idx, nfs.iter().map(|nf| nf.to_bytes()).collect())
+                        })
+                        .collect::<Vec<_>>(),
+                )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
-                    wtx.sapling_outputs().iter().map(|out| {
+                    let iter = wtx.sapling_outputs().iter().map(|out| {
                         (
                             ShieldedProtocol::Sapling,
                             out.note_commitment_tree_position(),
                         )
-                    })
+                    });
+                    #[cfg(feature = "orchard")]
+                    let iter = iter.chain(wtx.orchard_outputs().iter().map(|out| {
+                        (
+                            ShieldedProtocol::Orchard,
+                            out.note_commitment_tree_position(),
+                        )
+                    }));
+
+                    iter
                 }));
 
                 last_scanned_height = Some(block.height());

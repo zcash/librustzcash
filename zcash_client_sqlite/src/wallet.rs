@@ -380,7 +380,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     // If a birthday frontier is available, insert it into the note commitment tree. If the
     // birthday frontier is the empty frontier, we don't need to do anything.
     if let Some(frontier) = birthday.sapling_frontier().value() {
-        debug!("Inserting frontier into ShardTree: {:?}", frontier);
+        debug!("Inserting Sapling frontier into ShardTree: {:?}", frontier);
         let shard_store =
             SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
                 conn,
@@ -405,6 +405,34 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         )?;
     }
 
+    #[cfg(feature = "orchard")]
+    if let Some(frontier) = birthday.orchard_frontier().value() {
+        debug!("Inserting Orchard frontier into ShardTree: {:?}", frontier);
+        let shard_store = SqliteShardStore::<
+            _,
+            ::orchard::tree::MerkleHashOrchard,
+            ORCHARD_SHARD_HEIGHT,
+        >::from_connection(conn, ORCHARD_TABLES_PREFIX)?;
+        let mut shard_tree: ShardTree<
+            _,
+            { ::orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            ORCHARD_SHARD_HEIGHT,
+        > = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+        shard_tree.insert_frontier_nodes(
+            frontier.clone(),
+            Retention::Checkpoint {
+                // This subtraction is safe, because all leaves in the tree appear in blocks, and
+                // the invariant that birthday.height() always corresponds to the block for which
+                // `frontier` is the tree state at the start of the block. Together, this means
+                // there exists a prior block for which frontier is the tree state at the end of
+                // the block.
+                id: birthday.height() - 1,
+                is_marked: false,
+            },
+        )?;
+    }
+
+    // The ignored range always starts at Sapling activation
     let sapling_activation_height = params
         .activation_height(NetworkUpgrade::Sapling)
         .expect("Sapling activation height must be available.");
@@ -2050,13 +2078,20 @@ pub(crate) fn update_expired_notes(
     conn: &rusqlite::Connection,
     expiry_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    let mut stmt_update_expired = conn.prepare_cached(
+    let mut stmt_update_sapling_expired = conn.prepare_cached(
         "UPDATE sapling_received_notes SET spent = NULL WHERE EXISTS (
             SELECT id_tx FROM transactions
             WHERE id_tx = sapling_received_notes.spent AND block IS NULL AND expiry_height < ?
         )",
     )?;
-    stmt_update_expired.execute([u32::from(expiry_height)])?;
+    stmt_update_sapling_expired.execute([u32::from(expiry_height)])?;
+    let mut stmt_update_orchard_expired = conn.prepare_cached(
+        "UPDATE orchard_received_notes SET spent = NULL WHERE EXISTS (
+            SELECT id_tx FROM transactions
+            WHERE id_tx = orchard_received_notes.spent AND block IS NULL AND expiry_height < ?
+        )",
+    )?;
+    stmt_update_orchard_expired.execute([u32::from(expiry_height)])?;
     Ok(())
 }
 

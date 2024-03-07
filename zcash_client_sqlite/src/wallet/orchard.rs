@@ -1,5 +1,5 @@
 use incrementalmerkletree::Position;
-use rusqlite::{named_params, Connection};
+use rusqlite::{named_params, params, Connection};
 
 use zcash_client_backend::{
     data_api::NullifierQuery, wallet::WalletOrchardOutput, DecryptedOutput, TransferType,
@@ -188,6 +188,26 @@ pub(crate) fn get_orchard_nullifiers(
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
     Ok(res)
+}
+
+/// Marks a given nullifier as having been revealed in the construction
+/// of the specified transaction.
+///
+/// Marking a note spent in this fashion does NOT imply that the
+/// spending transaction has been mined.
+pub(crate) fn mark_orchard_note_spent(
+    conn: &Connection,
+    tx_ref: i64,
+    nf: &orchard::note::Nullifier,
+) -> Result<bool, SqliteClientError> {
+    let mut stmt_mark_orchard_note_spent =
+        conn.prepare_cached("UPDATE orchard_received_notes SET spent = ? WHERE nf = ?")?;
+
+    match stmt_mark_orchard_note_spent.execute(params![tx_ref, nf.to_bytes()])? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => unreachable!("nf column is marked as UNIQUE"),
+    }
 }
 
 #[cfg(test)]
