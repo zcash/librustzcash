@@ -58,7 +58,7 @@ impl RusqliteMigration for Migration {
                 CHECK (
                     (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL)
                     OR
-                    (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
+                    (account_type != 0 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
                 )
             );
             CREATE UNIQUE INDEX accounts_uvk ON accounts_new ("uvk");

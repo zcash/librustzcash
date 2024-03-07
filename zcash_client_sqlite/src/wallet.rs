@@ -131,6 +131,8 @@ pub(crate) mod scanning;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
+/// This tracks the allowed values of the `account_type` column of the `accounts` table
+/// and should not be made public.
 enum AccountType {
     Zip32,
     ImportedUfvk,
@@ -212,6 +214,7 @@ pub(crate) fn max_zip32_account_index(
     )
 }
 
+/// Returns (account_type, hd_seed_fingerprint, hd_account_index, uvk) for a given account.  
 fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
     account: &'a Account,
     params: &P,

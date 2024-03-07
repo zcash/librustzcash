@@ -87,8 +87,7 @@ pub struct HdSeedFingerprint([u8; 32]);
 impl HdSeedFingerprint {
     /// Generates the fingerprint from a given seed.
     ///
-    /// # Panics
-    /// If the length of the seed is not between 32 and 252 bytes inclusive.
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     pub fn from_seed(seed: &SecretVec<u8>) -> Self {
         let len = seed.expose_secret().len();
         let len = match len {

@@ -77,8 +77,7 @@ pub enum SqliteClientError {
     /// The account was imported, and ZIP-32 derivation information is not known for it.
     UnknownZip32Derivation,
 
-    /// An error occurred deriving a spending key from a seed and an account
-    /// identifier.
+    /// An error occurred deriving a spending key from a seed and a ZIP-32 account index.
     KeyDerivationError(zip32::AccountId),
 
     /// A caller attempted to initialize the accounts table with a discontinuous

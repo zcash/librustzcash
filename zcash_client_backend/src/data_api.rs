@@ -493,6 +493,7 @@ pub trait WalletRead {
     type AccountId: Copy + Debug + Eq + Hash;
 
     /// Gets some of the account details (e.g. seed fingerprint+index and/or uvk) for a given account id.
+    ///
     /// Returns `Ok(None)` if no account by the given ID is known.
     fn get_account(&self, account_id: Self::AccountId) -> Result<Option<Account>, Self::Error>;
 
@@ -1106,6 +1107,8 @@ pub trait WalletWrite: WalletRead {
     /// By convention, wallets should only allow a new account to be generated after confirmed
     /// funds have been received by the currently-available account (in order to enable automated
     /// account recovery).
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     fn create_account(

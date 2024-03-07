@@ -140,8 +140,8 @@ impl Account {
     }
 
     // TODO: When a UnifiedIncomingViewingKey is available, add a function that
-    // will return it. Even if the Account was initialized with a UFVK, we can always
-    // derive a UIVK from that.
+    // will return it (external scope only). Even if the Account was initialized with a UFVK,
+    // we can always derive a UIVK from that.
 }
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
