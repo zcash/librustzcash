@@ -99,7 +99,7 @@ pub(crate) mod tests {
         }
 
         fn next_subtree_index(s: &WalletSummary<crate::AccountId>) -> u64 {
-            todo!()
+            s.next_orchard_subtree_index()
         }
 
         fn select_spendable_notes<Cache>(

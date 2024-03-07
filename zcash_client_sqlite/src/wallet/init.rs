@@ -11,9 +11,8 @@ use uuid::Uuid;
 use zcash_client_backend::keys::AddressGenerationError;
 use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
 
-use crate::WalletDb;
-
 use super::commitment_tree;
+use crate::WalletDb;
 
 mod migrations;
 
@@ -263,6 +262,31 @@ mod tests {
                     ON UPDATE RESTRICT,
                 CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
             )",
+            "CREATE TABLE orchard_tree_cap (
+                -- cap_id exists only to be able to take advantage of `ON CONFLICT`
+                -- upsert functionality; the table will only ever contain one row
+                cap_id INTEGER PRIMARY KEY,
+                cap_data BLOB NOT NULL
+            )",
+            "CREATE TABLE orchard_tree_checkpoint_marks_removed (
+                checkpoint_id INTEGER NOT NULL,
+                mark_removed_position INTEGER NOT NULL,
+                FOREIGN KEY (checkpoint_id) REFERENCES orchard_tree_checkpoints(checkpoint_id)
+                ON DELETE CASCADE,
+                CONSTRAINT spend_position_unique UNIQUE (checkpoint_id, mark_removed_position)
+            )",
+            "CREATE TABLE orchard_tree_checkpoints (
+                checkpoint_id INTEGER PRIMARY KEY,
+                position INTEGER
+            )",
+            "CREATE TABLE orchard_tree_shards (
+                shard_index INTEGER PRIMARY KEY,
+                subtree_end_height INTEGER,
+                root_hash BLOB,
+                shard_data BLOB,
+                contains_marked INTEGER,
+                CONSTRAINT root_unique UNIQUE (root_hash)
+            )",
             r#"CREATE TABLE "sapling_received_notes" (
                 id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -390,6 +414,52 @@ mod tests {
         }
 
         let expected_views = vec![
+            // v_orchard_shard_scan_ranges
+            format!(
+                "CREATE VIEW v_orchard_shard_scan_ranges AS
+                SELECT
+                    shard.shard_index,
+                    shard.shard_index << 16 AS start_position,
+                    (shard.shard_index + 1) << 16 AS end_position_exclusive,
+                    IFNULL(prev_shard.subtree_end_height, {}) AS subtree_start_height,
+                    shard.subtree_end_height,
+                    shard.contains_marked,
+                    scan_queue.block_range_start,
+                    scan_queue.block_range_end,
+                    scan_queue.priority
+                FROM orchard_tree_shards shard
+                LEFT OUTER JOIN orchard_tree_shards prev_shard
+                    ON shard.shard_index = prev_shard.shard_index + 1
+                -- Join with scan ranges that overlap with the subtree's involved blocks.
+                INNER JOIN scan_queue ON (
+                    subtree_start_height < scan_queue.block_range_end AND
+                    (
+                        scan_queue.block_range_start <= shard.subtree_end_height OR
+                        shard.subtree_end_height IS NULL
+                    )
+                )",
+                u32::from(st.network().activation_height(NetworkUpgrade::Nu5).unwrap()),
+            ),
+            //v_orchard_shard_unscanned_ranges
+            format!(
+                "CREATE VIEW v_orchard_shard_unscanned_ranges AS
+                WITH wallet_birthday AS (SELECT MIN(birthday_height) AS height FROM accounts)
+                SELECT
+                    shard_index,
+                    start_position,
+                    end_position_exclusive,
+                    subtree_start_height,
+                    subtree_end_height,
+                    contains_marked,
+                    block_range_start,
+                    block_range_end,
+                    priority
+                FROM v_orchard_shard_scan_ranges
+                INNER JOIN wallet_birthday
+                WHERE priority > {}
+                AND block_range_end > wallet_birthday.height",
+                priority_code(&ScanPriority::Scanned),
+            ),
             // v_sapling_shard_scan_ranges
             format!(
                 "CREATE VIEW v_sapling_shard_scan_ranges AS

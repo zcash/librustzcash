@@ -110,6 +110,9 @@ use crate::{
 
 use self::scanning::{parse_priority_code, priority_code, replace_queue_entries};
 
+#[cfg(feature = "orchard")]
+use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+
 #[cfg(feature = "transparent-inputs")]
 use {
     crate::UtxoId,
@@ -948,6 +951,9 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         drop(transparent_trace);
     }
 
+    // The approach used here for Sapling and Orchard subtree indexing was a quick hack
+    // that has not yet been replaced. TODO: Make less hacky.
+    // https://github.com/zcash/librustzcash/issues/1249
     let next_sapling_subtree_index = {
         let shard_store =
             SqliteShardStore::<_, ::sapling::Node, SAPLING_SHARD_HEIGHT>::from_connection(
@@ -967,12 +973,34 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
             .unwrap_or(0)
     };
 
+    #[cfg(feature = "orchard")]
+    let next_orchard_subtree_index = {
+        let shard_store = SqliteShardStore::<
+            _,
+            ::orchard::tree::MerkleHashOrchard,
+            ORCHARD_SHARD_HEIGHT,
+        >::from_connection(tx, ORCHARD_TABLES_PREFIX)?;
+
+        // The last shard will be incomplete, and we want the next range to overlap with
+        // the last complete shard, so return the index of the second-to-last shard root.
+        shard_store
+            .get_shard_roots()
+            .map_err(ShardTreeError::Storage)?
+            .iter()
+            .rev()
+            .nth(1)
+            .map(|addr| addr.index())
+            .unwrap_or(0)
+    };
+
     let summary = WalletSummary::new(
         account_balances,
         chain_tip_height,
         fully_scanned_height,
         sapling_scan_progress,
         next_sapling_subtree_index,
+        #[cfg(feature = "orchard")]
+        next_orchard_subtree_index,
     );
 
     Ok(Some(summary))

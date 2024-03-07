@@ -5,6 +5,7 @@ mod addresses_table;
 mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
+mod orchard_shardtree;
 mod received_notes_nullable_nf;
 mod receiving_key_scopes;
 mod sapling_memo_consistency;
@@ -24,7 +25,7 @@ use std::rc::Rc;
 
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::SecretVec;
-use zcash_primitives::consensus;
+use zcash_protocol::consensus;
 
 use super::WalletMigrationError;
 
@@ -45,20 +46,20 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                                               |
     //                                       v_transactions_net
     //                                               |
-    //                                            received_notes_nullable_nf
-    //                                            /           |                \
-    //                                           /            |                 \
-    //                           shardtree_support    sapling_memo_consistency   nullifier_map
-    //                          /              \                       \
-    //               add_account_birthdays   receiving_key_scopes   v_transactions_transparent_history
-    //                  |                \             |                       |
-    // v_sapling_shard_unscanned_ranges   \            |         v_tx_outputs_use_legacy_false
-    //                  |                  \           |                       |
-    //        wallet_summaries              \          |        v_transactions_shielding_balance
-    //                                       \         |                       |
-    //                                        \        |         v_transactions_note_uniqueness
-    //                                         \       |          /
-    //                                           full_account_ids
+    //                                            received_notes_nullable_nf------
+    //                                            /           |                   \
+    //                                           /            |                    \
+    //           --------------- shardtree_support    sapling_memo_consistency   nullifier_map
+    //          /                     /           \                       \
+    // orchard_shardtree   add_account_birthdays   receiving_key_scopes   v_transactions_transparent_history
+    //                        |                 \            |                     |
+    //       v_sapling_shard_unscanned_ranges    \           |       v_tx_outputs_use_legacy_false
+    //                        |                   \          |                     |
+    //                wallet_summaries             \         |      v_transactions_shielding_balance
+    //                                              \        |                     |
+    //                                               \       |       v_transactions_note_uniqueness
+    //                                                \      |        /
+    //                                                full_account_ids
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -99,6 +100,9 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         }),
         Box::new(full_account_ids::Migration {
             seed,
+            params: params.clone(),
+        }),
+        Box::new(orchard_shardtree::Migration {
             params: params.clone(),
         }),
     ]

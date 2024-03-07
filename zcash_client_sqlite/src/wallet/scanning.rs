@@ -1,3 +1,4 @@
+use incrementalmerkletree::{Address, Position};
 use rusqlite::{self, named_params, types::Value, OptionalExtension};
 use shardtree::error::ShardTreeError;
 use std::cmp::{max, min};
@@ -6,14 +7,14 @@ use std::ops::Range;
 use std::rc::Rc;
 use tracing::{debug, trace};
 
-use incrementalmerkletree::{Address, Position};
-use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
-
-use zcash_client_backend::data_api::{
-    scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
-    SAPLING_SHARD_HEIGHT,
+use zcash_client_backend::{
+    data_api::{
+        scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
+        SAPLING_SHARD_HEIGHT,
+    },
+    ShieldedProtocol,
 };
-use zcash_protocol::{PoolType, ShieldedProtocol};
+use zcash_primitives::consensus::{self, BlockHeight, NetworkUpgrade};
 
 use crate::{
     error::SqliteClientError,
@@ -22,6 +23,12 @@ use crate::{
 };
 
 use super::wallet_birthday;
+
+#[cfg(feature = "orchard")]
+use {crate::ORCHARD_TABLES_PREFIX, zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT};
+
+#[cfg(not(feature = "orchard"))]
+use zcash_client_backend::PoolType;
 
 pub(crate) fn priority_code(priority: &ScanPriority) -> i64 {
     use ScanPriority::*;
@@ -301,6 +308,7 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     wallet_note_positions: &[(ShieldedProtocol, Position)],
 ) -> Result<(), SqliteClientError> {
     // Read the wallet birthday (if known).
+    // TODO: use per-pool birthdays?
     let wallet_birthday = wallet_birthday(conn)?;
 
     // Determine the range of block heights for which we will be updating the scan queue.
@@ -310,6 +318,8 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         // the note commitment tree subtrees containing the positions of the discovered notes.
         // We will query by subtree index to find these bounds.
         let mut required_sapling_subtrees = BTreeSet::new();
+        #[cfg(feature = "orchard")]
+        let mut required_orchard_subtrees = BTreeSet::new();
         for (protocol, position) in wallet_note_positions {
             match protocol {
                 ShieldedProtocol::Sapling => {
@@ -318,6 +328,12 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
                     );
                 }
                 ShieldedProtocol::Orchard => {
+                    #[cfg(feature = "orchard")]
+                    required_orchard_subtrees.insert(
+                        Address::above_position(ORCHARD_SHARD_HEIGHT.into(), *position).index(),
+                    );
+
+                    #[cfg(not(feature = "orchard"))]
                     return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
                         *protocol,
                     )));
@@ -325,14 +341,28 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
             }
         }
 
-        extend_range(
+        let extended_range = extend_range(
             conn,
             &range,
             required_sapling_subtrees,
             SAPLING_TABLES_PREFIX,
             params.activation_height(NetworkUpgrade::Sapling),
             wallet_birthday,
+        )?;
+
+        #[cfg(feature = "orchard")]
+        let extended_range = extend_range(
+            conn,
+            extended_range.as_ref().unwrap_or(&range),
+            required_orchard_subtrees,
+            ORCHARD_TABLES_PREFIX,
+            params.activation_height(NetworkUpgrade::Nu5),
+            wallet_birthday,
         )?
+        .or(extended_range);
+
+        #[allow(clippy::let_and_return)]
+        extended_range
     };
 
     let query_range = extended_range.clone().unwrap_or_else(|| range.clone());
@@ -415,9 +445,21 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from the shards table.
+    // Read the maximum height from each of the the shards tables. The minimum of the two
+    // gives the start of a height range that covers the last incomplete shard of both the
+    // Sapling and Orchard pools.
     let sapling_shard_tip = tip_shard_end_height(conn, SAPLING_TABLES_PREFIX)?;
+    #[cfg(feature = "orchard")]
+    let orchard_shard_tip = tip_shard_end_height(conn, ORCHARD_TABLES_PREFIX)?;
 
+    #[cfg(feature = "orchard")]
+    let min_shard_tip = match (sapling_shard_tip, orchard_shard_tip) {
+        (None, None) => None,
+        (None, Some(o)) => Some(o),
+        (Some(s), None) => Some(s),
+        (Some(s), Some(o)) => Some(std::cmp::min(s, o)),
+    };
+    #[cfg(not(feature = "orchard"))]
     let min_shard_tip = sapling_shard_tip;
 
     // Create a scanning range for the fragment of the last shard leading up to new tip.
