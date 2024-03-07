@@ -1,3 +1,153 @@
+use incrementalmerkletree::Position;
+use rusqlite::{named_params, Connection};
+
+use zcash_client_backend::{wallet::WalletOrchardOutput, DecryptedOutput, TransferType};
+use zcash_protocol::memo::MemoBytes;
+use zip32::Scope;
+
+use crate::{error::SqliteClientError, AccountId};
+
+use super::{memo_repr, scope_code};
+
+/// This trait provides a generalization over shielded output representations.
+pub(crate) trait ReceivedOrchardOutput {
+    fn index(&self) -> usize;
+    fn account_id(&self) -> AccountId;
+    fn note(&self) -> &orchard::note::Note;
+    fn memo(&self) -> Option<&MemoBytes>;
+    fn is_change(&self) -> bool;
+    fn nullifier(&self) -> Option<&orchard::note::Nullifier>;
+    fn note_commitment_tree_position(&self) -> Option<Position>;
+    fn recipient_key_scope(&self) -> Option<Scope>;
+}
+
+impl ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
+    fn index(&self) -> usize {
+        self.index()
+    }
+    fn account_id(&self) -> AccountId {
+        *WalletOrchardOutput::account_id(self)
+    }
+    fn note(&self) -> &orchard::note::Note {
+        WalletOrchardOutput::note(self)
+    }
+    fn memo(&self) -> Option<&MemoBytes> {
+        None
+    }
+    fn is_change(&self) -> bool {
+        WalletOrchardOutput::is_change(self)
+    }
+    fn nullifier(&self) -> Option<&orchard::note::Nullifier> {
+        self.nf()
+    }
+    fn note_commitment_tree_position(&self) -> Option<Position> {
+        Some(WalletOrchardOutput::note_commitment_tree_position(self))
+    }
+    fn recipient_key_scope(&self) -> Option<Scope> {
+        self.recipient_key_scope()
+    }
+}
+
+impl ReceivedOrchardOutput for DecryptedOutput<orchard::note::Note, AccountId> {
+    fn index(&self) -> usize {
+        self.index()
+    }
+    fn account_id(&self) -> AccountId {
+        *self.account()
+    }
+    fn note(&self) -> &orchard::note::Note {
+        self.note()
+    }
+    fn memo(&self) -> Option<&MemoBytes> {
+        Some(self.memo())
+    }
+    fn is_change(&self) -> bool {
+        self.transfer_type() == TransferType::WalletInternal
+    }
+    fn nullifier(&self) -> Option<&orchard::note::Nullifier> {
+        None
+    }
+    fn note_commitment_tree_position(&self) -> Option<Position> {
+        None
+    }
+    fn recipient_key_scope(&self) -> Option<Scope> {
+        if self.transfer_type() == TransferType::WalletInternal {
+            Some(Scope::Internal)
+        } else {
+            Some(Scope::External)
+        }
+    }
+}
+
+/// Records the specified shielded output as having been received.
+///
+/// This implementation relies on the facts that:
+/// - A transaction will not contain more than 2^63 shielded outputs.
+/// - A note value will never exceed 2^63 zatoshis.
+pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
+    conn: &Connection,
+    output: &T,
+    tx_ref: i64,
+    spent_in: Option<i64>,
+) -> Result<(), SqliteClientError> {
+    let mut stmt_upsert_received_note = conn.prepare_cached(
+        "INSERT INTO orchard_received_notes
+        (tx, action_index, account_id, diversifier, value, rseed, memo, nf,
+         is_change, spent, commitment_tree_position,
+         recipient_key_scope)
+        VALUES (
+            :tx,
+            :action_index,
+            :account_id,
+            :diversifier,
+            :value,
+            :rseed,
+            :memo,
+            :nf,
+            :is_change,
+            :spent,
+            :commitment_tree_position,
+            :recipient_key_scope
+        )
+        ON CONFLICT (tx, action_index) DO UPDATE
+        SET account_id = :account_id,
+            diversifier = :diversifier,
+            value = :value,
+            rseed = :rseed,
+            nf = IFNULL(:nf, nf),
+            memo = IFNULL(:memo, memo),
+            is_change = IFNULL(:is_change, is_change),
+            spent = IFNULL(:spent, spent),
+            commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
+            recipient_key_scope = :recipient_key_scope",
+    )?;
+
+    let rseed = output.note().rseed();
+    let to = output.note().recipient();
+    let diversifier = to.diversifier();
+
+    let sql_args = named_params![
+        ":tx": &tx_ref,
+        ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
+        ":account_id": output.account_id().0,
+        ":diversifier": diversifier.as_array(),
+        ":value": output.note().value().inner(),
+        ":rseed": &rseed.as_bytes(),
+        ":nf": output.nullifier().map(|nf| nf.to_bytes()),
+        ":memo": memo_repr(output.memo()),
+        ":is_change": output.is_change(),
+        ":spent": spent_in,
+        ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
+        ":recipient_key_scope": output.recipient_key_scope().map(scope_code),
+    ];
+
+    stmt_upsert_received_note
+        .execute(sql_args)
+        .map_err(SqliteClientError::from)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use incrementalmerkletree::{Hashable, Level};

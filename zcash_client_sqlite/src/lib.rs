@@ -865,8 +865,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         )?;
                     }
                     #[cfg(feature = "orchard")]
-                    Recipient::InternalAccount(_account, Note::Orchard(_note)) => {
-                        todo!();
+                    Recipient::InternalAccount(account, Note::Orchard(note)) => {
+                        wallet::orchard::put_received_note(
+                            wdb.conn.0,
+                            &DecryptedOutput::new(
+                                output.output_index(),
+                                *note,
+                                *account,
+                                output
+                                    .memo()
+                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                                TransferType::WalletInternal,
+                            ),
+                            tx_ref,
+                            None,
+                        )?;
                     }
                     _ => (),
                 }
