@@ -5,6 +5,7 @@ mod addresses_table;
 mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
+mod orchard_received_notes;
 mod orchard_shardtree;
 mod received_notes_nullable_nf;
 mod receiving_key_scopes;
@@ -60,6 +61,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                                               \       |       v_transactions_note_uniqueness
     //                                                \      |        /
     //                                                full_account_ids
+    //                                                       |
+    //                                             orchard_received_notes
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -105,5 +108,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
         Box::new(orchard_shardtree::Migration {
             params: params.clone(),
         }),
+        Box::new(orchard_received_notes::Migration),
     ]
 }

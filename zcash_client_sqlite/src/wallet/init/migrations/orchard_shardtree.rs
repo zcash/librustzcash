@@ -120,6 +120,26 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             priority_code(&ScanPriority::Scanned),
         ))?;
 
+        transaction.execute_batch(
+            "CREATE VIEW v_orchard_shards_scan_state AS
+            SELECT
+                shard_index,
+                start_position,
+                end_position_exclusive,
+                subtree_start_height,
+                subtree_end_height,
+                contains_marked,
+                MAX(priority) AS max_priority
+            FROM v_orchard_shard_scan_ranges
+            GROUP BY
+                shard_index,
+                start_position,
+                end_position_exclusive,
+                subtree_start_height,
+                subtree_end_height,
+                contains_marked;",
+        )?;
+
         // Treat the current best-known chain tip height as the height to use for Orchard
         // initialization, bounded below by NU5 activation.
         if let Some(orchard_init_height) = scan_queue_extrema(transaction)?.and_then(|r| {

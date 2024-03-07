@@ -962,7 +962,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
     fn add_spend<R: RngCore + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
-        nf: Self::Nullifier,
+        revealed_spent_note_nullifier: Self::Nullifier,
         rng: &mut R,
     ) {
         // Generate a dummy recipient.
@@ -977,7 +977,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
         };
 
         let (cact, _) = compact_orchard_action(
-            nf,
+            revealed_spent_note_nullifier,
             recipient,
             NonNegativeAmount::ZERO,
             self.orchard_ovk(zip32::Scope::Internal),
@@ -997,7 +997,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
         mut rng: &mut R,
     ) -> Self::Nullifier {
         // Generate a dummy nullifier
-        let nullifier =
+        let revealed_spent_note_nullifier =
             orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
                 .unwrap();
 
@@ -1008,7 +1008,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
         };
 
         let (cact, note) = compact_orchard_action(
-            nullifier,
+            revealed_spent_note_nullifier,
             self.address_at(j, scope),
             value,
             self.orchard_ovk(scope),
@@ -1025,7 +1025,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
         ctx: &mut CompactTx,
         _: &P,
         _: BlockHeight,
-        nf: Self::Nullifier,
+        revealed_spent_note_nullifier: Self::Nullifier,
         req: AddressType,
         value: NonNegativeAmount,
         _: u32,
@@ -1038,7 +1038,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
         };
 
         let (cact, note) = compact_orchard_action(
-            nf,
+            revealed_spent_note_nullifier,
             self.address_at(j, scope),
             value,
             self.orchard_ovk(scope),
@@ -1046,6 +1046,7 @@ impl TestFvk for orchard::keys::FullViewingKey {
         );
         ctx.actions.push(cact);
 
+        // Return the nullifier of the newly created output note
         note.nullifier(self)
     }
 }
@@ -1100,8 +1101,6 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
     ovk: Option<orchard::keys::OutgoingViewingKey>,
     rng: &mut R,
 ) -> (CompactOrchardAction, orchard::Note) {
-    let nf = nullifier.to_bytes().to_vec();
-
     let rseed = {
         loop {
             let mut bytes = [0; 32];
@@ -1120,16 +1119,14 @@ fn compact_orchard_action<R: RngCore + CryptoRng>(
     )
     .unwrap();
     let encryptor = OrchardNoteEncryption::new(ovk, note, *MemoBytes::empty().as_array());
-    let cmx = orchard::note::ExtractedNoteCommitment::from(note.commitment())
-        .to_bytes()
-        .to_vec();
+    let cmx = orchard::note::ExtractedNoteCommitment::from(note.commitment());
     let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0.to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
     (
         CompactOrchardAction {
-            nullifier: nf,
-            cmx,
+            nullifier: nullifier.to_bytes().to_vec(),
+            cmx: cmx.to_bytes().to_vec(),
             ephemeral_key,
             ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
         },
