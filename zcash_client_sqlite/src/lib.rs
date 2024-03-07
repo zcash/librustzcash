@@ -581,9 +581,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
-                    wtx.sapling_outputs()
-                        .iter()
-                        .map(|out| out.note_commitment_tree_position())
+                    wtx.sapling_outputs().iter().map(|out| {
+                        (
+                            ShieldedProtocol::Sapling,
+                            out.note_commitment_tree_position(),
+                        )
+                    })
                 }));
 
                 last_scanned_height = Some(block.height());

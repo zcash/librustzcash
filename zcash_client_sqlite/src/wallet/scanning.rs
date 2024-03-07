@@ -13,11 +13,12 @@ use zcash_client_backend::data_api::{
     scanning::{spanning_tree::SpanningTree, ScanPriority, ScanRange},
     SAPLING_SHARD_HEIGHT,
 };
+use zcash_protocol::{PoolType, ShieldedProtocol};
 
 use crate::{
     error::SqliteClientError,
     wallet::{block_height_extrema, commitment_tree, init::WalletMigrationError},
-    PRUNING_DEPTH, VERIFY_LOOKAHEAD,
+    PRUNING_DEPTH, SAPLING_TABLES_PREFIX, VERIFY_LOOKAHEAD,
 };
 
 use super::wallet_birthday;
@@ -232,11 +233,72 @@ pub(crate) fn replace_queue_entries<E: WalletError>(
     Ok(())
 }
 
+fn extend_range(
+    conn: &rusqlite::Transaction<'_>,
+    range: &Range<BlockHeight>,
+    required_subtree_indices: BTreeSet<u64>,
+    table_prefix: &'static str,
+    fallback_start_height: Option<BlockHeight>,
+    birthday_height: Option<BlockHeight>,
+) -> Result<Option<Range<BlockHeight>>, SqliteClientError> {
+    // we'll either have both min and max bounds, or we'll have neither
+    let subtree_index_bounds = required_subtree_indices
+        .iter()
+        .min()
+        .zip(required_subtree_indices.iter().max());
+
+    let mut shard_end_stmt = conn.prepare_cached(&format!(
+        "SELECT subtree_end_height
+                FROM {}_tree_shards
+                WHERE shard_index = :shard_index",
+        table_prefix
+    ))?;
+
+    let mut shard_end = |index: u64| -> Result<Option<BlockHeight>, rusqlite::Error> {
+        Ok(shard_end_stmt
+            .query_row(named_params![":shard_index": index], |row| {
+                row.get::<_, Option<u32>>(0)
+                    .map(|opt| opt.map(BlockHeight::from))
+            })
+            .optional()?
+            .flatten())
+    };
+
+    // If no notes belonging to the wallet were found, we don't need to extend the scanning
+    // range suggestions to include the associated subtrees, and our bounds are just the
+    // scanned range. Otherwise, ensure that all shard ranges starting from the wallet
+    // birthday are included.
+    subtree_index_bounds
+        .map(|(min_idx, max_idx)| {
+            let range_min = if *min_idx > 0 {
+                // get the block height of the end of the previous shard
+                shard_end(*min_idx - 1)?
+            } else {
+                // our lower bound is going to be the fallback height
+                fallback_start_height
+            };
+
+            // bound the minimum to the wallet birthday
+            let range_min = range_min.map(|h| birthday_height.map_or(h, |b| std::cmp::max(b, h)));
+
+            // Get the block height for the end of the current shard, and make it an
+            // exclusive end bound.
+            let range_max = shard_end(*max_idx)?.map(|end| end + 1);
+
+            Ok::<Range<BlockHeight>, rusqlite::Error>(Range {
+                start: range.start.min(range_min.unwrap_or(range.start)),
+                end: range.end.max(range_max.unwrap_or(range.end)),
+            })
+        })
+        .transpose()
+        .map_err(SqliteClientError::from)
+}
+
 pub(crate) fn scan_complete<P: consensus::Parameters>(
     conn: &rusqlite::Transaction<'_>,
     params: &P,
     range: Range<BlockHeight>,
-    wallet_note_positions: &[Position],
+    wallet_note_positions: &[(ShieldedProtocol, Position)],
 ) -> Result<(), SqliteClientError> {
     // Read the wallet birthday (if known).
     let wallet_birthday = wallet_birthday(conn)?;
@@ -247,63 +309,31 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         // ranges starting from the wallet birthday to include the blocks needed to complete
         // the note commitment tree subtrees containing the positions of the discovered notes.
         // We will query by subtree index to find these bounds.
-        let required_subtrees = wallet_note_positions
-            .iter()
-            .map(|p| Address::above_position(SAPLING_SHARD_HEIGHT.into(), *p).index())
-            .collect::<BTreeSet<_>>();
+        let mut required_sapling_subtrees = BTreeSet::new();
+        for (protocol, position) in wallet_note_positions {
+            match protocol {
+                ShieldedProtocol::Sapling => {
+                    required_sapling_subtrees.insert(
+                        Address::above_position(SAPLING_SHARD_HEIGHT.into(), *position).index(),
+                    );
+                }
+                ShieldedProtocol::Orchard => {
+                    return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                        *protocol,
+                    )));
+                }
+            }
+        }
 
-        // we'll either have both min and max bounds, or we'll have neither
-        let subtree_bounds = required_subtrees
-            .iter()
-            .min()
-            .zip(required_subtrees.iter().max());
-
-        let mut sapling_shard_end_stmt = conn.prepare_cached(
-            "SELECT subtree_end_height
-            FROM sapling_tree_shards
-            WHERE shard_index = :shard_index",
-        )?;
-
-        let mut sapling_shard_end = |index: u64| -> Result<Option<BlockHeight>, rusqlite::Error> {
-            Ok(sapling_shard_end_stmt
-                .query_row(named_params![":shard_index": index], |row| {
-                    row.get::<_, Option<u32>>(0)
-                        .map(|opt| opt.map(BlockHeight::from))
-                })
-                .optional()?
-                .flatten())
-        };
-
-        // If no notes belonging to the wallet were found, we don't need to extend the scanning
-        // range suggestions to include the associated subtrees, and our bounds are just the
-        // scanned range. Otherwise, ensure that all shard ranges starting from the wallet
-        // birthday are included.
-        subtree_bounds
-            .map(|(min_idx, max_idx)| {
-                let range_min = if *min_idx > 0 {
-                    // get the block height of the end of the previous shard
-                    sapling_shard_end(*min_idx - 1)?
-                } else {
-                    // our lower bound is going to be the Sapling activation height
-                    params.activation_height(NetworkUpgrade::Sapling)
-                };
-
-                // bound the minimum to the wallet birthday
-                let range_min =
-                    range_min.map(|h| wallet_birthday.map_or(h, |b| std::cmp::max(b, h)));
-
-                // Get the block height for the end of the current shard, and make it an
-                // exclusive end bound.
-                let range_max = sapling_shard_end(*max_idx)?.map(|end| end + 1);
-
-                Ok::<Range<BlockHeight>, rusqlite::Error>(Range {
-                    start: range.start.min(range_min.unwrap_or(range.start)),
-                    end: range.end.max(range_max.unwrap_or(range.end)),
-                })
-            })
-            .transpose()
-            .map_err(SqliteClientError::from)
-    }?;
+        extend_range(
+            conn,
+            &range,
+            required_sapling_subtrees,
+            SAPLING_TABLES_PREFIX,
+            params.activation_height(NetworkUpgrade::Sapling),
+            wallet_birthday,
+        )?
+    };
 
     let query_range = extended_range.clone().unwrap_or_else(|| range.clone());
 
@@ -332,6 +362,20 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
     )?;
 
     Ok(())
+}
+
+fn tip_shard_end_height(
+    conn: &rusqlite::Transaction<'_>,
+    table_prefix: &'static str,
+) -> Result<Option<BlockHeight>, rusqlite::Error> {
+    conn.query_row(
+        &format!(
+            "SELECT MAX(subtree_end_height) FROM {}_tree_shards",
+            table_prefix
+        ),
+        [],
+        |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
+    )
 }
 
 pub(crate) fn update_chain_tip<P: consensus::Parameters>(
@@ -372,18 +416,15 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     let chain_end = new_tip + 1;
 
     // Read the maximum height from the shards table.
-    let shard_start_height = conn.query_row(
-        "SELECT MAX(subtree_end_height)
-        FROM sapling_tree_shards",
-        [],
-        |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
-    )?;
+    let sapling_shard_tip = tip_shard_end_height(conn, SAPLING_TABLES_PREFIX)?;
+
+    let min_shard_tip = sapling_shard_tip;
 
     // Create a scanning range for the fragment of the last shard leading up to new tip.
     // We set a lower bound at the wallet birthday (if known), because account creation
     // requires specifying a tree frontier that ensures we don't need tree information
     // prior to the birthday.
-    let tip_shard_entry = shard_start_height.filter(|h| h < &chain_end).map(|h| {
+    let tip_shard_entry = min_shard_tip.filter(|h| h < &chain_end).map(|h| {
         let min_to_scan = wallet_birthday.filter(|b| b > &h).unwrap_or(h);
         ScanRange::from_parts(min_to_scan..chain_end, ScanPriority::ChainTip)
     });
