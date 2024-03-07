@@ -667,7 +667,13 @@ pub(crate) mod tests {
                     vec![Node::empty_leaf(); frontier_position.past_ommer_count().into()],
                 )
                 .unwrap();
-                AccountBirthday::from_parts(birthday_height, frontier, None)
+                AccountBirthday::from_parts(
+                    birthday_height,
+                    frontier,
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
+                    None,
+                )
             })
             .build();
 
@@ -717,7 +723,13 @@ pub(crate) mod tests {
         st.wallet_mut()
             .create_account(
                 &SecretVec::new(vec![0; 32]),
-                AccountBirthday::from_parts(wallet_birthday, Frontier::empty(), None),
+                AccountBirthday::from_parts(
+                    wallet_birthday,
+                    Frontier::empty(),
+                    #[cfg(feature = "orchard")]
+                    Frontier::empty(),
+                    None,
+                ),
             )
             .unwrap();
 

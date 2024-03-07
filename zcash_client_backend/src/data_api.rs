@@ -961,6 +961,9 @@ impl<AccountId> SentTransactionOutput<AccountId> {
 pub struct AccountBirthday {
     height: BlockHeight,
     sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
+    #[cfg(feature = "orchard")]
+    orchard_frontier:
+        Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>,
     recover_until: Option<BlockHeight>,
 }
 
@@ -1002,11 +1005,17 @@ impl AccountBirthday {
     pub fn from_parts(
         height: BlockHeight,
         sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
+        #[cfg(feature = "orchard")] orchard_frontier: Frontier<
+            orchard::tree::MerkleHashOrchard,
+            { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+        >,
         recover_until: Option<BlockHeight>,
     ) -> Self {
         Self {
             height,
             sapling_frontier,
+            #[cfg(feature = "orchard")]
+            orchard_frontier,
             recover_until,
         }
     }
@@ -1028,6 +1037,8 @@ impl AccountBirthday {
         Ok(Self {
             height: BlockHeight::try_from(treestate.height + 1)?,
             sapling_frontier: treestate.sapling_tree()?.to_frontier(),
+            #[cfg(feature = "orchard")]
+            orchard_frontier: treestate.orchard_tree()?.to_frontier(),
             recover_until,
         })
     }
@@ -1038,6 +1049,16 @@ impl AccountBirthday {
         &self,
     ) -> &Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }> {
         &self.sapling_frontier
+    }
+
+    /// Returns the Orchard note commitment tree frontier as of the end of the block at
+    /// [`Self::height`].
+    #[cfg(feature = "orchard")]
+    pub fn orchard_frontier(
+        &self,
+    ) -> &Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>
+    {
+        &self.orchard_frontier
     }
 
     /// Returns the birthday height of the account.
@@ -1064,6 +1085,8 @@ impl AccountBirthday {
 
         AccountBirthday::from_parts(
             params.activation_height(NetworkUpgrade::Sapling).unwrap(),
+            Frontier::empty(),
+            #[cfg(feature = "orchard")]
             Frontier::empty(),
             None,
         )
