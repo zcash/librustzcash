@@ -408,10 +408,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
-        match query {
-            NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self.conn.borrow()),
-            NullifierQuery::All => wallet::sapling::get_all_sapling_nullifiers(self.conn.borrow()),
-        }
+        wallet::sapling::get_sapling_nullifiers(self.conn.borrow(), query)
     }
 
     #[cfg(feature = "orchard")]
