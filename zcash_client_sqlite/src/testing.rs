@@ -767,7 +767,7 @@ pub(crate) enum AddressType {
 
 /// Create a fake CompactBlock at the given height, containing a single output paying
 /// an address. Returns the CompactBlock and the nullifier for the new note.
-pub(crate) fn fake_compact_block<P: consensus::Parameters>(
+fn fake_compact_block<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
@@ -827,7 +827,7 @@ pub(crate) fn fake_compact_block<P: consensus::Parameters>(
 }
 
 /// Create a fake CompactBlock at the given height containing only the given transaction.
-pub(crate) fn fake_compact_block_from_tx(
+fn fake_compact_block_from_tx(
     height: BlockHeight,
     prev_hash: BlockHash,
     tx_index: usize,
@@ -870,7 +870,7 @@ pub(crate) fn fake_compact_block_from_tx(
 /// Create a fake CompactBlock at the given height, spending a single note from the
 /// given address.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
+fn fake_compact_block_spending<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
@@ -945,7 +945,7 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
 }
 
-pub(crate) fn fake_compact_block_from_compact_tx(
+fn fake_compact_block_from_compact_tx(
     ctx: CompactTx,
     height: BlockHeight,
     prev_hash: BlockHash,
@@ -1090,7 +1090,7 @@ pub(crate) fn input_selector(
 
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
-pub(crate) fn check_proposal_serialization_roundtrip(
+fn check_proposal_serialization_roundtrip(
     db_data: &WalletDb<rusqlite::Connection, Network>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
