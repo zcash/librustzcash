@@ -416,10 +416,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     #[cfg(feature = "orchard")]
     fn get_orchard_nullifiers(
         &self,
-        _query: NullifierQuery,
+        query: NullifierQuery,
     ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
-        // FIXME! Orchard.
-        Ok(vec![])
+        wallet::orchard::get_orchard_nullifiers(self.conn.borrow(), query)
     }
 
     #[cfg(feature = "transparent-inputs")]

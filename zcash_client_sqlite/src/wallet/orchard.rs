@@ -1,7 +1,9 @@
 use incrementalmerkletree::Position;
 use rusqlite::{named_params, Connection};
 
-use zcash_client_backend::{wallet::WalletOrchardOutput, DecryptedOutput, TransferType};
+use zcash_client_backend::{
+    data_api::NullifierQuery, wallet::WalletOrchardOutput, DecryptedOutput, TransferType,
+};
 use zcash_protocol::memo::MemoBytes;
 use zip32::Scope;
 
@@ -146,6 +148,46 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
         .map_err(SqliteClientError::from)?;
 
     Ok(())
+}
+
+/// Retrieves the set of nullifiers for "potentially spendable" Orchard notes that the
+/// wallet is tracking.
+///
+/// "Potentially spendable" means:
+/// - The transaction in which the note was created has been observed as mined.
+/// - No transaction in which the note's nullifier appears has been observed as mined.
+pub(crate) fn get_orchard_nullifiers(
+    conn: &Connection,
+    query: NullifierQuery,
+) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, SqliteClientError> {
+    // Get the nullifiers for the notes we are tracking
+    let mut stmt_fetch_nullifiers = match query {
+        NullifierQuery::Unspent => conn.prepare(
+            "SELECT rn.id, rn.account_id, rn.nf
+             FROM orchard_received_notes rn
+             LEFT OUTER JOIN transactions tx
+             ON tx.id_tx = rn.spent
+             WHERE tx.block IS NULL
+             AND nf IS NOT NULL",
+        )?,
+        NullifierQuery::All => conn.prepare(
+            "SELECT rn.id, rn.account_id, rn.nf
+             FROM orchard_received_notes rn
+             WHERE nf IS NOT NULL",
+        )?,
+    };
+
+    let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
+        let account = AccountId(row.get(1)?);
+        let nf_bytes: [u8; 32] = row.get(2)?;
+        Ok::<_, rusqlite::Error>((
+            account,
+            orchard::note::Nullifier::from_bytes(&nf_bytes).unwrap(),
+        ))
+    })?;
+
+    let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
+    Ok(res)
 }
 
 #[cfg(test)]
