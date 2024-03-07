@@ -63,7 +63,6 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        wallet::{Account, HdSeedAccount},
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
         WalletWrite, SAPLING_SHARD_HEIGHT,
@@ -100,7 +99,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    SubtreeScanProgress,
+    Account, HdSeedAccount, SubtreeScanProgress,
 };
 
 #[cfg(test)]
@@ -266,7 +265,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account_id: Self::AccountId,
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
-        if let Some(account) = self.get_account(account_id)? {
+        if let Some(account) = wallet::get_account(self, account_id)? {
             if let Account::Zip32(hdaccount) = account {
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
@@ -290,10 +289,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             // Missing account is documented to return false.
             Ok(false)
         }
-    }
-
-    fn get_account(&self, account_id: Self::AccountId) -> Result<Option<Account>, Self::Error> {
-        wallet::get_account(self.conn.borrow(), &self.params, account_id)
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {

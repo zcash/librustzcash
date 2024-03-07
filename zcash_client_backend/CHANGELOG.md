@@ -38,16 +38,12 @@ and this library adheres to Rust's notion of
   - `WalletOrchardSpend`
   - `WalletOrchardOutput`
   - `WalletTx::{orchard_spends, orchard_outputs}`
-  - `HdSeedAccount`
-  - `ImportedAccount`
-  - `Account`
 
 ### Changed
 - `zcash_client_backend::data_api`:
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
-    - Added `get_account`
     - Added `get_orchard_nullifiers`
   - `ShieldedProtocol` has a new `Orchard` variant.
   - `WalletCommitmentTrees`

@@ -1086,7 +1086,9 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::data_api::{wallet::Account, AccountBirthday, WalletRead};
+        use zcash_client_backend::data_api::AccountBirthday;
+
+        use crate::wallet::{get_account, Account};
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1102,7 +1104,7 @@ mod tests {
             .create_account(&Secret::new(seed.to_vec()), birthday)
             .unwrap();
         assert_matches!(
-            db_data.get_account(account_id),
+            get_account(&db_data, account_id),
             Ok(Some(Account::Zip32(hdaccount))) if hdaccount.account_index() == zip32::AccountId::ZERO
         );
 

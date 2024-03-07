@@ -67,19 +67,19 @@
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, params, OptionalExtension};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_keys::keys::HdSeedFingerprint;
+use zcash_keys::keys::{AddressGenerationError, HdSeedFingerprint, UnifiedAddressRequest};
 
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        wallet::{Account, HdSeedAccount, ImportedAccount},
         AccountBalance, AccountBirthday, BlockMetadata, Ratio, SentTransactionOutput,
         WalletSummary, SAPLING_SHARD_HEIGHT,
     },
@@ -155,6 +155,69 @@ impl From<AccountType> for u32 {
         match value {
             AccountType::Zip32 => 0,
             AccountType::ImportedUfvk => 1,
+        }
+    }
+}
+
+/// Describes the key inputs and UFVK for an account that was derived from a ZIP-32 HD seed and account index.
+#[derive(Debug, Clone)]
+pub(crate) struct HdSeedAccount(HdSeedFingerprint, zip32::AccountId, UnifiedFullViewingKey);
+
+impl HdSeedAccount {
+    pub fn new(
+        hd_seed_fingerprint: HdSeedFingerprint,
+        account_index: zip32::AccountId,
+        ufvk: UnifiedFullViewingKey,
+    ) -> Self {
+        Self(hd_seed_fingerprint, account_index, ufvk)
+    }
+
+    /// Returns the HD seed fingerprint for this account.
+    pub fn hd_seed_fingerprint(&self) -> &HdSeedFingerprint {
+        &self.0
+    }
+
+    /// Returns the ZIP-32 account index for this account.
+    pub fn account_index(&self) -> zip32::AccountId {
+        self.1
+    }
+
+    /// Returns the Unified Full Viewing Key for this account.
+    pub fn ufvk(&self) -> &UnifiedFullViewingKey {
+        &self.2
+    }
+}
+
+/// Represents an arbitrary account for which the seed and ZIP-32 account ID are not known
+/// and may not have been involved in creating this account.
+#[derive(Debug, Clone)]
+pub(crate) enum ImportedAccount {
+    /// An account that was imported via its full viewing key.
+    Full(UnifiedFullViewingKey),
+}
+
+/// Describes an account in terms of its UVK or ZIP-32 origins.
+#[derive(Debug, Clone)]
+pub(crate) enum Account {
+    /// Inputs for a ZIP-32 HD account.
+    Zip32(HdSeedAccount),
+    /// Inputs for an imported account.
+    Imported(ImportedAccount),
+}
+
+impl Account {
+    /// Returns the default Unified Address for the account,
+    /// along with the diversifier index that generated it.
+    ///
+    /// The diversifier index may be non-zero if the Unified Address includes a Sapling  
+    /// receiver, and there was no valid Sapling receiver at diversifier index zero.
+    pub fn default_address(
+        &self,
+        request: UnifiedAddressRequest,
+    ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
+        match self {
+            Account::Zip32(HdSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
+            Account::Imported(ImportedAccount::Full(ufvk)) => ufvk.default_address(request),
         }
     }
 }
@@ -1039,12 +1102,11 @@ pub(crate) fn block_height_extrema(
     })
 }
 
-pub(crate) fn get_account<P: Parameters>(
-    conn: &rusqlite::Connection,
-    params: &P,
+pub(crate) fn get_account<C: Borrow<rusqlite::Connection>, P: Parameters>(
+    db: &WalletDb<C, P>,
     account_id: AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
-    let mut sql = conn.prepare_cached(
+    let mut sql = db.conn.borrow().prepare_cached(
         r#"
         SELECT account_type, uvk, hd_seed_fingerprint, hd_account_index
         FROM accounts
@@ -1060,7 +1122,7 @@ pub(crate) fn get_account<P: Parameters>(
                 SqliteClientError::CorruptedData("Unrecognized account_type".to_string())
             })?;
             let uvk: String = row.get(1)?;
-            let ufvk = UnifiedFullViewingKey::decode(params, &uvk[..])
+            let ufvk = UnifiedFullViewingKey::decode(&db.params, &uvk[..])
                 .map_err(SqliteClientError::CorruptedData)?;
 
             match account_type {
@@ -1800,8 +1862,9 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
     } else {
         // If the UTXO is received at the legacy transparent address, there may be no entry in the
         // addresses table that can be used to tie the address to a particular account. In this
-        // case, we should look up the legacy address for account 0 and check whether it matches
-        // the address for the received UTXO, and if so then insert/update it directly.
+        // case, we should look up the legacy address for all ZIP-32 account index 0 accounts and
+        // check whether it matches the address for the received UTXO, and if so then insert/update
+        // it directly.
         let account = AccountId(0);
         get_legacy_transparent_address(params, conn, account).and_then(|legacy_taddr| {
             if legacy_taddr
@@ -2155,11 +2218,12 @@ mod tests {
     use std::num::NonZeroU32;
 
     use sapling::zip32::ExtendedSpendingKey;
-    use zcash_client_backend::data_api::{wallet::Account, AccountBirthday, WalletRead};
+    use zcash_client_backend::data_api::{AccountBirthday, WalletRead};
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
         testing::{AddressType, BlockCache, TestBuilder, TestState},
+        wallet::{get_account, Account},
         AccountId,
     };
 
@@ -2307,7 +2371,7 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
         let account_id = st.test_account().unwrap().0;
-        let account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
+        let account_parameters = get_account(st.wallet(), account_id).unwrap().unwrap();
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(

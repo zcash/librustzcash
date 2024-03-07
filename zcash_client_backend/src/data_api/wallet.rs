@@ -36,28 +36,6 @@ use sapling::{
 };
 use std::num::NonZeroU32;
 
-use zcash_keys::{
-    address::UnifiedAddress,
-    keys::{
-        AddressGenerationError, HdSeedFingerprint, UnifiedAddressRequest, UnifiedFullViewingKey,
-    },
-};
-use zcash_primitives::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
-    memo::MemoBytes,
-    transaction::{
-        builder::{BuildConfig, BuildResult, Builder},
-        components::{
-            amount::{Amount, NonNegativeAmount},
-            sapling::zip212_enforcement,
-        },
-        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
-        Transaction, TxId,
-    },
-    zip32::Scope,
-};
-use zip32::DiversifierIndex;
-
 use super::InputSource;
 use crate::{
     address::Address,
@@ -73,6 +51,20 @@ use crate::{
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
 };
+use zcash_primitives::{
+    consensus::{self, BlockHeight, NetworkUpgrade},
+    memo::MemoBytes,
+    transaction::{
+        builder::{BuildConfig, BuildResult, Builder},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            sapling::zip212_enforcement,
+        },
+        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
+        Transaction, TxId,
+    },
+    zip32::Scope,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -87,83 +79,6 @@ pub mod input_selection;
 use input_selection::{
     GreedyInputSelector, GreedyInputSelectorError, InputSelector, InputSelectorError,
 };
-
-/// Describes the key inputs and UFVK for an account that was derived from a ZIP-32 HD seed and account index.
-#[derive(Debug, Clone)]
-pub struct HdSeedAccount(HdSeedFingerprint, zip32::AccountId, UnifiedFullViewingKey);
-
-impl HdSeedAccount {
-    pub fn new(
-        hd_seed_fingerprint: HdSeedFingerprint,
-        account_index: zip32::AccountId,
-        ufvk: UnifiedFullViewingKey,
-    ) -> Self {
-        Self(hd_seed_fingerprint, account_index, ufvk)
-    }
-
-    /// Returns the HD seed fingerprint for this account.
-    pub fn hd_seed_fingerprint(&self) -> &HdSeedFingerprint {
-        &self.0
-    }
-
-    /// Returns the ZIP-32 account index for this account.
-    pub fn account_index(&self) -> zip32::AccountId {
-        self.1
-    }
-
-    /// Returns the Unified Full Viewing Key for this account.
-    pub fn ufvk(&self) -> &UnifiedFullViewingKey {
-        &self.2
-    }
-}
-
-/// Represents an arbitrary account for which the seed and ZIP-32 account ID are not known
-/// and may not have been involved in creating this account.
-#[derive(Debug, Clone)]
-pub enum ImportedAccount {
-    /// An account that was imported via its full viewing key.
-    Full(UnifiedFullViewingKey),
-}
-
-/// Describes an account in terms of its UVK or ZIP-32 origins.
-#[derive(Debug, Clone)]
-pub enum Account {
-    /// Inputs for a ZIP-32 HD account.
-    Zip32(HdSeedAccount),
-    /// Inputs for an imported account.
-    Imported(ImportedAccount),
-}
-
-impl Account {
-    /// Returns the default Unified Address for the account,
-    /// along with the diversifier index that generated it.
-    ///
-    /// The diversifier index may be non-zero if the Unified Address includes a Sapling  
-    /// receiver, and there was no valid Sapling receiver at diversifier index zero.
-    pub fn default_address(
-        &self,
-        request: UnifiedAddressRequest,
-    ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        match self {
-            Account::Zip32(HdSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
-            Account::Imported(ImportedAccount::Full(ufvk)) => ufvk.default_address(request),
-        }
-    }
-
-    /// Gets the unified full viewing key for this account, if available.
-    ///
-    /// Accounts initialized with an incoming viewing key will not have a unified full viewing key.
-    pub fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
-        match self {
-            Account::Zip32(HdSeedAccount(_, _, ufvk)) => Some(ufvk),
-            Account::Imported(ImportedAccount::Full(ufvk)) => Some(ufvk),
-        }
-    }
-
-    // TODO: When a UnifiedIncomingViewingKey is available, add a function that
-    // will return it (external scope only). Even if the Account was initialized with a UFVK,
-    // we can always derive a UIVK from that.
-}
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the accounts in
 /// the wallet, and saves it to the wallet.

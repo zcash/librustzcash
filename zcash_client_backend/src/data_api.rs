@@ -67,7 +67,7 @@ use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 
-use self::{chain::CommitmentTreeRoot, scanning::ScanRange, wallet::Account};
+use self::{chain::CommitmentTreeRoot, scanning::ScanRange};
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
@@ -491,11 +491,6 @@ pub trait WalletRead {
     /// authority, such that both received notes and change spendable by that spending authority
     /// will be interpreted as belonging to that account.
     type AccountId: Copy + Debug + Eq + Hash;
-
-    /// Gets some of the account details (e.g. seed fingerprint+index and/or uvk) for a given account id.
-    ///
-    /// Returns `Ok(None)` if no account by the given ID is known.
-    fn get_account(&self, account_id: Self::AccountId) -> Result<Option<Account>, Self::Error>;
 
     /// Verifies that the given seed corresponds to the viewing key for the specified account.
     ///
@@ -1338,13 +1333,6 @@ pub mod testing {
     impl WalletRead for MockWalletDb {
         type Error = ();
         type AccountId = u32;
-
-        fn get_account(
-            &self,
-            _account_id: Self::AccountId,
-        ) -> Result<Option<super::Account>, Self::Error> {
-            Ok(None)
-        }
 
         fn validate_seed(
             &self,
