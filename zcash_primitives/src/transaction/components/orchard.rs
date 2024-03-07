@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
-use nonempty::NonEmpty;
+use nonempty_orchard::NonEmpty;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},

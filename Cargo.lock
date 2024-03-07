@@ -1314,7 +1314,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2145869435ace5ea6ea3d35f59be559317ec9a0d04e1812d5f185a87b6d36f1a"
 dependencies = [
- "nonempty",
+ "nonempty 0.7.0",
 ]
 
 [[package]]
@@ -1394,6 +1394,12 @@ name = "nonempty"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
+
+[[package]]
+name = "nonempty"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "303e8749c804ccd6ca3b428de7fe0d86cb86bc7606bc15291f100fd487960bb8"
 
 [[package]]
 name = "num-bigint"
@@ -1491,7 +1497,7 @@ dependencies = [
  "incrementalmerkletree",
  "lazy_static",
  "memuse",
- "nonempty",
+ "nonempty 0.7.0",
  "pasta_curves",
  "proptest",
  "rand",
@@ -3025,7 +3031,7 @@ dependencies = [
  "jubjub",
  "memuse",
  "nom",
- "nonempty",
+ "nonempty 0.10.0",
  "orchard",
  "percent-encoding",
  "proptest",
@@ -3064,7 +3070,7 @@ dependencies = [
  "incrementalmerkletree",
  "jubjub",
  "maybe-rayon",
- "nonempty",
+ "nonempty 0.10.0",
  "orchard",
  "proptest",
  "prost",
@@ -3095,7 +3101,7 @@ name = "zcash_encoding"
 version = "0.2.0"
 dependencies = [
  "byteorder",
- "nonempty",
+ "nonempty 0.7.0",
 ]
 
 [[package]]
@@ -3138,7 +3144,7 @@ dependencies = [
  "hex",
  "jubjub",
  "memuse",
- "nonempty",
+ "nonempty 0.10.0",
  "orchard",
  "proptest",
  "rand_core",
@@ -3186,7 +3192,8 @@ dependencies = [
  "incrementalmerkletree",
  "jubjub",
  "memuse",
- "nonempty",
+ "nonempty 0.10.0",
+ "nonempty 0.7.0",
  "orchard",
  "pprof",
  "proptest",
