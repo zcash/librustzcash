@@ -267,13 +267,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = self.get_account(account_id)? {
-            if let Account::Zip32(HdSeedAccount(_, account_index, ufvk)) = account {
+            if let Account::Zip32(hdaccount) = account {
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
                     &seed.expose_secret()[..],
-                    account_index,
+                    hdaccount.account_index(),
                 )
-                .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
+                .map_err(|_| SqliteClientError::KeyDerivationError(hdaccount.account_index()))?;
 
                 // Keys are not comparable with `Eq`, but addresses are, so we derive what should
                 // be equivalent addresses for each key and use those to check for key equality.
@@ -281,7 +281,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                     Ok(usk
                         .to_unified_full_viewing_key()
                         .default_address(ua_request)?
-                        == ufvk.default_address(ua_request)?)
+                        == hdaccount.ufvk().default_address(ua_request)?)
                 })
             } else {
                 Err(SqliteClientError::UnknownZip32Derivation)
@@ -460,7 +460,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let account = Account::Zip32(HdSeedAccount(seed_id, account_index, ufvk));
+            let account = Account::Zip32(HdSeedAccount::new(seed_id, account_index, ufvk));
             let account_id = wallet::add_account(wdb.conn.0, &wdb.params, account, birthday)?;
 
             Ok((account_id, usk))

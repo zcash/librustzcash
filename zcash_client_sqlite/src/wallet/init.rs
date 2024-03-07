@@ -225,7 +225,7 @@ mod tests {
                 uvk TEXT NOT NULL,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
-                CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
+                CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL) OR (account_type != 0 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
             )"#,
             r#"CREATE TABLE "addresses" (
                 account_id INTEGER NOT NULL,
@@ -331,6 +331,7 @@ mod tests {
                     (to_address IS NOT NULL) != (to_account_id IS NOT NULL)
                 )
             )"#,
+            // Internal table created by SQLite when we started using `AUTOINCREMENT`.
             "CREATE TABLE sqlite_sequence(name,seq)",
             "CREATE TABLE transactions (
                 id_tx INTEGER PRIMARY KEY,
@@ -1085,10 +1086,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::data_api::{
-            wallet::{Account, HdSeedAccount},
-            AccountBirthday, WalletRead,
-        };
+        use zcash_client_backend::data_api::{wallet::Account, AccountBirthday, WalletRead};
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1105,11 +1103,7 @@ mod tests {
             .unwrap();
         assert_matches!(
             db_data.get_account(account_id),
-            Ok(Some(Account::Zip32(HdSeedAccount(
-                _,
-                zip32::AccountId::ZERO,
-                _
-            ))))
+            Ok(Some(Account::Zip32(hdaccount))) if hdaccount.account_index() == zip32::AccountId::ZERO
         );
 
         for tv in &test_vectors::UNIFIED[..3] {

@@ -220,11 +220,11 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
     params: &P,
 ) -> (u32, Option<&'a [u8]>, Option<u32>, String) {
     match account {
-        Account::Zip32(HdSeedAccount(fingerprint, account_index, ufvk)) => (
+        Account::Zip32(hdaccount) => (
             AccountType::Zip32.into(),
-            Some(fingerprint.as_bytes()),
-            Some((*account_index).into()),
-            ufvk.encode(params),
+            Some(hdaccount.hd_seed_fingerprint().as_bytes()),
+            Some(hdaccount.account_index().into()),
+            hdaccount.ufvk().encode(params),
         ),
         Account::Imported(ImportedAccount::Full(ufvk)) => (
             AccountType::ImportedUfvk.into(),
@@ -1064,7 +1064,7 @@ pub(crate) fn get_account<P: Parameters>(
                 .map_err(SqliteClientError::CorruptedData)?;
 
             match account_type {
-                AccountType::Zip32 => Ok(Some(Account::Zip32(HdSeedAccount(
+                AccountType::Zip32 => Ok(Some(Account::Zip32(HdSeedAccount::new(
                     HdSeedFingerprint::from_bytes(row.get(2)?),
                     zip32::AccountId::try_from(row.get::<_, u32>(3)?).map_err(|_| {
                         SqliteClientError::CorruptedData(
@@ -2155,10 +2155,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use sapling::zip32::ExtendedSpendingKey;
-    use zcash_client_backend::data_api::{
-        wallet::{Account, HdSeedAccount},
-        AccountBirthday, WalletRead,
-    };
+    use zcash_client_backend::data_api::{wallet::Account, AccountBirthday, WalletRead};
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
@@ -2315,7 +2312,7 @@ mod tests {
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(
             account_parameters,
-            Account::Zip32(HdSeedAccount(_,actual_account_index,_)) if actual_account_index == expected_account_index
+            Account::Zip32(hdaccount) if hdaccount.account_index() == expected_account_index
         );
     }
 

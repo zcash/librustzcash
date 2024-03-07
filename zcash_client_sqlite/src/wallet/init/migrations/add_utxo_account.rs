@@ -14,14 +14,15 @@ use {
     crate::error::SqliteClientError,
     rusqlite::{named_params, OptionalExtension},
     std::collections::HashMap,
-    zcash_client_backend::encoding::AddressCodec,
-    zcash_client_backend::keys::UnifiedFullViewingKey,
+    zcash_client_backend::{
+        encoding::AddressCodec, keys::UnifiedFullViewingKey, wallet::TransparentAddressMetadata,
+    },
     zcash_keys::address::Address,
     zcash_primitives::legacy::{
         keys::{IncomingViewingKey, NonHardenedChildIndex},
         TransparentAddress,
     },
-    zip32::{AccountId, DiversifierIndex},
+    zip32::{AccountId, DiversifierIndex, Scope},
 };
 
 /// This migration adds an account identifier column to the UTXOs table.
@@ -134,8 +135,8 @@ fn get_transparent_receivers<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     account: AccountId,
-) -> Result<HashMap<TransparentAddress, NonHardenedChildIndex>, SqliteClientError> {
-    let mut ret = HashMap::new();
+) -> Result<HashMap<TransparentAddress, Option<TransparentAddressMetadata>>, SqliteClientError> {
+    let mut ret: HashMap<TransparentAddress, Option<TransparentAddressMetadata>> = HashMap::new();
 
     // Get all UAs derived
     let mut ua_query = conn
@@ -165,17 +166,37 @@ fn get_transparent_receivers<P: consensus::Parameters>(
             })?;
 
         if let Some(taddr) = ua.transparent() {
-            let di_short = DiversifierIndex::from(di).try_into();
-            if let Ok(di_short) = di_short {
-                if let Some(index) = NonHardenedChildIndex::from_index(di_short) {
-                    ret.insert(*taddr, index);
-                }
-            }
+            let index = NonHardenedChildIndex::from_index(
+                DiversifierIndex::from(di).try_into().map_err(|_| {
+                    SqliteClientError::CorruptedData(
+                        "Unable to get diversifier for transparent address.".to_string(),
+                    )
+                })?,
+            )
+            .ok_or_else(|| {
+                SqliteClientError::CorruptedData(
+                    "Unexpected hardened index for transparent address.".to_string(),
+                )
+            })?;
+
+            ret.insert(
+                *taddr,
+                Some(TransparentAddressMetadata::new(
+                    Scope::External.into(),
+                    index,
+                )),
+            );
         }
     }
 
     if let Some((taddr, child_index)) = get_legacy_transparent_address(params, conn, account)? {
-        ret.insert(taddr, child_index);
+        ret.insert(
+            taddr,
+            Some(TransparentAddressMetadata::new(
+                Scope::External.into(),
+                child_index,
+            )),
+        );
     }
 
     Ok(ret)

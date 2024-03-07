@@ -92,7 +92,7 @@ impl HdSeedFingerprint {
         let len = seed.expose_secret().len();
         let len = match len {
             32..=252 => [u8::try_from(len).unwrap()],
-            _ => panic!("ZIP 32 seeds MUST be at most 252 bytes"),
+            _ => panic!("ZIP 32 seeds MUST be at least 32 bytes and at most 252 bytes"),
         };
         const PERSONALIZATION: &[u8] = b"Zcash_HD_Seed_FP";
         let hash = blake2bParams::new()

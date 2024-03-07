@@ -90,11 +90,32 @@ use input_selection::{
 
 /// Describes the key inputs and UFVK for an account that was derived from a ZIP-32 HD seed and account index.
 #[derive(Debug, Clone)]
-pub struct HdSeedAccount(
-    pub HdSeedFingerprint,
-    pub zip32::AccountId,
-    pub UnifiedFullViewingKey,
-);
+pub struct HdSeedAccount(HdSeedFingerprint, zip32::AccountId, UnifiedFullViewingKey);
+
+impl HdSeedAccount {
+    pub fn new(
+        hd_seed_fingerprint: HdSeedFingerprint,
+        account_index: zip32::AccountId,
+        ufvk: UnifiedFullViewingKey,
+    ) -> Self {
+        Self(hd_seed_fingerprint, account_index, ufvk)
+    }
+
+    /// Returns the HD seed fingerprint for this account.
+    pub fn hd_seed_fingerprint(&self) -> &HdSeedFingerprint {
+        &self.0
+    }
+
+    /// Returns the ZIP-32 account index for this account.
+    pub fn account_index(&self) -> zip32::AccountId {
+        self.1
+    }
+
+    /// Returns the Unified Full Viewing Key for this account.
+    pub fn ufvk(&self) -> &UnifiedFullViewingKey {
+        &self.2
+    }
+}
 
 /// Represents an arbitrary account for which the seed and ZIP-32 account ID are not known
 /// and may not have been involved in creating this account.
