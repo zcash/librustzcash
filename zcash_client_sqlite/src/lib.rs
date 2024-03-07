@@ -129,7 +129,7 @@ pub struct AccountId(u32);
 
 impl ConditionallySelectable for AccountId {
     fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
-        AccountId(subtle::ConditionallySelectable::conditional_select(
+        AccountId(ConditionallySelectable::conditional_select(
             &a.0, &b.0, choice,
         ))
     }
