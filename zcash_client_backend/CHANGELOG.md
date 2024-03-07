@@ -14,6 +14,7 @@ and this library adheres to Rust's notion of
   flag.
 - `zcash_client_backend::data_api`:
   - `AccountBalance::with_orchard_balance_mut`
+  - `AccountBirthday::orchard_frontier`
   - `BlockMetadata::orchard_tree_size`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
@@ -41,6 +42,7 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_client_backend::data_api`:
+  - Arguments to `AccountBirthday::from_parts` have changed.
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
