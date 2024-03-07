@@ -240,6 +240,7 @@ pub enum Address {
     Sapling(PaymentAddress),
     Transparent(TransparentAddress),
     Unified(UnifiedAddress),
+    TransparentSourceOnlyTransparent(TransparentAddress)
 }
 
 #[cfg(feature = "sapling")]
@@ -286,6 +287,10 @@ impl TryFromRawAddress for Address {
 
     fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data).into())
+    }
+
+    fn try_from_raw_tex(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {        
+        Ok(Address::TransparentSourceOnlyTransparent(TransparentAddress::PublicKeyHash(data)))
     }
 }
 

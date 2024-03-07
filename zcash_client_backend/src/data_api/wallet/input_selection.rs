@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 use std::{
     collections::BTreeMap,
     error,
-    fmt::{self, Debug, Display},
+    fmt::{self, Debug, Display}, ptr::addr_of_mut,
 };
 
 use nonempty::NonEmpty;
@@ -343,6 +343,7 @@ where
         #[cfg(feature = "orchard")]
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
+        let mut ephemeral_transparent_output: Option<(TransparentAddress, NonNegativeAmount)> = None;
         for (idx, payment) in transaction_request.payments() {
             match &payment.recipient_address {
                 Address::Transparent(addr) => {
@@ -351,6 +352,17 @@ where
                         value: payment.amount,
                         script_pubkey: addr.script(),
                     });
+                }
+                Address::TransparentSourceOnlyTransparent(_) => {
+                    if let Some((addr, amount)) = ephemeral_transparent_output {
+                        ephemeral_transparent_output = Some((addr, amount + payment.amount));
+                    } else {
+                        // create ephemeral address
+                        let ephemeral_addr = wallet_db
+                            .get_new_transparent_address(account, TransparentKeyScope::custom(2))
+                            .map_err(InputSelectorError::DataSource)?;
+                        ephemeral_transparent_output = Some((ephemeral_addr, payment.amount + 10000))
+                    }
                 }
                 Address::Sapling(_) => {
                     payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
