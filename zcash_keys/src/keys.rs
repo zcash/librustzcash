@@ -1,8 +1,9 @@
 //! Helper functions for managing light client key material.
 use std::{error, fmt};
+use nonempty::NonEmpty;
 
 use zcash_address::unified::{self, Container, Encoding, Typecode};
-use zcash_protocol::consensus::{self, NetworkConstants};
+use zcash_protocol::{consensus::{self, NetworkConstants}, ShieldedProtocol};
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::address::UnifiedAddress;
@@ -515,6 +516,21 @@ impl UnifiedAddressRequest {
                 has_sapling,
                 has_p2pkh,
             })
+        }
+    }
+
+    /// Constructs a new request for a Unified address having the specified set of shielded receivers.
+    pub fn shielded(protocols: NonEmpty<ShieldedProtocol>) -> Self {
+        let mut has_orchard = false;
+        let mut has_sapling = false;
+        for protocol in protocols {
+            match protocol {
+                ShieldedProtocol::Sapling => { has_sapling = true; }
+                ShieldedProtocol::Orchard => { has_orchard = true; }
+            }
+        }
+        Self {
+            has_orchard, has_sapling, has_p2pkh: false
         }
     }
 

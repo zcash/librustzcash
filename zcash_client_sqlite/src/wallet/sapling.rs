@@ -1691,8 +1691,7 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn birthday_in_anchor_shard() {
+    fn birthday_in_anchor_shard(protocol: ShieldedProtocol) {
         let (mut st, dfvk, birthday, _) = test_with_canopy_birthday();
 
         // Set up the following situation:

@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 #[cfg(feature = "unstable")]
 use std::fs::File;
 
-use nonempty::NonEmpty;
+use nonempty::{NonEmpty, nonempty};
 use prost::Message;
 use rand_core::{OsRng, RngCore};
 use rusqlite::{params, Connection};
@@ -22,6 +22,7 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier, PaymentAddress,
 };
+use zcash_client_backend::keys::UnifiedAddressRequest;
 #[allow(deprecated)]
 use zcash_client_backend::{
     address::Address,
@@ -35,7 +36,8 @@ use zcash_client_backend::{
         },
         AccountBalance, AccountBirthday, WalletRead, WalletSummary, WalletWrite,
     },
-    keys::UnifiedSpendingKey,
+    fees::{standard, DustOutputPolicy},
+    ShieldedProtocol,
     proposal::Proposal,
     proto::compact_formats::{
         self as compact, CompactBlock, CompactSaplingOutput, CompactSaplingSpend, CompactTx,
@@ -44,10 +46,7 @@ use zcash_client_backend::{
     wallet::OvkPolicy,
     zip321,
 };
-use zcash_client_backend::{
-    fees::{standard, DustOutputPolicy},
-    ShieldedProtocol,
-};
+use zcash_keys::keys::{UnifiedSpendingKey, UnifiedFullViewingKey};
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
@@ -219,8 +218,8 @@ where
         &mut self,
         height: BlockHeight,
         prev_hash: BlockHash,
-        dfvk: &DiversifiableFullViewingKey,
-        req: AddressType,
+        dfvk: &UnifiedFullViewingKey,
+        req: AddressRequest,
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
     ) -> (Cache::InsertResult, Nullifier) {
@@ -765,48 +764,79 @@ pub(crate) enum AddressType {
     Internal,
 }
 
-/// Create a fake CompactBlock at the given height, containing a single output paying
-/// an address. Returns the CompactBlock and the nullifier for the new note.
+pub(crate) struct AddressRequest {
+    protocol: ShieldedProtocol,
+    address_type: AddressType,
+}
+
+impl AddressRequest {
+    fn default_external(protocol: ShieldedProtocol) -> Self {
+        Self { protocol, address_type: AddressType::DefaultExternal }
+    }
+
+    fn diversified_external(protocol: ShieldedProtocol, index: DiversifierIndex) -> Self {
+        Self { protocol, address_type: AddressType::DiversifiedExternal(index) }
+    }
+
+    fn internal(protocol: ShieldedProtocol) -> Self {
+        Self { protocol, address_type: AddressType::Internal }
+    }
+}
+
+/// Create a fake CompactBlock at the given height, containing a single output paying to an address
+/// derived from the provided UFVK. Returns the CompactBlock and the nullifier for the new note.
 pub(crate) fn fake_compact_block<P: consensus::Parameters>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    dfvk: &DiversifiableFullViewingKey,
-    req: AddressType,
-    value: NonNegativeAmount,
+    ufvk: &UnifiedFullViewingKey,
+    note_recipient: AddressRequest,
+    note_value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
-) -> (CompactBlock, Nullifier) {
-    let to = match req {
-        AddressType::DefaultExternal => dfvk.default_address().1,
-        AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
-        AddressType::Internal => dfvk.change_address().1,
-    };
-
-    // Create a fake Note for the account
+    initial_orchard_tree_size: u32,
+) -> (CompactBlock, Either<sapling::Nullifier, orchard::note::Nullifier>) {
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
-    let note = Note::from_parts(to, NoteValue::from_raw(value.into_u64()), rseed);
-    let encryptor = sapling_note_encryption(
-        Some(dfvk.fvk().ovk),
-        note.clone(),
-        *MemoBytes::empty().as_array(),
-        &mut rng,
-    );
-    let cmu = note.cmu().to_bytes().to_vec();
-    let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
-    let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-    // Create a fake CompactBlock containing the note
-    let cout = CompactSaplingOutput {
-        cmu,
-        ephemeral_key,
-        ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-    };
     let mut ctx = CompactTx::default();
     let mut txid = vec![0; 32];
     rng.fill_bytes(&mut txid);
     ctx.hash = txid;
-    ctx.outputs.push(cout);
+    match note_recipient.protocol {
+        ShieldedProtocol::Sapling => {
+            let dfvk = ufvk.sapling().unwrap();
+            let to = match note_recipient.address_type {
+                AddressType::DefaultExternal => dfvk.default_address().1,
+                AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
+                AddressType::Internal => dfvk.change_address().1,
+            };
+            let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
+
+            // Create a fake Note
+            let note = Note::from_parts(to, NoteValue::from_raw(value.into_u64()), rseed);
+            let encryptor = sapling_note_encryption(
+                Some(dfvk.fvk().ovk),
+                note.clone(),
+                *MemoBytes::empty().as_array(),
+                &mut rng,
+            );
+            let cmu = note.cmu().to_bytes().to_vec();
+            let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
+            let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
+            // Create a fake CompactBlock containing the note
+            let cout = CompactSaplingOutput {
+                cmu,
+                ephemeral_key,
+                ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            };
+
+            ctx.outputs.push(cout);
+        }
+        ShieldedProtocol::Orchard => {
+
+        }
+    }
+
     let mut cb = CompactBlock {
         hash: {
             let mut hash = vec![0; 32];
@@ -875,8 +905,8 @@ pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
     height: BlockHeight,
     prev_hash: BlockHash,
     (nf, in_value): (Nullifier, NonNegativeAmount),
-    dfvk: &DiversifiableFullViewingKey,
-    to: PaymentAddress,
+    ufvk: &UnifiedFullViewingKey,
+    to: Address,
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
