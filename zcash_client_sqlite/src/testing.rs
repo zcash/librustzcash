@@ -7,7 +7,7 @@ use std::fs::File;
 
 use nonempty::NonEmpty;
 use prost::Message;
-use rand_core::{OsRng, RngCore};
+use rand_core::{CryptoRng, OsRng, RngCore};
 use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
 use tempfile::NamedTempFile;
@@ -18,7 +18,6 @@ use tempfile::TempDir;
 use sapling::{
     note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
-    value::NoteValue,
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier, PaymentAddress,
 };
@@ -765,6 +764,49 @@ pub(crate) enum AddressType {
     Internal,
 }
 
+/// Creates a `CompactSaplingOutput` at the given height paying the given recipient.
+///
+/// Returns the `CompactSaplingOutput` and the new note.
+fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    params: &P,
+    height: BlockHeight,
+    recipient: sapling::PaymentAddress,
+    value: NonNegativeAmount,
+    ovk: sapling::keys::OutgoingViewingKey,
+    rng: &mut R,
+) -> (CompactSaplingOutput, sapling::Note) {
+    let rseed = generate_random_rseed(zip212_enforcement(params, height), rng);
+    let note = Note::from_parts(
+        recipient,
+        sapling::value::NoteValue::from_raw(value.into_u64()),
+        rseed,
+    );
+    let encryptor =
+        sapling_note_encryption(Some(ovk), note.clone(), *MemoBytes::empty().as_array(), rng);
+    let cmu = note.cmu().to_bytes().to_vec();
+    let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
+    let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
+    (
+        CompactSaplingOutput {
+            cmu,
+            ephemeral_key,
+            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        },
+        note,
+    )
+}
+
+/// Creates a fake `CompactTx` with a random transaction ID and no spends or outputs.
+fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
+    let mut ctx = CompactTx::default();
+    let mut txid = vec![0; 32];
+    rng.fill_bytes(&mut txid);
+    ctx.hash = txid;
+
+    ctx
+}
+
 /// Create a fake CompactBlock at the given height, containing a single output paying
 /// an address. Returns the CompactBlock and the nullifier for the new note.
 fn fake_compact_block<P: consensus::Parameters>(
@@ -784,45 +826,14 @@ fn fake_compact_block<P: consensus::Parameters>(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
-    let note = Note::from_parts(to, NoteValue::from_raw(value.into_u64()), rseed);
-    let encryptor = sapling_note_encryption(
-        Some(dfvk.fvk().ovk),
-        note.clone(),
-        *MemoBytes::empty().as_array(),
-        &mut rng,
-    );
-    let cmu = note.cmu().to_bytes().to_vec();
-    let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
-    let enc_ciphertext = encryptor.encrypt_note_plaintext();
+    let (cout, note) = compact_sapling_output(params, height, to, value, dfvk.fvk().ovk, &mut rng);
 
     // Create a fake CompactBlock containing the note
-    let cout = CompactSaplingOutput {
-        cmu,
-        ephemeral_key,
-        ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-    };
-    let mut ctx = CompactTx::default();
-    let mut txid = vec![0; 32];
-    rng.fill_bytes(&mut txid);
-    ctx.hash = txid;
+    let mut ctx = fake_compact_tx(&mut rng);
     ctx.outputs.push(cout);
-    let mut cb = CompactBlock {
-        hash: {
-            let mut hash = vec![0; 32];
-            rng.fill_bytes(&mut hash);
-            hash
-        },
-        height: height.into(),
-        ..Default::default()
-    };
-    cb.prev_hash.extend_from_slice(&prev_hash.0);
-    cb.vtx.push(ctx);
-    cb.chain_metadata = Some(compact::ChainMetadata {
-        sapling_commitment_tree_size: initial_sapling_tree_size
-            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ..Default::default()
-    });
+
+    let cb =
+        fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0);
     (cb, note.nf(&dfvk.fvk().vk.nk, 0))
 }
 
@@ -880,67 +891,29 @@ fn fake_compact_block_spending<P: consensus::Parameters>(
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
-    let zip212_enforcement = zip212_enforcement(params, height);
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
+    let mut ctx = fake_compact_tx(&mut rng);
 
-    // Create a fake CompactBlock containing the note
+    // Create a fake spend
     let cspend = CompactSaplingSpend { nf: nf.to_vec() };
-    let mut ctx = CompactTx::default();
-    let mut txid = vec![0; 32];
-    rng.fill_bytes(&mut txid);
-    ctx.hash = txid;
     ctx.spends.push(cspend);
 
     // Create a fake Note for the payment
-    ctx.outputs.push({
-        let note = Note::from_parts(
-            to,
-            sapling::value::NoteValue::from_raw(value.into_u64()),
-            rseed,
-        );
-        let encryptor = sapling_note_encryption(
-            Some(dfvk.fvk().ovk),
-            note.clone(),
-            *MemoBytes::empty().as_array(),
-            &mut rng,
-        );
-        let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
-        let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-        CompactSaplingOutput {
-            cmu,
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-        }
-    });
+    ctx.outputs
+        .push(compact_sapling_output(params, height, to, value, dfvk.fvk().ovk, &mut rng).0);
 
     // Create a fake Note for the change
-    ctx.outputs.push({
-        let change_addr = dfvk.default_address().1;
-        let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
-        let note = Note::from_parts(
-            change_addr,
-            NoteValue::from_raw((in_value - value).unwrap().into_u64()),
-            rseed,
-        );
-        let encryptor = sapling_note_encryption(
-            Some(dfvk.fvk().ovk),
-            note.clone(),
-            *MemoBytes::empty().as_array(),
+    ctx.outputs.push(
+        compact_sapling_output(
+            params,
+            height,
+            dfvk.default_address().1,
+            (in_value - value).unwrap(),
+            dfvk.fvk().ovk,
             &mut rng,
-        );
-        let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
-        let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-        CompactSaplingOutput {
-            cmu,
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-        }
-    });
+        )
+        .0,
+    );
 
     fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
 }
