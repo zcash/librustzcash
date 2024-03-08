@@ -81,7 +81,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     transaction::{
-        components::amount::{Amount, BalanceError, NonNegativeAmount},
+        components::amount::{BalanceError, NonNegativeAmount},
         Transaction, TxId,
     },
 };
@@ -445,7 +445,7 @@ pub trait InputSource {
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: Amount,
+        target_value: NonNegativeAmount,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
@@ -662,7 +662,7 @@ pub trait WalletRead {
         &self,
         _account: Self::AccountId,
         _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -891,7 +891,7 @@ pub struct SentTransaction<'a, AccountId> {
     pub created: time::OffsetDateTime,
     pub account: AccountId,
     pub outputs: Vec<SentTransactionOutput<AccountId>>,
-    pub fee_amount: Amount,
+    pub fee_amount: NonNegativeAmount,
     #[cfg(feature = "transparent-inputs")]
     pub utxos_spent: Vec<OutPoint>,
 }
@@ -1279,7 +1279,7 @@ pub mod testing {
         block::BlockHash,
         consensus::{BlockHeight, Network},
         memo::Memo,
-        transaction::{components::Amount, Transaction, TxId},
+        transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     };
 
     use crate::{
@@ -1344,7 +1344,7 @@ pub mod testing {
         fn select_spendable_notes(
             &self,
             _account: Self::AccountId,
-            _target_value: Amount,
+            _target_value: NonNegativeAmount,
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
@@ -1489,7 +1489,7 @@ pub mod testing {
             &self,
             _account: Self::AccountId,
             _max_height: BlockHeight,
-        ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
             Ok(HashMap::new())
         }
 

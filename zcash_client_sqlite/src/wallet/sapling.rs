@@ -11,10 +11,10 @@ use zcash_client_backend::{
     wallet::{Note, ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
-use zcash_primitives::{
+use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{components::Amount, TxId},
 };
 use zip32::Scope;
 
@@ -231,7 +231,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountId,
-    target_value: Amount,
+    target_value: NonNegativeAmount,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
@@ -305,7 +305,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         named_params![
             ":account": account.0,
             ":anchor_height": &u32::from(anchor_height),
-            ":target_value": &i64::from(target_value),
+            ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
         ],
@@ -480,7 +480,7 @@ pub(crate) mod tests {
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
         transaction::{
-            components::{amount::NonNegativeAmount, sapling::zip212_enforcement, Amount},
+            components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
             fees::{
                 fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
             },
@@ -1743,7 +1743,7 @@ pub(crate) mod tests {
             &st.wallet().conn,
             &st.wallet().params,
             account.0,
-            Amount::const_from_i64(300000),
+            NonNegativeAmount::const_from_u64(300000),
             received_tx_height + 10,
             &[],
         )
@@ -1759,7 +1759,7 @@ pub(crate) mod tests {
             &st.wallet().conn,
             &st.wallet().params,
             account.0,
-            Amount::const_from_i64(300000),
+            NonNegativeAmount::const_from_u64(300000),
             received_tx_height + 10,
             &[],
         )
@@ -1813,7 +1813,7 @@ pub(crate) mod tests {
             &st.wallet().conn,
             &st.wallet().params,
             account,
-            Amount::const_from_i64(300000),
+            NonNegativeAmount::const_from_u64(300000),
             birthday.height() + 5,
             &[],
         )

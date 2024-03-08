@@ -50,10 +50,7 @@ use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
     memo::{Memo, MemoBytes},
-    transaction::{
-        components::amount::{Amount, NonNegativeAmount},
-        Transaction, TxId,
-    },
+    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     zip32::{self, DiversifierIndex, Scope},
 };
 
@@ -216,7 +213,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
     fn select_spendable_notes(
         &self,
         account: AccountId,
-        target_value: Amount,
+        target_value: NonNegativeAmount,
         _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
@@ -439,7 +436,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         account: AccountId,
         max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         wallet::get_transparent_balances(self.conn.borrow(), &self.params, account, max_height)
     }
 

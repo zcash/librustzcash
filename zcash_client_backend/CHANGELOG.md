@@ -47,6 +47,10 @@ and this library adheres to Rust's notion of
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
+  - Changes to the `InputSource` trait:
+    - `select_spendable_notes` now takes its `target_value` argument as a
+      `NonNegativeAmount`. Also, the values of the returned map are also
+      `NonNegativeAmount`s instead of `Amount`s.
   - `ShieldedProtocol` has a new `Orchard` variant.
   - `WalletCommitmentTrees`
     - `type OrchardShardStore`

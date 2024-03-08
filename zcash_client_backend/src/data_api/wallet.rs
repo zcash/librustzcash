@@ -51,20 +51,17 @@ use crate::{
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
 };
-use zcash_primitives::{
+use zcash_primitives::transaction::{
+    builder::{BuildConfig, BuildResult, Builder},
+    components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
+    fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
+    Transaction, TxId,
+};
+use zcash_protocol::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     memo::MemoBytes,
-    transaction::{
-        builder::{BuildConfig, BuildResult, Builder},
-        components::{
-            amount::{Amount, NonNegativeAmount},
-            sapling::zip212_enforcement,
-        },
-        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
-        Transaction, TxId,
-    },
-    zip32::Scope,
 };
+use zip32::Scope;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -1180,7 +1177,7 @@ where
             created: time::OffsetDateTime::now_utc(),
             account,
             outputs,
-            fee_amount: Amount::from(proposal_step.balance().fee_required()),
+            fee_amount: proposal_step.balance().fee_required(),
             #[cfg(feature = "transparent-inputs")]
             utxos_spent,
         })
