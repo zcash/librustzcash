@@ -43,6 +43,7 @@ jubjub.workspace = true
 
 # - Secret management
 secrecy.workspace = true
+subtle.workspace = true
 
 # - Shielded protocols
 orchard = { workspace = true, optional = true }

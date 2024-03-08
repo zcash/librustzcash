@@ -10,11 +10,26 @@ and this library adheres to Rust's notion of
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
+- `zcash_client_sqlite::AccountId` 
 - `impl From<zcash_keys::keys::AddressGenerationError> for SqliteClientError`
 
 ### Changed
+- Many places that `AccountId` appeared in the API changed from
+  using `zcash_primitives::zip32::AccountId` to using an opaque `zcash_client_sqlite::AccountId`
+  type.
+  - The enum variant `zcash_client_sqlite::error::SqliteClientError::AccountUnknown`
+    no longer has a `zcash_primitives::zip32::AccountId` data value.
+  - Changes to the implementation of the `WalletWrite` trait:
+    - `create_account` function returns a unique identifier for the new account (as before),
+      except that this ID no longer happens to match the ZIP-32 account index.
+      To get the ZIP-32 account index, use the new `WalletRead::get_account` function.
+  - Two columns in the `transactions` view were renamed. They refer to the primary key field in the `accounts` table, which no longer equates to a ZIP-32 account index.
+    - `to_account` -> `to_account_id`
+    - `from_account` -> `from_account_id`
 - `zcash_client_sqlite::error::SqliteClientError` has changed variants:
   - Added `AddressGeneration`
+  - Added `UnknownZip32Derivation`
+  - Added `BadAccountData`
   - Removed `DiversifierIndexOutOfRange`
 - `zcash_client_sqlite::wallet::init::WalletMigrationError` has added variant
   `AddressGeneration`

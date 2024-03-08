@@ -53,6 +53,7 @@ and this library adheres to Rust's notion of
     - `fn with_orchard_tree_mut`
     - `fn put_orchard_subtree_roots`
   - Added method `WalletRead::validate_seed`
+  - Removed `Error::AccountNotFound` variant.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 - `zcash_client_backend::zip321::render::amount_str` now takes a

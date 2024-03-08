@@ -217,19 +217,25 @@ mod tests {
         let re = Regex::new(r"\s+").unwrap();
 
         let expected_tables = vec![
-            "CREATE TABLE \"accounts\" (
-                account INTEGER PRIMARY KEY,
-                ufvk TEXT NOT NULL,
+            r#"CREATE TABLE "accounts" (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                account_type INTEGER NOT NULL DEFAULT 0,
+                hd_seed_fingerprint BLOB,
+                hd_account_index INTEGER,
+                ufvk TEXT,
+                uivk TEXT NOT NULL,
                 birthday_height INTEGER NOT NULL,
-                recover_until_height INTEGER )",
-            "CREATE TABLE addresses (
-                account INTEGER NOT NULL,
+                recover_until_height INTEGER,
+                CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
+            )"#,
+            r#"CREATE TABLE "addresses" (
+                account_id INTEGER NOT NULL,
                 diversifier_index_be BLOB NOT NULL,
                 address TEXT NOT NULL,
                 cached_transparent_receiver_address TEXT,
-                FOREIGN KEY (account) REFERENCES accounts(account),
-                CONSTRAINT diversification UNIQUE (account, diversifier_index_be)
-            )",
+                FOREIGN KEY (account_id) REFERENCES accounts(id),
+                CONSTRAINT diversification UNIQUE (account_id, diversifier_index_be)
+            )"#,
             "CREATE TABLE blocks (
                 height INTEGER PRIMARY KEY,
                 hash BLOB NOT NULL,
@@ -251,11 +257,11 @@ mod tests {
                     ON UPDATE RESTRICT,
                 CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
             )",
-            "CREATE TABLE sapling_received_notes (
-                id_note INTEGER PRIMARY KEY,
+            r#"CREATE TABLE "sapling_received_notes" (
+                id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
-                account INTEGER NOT NULL,
+                account_id INTEGER NOT NULL,
                 diversifier BLOB NOT NULL,
                 value INTEGER NOT NULL,
                 rcm BLOB NOT NULL,
@@ -266,10 +272,10 @@ mod tests {
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (account) REFERENCES accounts(account),
+                FOREIGN KEY (account_id) REFERENCES accounts(id),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
-            )",
+            )"#,
             "CREATE TABLE sapling_tree_cap (
                 -- cap_id exists only to be able to take advantage of `ON CONFLICT`
                 -- upsert functionality; the table will only ever contain one row
@@ -295,15 +301,6 @@ mod tests {
                 contains_marked INTEGER,
                 CONSTRAINT root_unique UNIQUE (root_hash)
             )",
-            "CREATE TABLE sapling_witnesses (
-                id_witness INTEGER PRIMARY KEY,
-                note INTEGER NOT NULL,
-                block INTEGER NOT NULL,
-                witness BLOB NOT NULL,
-                FOREIGN KEY (note) REFERENCES sapling_received_notes(id_note),
-                FOREIGN KEY (block) REFERENCES blocks(height),
-                CONSTRAINT witness_height UNIQUE (note, block)
-            )",
             "CREATE TABLE scan_queue (
                 block_range_start INTEGER NOT NULL,
                 block_range_end INTEGER NOT NULL,
@@ -317,24 +314,26 @@ mod tests {
             "CREATE TABLE schemer_migrations (
                 id blob PRIMARY KEY
             )",
-            "CREATE TABLE \"sent_notes\" (
-                id_note INTEGER PRIMARY KEY,
+            r#"CREATE TABLE "sent_notes" (
+                id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
                 output_pool INTEGER NOT NULL,
                 output_index INTEGER NOT NULL,
-                from_account INTEGER NOT NULL,
+                from_account_id INTEGER NOT NULL,
                 to_address TEXT,
-                to_account INTEGER,
+                to_account_id INTEGER,
                 value INTEGER NOT NULL,
                 memo BLOB,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
-                FOREIGN KEY (from_account) REFERENCES accounts(account),
-                FOREIGN KEY (to_account) REFERENCES accounts(account),
+                FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+                FOREIGN KEY (to_account_id) REFERENCES accounts(id),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
                 CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) != (to_account IS NOT NULL)
+                    (to_address IS NOT NULL) != (to_account_id IS NOT NULL)
                 )
-            )",
+            )"#,
+            // Internal table created by SQLite when we started using `AUTOINCREMENT`.
+            "CREATE TABLE sqlite_sequence(name,seq)",
             "CREATE TABLE transactions (
                 id_tx INTEGER PRIMARY KEY,
                 txid BLOB NOT NULL UNIQUE,
@@ -352,9 +351,9 @@ mod tests {
                 txid BLOB NOT NULL UNIQUE,
                 PRIMARY KEY (block_height, tx_index)
             )",
-            "CREATE TABLE \"utxos\" (
-                id_utxo INTEGER PRIMARY KEY,
-                received_by_account INTEGER NOT NULL,
+            r#"CREATE TABLE "utxos" (
+                id INTEGER PRIMARY KEY,
+                received_by_account_id INTEGER NOT NULL,
                 address TEXT NOT NULL,
                 prevout_txid BLOB NOT NULL,
                 prevout_idx INTEGER NOT NULL,
@@ -362,10 +361,10 @@ mod tests {
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
                 spent_in_tx INTEGER,
-                FOREIGN KEY (received_by_account) REFERENCES accounts(account),
+                FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
                 FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
-            )",
+            )"#,
         ];
 
         let mut tables_query = st
@@ -453,8 +452,8 @@ mod tests {
             "CREATE VIEW v_transactions AS
             WITH
             notes AS (
-                SELECT sapling_received_notes.id_note        AS id,
-                       sapling_received_notes.account        AS account_id,
+                SELECT sapling_received_notes.id             AS id,
+                       sapling_received_notes.account_id     AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
                        2                                     AS pool,
@@ -476,8 +475,8 @@ mod tests {
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.tx
                 UNION
-                SELECT utxos.id_utxo                 AS id,
-                       utxos.received_by_account     AS account_id,
+                SELECT utxos.id                      AS id,
+                       utxos.received_by_account_id  AS account_id,
                        utxos.height                  AS block,
                        utxos.prevout_txid            AS txid,
                        0                             AS pool,
@@ -487,8 +486,8 @@ mod tests {
                        0                             AS memo_present
                 FROM utxos
                 UNION
-                SELECT sapling_received_notes.id_note        AS id,
-                       sapling_received_notes.account        AS account_id,
+                SELECT sapling_received_notes.id             AS id,
+                       sapling_received_notes.account_id     AS account_id,
                        transactions.block                    AS block,
                        transactions.txid                     AS txid,
                        2                                     AS pool,
@@ -500,8 +499,8 @@ mod tests {
                 JOIN transactions
                      ON transactions.id_tx = sapling_received_notes.spent
                 UNION
-                SELECT utxos.id_utxo                 AS id,
-                       utxos.received_by_account     AS account_id,
+                SELECT utxos.id                      AS id,
+                       utxos.received_by_account_id  AS account_id,
                        transactions.block            AS block,
                        transactions.txid             AS txid,
                        0                             AS pool,
@@ -514,9 +513,9 @@ mod tests {
                      ON transactions.id_tx = utxos.spent_in_tx
             ),
             sent_note_counts AS (
-                SELECT sent_notes.from_account AS account_id,
+                SELECT sent_notes.from_account_id AS account_id,
                        transactions.txid       AS txid,
-                       COUNT(DISTINCT sent_notes.id_note) as sent_notes,
+                       COUNT(DISTINCT sent_notes.id) as sent_notes,
                        SUM(
                          CASE
                            WHEN (sent_notes.memo IS NULL OR sent_notes.memo = X'F6' OR sapling_received_notes.tx IS NOT NULL)
@@ -567,8 +566,8 @@ mod tests {
             SELECT transactions.txid                   AS txid,
                    2                                   AS output_pool,
                    sapling_received_notes.output_index AS output_index,
-                   sent_notes.from_account             AS from_account,
-                   sapling_received_notes.account      AS to_account,
+                   sent_notes.from_account_id          AS from_account_id,
+                   sapling_received_notes.account_id   AS to_account_id,
                    NULL                                AS to_address,
                    sapling_received_notes.value        AS value,
                    sapling_received_notes.is_change    AS is_change,
@@ -580,26 +579,26 @@ mod tests {
                       ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                          (sapling_received_notes.tx, 2, sent_notes.output_index)
             UNION
-            SELECT utxos.prevout_txid          AS txid,
-                   0                           AS output_pool,
-                   utxos.prevout_idx           AS output_index,
-                   NULL                        AS from_account,
-                   utxos.received_by_account   AS to_account,
-                   utxos.address               AS to_address,
-                   utxos.value_zat             AS value,
-                   0                           AS is_change,
-                   NULL                        AS memo
+            SELECT utxos.prevout_txid           AS txid,
+                   0                            AS output_pool,
+                   utxos.prevout_idx            AS output_index,
+                   NULL                         AS from_account_id,
+                   utxos.received_by_account_id AS to_account_id,
+                   utxos.address                AS to_address,
+                   utxos.value_zat              AS value,
+                   0                            AS is_change,
+                   NULL                         AS memo
             FROM utxos
             UNION
-            SELECT transactions.txid              AS txid,
-                   sent_notes.output_pool         AS output_pool,
-                   sent_notes.output_index        AS output_index,
-                   sent_notes.from_account        AS from_account,
-                   sapling_received_notes.account AS to_account,
-                   sent_notes.to_address          AS to_address,
-                   sent_notes.value               AS value,
-                   0                              AS is_change,
-                   sent_notes.memo                AS memo
+            SELECT transactions.txid                 AS txid,
+                   sent_notes.output_pool            AS output_pool,
+                   sent_notes.output_index           AS output_index,
+                   sent_notes.from_account_id        AS from_account_id,
+                   sapling_received_notes.account_id AS to_account_id,
+                   sent_notes.to_address             AS to_address,
+                   sent_notes.value                  AS value,
+                   0                                 AS is_change,
+                   sent_notes.memo                   AS memo
             FROM sent_notes
             JOIN transactions
                  ON transactions.id_tx = sent_notes.tx
@@ -1090,6 +1089,8 @@ mod tests {
     fn account_produces_expected_ua_sequence() {
         use zcash_client_backend::data_api::AccountBirthday;
 
+        use crate::wallet::{get_account, Account};
+
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
@@ -1100,25 +1101,29 @@ mod tests {
         );
 
         let birthday = AccountBirthday::from_sapling_activation(&network);
-        let (account, _usk) = db_data
+        let (account_id, _usk) = db_data
             .create_account(&Secret::new(seed.to_vec()), birthday)
             .unwrap();
-        assert_eq!(account, AccountId::ZERO);
+        assert_matches!(
+            get_account(&db_data, account_id),
+            Ok(Some(Account::Zip32(hdaccount))) if hdaccount.account_index() == zip32::AccountId::ZERO
+        );
 
         for tv in &test_vectors::UNIFIED[..3] {
             if let Some(Address::Unified(tvua)) =
                 Address::decode(&Network::MainNetwork, tv.unified_addr)
             {
-                let (ua, di) = wallet::get_current_address(&db_data.conn, &db_data.params, account)
-                    .unwrap()
-                    .expect("create_account generated the first address");
+                let (ua, di) =
+                    wallet::get_current_address(&db_data.conn, &db_data.params, account_id)
+                        .unwrap()
+                        .expect("create_account generated the first address");
                 assert_eq!(DiversifierIndex::from(tv.diversifier_index), di);
                 assert_eq!(tvua.transparent(), ua.transparent());
                 assert_eq!(tvua.sapling(), ua.sapling());
                 assert_eq!(tv.unified_addr, ua.encode(&Network::MainNetwork));
 
                 db_data
-                    .get_next_available_address(account, DEFAULT_UA_REQUEST)
+                    .get_next_available_address(account_id, DEFAULT_UA_REQUEST)
                     .unwrap()
                     .expect("get_next_available_address generated an address");
             } else {

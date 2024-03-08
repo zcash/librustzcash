@@ -5,13 +5,11 @@ use schemer;
 use schemer_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_client_backend::{address::Address, keys::UnifiedFullViewingKey};
-use zcash_keys::keys::UnifiedAddressRequest;
-use zcash_primitives::{consensus, zip32::AccountId};
+use zcash_keys::{address::UnifiedAddress, encoding::AddressCodec, keys::UnifiedAddressRequest};
+use zcash_primitives::consensus;
+use zip32::{AccountId, DiversifierIndex};
 
-use crate::{
-    wallet::{init::WalletMigrationError, insert_address},
-    UA_TRANSPARENT,
-};
+use crate::{wallet::init::WalletMigrationError, UA_TRANSPARENT};
 
 #[cfg(feature = "transparent-inputs")]
 use zcash_primitives::legacy::keys::IncomingViewingKey;
@@ -64,9 +62,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
-            let account: u32 = row.get(0)?;
-            let account = AccountId::try_from(account).map_err(|_| {
-                WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())
+            let account = AccountId::try_from(row.get::<_, u32>(0)?).map_err(|_| {
+                WalletMigrationError::CorruptedData("Invalid ZIP-32 account index.".to_owned())
             })?;
 
             let ufvk_str: String = row.get(1)?;
@@ -180,4 +177,40 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         // TODO: something better than just panic?
         panic!("Cannot revert this migration.");
     }
+}
+
+/// Adds the given address and diversifier index to the addresses table.
+fn insert_address<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    account: AccountId,
+    diversifier_index: DiversifierIndex,
+    address: &UnifiedAddress,
+) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO addresses (
+            account,
+            diversifier_index_be,
+            address,
+            cached_transparent_receiver_address
+        )
+        VALUES (
+            :account,
+            :diversifier_index_be,
+            :address,
+            :cached_transparent_receiver_address
+        )",
+    )?;
+
+    // the diversifier index is stored in big-endian order to allow sorting
+    let mut di_be = *diversifier_index.as_bytes();
+    di_be.reverse();
+    stmt.execute(named_params![
+        ":account": u32::from(account),
+        ":diversifier_index_be": &di_be[..],
+        ":address": &address.encode(params),
+        ":cached_transparent_receiver_address": &address.transparent().map(|r| r.encode(params)),
+    ])?;
+
+    Ok(())
 }

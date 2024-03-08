@@ -497,10 +497,10 @@ pub trait WalletRead {
     /// Returns:
     /// - `Ok(true)` if the viewing key for the specified account can be derived from the
     ///   provided seed.
-    /// - `Ok(false)` if the derived seed does not match, or the specified account is not
+    /// - `Ok(false)` if the derived viewing key does not match, or the specified account is not
     ///   present in the database.
     /// - `Err(_)` if a Unified Spending Key cannot be derived from the seed for the
-    ///   specified account.
+    ///   specified account or the account has no known ZIP-32 derivation.
     fn validate_seed(
         &self,
         account_id: Self::AccountId,
@@ -1125,6 +1125,8 @@ pub trait WalletWrite: WalletRead {
     /// By convention, wallets should only allow a new account to be generated after confirmed
     /// funds have been received by the currently-available account (in order to enable automated
     /// account recovery).
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     fn create_account(

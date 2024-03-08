@@ -6,20 +6,19 @@ use rusqlite::{named_params, params, types::Value, Connection, Row};
 use std::rc::Rc;
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
-use zcash_primitives::{
-    consensus::{self, BlockHeight},
-    memo::MemoBytes,
-    transaction::{components::Amount, TxId},
-    zip32::{AccountId, Scope},
-};
-
 use zcash_client_backend::{
     keys::UnifiedFullViewingKey,
     wallet::{Note, ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
+use zcash_primitives::{
+    consensus::{self, BlockHeight},
+    memo::MemoBytes,
+    transaction::{components::Amount, TxId},
+};
+use zip32::Scope;
 
-use crate::{error::SqliteClientError, ReceivedNoteId};
+use crate::{error::SqliteClientError, AccountId, ReceivedNoteId};
 
 use super::{memo_repr, parse_scope, scope_code, wallet_birthday};
 
@@ -180,12 +179,12 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     index: u32,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     let mut stmt_select_note = conn.prepare_cached(
-        "SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+        "SELECT sapling_received_notes.id, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                 accounts.ufvk, recipient_key_scope
          FROM sapling_received_notes
-         INNER JOIN accounts on accounts.account = sapling_received_notes.account
+         INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-         WHERE txid = :txid
+         WHERE txid = :txid AND accounts.ufvk IS NOT NULL
          AND output_index = :output_index
          AND spent IS NULL",
     )?;
@@ -268,19 +267,19 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     let mut stmt_select_notes = conn.prepare_cached(
         "WITH eligible AS (
              SELECT
-                 id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+                 sapling_received_notes.id AS id, txid, output_index, diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
-                    OVER (PARTITION BY sapling_received_notes.account, spent ORDER BY id_note) AS so_far,
+                    OVER (PARTITION BY sapling_received_notes.account_id, spent ORDER BY sapling_received_notes.id) AS so_far,
                  accounts.ufvk as ufvk, recipient_key_scope
              FROM sapling_received_notes
-             INNER JOIN accounts on accounts.account = sapling_received_notes.account
+             INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
              INNER JOIN transactions
                 ON transactions.id_tx = sapling_received_notes.tx
-             WHERE sapling_received_notes.account = :account
+             WHERE sapling_received_notes.account_id = :account AND ufvk IS NOT NULL
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
-             AND id_note NOT IN rarray(:exclude)
+             AND sapling_received_notes.id NOT IN rarray(:exclude)
              AND NOT EXISTS (
                 SELECT 1 FROM v_sapling_shard_unscanned_ranges unscanned
                 -- select all the unscanned ranges involving the shard containing this note
@@ -292,10 +291,10 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
                 AND unscanned.block_range_end > :wallet_birthday
              )
          )
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
+         SELECT id, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
          FROM eligible WHERE so_far < :target_value
          UNION
-         SELECT id_note, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
+         SELECT id, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
@@ -304,7 +303,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
 
     let notes = stmt_select_notes.query_and_then(
         named_params![
-            ":account": &u32::from(account),
+            ":account": account.0,
             ":anchor_height": &u32::from(anchor_height),
             ":target_value": &i64::from(target_value),
             ":exclude": &excluded_ptr,
@@ -327,7 +326,7 @@ pub(crate) fn get_sapling_nullifiers(
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = conn.prepare(
-        "SELECT rn.id_note, rn.account, rn.nf, tx.block as block
+        "SELECT rn.id, rn.account_id, rn.nf, tx.block as block
          FROM sapling_received_notes rn
          LEFT OUTER JOIN transactions tx
          ON tx.id_tx = rn.spent
@@ -335,11 +334,9 @@ pub(crate) fn get_sapling_nullifiers(
          AND nf IS NOT NULL",
     )?;
     let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account: u32 = row.get(1)?;
+        let account = AccountId(row.get(1)?);
         let nf_bytes: Vec<u8> = row.get(2)?;
-        AccountId::try_from(account)
-            .map_err(|_| SqliteClientError::AccountIdOutOfRange)
-            .map(|a| (a, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
+        Ok::<_, rusqlite::Error>((account, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
@@ -352,16 +349,14 @@ pub(crate) fn get_all_sapling_nullifiers(
 ) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = conn.prepare(
-        "SELECT rn.id_note, rn.account, rn.nf
+        "SELECT rn.id, rn.account_id, rn.nf
          FROM sapling_received_notes rn
          WHERE nf IS NOT NULL",
     )?;
     let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account: u32 = row.get(1)?;
+        let account = AccountId(row.get(1)?);
         let nf_bytes: Vec<u8> = row.get(2)?;
-        AccountId::try_from(account)
-            .map_err(|_| SqliteClientError::AccountIdOutOfRange)
-            .map(|a| (a, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
+        Ok::<_, rusqlite::Error>((account, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
@@ -401,13 +396,13 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
-        (tx, output_index, account, diversifier, value, rcm, memo, nf,
+        (tx, output_index, account_id, diversifier, value, rcm, memo, nf,
          is_change, spent, commitment_tree_position,
          recipient_key_scope)
         VALUES (
             :tx,
             :output_index,
-            :account,
+            :account_id,
             :diversifier,
             :value,
             :rcm,
@@ -419,7 +414,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             :recipient_key_scope
         )
         ON CONFLICT (tx, output_index) DO UPDATE
-        SET account = :account,
+        SET account_id = :account_id,
             diversifier = :diversifier,
             value = :value,
             rcm = :rcm,
@@ -444,7 +439,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
-        ":account": u32::from(output.account_id()),
+        ":account_id": output.account_id().0,
         ":diversifier": &diversifier.0.as_ref(),
         ":value": output.note().value().inner(),
         ":rcm": &rcm.as_ref(),
@@ -518,7 +513,7 @@ pub(crate) mod tests {
             block_max_scanned, commitment_tree, parse_scope,
             sapling::select_spendable_sapling_notes, scanning::tests::test_with_canopy_birthday,
         },
-        AccountId, NoteId, ReceivedNoteId,
+        NoteId, ReceivedNoteId,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -849,7 +844,7 @@ pub(crate) mod tests {
         let to = dfvk.default_address().1.into();
 
         // Create a USK that doesn't exist in the wallet
-        let acct1 = AccountId::try_from(1).unwrap();
+        let acct1 = zip32::AccountId::try_from(1).unwrap();
         let usk1 = UnifiedSpendingKey::from_seed(&st.network(), &[1u8; 32], acct1).unwrap();
 
         // Attempting to spend with a USK that is not in the wallet results in an error
@@ -1418,13 +1413,13 @@ pub(crate) mod tests {
         // Add two accounts to the wallet.
         let seed = Secret::new([0u8; 32].to_vec());
         let birthday = AccountBirthday::from_sapling_activation(&st.network());
-        let (_, usk) = st
+        let (account, usk) = st
             .wallet_mut()
             .create_account(&seed, birthday.clone())
             .unwrap();
         let dfvk = usk.sapling().to_diversifiable_full_viewing_key();
 
-        let (_, usk2) = st
+        let (account2, usk2) = st
             .wallet_mut()
             .create_account(&seed, birthday.clone())
             .unwrap();
@@ -1436,12 +1431,9 @@ pub(crate) mod tests {
         st.scan_cached_blocks(h, 1);
 
         // Spendable balance matches total balance
-        assert_eq!(st.get_total_balance(AccountId::ZERO), value);
-        assert_eq!(st.get_spendable_balance(AccountId::ZERO, 1), value);
-        assert_eq!(
-            st.get_total_balance(AccountId::try_from(1).unwrap()),
-            NonNegativeAmount::ZERO,
-        );
+        assert_eq!(st.get_total_balance(account), value);
+        assert_eq!(st.get_spendable_balance(account, 1), value);
+        assert_eq!(st.get_total_balance(account2), NonNegativeAmount::ZERO);
 
         let amount_sent = NonNegativeAmount::from_u64(20000).unwrap();
         let amount_legacy_change = NonNegativeAmount::from_u64(30000).unwrap();
@@ -1490,18 +1482,15 @@ pub(crate) mod tests {
         let pending_change = (amount_left - amount_legacy_change).unwrap();
 
         // The "legacy change" is not counted by get_pending_change().
-        assert_eq!(st.get_pending_change(AccountId::ZERO, 1), pending_change);
+        assert_eq!(st.get_pending_change(account, 1), pending_change);
         // We spent the only note so we only have pending change.
-        assert_eq!(st.get_total_balance(AccountId::ZERO), pending_change);
+        assert_eq!(st.get_total_balance(account), pending_change);
 
         let (h, _) = st.generate_next_block_including(txid);
         st.scan_cached_blocks(h, 1);
 
-        assert_eq!(
-            st.get_total_balance(AccountId::try_from(1).unwrap()),
-            amount_sent,
-        );
-        assert_eq!(st.get_total_balance(AccountId::ZERO), amount_left);
+        assert_eq!(st.get_total_balance(account2), amount_sent,);
+        assert_eq!(st.get_total_balance(account), amount_left);
 
         st.reset();
 
@@ -1529,11 +1518,8 @@ pub(crate) mod tests {
 
         st.scan_cached_blocks(st.sapling_activation_height(), 2);
 
-        assert_eq!(
-            st.get_total_balance(AccountId::try_from(1).unwrap()),
-            amount_sent,
-        );
-        assert_eq!(st.get_total_balance(AccountId::ZERO), amount_left);
+        assert_eq!(st.get_total_balance(account2), amount_sent,);
+        assert_eq!(st.get_total_balance(account), amount_left);
     }
 
     #[test]
@@ -1752,10 +1738,11 @@ pub(crate) mod tests {
         st.scan_cached_blocks(birthday.height() + 5, 20);
 
         // Verify that the received note is not considered spendable
+        let account = st.test_account().unwrap();
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
             &st.wallet().params,
-            AccountId::ZERO,
+            account.0,
             Amount::const_from_i64(300000),
             received_tx_height + 10,
             &[],
@@ -1771,7 +1758,7 @@ pub(crate) mod tests {
         let spendable = select_spendable_sapling_notes(
             &st.wallet().conn,
             &st.wallet().params,
-            AccountId::ZERO,
+            account.0,
             Amount::const_from_i64(300000),
             received_tx_height + 10,
             &[],
