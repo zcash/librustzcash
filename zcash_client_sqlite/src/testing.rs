@@ -19,7 +19,7 @@ use sapling::{
     note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
     zip32::DiversifiableFullViewingKey,
-    Note, Nullifier, PaymentAddress,
+    Note, Nullifier,
 };
 #[allow(deprecated)]
 use zcash_client_backend::{
@@ -258,7 +258,7 @@ where
         &mut self,
         fvk: &Fvk,
         note: (Fvk::Nullifier, NonNegativeAmount),
-        to: PaymentAddress,
+        to: impl Into<Address>,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult) {
         let (height, prev_hash, initial_sapling_tree_size) = self
@@ -272,7 +272,7 @@ where
             prev_hash,
             note,
             fvk,
-            to,
+            to.into(),
             value,
             initial_sapling_tree_size,
         );
@@ -1147,7 +1147,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     prev_hash: BlockHash,
     (nf, in_value): (Fvk::Nullifier, NonNegativeAmount),
     fvk: &Fvk,
-    to: PaymentAddress,
+    to: Address,
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
 ) -> CompactBlock {
@@ -1167,8 +1167,65 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     );
 
     // Create a fake Note for the payment
-    ctx.outputs
-        .push(compact_sapling_output(params, height, to, value, fvk.sapling_ovk(), &mut rng).0);
+    match to {
+        Address::Sapling(recipient) => ctx.outputs.push(
+            compact_sapling_output(
+                params,
+                height,
+                recipient,
+                value,
+                fvk.sapling_ovk(),
+                &mut rng,
+            )
+            .0,
+        ),
+        Address::Transparent(_) => panic!("transparent addresses not supported in compact blocks"),
+        Address::Unified(ua) => {
+            // This is annoying to implement, because the protocol-aware UA type has no
+            // concept of ZIP 316 preference order.
+            let mut done = false;
+
+            #[cfg(feature = "orchard")]
+            if let Some(recipient) = ua.orchard() {
+                // Generate a dummy nullifier
+                let nullifier =
+                    orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+                        .unwrap();
+
+                ctx.actions.push(
+                    compact_orchard_action(
+                        nullifier,
+                        *recipient,
+                        value,
+                        fvk.orchard_ovk(zip32::Scope::External),
+                        &mut rng,
+                    )
+                    .0,
+                );
+                done = true;
+            }
+
+            if !done {
+                if let Some(recipient) = ua.sapling() {
+                    ctx.outputs.push(
+                        compact_sapling_output(
+                            params,
+                            height,
+                            *recipient,
+                            value,
+                            fvk.sapling_ovk(),
+                            &mut rng,
+                        )
+                        .0,
+                    );
+                    done = true;
+                }
+            }
+            if !done {
+                panic!("No supported shielded receiver to send funds to");
+            }
+        }
+    }
 
     fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
 }
