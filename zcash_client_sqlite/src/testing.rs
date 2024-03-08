@@ -792,6 +792,30 @@ pub(crate) trait TestFvk {
         initial_sapling_tree_size: u32,
         rng: &mut R,
     ) -> Self::Nullifier;
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        nf: Self::Nullifier,
+        req: AddressType,
+        value: NonNegativeAmount,
+        initial_sapling_tree_size: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        self.add_spend(ctx, nf, rng);
+        self.add_output(
+            ctx,
+            params,
+            height,
+            req,
+            value,
+            initial_sapling_tree_size,
+            rng,
+        )
+    }
 }
 
 impl TestFvk for DiversifiableFullViewingKey {
@@ -904,6 +928,36 @@ impl TestFvk for orchard::keys::FullViewingKey {
 
         let (cact, note) = compact_orchard_action(
             nullifier,
+            self.address_at(j, scope),
+            value,
+            self.orchard_ovk(scope),
+            rng,
+        );
+        ctx.actions.push(cact);
+
+        note.nullifier(self)
+    }
+
+    // Override so we can merge the spend and output into a single action.
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        _: &P,
+        _: BlockHeight,
+        nf: Self::Nullifier,
+        req: AddressType,
+        value: NonNegativeAmount,
+        _: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        let (j, scope) = match req {
+            AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
+            AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
+            AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
+        };
+
+        let (cact, note) = compact_orchard_action(
+            nf,
             self.address_at(j, scope),
             value,
             self.orchard_ovk(scope),
@@ -1100,23 +1154,21 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     let mut rng = OsRng;
     let mut ctx = fake_compact_tx(&mut rng);
 
-    // Create a fake spend
-    fvk.add_spend(&mut ctx, nf, &mut rng);
-
-    // Create a fake Note for the payment
-    ctx.outputs
-        .push(compact_sapling_output(params, height, to, value, fvk.sapling_ovk(), &mut rng).0);
-
-    // Create a fake Note for the change
-    fvk.add_output(
+    // Create a fake spend and a fake Note for the change
+    fvk.add_logical_action(
         &mut ctx,
         params,
         height,
+        nf,
         AddressType::Internal,
         (in_value - value).unwrap(),
         initial_sapling_tree_size,
         &mut rng,
     );
+
+    // Create a fake Note for the payment
+    ctx.outputs
+        .push(compact_sapling_output(params, height, to, value, fvk.sapling_ovk(), &mut rng).0);
 
     fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
 }
