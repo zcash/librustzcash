@@ -145,7 +145,6 @@ jobs:
 
   clippy:
     name: Clippy (MSRV)
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -164,7 +163,6 @@ jobs:
 
   clippy-beta:
     name: Clippy (beta)
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -235,7 +233,6 @@ jobs:
 
   fmt:
     name: Rustfmt
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
