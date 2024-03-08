@@ -1949,31 +1949,34 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
         )
         .optional()?;
 
-    let utxoid = if let Some(account) = account_id {
-        put_legacy_transparent_utxo(conn, params, output, account)?
+    if let Some(account) = account_id {
+        Ok(put_legacy_transparent_utxo(conn, params, output, account)?)
     } else {
-        // If the UTXO is received at the legacy transparent address, there may be no entry in the
-        // addresses table that can be used to tie the address to a particular account. In this
-        // case, we should look up the legacy address for all ZIP-32 account index 0 accounts and
-        // check whether it matches the address for the received UTXO, and if so then insert/update
-        // it directly.
-        let account = AccountId(0);
-        get_legacy_transparent_address(params, conn, account).and_then(|legacy_taddr| {
-            if legacy_taddr
-                .iter()
-                .any(|(taddr, _)| taddr == output.recipient_address())
-            {
-                put_legacy_transparent_utxo(conn, params, output, account)
-                    .map_err(SqliteClientError::from)
-            } else {
-                Err(SqliteClientError::AddressNotRecognized(
-                    *output.recipient_address(),
-                ))
-            }
-        })?
-    };
-
-    Ok(utxoid)
+        // If the UTXO is received at the legacy transparent address (at BIP 44 address
+        // index 0 within its particular account, which we specifically ensure is returned
+        // from `get_transparent_receivers`), there may be no entry in the addresses table
+        // that can be used to tie the address to a particular account. In this case, we
+        // look up the legacy address for each account in the wallet, and check whether it
+        // matches the address for the received UTXO; if so, insert/update it directly.
+        get_account_ids(conn)?
+            .into_iter()
+            .find_map(
+                |account| match get_legacy_transparent_address(params, conn, account) {
+                    Ok(Some((legacy_taddr, _))) if &legacy_taddr == output.recipient_address() => {
+                        Some(
+                            put_legacy_transparent_utxo(conn, params, output, account)
+                                .map_err(SqliteClientError::from),
+                        )
+                    }
+                    Ok(_) => None,
+                    Err(e) => Some(Err(e)),
+                },
+            )
+            // The UTXO was not for any of the legacy transparent addresses.
+            .unwrap_or(Err(SqliteClientError::AddressNotRecognized(
+                *output.recipient_address(),
+            )))
+    }
 }
 
 #[cfg(feature = "transparent-inputs")]
