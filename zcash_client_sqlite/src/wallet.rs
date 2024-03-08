@@ -339,6 +339,7 @@ pub(crate) fn ufvk_to_uivk<P: consensus::Parameters>(
         divk[32..].copy_from_slice(&ivk[..]);
         ivks.push(Ivk::Sapling(divk));
     }
+    #[cfg(feature = "transparent-inputs")]
     if let Some(tfvk) = ufvk.transparent() {
         let tivk = tfvk.derive_external_ivk()?;
         ivks.push(Ivk::P2pkh(tivk.serialize().try_into().map_err(|_| {
