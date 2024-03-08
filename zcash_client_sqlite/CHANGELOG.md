@@ -28,6 +28,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_sqlite::error::SqliteClientError` has changed variants:
   - Added `AddressGeneration`
   - Added `UnknownZip32Derivation`
+  - Added `BadAccountData`
   - Removed `DiversifierIndexOutOfRange`
 - `zcash_client_sqlite::wallet::init::WalletMigrationError` has added variant
   `AddressGeneration`

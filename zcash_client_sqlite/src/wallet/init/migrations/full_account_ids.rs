@@ -1,12 +1,13 @@
 use std::{collections::HashSet, rc::Rc};
 
-use rusqlite::{params, Transaction};
+use crate::wallet::{init::WalletMigrationError, ufvk_to_uivk, AccountType};
+use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
-use secrecy::SecretVec;
+use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_keys::keys::HdSeedFingerprint;
-
-use crate::wallet::init::WalletMigrationError;
+use zcash_client_backend::keys::UnifiedSpendingKey;
+use zcash_keys::keys::{HdSeedFingerprint, UnifiedFullViewingKey};
+use zcash_primitives::consensus;
 
 use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness};
 
@@ -14,11 +15,12 @@ use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uni
 /// HD accounts and all sorts of imported keys.
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x1b104345_f27e_42da_a9e3_1de22694da43);
 
-pub(crate) struct Migration {
+pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) seed: Rc<Option<SecretVec<u8>>>,
+    pub(super) params: P,
 }
 
-impl schemer::Migration for Migration {
+impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
@@ -38,12 +40,14 @@ impl schemer::Migration for Migration {
     }
 }
 
-impl RusqliteMigration for Migration {
+impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
+        let account_type_zip32 = u32::from(AccountType::Zip32);
+        let account_type_imported = u32::from(AccountType::Imported);
         transaction.execute_batch(
-            r#"
+            &format!(r#"
             PRAGMA foreign_keys = OFF;
             PRAGMA legacy_alter_table = ON;
 
@@ -52,17 +56,19 @@ impl RusqliteMigration for Migration {
                 account_type INTEGER NOT NULL DEFAULT 0,
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
-                uvk TEXT NOT NULL,
+                ufvk TEXT,
+                uivk TEXT NOT NULL,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
                 CHECK (
-                    (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL)
+                    (account_type = {account_type_zip32} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
                     OR
-                    (account_type != 0 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
+                    (account_type = {account_type_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
                 )
             );
-            CREATE UNIQUE INDEX accounts_uvk ON accounts_new ("uvk");
-            "#,
+            CREATE UNIQUE INDEX accounts_uivk ON accounts_new ("uivk");
+            CREATE UNIQUE INDEX accounts_ufvk ON accounts_new ("ufvk");
+            "#),
         )?;
 
         // We require the seed *if* there are existing accounts in the table.
@@ -71,14 +77,59 @@ impl RusqliteMigration for Migration {
         })? {
             if let Some(seed) = &self.seed.as_ref() {
                 let seed_id = HdSeedFingerprint::from_seed(seed);
-                // Although 'id' is an AUTOINCREMENT column, we'll set it explicitly to match the old account value
-                // strictly as a matter of convenience to make this migration script easier,
-                // specifically around updating tables with foreign keys to this one.
-                transaction.execute(r#"
-                INSERT INTO accounts_new (id, account_type, hd_seed_fingerprint, hd_account_index, uvk, birthday_height, recover_until_height)
-                SELECT account, 0, :seed_id, account, ufvk, birthday_height, recover_until_height
-                FROM accounts;
-            "#, params![seed_id.as_bytes()])?;
+                let mut q = transaction.prepare("SELECT * FROM accounts")?;
+                let mut rows = q.query([])?;
+                while let Some(row) = rows.next()? {
+                    let account_index: u32 = row.get("account")?;
+                    let account_type = u32::from(AccountType::Zip32);
+                    let birthday_height: u32 = row.get("birthday_height")?;
+                    let recover_until_height: Option<u32> = row.get("recover_until_height")?;
+
+                    // Although 'id' is an AUTOINCREMENT column, we'll set it explicitly to match the old account value
+                    // strictly as a matter of convenience to make this migration script easier,
+                    // specifically around updating tables with foreign keys to this one.
+                    let account_id = account_index;
+
+                    // Verify that the UFVK is as expected by re-deriving it.
+                    let ufvk: String = row.get("ufvk")?;
+                    let ufvk_parsed = UnifiedFullViewingKey::decode(&self.params, &ufvk)
+                        .map_err(|_| WalletMigrationError::CorruptedData("Bad UFVK".to_string()))?;
+                    let usk = UnifiedSpendingKey::from_seed(
+                        &self.params,
+                        seed.expose_secret(),
+                        zip32::AccountId::try_from(account_index).map_err(|_| {
+                            WalletMigrationError::CorruptedData("Bad account index".to_string())
+                        })?,
+                    )
+                    .map_err(|_| {
+                        WalletMigrationError::CorruptedData(
+                            "Unable to derive spending key from seed.".to_string(),
+                        )
+                    })?;
+                    let expected_ufvk = usk.to_unified_full_viewing_key();
+                    if ufvk != expected_ufvk.encode(&self.params) {
+                        return Err(WalletMigrationError::CorruptedData(
+                            "UFVK does not match expected value.".to_string(),
+                        ));
+                    }
+
+                    let uivk = ufvk_to_uivk(&ufvk_parsed, &self.params)
+                        .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
+
+                    transaction.execute(r#"
+                        INSERT INTO accounts_new (id, account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk, birthday_height, recover_until_height)
+                        VALUES (:account_id, :account_type, :seed_id, :account_index, :ufvk, :uivk, :birthday_height, :recover_until_height);
+                    "#, named_params![
+                        ":account_id": account_id,
+                        ":account_type": account_type,
+                        ":seed_id": seed_id.as_bytes(),
+                        ":account_index": account_index,
+                        ":ufvk": ufvk,
+                        ":uivk": uivk,
+                        ":birthday_height": birthday_height,
+                        ":recover_until_height": recover_until_height,
+                    ])?;
+                }
             } else {
                 return Err(WalletMigrationError::SeedRequired);
             }

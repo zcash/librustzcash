@@ -80,6 +80,9 @@ pub enum SqliteClientError {
     /// An error occurred deriving a spending key from a seed and a ZIP-32 account index.
     KeyDerivationError(zip32::AccountId),
 
+    /// An error occurred while processing an account due to a failure in deriving the account's keys.
+    BadAccountData(String),
+
     /// A caller attempted to initialize the accounts table with a discontinuous
     /// set of account identifiers.
     AccountIdDiscontinuity,
@@ -153,6 +156,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::AccountUnknown => write!(f, "The account with the given ID does not belong to this wallet."),
             SqliteClientError::UnknownZip32Derivation => write!(f, "ZIP-32 derivation information is not known for this account."),
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
+            SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {}", e),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
             #[cfg(feature = "transparent-inputs")]

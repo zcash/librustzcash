@@ -222,10 +222,11 @@ mod tests {
                 account_type INTEGER NOT NULL DEFAULT 0,
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
-                uvk TEXT NOT NULL,
+                ufvk TEXT,
+                uivk TEXT NOT NULL,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
-                CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL) OR (account_type != 0 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
+                CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
             )"#,
             r#"CREATE TABLE "addresses" (
                 account_id INTEGER NOT NULL,
