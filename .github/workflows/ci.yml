@@ -38,6 +38,15 @@ jobs:
         uses: ./.github/actions/prepare
         with:
           extra-features: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run tests
         run: >
           cargo test
@@ -64,6 +73,15 @@ jobs:
       - uses: actions/checkout@v4
       - id: prepare
         uses: ./.github/actions/prepare
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-latest
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
       - run: rustup override set ${{steps.toolchain.outputs.name}}
@@ -127,7 +145,6 @@ jobs:
 
   clippy:
     name: Clippy (MSRV)
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +163,6 @@ jobs:
 
   clippy-beta:
     name: Clippy (beta)
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -179,6 +195,15 @@ jobs:
       - uses: actions/checkout@v4
       - id: prepare
         uses: ./.github/actions/prepare
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Generate coverage report
         run: >
           cargo tarpaulin
@@ -208,7 +233,6 @@ jobs:
 
   fmt:
     name: Rustfmt
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
