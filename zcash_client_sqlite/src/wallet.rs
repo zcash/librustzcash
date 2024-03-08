@@ -332,12 +332,8 @@ pub(crate) fn ufvk_to_uivk<P: consensus::Parameters>(
         ivks.push(Ivk::Orchard(orchard.to_ivk(Scope::External).to_bytes()));
     }
     if let Some(sapling) = ufvk.sapling() {
-        let dk = sapling.to_bytes();
-        let ivk = sapling.to_ivk(Scope::External).to_repr();
-        let mut divk = [0u8; 64];
-        divk[..32].copy_from_slice(&dk[96..]);
-        divk[32..].copy_from_slice(&ivk[..]);
-        ivks.push(Ivk::Sapling(divk));
+        let ivk = sapling.to_external_ivk();
+        ivks.push(Ivk::Sapling(ivk.to_bytes()));
     }
     #[cfg(feature = "transparent-inputs")]
     if let Some(tfvk) = ufvk.transparent() {
