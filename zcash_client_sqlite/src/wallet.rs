@@ -453,16 +453,16 @@ pub(crate) fn add_account<P: consensus::Parameters>(
 pub(crate) fn get_current_address<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    account: AccountId,
+    account_id: AccountId,
 ) -> Result<Option<(UnifiedAddress, DiversifierIndex)>, SqliteClientError> {
     // This returns the most recently generated address.
     let addr: Option<(String, Vec<u8>)> = conn
         .query_row(
             "SELECT address, diversifier_index_be
-            FROM addresses WHERE account_id = :account
+            FROM addresses WHERE account_id = :account_id
             ORDER BY diversifier_index_be DESC
             LIMIT 1",
-            named_params![":account": account.0],
+            named_params![":account_id": account_id.0],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
