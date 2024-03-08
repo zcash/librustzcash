@@ -339,14 +339,11 @@ pub(crate) fn ufvk_to_uivk<P: consensus::Parameters>(
         divk[32..].copy_from_slice(&ivk[..]);
         ivks.push(Ivk::Sapling(divk));
     }
-    if let Some(transparent) = ufvk.transparent() {
-        ivks.push(Ivk::P2pkh(transparent.serialize().try_into().map_err(
-            |_| {
-                SqliteClientError::BadAccountData(
-                    "Unable to serialize transparent IVK.".to_string(),
-                )
-            },
-        )?));
+    if let Some(tfvk) = ufvk.transparent() {
+        let tivk = tfvk.derive_external_ivk()?;
+        ivks.push(Ivk::P2pkh(tivk.serialize().try_into().map_err(|_| {
+            SqliteClientError::BadAccountData("Unable to serialize transparent IVK.".to_string())
+        })?));
     }
 
     let uivk = zcash_address::unified::Uivk::try_from_items(ivks)
@@ -607,7 +604,7 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
     account_id: AccountId,
 ) -> Result<Option<(TransparentAddress, NonHardenedChildIndex)>, SqliteClientError> {
     use zcash_address::unified::Container;
-    use zcash_primitives::legacy::keys::AccountPubKey;
+    use zcash_primitives::legacy::keys::ExternalIvk;
 
     // Get the UIVK for the account.
     let uivk_str: Option<String> = conn
@@ -629,9 +626,9 @@ pub(crate) fn get_legacy_transparent_address<P: consensus::Parameters>(
 
         // Derive the default transparent address (if it wasn't already part of a derived UA).
         for item in uivk.items() {
-            if let Ivk::P2pkh(ivk) = item {
-                let pubkey = AccountPubKey::deserialize(&ivk)?;
-                return Ok(Some(pubkey.derive_external_ivk()?.default_address()));
+            if let Ivk::P2pkh(tivk_bytes) = item {
+                let tivk = ExternalIvk::deserialize(&tivk_bytes)?;
+                return Ok(Some(tivk.default_address()));
             }
         }
     }
