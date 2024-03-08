@@ -1,6 +1,9 @@
 name: CI checks
 
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches: master
 
 jobs:
   test:
@@ -11,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        os: [ubuntu-latest-8cores, windows-latest-8cores, macOS-latest]
         extra_flags:
           - NOT_A_PUZZLE
           - orchard
