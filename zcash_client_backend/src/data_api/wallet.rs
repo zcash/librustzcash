@@ -40,8 +40,8 @@ use super::InputSource;
 use crate::{
     address::Address,
     data_api::{
-        error::Error, DecryptedTransaction, SentTransaction, SentTransactionOutput,
-        WalletCommitmentTrees, WalletRead, WalletWrite,
+        error::Error, SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead,
+        WalletWrite,
     },
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
@@ -99,10 +99,7 @@ where
         .or_else(|| params.activation_height(NetworkUpgrade::Sapling))
         .expect("Sapling activation height must be known.");
 
-    data.store_decrypted_tx(DecryptedTransaction {
-        tx,
-        sapling_outputs: &decrypt_transaction(params, height, tx, &ufvks),
-    })?;
+    data.store_decrypted_tx(decrypt_transaction(params, height, tx, &ufvks))?;
 
     Ok(())
 }

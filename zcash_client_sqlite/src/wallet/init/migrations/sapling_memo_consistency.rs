@@ -100,11 +100,14 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 })?;
 
             let decrypted_outputs = decrypt_transaction(&self.params, block_height, &tx, &ufvks);
-            for d_out in decrypted_outputs {
+
+            // Orchard outputs were not supported as of the wallet states that could require this
+            // migration.
+            for d_out in decrypted_outputs.sapling_outputs() {
                 stmt_update_sent_memo.execute(named_params![
                     ":id_tx": id_tx,
-                    ":output_index": d_out.index,
-                    ":memo": memo_repr(Some(&d_out.memo))
+                    ":output_index": d_out.index(),
+                    ":memo": memo_repr(Some(d_out.memo()))
                 ])?;
             }
         }

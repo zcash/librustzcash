@@ -75,7 +75,7 @@ use zcash_client_backend::{
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, PoolType};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -662,35 +662,31 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         d_tx: DecryptedTransaction<AccountId>,
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
-            let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None)?;
+            let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None)?;
 
             let mut spending_account_id: Option<AccountId> = None;
-            for output in d_tx.sapling_outputs {
-                match output.transfer_type {
+            for output in d_tx.sapling_outputs() {
+                match output.transfer_type() {
                     TransferType::Outgoing | TransferType::WalletInternal => {
-                        let value = output.note.value();
-                        let recipient = if output.transfer_type == TransferType::Outgoing {
-                            Recipient::Sapling(output.note.recipient())
+                        let recipient = if output.transfer_type() == TransferType::Outgoing {
+                            //TODO: Recover the UA, if possible.
+                            Recipient::Sapling(output.note().recipient())
                         } else {
                             Recipient::InternalAccount(
-                                output.account,
-                                Note::Sapling(output.note.clone()),
+                                *output.account(),
+                                Note::Sapling(output.note().clone()),
                             )
                         };
 
                         wallet::put_sent_output(
                             wdb.conn.0,
                             &wdb.params,
-                            output.account,
+                            *output.account(),
                             tx_ref,
-                            output.index,
+                            output.index(),
                             &recipient,
-                            NonNegativeAmount::from_u64(value.inner()).map_err(|_| {
-                                SqliteClientError::CorruptedData(
-                                    "Note value is not a valid Zcash amount.".to_string(),
-                                )
-                            })?,
-                            Some(&output.memo),
+                            output.note_value(),
+                            Some(output.memo()),
                         )?;
 
                         if matches!(recipient, Recipient::InternalAccount(_, _)) {
@@ -700,12 +696,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     TransferType::Incoming => {
                         match spending_account_id {
                             Some(id) => {
-                                if id != output.account {
+                                if id != *output.account() {
                                     panic!("Unable to determine a unique account identifier for z->t spend.");
                                 }
                             }
                             None => {
-                                spending_account_id = Some(output.account);
+                                spending_account_id = Some(*output.account());
                             }
                         }
 
@@ -714,24 +710,80 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }
             }
 
+            #[cfg(feature = "orchard")]
+            #[allow(unused_assignments)] // Remove this when the todo!()s below are implemented.
+            for output in d_tx.orchard_outputs() {
+                match output.transfer_type() {
+                    TransferType::Outgoing | TransferType::WalletInternal => {
+                        let recipient = if output.transfer_type() == TransferType::Outgoing {
+                            // TODO: Recover the actual UA, if possible.
+                            Recipient::Unified(
+                                UnifiedAddress::from_receivers(
+                                    Some(output.note().recipient()),
+                                    None,
+                                    None
+                                ).expect("UA has an Orchard receiver by construction."),
+                                PoolType::Shielded(ShieldedProtocol::Orchard)
+                            )
+                        } else {
+                            Recipient::InternalAccount(
+                                *output.account(),
+                                Note::Orchard(*output.note()),
+                            )
+                        };
+
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            &wdb.params,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
+
+                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            todo!();
+                            //wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+                        }
+                    }
+                    TransferType::Incoming => {
+                        match spending_account_id {
+                            Some(id) => {
+                                if id != *output.account() {
+                                    panic!("Unable to determine a unique account identifier for z->t spend.");
+                                }
+                            }
+                            None => {
+                                spending_account_id = Some(*output.account());
+                            }
+                        }
+
+                        todo!()
+                        //wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+                    }
+                }
+            }
+
             // If any of the utxos spent in the transaction are ours, mark them as spent.
             #[cfg(feature = "transparent-inputs")]
-            for txin in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
+            for txin in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
                 wallet::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, &txin.prevout)?;
             }
 
             // If we have some transparent outputs:
-            if d_tx.tx.transparent_bundle().iter().any(|b| !b.vout.is_empty()) {
+            if d_tx.tx().transparent_bundle().iter().any(|b| !b.vout.is_empty()) {
                 let nullifiers = wdb.get_sapling_nullifiers(NullifierQuery::All)?;
                 // If the transaction contains shielded spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address.
                 if let Some((account_id, _)) = nullifiers.iter().find(
                     |(_, nf)|
-                        d_tx.tx.sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
+                        d_tx.tx().sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
                         .any(|input| nf == input.nullifier())
                 ) {
-                    for (output_index, txout) in d_tx.tx.transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
+                    for (output_index, txout) in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
                             wallet::put_sent_output(
                                 wdb.conn.0,
@@ -756,9 +808,9 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(
                 wdb.conn.0,
-                sent_tx.tx,
-                Some(sent_tx.fee_amount),
-                Some(sent_tx.created),
+                sent_tx.tx(),
+                Some(sent_tx.fee_amount()),
+                Some(sent_tx.created()),
             )?;
 
             // Mark notes as spent.
@@ -769,7 +821,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             //
             // Assumes that create_spend_to_address() will never be called in parallel, which is a
             // reasonable assumption for a light client such as a mobile phone.
-            if let Some(bundle) = sent_tx.tx.sapling_bundle() {
+            if let Some(bundle) = sent_tx.tx().sapling_bundle() {
                 for spend in bundle.shielded_spends() {
                     wallet::sapling::mark_sapling_note_spent(
                         wdb.conn.0,
@@ -780,16 +832,16 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             #[cfg(feature = "transparent-inputs")]
-            for utxo_outpoint in &sent_tx.utxos_spent {
+            for utxo_outpoint in sent_tx.utxos_spent() {
                 wallet::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, utxo_outpoint)?;
             }
 
-            for output in &sent_tx.outputs {
+            for output in sent_tx.outputs() {
                 wallet::insert_sent_output(
                     wdb.conn.0,
                     &wdb.params,
                     tx_ref,
-                    sent_tx.account,
+                    *sent_tx.account_id(),
                     output,
                 )?;
 
@@ -797,15 +849,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     Recipient::InternalAccount(account, Note::Sapling(note)) => {
                         wallet::sapling::put_received_note(
                             wdb.conn.0,
-                            &DecryptedOutput {
-                                index: output.output_index(),
-                                note: note.clone(),
-                                account: *account,
-                                memo: output
+                            &DecryptedOutput::new(
+                                output.output_index(),
+                                note.clone(),
+                                *account,
+                                output
                                     .memo()
                                     .map_or_else(MemoBytes::empty, |memo| memo.clone()),
-                                transfer_type: TransferType::WalletInternal,
-                            },
+                                TransferType::WalletInternal,
+                            ),
                             tx_ref,
                             None,
                         )?;

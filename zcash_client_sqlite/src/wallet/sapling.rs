@@ -63,19 +63,19 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
 
 impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
     fn index(&self) -> usize {
-        self.index
+        self.index()
     }
     fn account_id(&self) -> AccountId {
-        self.account
+        *self.account()
     }
     fn note(&self) -> &sapling::Note {
-        &self.note
+        self.note()
     }
     fn memo(&self) -> Option<&MemoBytes> {
-        Some(&self.memo)
+        Some(self.memo())
     }
     fn is_change(&self) -> bool {
-        self.transfer_type == TransferType::WalletInternal
+        self.transfer_type() == TransferType::WalletInternal
     }
     fn nullifier(&self) -> Option<&sapling::Nullifier> {
         None
@@ -84,7 +84,7 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
         None
     }
     fn recipient_key_scope(&self) -> Option<Scope> {
-        if self.transfer_type == TransferType::WalletInternal {
+        if self.transfer_type() == TransferType::WalletInternal {
             Some(Scope::Internal)
         } else {
             Some(Scope::External)
@@ -607,16 +607,16 @@ pub(crate) mod tests {
         let ufvks = [(account, usk.to_unified_full_viewing_key())]
             .into_iter()
             .collect();
-        let decrypted_outputs = decrypt_transaction(&st.network(), h + 1, &tx, &ufvks);
-        assert_eq!(decrypted_outputs.len(), 2);
+        let d_tx = decrypt_transaction(&st.network(), h + 1, &tx, &ufvks);
+        assert_eq!(d_tx.sapling_outputs().len(), 2);
 
         let mut found_tx_change_memo = false;
         let mut found_tx_empty_memo = false;
-        for output in decrypted_outputs {
-            if output.memo == change_memo.clone().into() {
+        for output in d_tx.sapling_outputs() {
+            if Memo::try_from(output.memo()).unwrap() == change_memo {
                 found_tx_change_memo = true
             }
-            if output.memo == Memo::Empty.into() {
+            if Memo::try_from(output.memo()).unwrap() == Memo::Empty {
                 found_tx_empty_memo = true
             }
         }
