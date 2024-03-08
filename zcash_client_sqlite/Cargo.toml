@@ -70,6 +70,7 @@ maybe-rayon.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
+pasta_curves.workspace = true
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 nonempty.workspace = true
 proptest.workspace = true

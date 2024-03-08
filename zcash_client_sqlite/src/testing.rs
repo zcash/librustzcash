@@ -72,6 +72,14 @@ use crate::{
 
 use super::BlockDb;
 
+#[cfg(feature = "orchard")]
+use {
+    group::ff::{Field, PrimeField},
+    orchard::note_encryption::{OrchardDomain, OrchardNoteEncryption},
+    pasta_curves::pallas,
+    zcash_client_backend::proto::compact_formats::CompactOrchardAction,
+};
+
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::data_api::wallet::{
@@ -763,9 +771,18 @@ pub(crate) trait TestFvk {
 
     fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey>;
 
-    fn add_compact_spend(&self, ctx: &mut CompactTx, nf: Self::Nullifier);
+    #[cfg(feature = "orchard")]
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey>;
 
-    fn add_compact_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nf: Self::Nullifier,
+        rng: &mut R,
+    );
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -784,12 +801,22 @@ impl TestFvk for DiversifiableFullViewingKey {
         Some(self.fvk().ovk)
     }
 
-    fn add_compact_spend(&self, ctx: &mut CompactTx, nf: Self::Nullifier) {
+    #[cfg(feature = "orchard")]
+    fn orchard_ovk(&self, _: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+        None
+    }
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nf: Self::Nullifier,
+        _: &mut R,
+    ) {
         let cspend = CompactSaplingSpend { nf: nf.to_vec() };
         ctx.spends.push(cspend);
     }
 
-    fn add_compact_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
         &self,
         ctx: &mut CompactTx,
         params: &P,
@@ -812,6 +839,79 @@ impl TestFvk for DiversifiableFullViewingKey {
         ctx.outputs.push(cout);
 
         note.nf(&self.fvk().vk.nk, position as u64)
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl TestFvk for orchard::keys::FullViewingKey {
+    type Nullifier = orchard::note::Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+        None
+    }
+
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+        Some(self.to_ovk(scope))
+    }
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nf: Self::Nullifier,
+        rng: &mut R,
+    ) {
+        // Generate a dummy recipient.
+        let recipient = loop {
+            let mut bytes = [0; 32];
+            rng.fill_bytes(&mut bytes);
+            let sk = orchard::keys::SpendingKey::from_bytes(bytes);
+            if sk.is_some().into() {
+                break orchard::keys::FullViewingKey::from(&sk.unwrap())
+                    .address_at(0u32, zip32::Scope::External);
+            }
+        };
+
+        let (cact, _) = compact_orchard_action(
+            nf,
+            recipient,
+            NonNegativeAmount::ZERO,
+            self.orchard_ovk(zip32::Scope::Internal),
+            rng,
+        );
+        ctx.actions.push(cact);
+    }
+
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        _: &P,
+        _: BlockHeight,
+        req: AddressType,
+        value: NonNegativeAmount,
+        _: u32,
+        mut rng: &mut R,
+    ) -> Self::Nullifier {
+        // Generate a dummy nullifier
+        let nullifier =
+            orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+                .unwrap();
+
+        let (j, scope) = match req {
+            AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
+            AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
+            AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
+        };
+
+        let (cact, note) = compact_orchard_action(
+            nullifier,
+            self.address_at(j, scope),
+            value,
+            self.orchard_ovk(scope),
+            rng,
+        );
+        ctx.actions.push(cact);
+
+        note.nullifier(self)
     }
 }
 
@@ -854,6 +954,54 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
     )
 }
 
+/// Creates a `CompactOrchardAction` at the given height paying the given recipient.
+///
+/// Returns the `CompactOrchardAction` and the new note.
+#[cfg(feature = "orchard")]
+fn compact_orchard_action<R: RngCore + CryptoRng>(
+    nullifier: orchard::note::Nullifier,
+    recipient: orchard::Address,
+    value: NonNegativeAmount,
+    ovk: Option<orchard::keys::OutgoingViewingKey>,
+    rng: &mut R,
+) -> (CompactOrchardAction, orchard::Note) {
+    let nf = nullifier.to_bytes().to_vec();
+
+    let rseed = {
+        loop {
+            let mut bytes = [0; 32];
+            rng.fill_bytes(&mut bytes);
+            let rseed = orchard::note::RandomSeed::from_bytes(bytes, &nullifier);
+            if rseed.is_some().into() {
+                break rseed.unwrap();
+            }
+        }
+    };
+    let note = orchard::Note::from_parts(
+        recipient,
+        orchard::value::NoteValue::from_raw(value.into_u64()),
+        nullifier,
+        rseed,
+    )
+    .unwrap();
+    let encryptor = OrchardNoteEncryption::new(ovk, note, *MemoBytes::empty().as_array());
+    let cmx = orchard::note::ExtractedNoteCommitment::from(note.commitment())
+        .to_bytes()
+        .to_vec();
+    let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0.to_vec();
+    let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
+    (
+        CompactOrchardAction {
+            nullifier: nf,
+            cmx,
+            ephemeral_key,
+            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        },
+        note,
+    )
+}
+
 /// Creates a fake `CompactTx` with a random transaction ID and no spends or outputs.
 fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
     let mut ctx = CompactTx::default();
@@ -880,7 +1028,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
 
     // Create a fake CompactBlock containing the note
     let mut ctx = fake_compact_tx(&mut rng);
-    let nf = fvk.add_compact_output(
+    let nf = fvk.add_output(
         &mut ctx,
         params,
         height,
@@ -953,14 +1101,14 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     let mut ctx = fake_compact_tx(&mut rng);
 
     // Create a fake spend
-    fvk.add_compact_spend(&mut ctx, nf);
+    fvk.add_spend(&mut ctx, nf, &mut rng);
 
     // Create a fake Note for the payment
     ctx.outputs
         .push(compact_sapling_output(params, height, to, value, fvk.sapling_ovk(), &mut rng).0);
 
     // Create a fake Note for the change
-    fvk.add_compact_output(
+    fvk.add_output(
         &mut ctx,
         params,
         height,

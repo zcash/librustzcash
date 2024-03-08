@@ -3066,6 +3066,7 @@ dependencies = [
  "maybe-rayon",
  "nonempty",
  "orchard",
+ "pasta_curves",
  "proptest",
  "prost",
  "rand_core",
