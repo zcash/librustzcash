@@ -146,11 +146,10 @@
 use std::ops::Range;
 
 use subtle::ConditionallySelectable;
-use tokio::task::JoinHandle;
 use zcash_primitives::consensus::{self, BlockHeight};
 
 use crate::{
-    data_api::{scanning::ScanRange, NullifierQuery, WalletWrite},
+    data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
 };
@@ -159,6 +158,9 @@ pub mod error;
 use error::Error;
 
 use super::WalletRead;
+
+#[cfg(feature = "sync")]
+use {crate::data_api::scanning::ScanRange, tokio::task::JoinHandle};
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -365,6 +367,7 @@ pub trait BlockSource {
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
 ///    assert_eq!(block_cache.cache_tip(None).unwrap(), None);
 /// ```
+#[cfg(feature = "sync")]
 pub trait BlockCache: BlockSource + Send + Sync {
     /// Returns a range of compact blocks from the cache.
     fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error>;

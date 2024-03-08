@@ -114,9 +114,6 @@ aes = "0.8"
 fpe = "0.6"
 zip32 = "0.1"
 
-# Runtime
-tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
-
 [profile.release]
 lto = true
 panic = 'abort'
