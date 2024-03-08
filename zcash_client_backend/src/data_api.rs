@@ -497,7 +497,7 @@ pub trait WalletRead {
     /// Returns:
     /// - `Ok(true)` if the viewing key for the specified account can be derived from the
     ///   provided seed.
-    /// - `Ok(false)` if the derived seed does not match, or the specified account is not
+    /// - `Ok(false)` if the derived viewing key does not match, or the specified account is not
     ///   present in the database.
     /// - `Err(_)` if a Unified Spending Key cannot be derived from the seed for the
     ///   specified account or the account has no known ZIP-32 derivation.

@@ -267,6 +267,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     ) -> Result<bool, Self::Error> {
         if let Some(account) = wallet::get_account(self, account_id)? {
             if let Account::Zip32(hdaccount) = account {
+                let seed_fingerprint_match =
+                    HdSeedFingerprint::from_seed(seed) == *hdaccount.hd_seed_fingerprint();
+
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
                     &seed.expose_secret()[..],
@@ -276,12 +279,22 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
                 // Keys are not comparable with `Eq`, but addresses are, so we derive what should
                 // be equivalent addresses for each key and use those to check for key equality.
-                UnifiedAddressRequest::all().map_or(Ok(false), |ua_request| {
-                    Ok(usk
-                        .to_unified_full_viewing_key()
-                        .default_address(ua_request)?
-                        == hdaccount.ufvk().default_address(ua_request)?)
-                })
+                let ufvk_match = UnifiedAddressRequest::all().map_or(
+                    Ok::<_, Self::Error>(false),
+                    |ua_request| {
+                        Ok(usk
+                            .to_unified_full_viewing_key()
+                            .default_address(ua_request)?
+                            == hdaccount.ufvk().default_address(ua_request)?)
+                    },
+                )?;
+
+                if seed_fingerprint_match != ufvk_match {
+                    // If these mismatch, it suggests database corruption.
+                    return Err(SqliteClientError::CorruptedData(format!("Seed fingerprint match: {seed_fingerprint_match}, ufvk match: {ufvk_match}")));
+                }
+
+                Ok(seed_fingerprint_match && ufvk_match)
             } else {
                 Err(SqliteClientError::UnknownZip32Derivation)
             }
