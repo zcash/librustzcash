@@ -10,7 +10,7 @@ use zcash_client_backend::{
     data_api::NullifierQuery,
     keys::UnifiedFullViewingKey,
     wallet::{Note, ReceivedNote, WalletSaplingOutput},
-    DecryptedOutput, TransferType,
+    DecryptedOutput, ShieldedProtocol, TransferType,
 };
 use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
 use zcash_protocol::{
@@ -97,7 +97,7 @@ fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<ReceivedNote<ReceivedNoteId, Note>, SqliteClientError> {
-    let note_id = ReceivedNoteId(row.get(0)?);
+    let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
     let diversifier = {
@@ -299,7 +299,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
-    let excluded: Vec<Value> = exclude.iter().map(|n| Value::from(n.0)).collect();
+    let excluded: Vec<Value> = exclude.iter().map(|n| Value::from(n.1)).collect();
     let excluded_ptr = Rc::new(excluded);
 
     let notes = stmt_select_notes.query_and_then(
@@ -329,7 +329,7 @@ pub(crate) fn get_sapling_nullifiers(
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = match query {
         NullifierQuery::Unspent => conn.prepare(
-            "SELECT rn.id, rn.account_id, rn.nf
+            "SELECT rn.account_id, rn.nf
              FROM sapling_received_notes rn
              LEFT OUTER JOIN transactions tx
              ON tx.id_tx = rn.spent
@@ -337,15 +337,15 @@ pub(crate) fn get_sapling_nullifiers(
              AND nf IS NOT NULL",
         ),
         NullifierQuery::All => conn.prepare(
-            "SELECT rn.id, rn.account_id, rn.nf
+            "SELECT rn.account_id, rn.nf
              FROM sapling_received_notes rn
              WHERE nf IS NOT NULL",
         ),
     }?;
 
     let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account = AccountId(row.get(1)?);
-        let nf_bytes: Vec<u8> = row.get(2)?;
+        let account = AccountId(row.get(0)?);
+        let nf_bytes: Vec<u8> = row.get(1)?;
         Ok::<_, rusqlite::Error>((account, sapling::Nullifier::from_slice(&nf_bytes).unwrap()))
     })?;
 

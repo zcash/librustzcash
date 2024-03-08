@@ -132,14 +132,14 @@ impl ConditionallySelectable for AccountId {
     }
 }
 
-/// A newtype wrapper for received note identifiers.
+/// An opaque type for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReceivedNoteId(pub(crate) i64);
+pub struct ReceivedNoteId(pub(crate) ShieldedProtocol, pub(crate) i64);
 
 impl fmt::Display for ReceivedNoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ReceivedNoteId(id) => write!(f, "Received Note {}", id),
+            ReceivedNoteId(protocol, id) => write!(f, "Received {:?} Note: {}", protocol, id),
         }
     }
 }
