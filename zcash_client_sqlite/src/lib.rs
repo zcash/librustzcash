@@ -523,6 +523,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 )
             });
             let mut sapling_commitments = vec![];
+            #[cfg(feature = "orchard")]
+            let mut orchard_commitments = vec![];
             let mut last_scanned_height = None;
             let mut note_positions = vec![];
             for block in blocks.into_iter() {
@@ -541,6 +543,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     block.block_time(),
                     block.sapling().final_tree_size(),
                     block.sapling().commitments().len().try_into().unwrap(),
+                    #[cfg(feature = "orchard")]
+                    block.orchard().final_tree_size(),
+                    #[cfg(feature = "orchard")]
+                    block.orchard().commitments().len().try_into().unwrap(),
                 )?;
 
                 for tx in block.transactions() {
@@ -635,6 +641,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 last_scanned_height = Some(block.height());
                 let block_commitments = block.into_commitments();
                 sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
+                #[cfg(feature = "orchard")]
+                orchard_commitments.extend(block_commitments.orchard.into_iter().map(Some));
             }
 
             // Prune the nullifier map of entries we no longer need.
@@ -652,31 +660,63 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             {
                 // Create subtrees from the note commitments in parallel.
                 const CHUNK_SIZE: usize = 1024;
-                let subtrees = sapling_commitments
-                    .par_chunks_mut(CHUNK_SIZE)
-                    .enumerate()
-                    .filter_map(|(i, chunk)| {
-                        let start = start_position + (i * CHUNK_SIZE) as u64;
-                        let end = start + chunk.len() as u64;
+                {
+                    let sapling_subtrees = sapling_commitments
+                        .par_chunks_mut(CHUNK_SIZE)
+                        .enumerate()
+                        .filter_map(|(i, chunk)| {
+                            let start = start_position + (i * CHUNK_SIZE) as u64;
+                            let end = start + chunk.len() as u64;
 
-                        shardtree::LocatedTree::from_iter(
-                            start..end,
-                            SAPLING_SHARD_HEIGHT.into(),
-                            chunk.iter_mut().map(|n| n.take().expect("always Some")),
-                        )
-                    })
-                    .map(|res| (res.subtree, res.checkpoints))
-                    .collect::<Vec<_>>();
+                            shardtree::LocatedTree::from_iter(
+                                start..end,
+                                SAPLING_SHARD_HEIGHT.into(),
+                                chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                            )
+                        })
+                        .map(|res| (res.subtree, res.checkpoints))
+                        .collect::<Vec<_>>();
 
-                // Update the Sapling note commitment tree with all newly read note commitments
-                let mut subtrees = subtrees.into_iter();
-                wdb.with_sapling_tree_mut::<_, _, Self::Error>(move |sapling_tree| {
-                    for (tree, checkpoints) in &mut subtrees {
-                        sapling_tree.insert_tree(tree, checkpoints)?;
-                    }
+                    // Update the Sapling note commitment tree with all newly read note commitments
+                    let mut sapling_subtrees = sapling_subtrees.into_iter();
+                    wdb.with_sapling_tree_mut::<_, _, Self::Error>(move |sapling_tree| {
+                        for (tree, checkpoints) in &mut sapling_subtrees {
+                            sapling_tree.insert_tree(tree, checkpoints)?;
+                        }
 
-                    Ok(())
-                })?;
+                        Ok(())
+                    })?;
+                }
+
+                // Create subtrees from the note commitments in parallel.
+                #[cfg(feature = "orchard")]
+                {
+                    let orchard_subtrees = orchard_commitments
+                        .par_chunks_mut(CHUNK_SIZE)
+                        .enumerate()
+                        .filter_map(|(i, chunk)| {
+                            let start = start_position + (i * CHUNK_SIZE) as u64;
+                            let end = start + chunk.len() as u64;
+
+                            shardtree::LocatedTree::from_iter(
+                                start..end,
+                                ORCHARD_SHARD_HEIGHT.into(),
+                                chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                            )
+                        })
+                        .map(|res| (res.subtree, res.checkpoints))
+                        .collect::<Vec<_>>();
+
+                    // Update the Sapling note commitment tree with all newly read note commitments
+                    let mut orchard_subtrees = orchard_subtrees.into_iter();
+                    wdb.with_orchard_tree_mut::<_, _, Self::Error>(move |orchard_tree| {
+                        for (tree, checkpoints) in &mut orchard_subtrees {
+                            orchard_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        Ok(())
+                    })?;
+                }
 
                 // Update now-expired transactions that didn't get mined.
                 wallet::update_expired_notes(wdb.conn.0, last_scanned_height)?;

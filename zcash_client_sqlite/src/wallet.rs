@@ -1834,6 +1834,7 @@ pub(crate) fn get_account_ids(
 }
 
 /// Inserts information about a scanned block into the database.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn put_block(
     conn: &rusqlite::Transaction<'_>,
     block_height: BlockHeight,
@@ -1841,6 +1842,8 @@ pub(crate) fn put_block(
     block_time: u32,
     sapling_commitment_tree_size: u32,
     sapling_output_count: u32,
+    #[cfg(feature = "orchard")] orchard_commitment_tree_size: u32,
+    #[cfg(feature = "orchard")] orchard_action_count: u32,
 ) -> Result<(), SqliteClientError> {
     let block_hash_data = conn
         .query_row(
@@ -1871,7 +1874,9 @@ pub(crate) fn put_block(
             time,
             sapling_commitment_tree_size,
             sapling_output_count,
-            sapling_tree
+            sapling_tree,
+            orchard_commitment_tree_size,
+            orchard_action_count
         )
         VALUES (
             :height,
@@ -1879,14 +1884,23 @@ pub(crate) fn put_block(
             :block_time,
             :sapling_commitment_tree_size,
             :sapling_output_count,
-            x'00'
+            x'00',
+            :orchard_commitment_tree_size,
+            :orchard_action_count
         )
         ON CONFLICT (height) DO UPDATE
         SET hash = :hash,
             time = :block_time,
             sapling_commitment_tree_size = :sapling_commitment_tree_size,
-            sapling_output_count = :sapling_output_count",
+            sapling_output_count = :sapling_output_count,
+            orchard_commitment_tree_size = :orchard_commitment_tree_size,
+            orchard_action_count = :orchard_action_count",
     )?;
+
+    #[cfg(not(feature = "orchard"))]
+    let orchard_commitment_tree_size: Option<u32> = None;
+    #[cfg(not(feature = "orchard"))]
+    let orchard_action_count: Option<u32> = None;
 
     stmt_upsert_block.execute(named_params![
         ":height": u32::from(block_height),
@@ -1894,6 +1908,8 @@ pub(crate) fn put_block(
         ":block_time": block_time,
         ":sapling_commitment_tree_size": sapling_commitment_tree_size,
         ":sapling_output_count": sapling_output_count,
+        ":orchard_commitment_tree_size": orchard_commitment_tree_size,
+        ":orchard_action_count": orchard_action_count,
     ])?;
 
     Ok(())
