@@ -32,19 +32,20 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
+use incrementalmerkletree::Position;
 use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
+use shardtree::{error::ShardTreeError, ShardTree};
 use std::{
     borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
     path::Path,
 };
-
-use incrementalmerkletree::Position;
-use shardtree::{error::ShardTreeError, ShardTree};
+use subtle::ConditionallySelectable;
+use zcash_keys::keys::HdSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -53,7 +54,7 @@ use zcash_primitives::{
         components::amount::{Amount, NonNegativeAmount},
         Transaction, TxId,
     },
-    zip32::{AccountId, DiversifierIndex, Scope},
+    zip32::{self, DiversifierIndex, Scope},
 };
 
 use zcash_client_backend::{
@@ -98,7 +99,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    SubtreeScanProgress,
+    Account, HdSeedAccount, SubtreeScanProgress,
 };
 
 #[cfg(test)]
@@ -121,6 +122,18 @@ pub(crate) const UA_TRANSPARENT: bool = true;
 
 pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
     UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+
+/// The ID type for accounts.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub struct AccountId(u32);
+
+impl ConditionallySelectable for AccountId {
+    fn conditional_select(a: &Self, b: &Self, choice: subtle::Choice) -> Self {
+        AccountId(ConditionallySelectable::conditional_select(
+            &a.0, &b.0, choice,
+        ))
+    }
+}
 
 /// A newtype wrapper for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -252,25 +265,43 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account_id: Self::AccountId,
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
-        self.get_unified_full_viewing_keys().and_then(|keys| {
-            keys.get(&account_id).map_or(Ok(false), |ufvk| {
+        if let Some(account) = wallet::get_account(self, account_id)? {
+            if let Account::Zip32(hdaccount) = account {
+                let seed_fingerprint_match =
+                    HdSeedFingerprint::from_seed(seed) == *hdaccount.hd_seed_fingerprint();
+
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
                     &seed.expose_secret()[..],
-                    account_id,
+                    hdaccount.account_index(),
                 )
-                .map_err(|_| SqliteClientError::KeyDerivationError(account_id))?;
+                .map_err(|_| SqliteClientError::KeyDerivationError(hdaccount.account_index()))?;
 
                 // Keys are not comparable with `Eq`, but addresses are, so we derive what should
                 // be equivalent addresses for each key and use those to check for key equality.
-                UnifiedAddressRequest::all().map_or(Ok(false), |ua_request| {
-                    Ok(usk
-                        .to_unified_full_viewing_key()
-                        .default_address(ua_request)?
-                        == ufvk.default_address(ua_request)?)
-                })
-            })
-        })
+                let ufvk_match = UnifiedAddressRequest::all().map_or(
+                    Ok::<_, Self::Error>(false),
+                    |ua_request| {
+                        Ok(usk
+                            .to_unified_full_viewing_key()
+                            .default_address(ua_request)?
+                            == hdaccount.ufvk().default_address(ua_request)?)
+                    },
+                )?;
+
+                if seed_fingerprint_match != ufvk_match {
+                    // If these mismatch, it suggests database corruption.
+                    return Err(SqliteClientError::CorruptedData(format!("Seed fingerprint match: {seed_fingerprint_match}, ufvk match: {ufvk_match}")));
+                }
+
+                Ok(seed_fingerprint_match && ufvk_match)
+            } else {
+                Err(SqliteClientError::UnknownZip32Derivation)
+            }
+        } else {
+            // Missing account is documented to return false.
+            Ok(false)
+        }
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
@@ -426,18 +457,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let account = wallet::get_max_account_id(wdb.conn.0)?
+            let seed_id = HdSeedFingerprint::from_seed(seed);
+            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_id)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
-                .unwrap_or(AccountId::ZERO);
+                .unwrap_or(zip32::AccountId::ZERO);
 
-            let usk = UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account)
-                .map_err(|_| SqliteClientError::KeyDerivationError(account))?;
+            let usk =
+                UnifiedSpendingKey::from_seed(&wdb.params, seed.expose_secret(), account_index)
+                    .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            wallet::add_account(wdb.conn.0, &wdb.params, account, &ufvk, birthday)?;
+            let account = Account::Zip32(HdSeedAccount::new(seed_id, account_index, ufvk));
+            let account_id = wallet::add_account(wdb.conn.0, &wdb.params, account, birthday)?;
 
-            Ok((account, usk))
+            Ok((account_id, usk))
         })
     }
 
@@ -1233,8 +1267,7 @@ mod tests {
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
 
-    use crate::{testing::TestBuilder, DEFAULT_UA_REQUEST};
-    use zip32::AccountId;
+    use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
 
     #[cfg(feature = "unstable")]
     use {
@@ -1257,7 +1290,7 @@ mod tests {
 
         // check that passing an invalid account results in a failure
         assert!({
-            let account = AccountId::try_from(1u32).unwrap();
+            let account = AccountId(3);
             !st.wallet()
                 .validate_seed(account, st.test_seed().unwrap())
                 .unwrap()
@@ -1277,20 +1310,20 @@ mod tests {
         let mut st = TestBuilder::new()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
+        let account = st.test_account().unwrap();
 
-        let account = AccountId::ZERO;
-        let current_addr = st.wallet().get_current_address(account).unwrap();
+        let current_addr = st.wallet().get_current_address(account.0).unwrap();
         assert!(current_addr.is_some());
 
         // TODO: Add Orchard
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account, DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.0, DEFAULT_UA_REQUEST)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = st.wallet().get_current_address(account).unwrap();
+        let addr2_cur = st.wallet().get_current_address(account.0).unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1302,15 +1335,13 @@ mod tests {
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
+        let account = st.test_account().unwrap();
 
         let (_, usk, _) = st.test_account().unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (taddr, _) = usk.default_transparent_address();
 
-        let receivers = st
-            .wallet()
-            .get_transparent_receivers(AccountId::ZERO)
-            .unwrap();
+        let receivers = st.wallet().get_transparent_receivers(account.0).unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
@@ -1329,6 +1360,7 @@ mod tests {
     #[test]
     pub(crate) fn fsblockdb_api() {
         use zcash_primitives::consensus::NetworkConstants;
+        use zcash_primitives::zip32;
 
         let mut st = TestBuilder::new().with_fs_block_cache().build();
 
@@ -1337,7 +1369,7 @@ mod tests {
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
-        let account = AccountId::ZERO;
+        let account = zip32::AccountId::ZERO;
         let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(

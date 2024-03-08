@@ -43,6 +43,7 @@ memuse.workspace = true
 tracing.workspace = true
 
 # - Secret management
+secrecy.workspace = true
 subtle.workspace = true
 
 # - Shielded protocols
@@ -61,6 +62,9 @@ document-features.workspace = true
 
 # - Encodings
 byteorder = { workspace = true, optional = true }
+
+# - Digests
+blake2b_simd = { workspace = true }
 
 [dev-dependencies]
 hex.workspace = true

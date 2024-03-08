@@ -36,21 +36,6 @@ use sapling::{
 };
 use std::num::NonZeroU32;
 
-use zcash_primitives::{
-    consensus::{self, BlockHeight, NetworkUpgrade},
-    memo::MemoBytes,
-    transaction::{
-        builder::{BuildConfig, BuildResult, Builder},
-        components::{
-            amount::{Amount, NonNegativeAmount},
-            sapling::zip212_enforcement,
-        },
-        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
-        Transaction, TxId,
-    },
-    zip32::Scope,
-};
-
 use super::InputSource;
 use crate::{
     address::Address,
@@ -65,6 +50,20 @@ use crate::{
     wallet::{Note, OvkPolicy, Recipient},
     zip321::{self, Payment},
     PoolType, ShieldedProtocol,
+};
+use zcash_primitives::{
+    consensus::{self, BlockHeight, NetworkUpgrade},
+    memo::MemoBytes,
+    transaction::{
+        builder::{BuildConfig, BuildResult, Builder},
+        components::{
+            amount::{Amount, NonNegativeAmount},
+            sapling::zip212_enforcement,
+        },
+        fees::{zip317::FeeError as Zip317FeeError, FeeRule, StandardFeeRule},
+        Transaction, TxId,
+    },
+    zip32::Scope,
 };
 
 #[cfg(feature = "transparent-inputs")]
