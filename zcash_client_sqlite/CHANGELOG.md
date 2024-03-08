@@ -31,8 +31,10 @@ and this library adheres to Rust's notion of
   - Added `UnknownZip32Derivation`
   - Added `BadAccountData`
   - Removed `DiversifierIndexOutOfRange`
-- `zcash_client_sqlite::wallet::init::WalletMigrationError` has added variant
-  `AddressGeneration`
+- `zcash_client_sqlite::wallet`:
+  - `init::WalletMigrationError` has added variants:
+    - `WalletMigrationError::AddressGeneration`
+    - `WalletMigrationError::CannotRevert`
 
 ## [0.9.0] - 2024-03-01
 

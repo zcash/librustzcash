@@ -36,6 +36,9 @@ pub enum WalletMigrationError {
 
     /// Wrapper for commitment tree invariant violations
     CommitmentTree(ShardTreeError<commitment_tree::Error>),
+
+    /// Reverting the specified migration is not supported.
+    CannotRevert(Uuid),
 }
 
 impl From<rusqlite::Error> for WalletMigrationError {
@@ -79,6 +82,9 @@ impl fmt::Display for WalletMigrationError {
             WalletMigrationError::CommitmentTree(e) => write!(f, "Commitment tree error: {:?}", e),
             WalletMigrationError::AddressGeneration(e) => {
                 write!(f, "Address generation error: {:?}", e)
+            }
+            WalletMigrationError::CannotRevert(uuid) => {
+                write!(f, "Reverting migration {} is not supported", uuid)
             }
         }
     }
