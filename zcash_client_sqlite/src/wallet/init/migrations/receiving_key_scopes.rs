@@ -290,14 +290,11 @@ mod tests {
     use rusqlite::{named_params, params, Connection};
     use tempfile::NamedTempFile;
     use zcash_client_backend::{
-        data_api::{
-            BlockMetadata, DecryptedTransaction, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT,
-        },
+        data_api::{BlockMetadata, WalletCommitmentTrees, SAPLING_SHARD_HEIGHT},
         decrypt_transaction,
         proto::compact_formats::{CompactBlock, CompactTx},
         scanning::{scan_block, Nullifiers, ScanningKeys},
-        wallet::Recipient,
-        PoolType, ShieldedProtocol, TransferType,
+        TransferType,
     };
     use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
     use zcash_primitives::{
@@ -496,34 +493,26 @@ mod tests {
 
         // We can't use `decrypt_and_store_transaction` because we haven't migrated yet.
         // Replicate its relevant innards here.
-        let d_tx = DecryptedTransaction {
+        let d_tx = decrypt_transaction(
+            &params,
+            height,
             tx,
-            sapling_outputs: &decrypt_transaction(
-                &params,
-                height,
-                tx,
-                &[(account_id, ufvk0)].into_iter().collect(),
-            ),
-        };
+            &[(account_id, ufvk0)].into_iter().collect(),
+        );
+
         db_data
             .transactionally::<_, _, rusqlite::Error>(|wdb| {
-                let tx_ref = crate::wallet::put_tx_data(wdb.conn.0, d_tx.tx, None, None).unwrap();
+                let tx_ref = crate::wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None).unwrap();
 
                 let mut spending_account_id: Option<AccountId> = None;
-                for output in d_tx.sapling_outputs {
-                    match output.transfer_type {
-                        TransferType::Outgoing | TransferType::WalletInternal => {
-                            let recipient = if output.transfer_type == TransferType::Outgoing {
-                                Recipient::Sapling(output.note.recipient())
-                            } else {
-                                Recipient::InternalAccount(
-                                    output.account,
-                                    PoolType::Shielded(ShieldedProtocol::Sapling),
-                                )
-                            };
 
+                // Orchard outputs were not supported as of the wallet states that could require this
+                // migration.
+                for output in d_tx.sapling_outputs() {
+                    match output.transfer_type() {
+                        TransferType::Outgoing | TransferType::WalletInternal => {
                             // Don't need to bother with sent outputs for this test.
-                            if matches!(recipient, Recipient::InternalAccount(_, _)) {
+                            if output.transfer_type() != TransferType::Outgoing {
                                 put_received_note_before_migration(
                                     wdb.conn.0, output, tx_ref, None,
                                 )
@@ -532,11 +521,12 @@ mod tests {
                         }
                         TransferType::Incoming => {
                             match spending_account_id {
-                                Some(id) => assert_eq!(id, output.account),
+                                Some(id) => assert_eq!(id, *output.account()),
                                 None => {
-                                    spending_account_id = Some(output.account);
+                                    spending_account_id = Some(*output.account());
                                 }
                             }
+
                             put_received_note_before_migration(wdb.conn.0, output, tx_ref, None)
                                 .unwrap();
                         }

@@ -11,10 +11,10 @@ use zcash_client_backend::{
     wallet::{Note, ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, TransferType,
 };
-use zcash_primitives::{
+use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
+use zcash_protocol::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::{components::Amount, TxId},
 };
 use zip32::Scope;
 
@@ -63,19 +63,19 @@ impl ReceivedSaplingOutput for WalletSaplingOutput<AccountId> {
 
 impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
     fn index(&self) -> usize {
-        self.index
+        self.index()
     }
     fn account_id(&self) -> AccountId {
-        self.account
+        *self.account()
     }
     fn note(&self) -> &sapling::Note {
-        &self.note
+        self.note()
     }
     fn memo(&self) -> Option<&MemoBytes> {
-        Some(&self.memo)
+        Some(self.memo())
     }
     fn is_change(&self) -> bool {
-        self.transfer_type == TransferType::WalletInternal
+        self.transfer_type() == TransferType::WalletInternal
     }
     fn nullifier(&self) -> Option<&sapling::Nullifier> {
         None
@@ -84,7 +84,7 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
         None
     }
     fn recipient_key_scope(&self) -> Option<Scope> {
-        if self.transfer_type == TransferType::WalletInternal {
+        if self.transfer_type() == TransferType::WalletInternal {
             Some(Scope::Internal)
         } else {
             Some(Scope::External)
@@ -231,7 +231,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
     account: AccountId,
-    target_value: Amount,
+    target_value: NonNegativeAmount,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
@@ -305,7 +305,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         named_params![
             ":account": account.0,
             ":anchor_height": &u32::from(anchor_height),
-            ":target_value": &i64::from(target_value),
+            ":target_value": &u64::from(target_value),
             ":exclude": &excluded_ptr,
             ":wallet_birthday": u32::from(birthday_height)
         ],
@@ -480,7 +480,7 @@ pub(crate) mod tests {
         legacy::TransparentAddress,
         memo::{Memo, MemoBytes},
         transaction::{
-            components::{amount::NonNegativeAmount, sapling::zip212_enforcement, Amount},
+            components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
             fees::{
                 fixed::FeeRule as FixedFeeRule, zip317::FeeError as Zip317FeeError, StandardFeeRule,
             },
@@ -607,16 +607,16 @@ pub(crate) mod tests {
         let ufvks = [(account, usk.to_unified_full_viewing_key())]
             .into_iter()
             .collect();
-        let decrypted_outputs = decrypt_transaction(&st.network(), h + 1, &tx, &ufvks);
-        assert_eq!(decrypted_outputs.len(), 2);
+        let d_tx = decrypt_transaction(&st.network(), h + 1, &tx, &ufvks);
+        assert_eq!(d_tx.sapling_outputs().len(), 2);
 
         let mut found_tx_change_memo = false;
         let mut found_tx_empty_memo = false;
-        for output in decrypted_outputs {
-            if output.memo == change_memo.clone().into() {
+        for output in d_tx.sapling_outputs() {
+            if Memo::try_from(output.memo()).unwrap() == change_memo {
                 found_tx_change_memo = true
             }
-            if output.memo == Memo::Empty.into() {
+            if Memo::try_from(output.memo()).unwrap() == Memo::Empty {
                 found_tx_empty_memo = true
             }
         }
@@ -1743,7 +1743,7 @@ pub(crate) mod tests {
             &st.wallet().conn,
             &st.wallet().params,
             account.0,
-            Amount::const_from_i64(300000),
+            NonNegativeAmount::const_from_u64(300000),
             received_tx_height + 10,
             &[],
         )
@@ -1759,7 +1759,7 @@ pub(crate) mod tests {
             &st.wallet().conn,
             &st.wallet().params,
             account.0,
-            Amount::const_from_i64(300000),
+            NonNegativeAmount::const_from_u64(300000),
             received_tx_height + 10,
             &[],
         )
@@ -1813,7 +1813,7 @@ pub(crate) mod tests {
             &st.wallet().conn,
             &st.wallet().params,
             account,
-            Amount::const_from_i64(300000),
+            NonNegativeAmount::const_from_u64(300000),
             birthday.height() + 5,
             &[],
         )

@@ -1727,7 +1727,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     params: &P,
     account: AccountId,
     max_height: BlockHeight,
-) -> Result<HashMap<TransparentAddress, Amount>, SqliteClientError> {
+) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, SqliteClientError> {
     let chain_tip_height = scan_queue_extrema(conn)?.map(|range| *range.end());
     let stable_height = chain_tip_height
         .unwrap_or(max_height)
@@ -1753,7 +1753,7 @@ pub(crate) fn get_transparent_balances<P: consensus::Parameters>(
     while let Some(row) = rows.next()? {
         let taddr_str: String = row.get(0)?;
         let taddr = TransparentAddress::decode(params, &taddr_str)?;
-        let value = Amount::from_i64(row.get(1)?).unwrap();
+        let value = NonNegativeAmount::from_nonnegative_i64(row.get(1)?)?;
 
         res.insert(taddr, value);
     }
@@ -1874,7 +1874,7 @@ pub(crate) fn put_tx_meta(
 pub(crate) fn put_tx_data(
     conn: &rusqlite::Connection,
     tx: &Transaction,
-    fee: Option<Amount>,
+    fee: Option<NonNegativeAmount>,
     created_at: Option<time::OffsetDateTime>,
 ) -> Result<i64, SqliteClientError> {
     let mut stmt_upsert_tx_data = conn.prepare_cached(
@@ -1896,7 +1896,7 @@ pub(crate) fn put_tx_data(
         ":created_at": created_at,
         ":expiry_height": u32::from(tx.expiry_height()),
         ":raw": raw_tx,
-        ":fee": fee.map(i64::from),
+        ":fee": fee.map(u64::from),
     ];
 
     stmt_upsert_tx_data
@@ -2330,7 +2330,7 @@ mod tests {
         zcash_primitives::{
             consensus::BlockHeight,
             transaction::{
-                components::{Amount, OutPoint, TxOut},
+                components::{OutPoint, TxOut},
                 fees::fixed::FeeRule as FixedFeeRule,
             },
         },
@@ -2437,7 +2437,7 @@ mod tests {
 
         assert_matches!(
             st.wallet().get_transparent_balances(account_id, height_2),
-            Ok(h) if h.get(taddr) == Some(&value.into())
+            Ok(h) if h.get(taddr) == Some(&value)
         );
 
         // Artificially delete the address from the addresses table so that
@@ -2517,8 +2517,8 @@ mod tests {
                     .unwrap()
                     .get(taddr)
                     .cloned()
-                    .unwrap_or(Amount::zero()),
-                Amount::from(expected),
+                    .unwrap_or(NonNegativeAmount::ZERO),
+                expected,
             );
             assert_eq!(
                 st.wallet()

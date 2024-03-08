@@ -7,6 +7,10 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_protocol::memo`:
+  - `impl TryFrom<&MemoBytes> for Memo`
+
 ## [0.1.0] - 2024-03-06
 The entries below are relative to the `zcash_primitives` crate as of the tag
 `zcash_primitives-0.14.0`.

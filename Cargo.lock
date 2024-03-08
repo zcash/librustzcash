@@ -3089,6 +3089,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_proofs",
+ "zcash_protocol",
  "zip32",
 ]
 
