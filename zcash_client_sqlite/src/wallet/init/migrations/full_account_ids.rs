@@ -53,7 +53,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             CREATE TABLE accounts_new (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_type INTEGER NOT NULL DEFAULT 0,
+                account_type INTEGER NOT NULL DEFAULT {account_type_zip32},
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
                 ufvk TEXT,

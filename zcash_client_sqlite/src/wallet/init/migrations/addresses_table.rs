@@ -63,7 +63,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             let account = AccountId::try_from(row.get::<_, u32>(0)?).map_err(|_| {
-                WalletMigrationError::CorruptedData("Invalid ZIP-32 account index.".to_string())
+                WalletMigrationError::CorruptedData("Invalid ZIP-32 account index.".to_owned())
             })?;
 
             let ufvk_str: String = row.get(1)?;

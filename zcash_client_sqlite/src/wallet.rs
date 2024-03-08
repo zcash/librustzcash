@@ -1973,9 +1973,11 @@ pub(crate) fn put_received_transparent_utxo<P: consensus::Parameters>(
                 },
             )
             // The UTXO was not for any of the legacy transparent addresses.
-            .unwrap_or(Err(SqliteClientError::AddressNotRecognized(
-                *output.recipient_address(),
-            )))
+            .unwrap_or_else(|| {
+                Err(SqliteClientError::AddressNotRecognized(
+                    *output.recipient_address(),
+                ))
+            })
     }
 }
 
