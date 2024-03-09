@@ -229,6 +229,9 @@ mod tests {
                 hd_account_index INTEGER,
                 ufvk TEXT,
                 uivk TEXT NOT NULL,
+                orchard_fvk_item_cache BLOB,
+                sapling_fvk_item_cache BLOB,
+                p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
                 CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
