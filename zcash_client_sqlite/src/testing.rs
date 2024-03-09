@@ -94,6 +94,8 @@ use crate::{
     FsBlockDb,
 };
 
+pub(crate) mod pool;
+
 /// A builder for a `zcash_client_sqlite` test.
 pub(crate) struct TestBuilder<Cache> {
     network: Network,

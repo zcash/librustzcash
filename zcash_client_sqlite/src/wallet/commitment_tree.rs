@@ -1091,57 +1091,67 @@ mod tests {
     use zcash_primitives::consensus::{BlockHeight, Network};
 
     use super::SqliteShardStore;
-    use crate::{wallet::init::init_wallet_db, WalletDb, SAPLING_TABLES_PREFIX};
+    use crate::{
+        testing::pool::ShieldedPoolTester,
+        wallet::{init::init_wallet_db, sapling::tests::SaplingPoolTester},
+        WalletDb,
+    };
 
-    fn new_tree(m: usize) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
+    fn new_tree<T: ShieldedPoolTester>(
+        m: usize,
+    ) -> ShardTree<SqliteShardStore<rusqlite::Connection, String, 3>, 4, 3> {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
         data_file.keep().unwrap();
 
         init_wallet_db(&mut db_data, None).unwrap();
         let store =
-            SqliteShardStore::<_, String, 3>::from_connection(db_data.conn, SAPLING_TABLES_PREFIX)
+            SqliteShardStore::<_, String, 3>::from_connection(db_data.conn, T::TABLES_PREFIX)
                 .unwrap();
         ShardTree::new(store, m)
     }
 
     #[test]
-    fn append() {
-        check_append(new_tree);
+    fn sapling_append() {
+        check_append(new_tree::<SaplingPoolTester>);
     }
 
     #[test]
-    fn root_hashes() {
-        check_root_hashes(new_tree);
+    fn sapling_root_hashes() {
+        check_root_hashes(new_tree::<SaplingPoolTester>);
     }
 
     #[test]
-    fn witnesses() {
-        check_witnesses(new_tree);
+    fn sapling_witnesses() {
+        check_witnesses(new_tree::<SaplingPoolTester>);
     }
 
     #[test]
-    fn witness_consistency() {
-        check_witness_consistency(new_tree);
+    fn sapling_witness_consistency() {
+        check_witness_consistency(new_tree::<SaplingPoolTester>);
     }
 
     #[test]
-    fn checkpoint_rewind() {
-        check_checkpoint_rewind(new_tree);
+    fn sapling_checkpoint_rewind() {
+        check_checkpoint_rewind(new_tree::<SaplingPoolTester>);
     }
 
     #[test]
-    fn remove_mark() {
-        check_remove_mark(new_tree);
+    fn sapling_remove_mark() {
+        check_remove_mark(new_tree::<SaplingPoolTester>);
     }
 
     #[test]
-    fn rewind_remove_mark() {
-        check_rewind_remove_mark(new_tree);
+    fn sapling_rewind_remove_mark() {
+        check_rewind_remove_mark(new_tree::<SaplingPoolTester>);
     }
 
     #[test]
-    fn put_shard_roots() {
+    fn sapling_put_shard_roots() {
+        put_shard_roots::<SaplingPoolTester>()
+    }
+
+    fn put_shard_roots<T: ShieldedPoolTester>() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
         data_file.keep().unwrap();
@@ -1149,7 +1159,7 @@ mod tests {
         init_wallet_db(&mut db_data, None).unwrap();
         let tx = db_data.conn.transaction().unwrap();
         let store =
-            SqliteShardStore::<_, String, 3>::from_connection(&tx, SAPLING_TABLES_PREFIX).unwrap();
+            SqliteShardStore::<_, String, 3>::from_connection(&tx, T::TABLES_PREFIX).unwrap();
 
         // introduce some roots
         let roots = (0u32..4)
@@ -1165,7 +1175,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        super::put_shard_roots::<_, 6, 3>(store.conn, SAPLING_TABLES_PREFIX, 0, &roots).unwrap();
+        super::put_shard_roots::<_, 6, 3>(store.conn, T::TABLES_PREFIX, 0, &roots).unwrap();
 
         // simulate discovery of a note
         let mut tree = ShardTree::<_, 6, 3>::new(store, 10);

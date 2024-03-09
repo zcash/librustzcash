@@ -542,13 +542,12 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 pub(crate) mod tests {
     use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
 
-    use sapling::{zip32::DiversifiableFullViewingKey, Node};
+    use sapling::Node;
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
         scanning::{spanning_tree::testing::scan_range, ScanPriority},
-        AccountBirthday, Ratio, WalletCommitmentTrees, WalletRead, WalletWrite,
-        SAPLING_SHARD_HEIGHT,
+        AccountBirthday, Ratio, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
     use zcash_primitives::{
         block::BlockHash,
@@ -558,13 +557,20 @@ pub(crate) mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        testing::{pool::ShieldedPoolTester, AddressType, BlockCache, TestBuilder, TestState},
+        wallet::{
+            sapling::tests::SaplingPoolTester,
+            scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        },
         VERIFY_LOOKAHEAD,
     };
 
     #[test]
-    fn scan_complete() {
+    fn sapling_scan_complete() {
+        scan_complete::<SaplingPoolTester>();
+    }
+
+    fn scan_complete<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
         let mut st = TestBuilder::new()
@@ -572,26 +578,27 @@ pub(crate) mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let dfvk = st.test_account_sapling().unwrap();
+        let dfvk = T::test_account_fvk(&st);
         let sapling_activation_height = st.sapling_activation_height();
 
         assert_matches!(
             // In the following, we don't care what the root hashes are, they just need to be
             // distinct.
-            st.wallet_mut().put_sapling_subtree_roots(
+            T::put_subtree_roots(
+                &mut st,
                 0,
                 &[
                     CommitmentTreeRoot::from_parts(
                         sapling_activation_height + 100,
-                        Node::empty_root(Level::from(0))
+                        T::empty_tree_root(Level::from(0))
                     ),
                     CommitmentTreeRoot::from_parts(
                         sapling_activation_height + 200,
-                        Node::empty_root(Level::from(1))
+                        T::empty_tree_root(Level::from(1))
                     ),
                     CommitmentTreeRoot::from_parts(
                         sapling_activation_height + 300,
-                        Node::empty_root(Level::from(2))
+                        T::empty_tree_root(Level::from(2))
                     ),
                 ]
             ),
@@ -684,17 +691,13 @@ pub(crate) mod tests {
             st.wallet()
                 .get_wallet_summary(0)
                 .unwrap()
-                .map(|s| s.next_sapling_subtree_index()),
+                .map(|s| T::next_subtree_index(&s)),
             Some(2),
         );
     }
 
-    pub(crate) fn test_with_canopy_birthday() -> (
-        TestState<BlockCache>,
-        DiversifiableFullViewingKey,
-        AccountBirthday,
-        u32,
-    ) {
+    pub(crate) fn test_with_canopy_birthday<T: ShieldedPoolTester>(
+    ) -> (TestState<BlockCache>, T::Fvk, AccountBirthday, u32) {
         let st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(|network| {
@@ -719,17 +722,21 @@ pub(crate) mod tests {
             .build();
 
         let (_, _, birthday) = st.test_account().unwrap();
-        let dfvk = st.test_account_sapling().unwrap();
+        let dfvk = T::test_account_fvk(&st);
         let sap_active = st.sapling_activation_height();
 
         (st, dfvk, birthday, sap_active.into())
     }
 
     #[test]
-    fn create_account_creates_ignored_range() {
+    fn sapling_create_account_creates_ignored_range() {
+        create_account_creates_ignored_range::<SaplingPoolTester>();
+    }
+
+    fn create_account_creates_ignored_range<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (st, _, birthday, sap_active) = test_with_canopy_birthday();
+        let (st, _, birthday, sap_active) = test_with_canopy_birthday::<T>();
         let birthday_height = birthday.height().into();
 
         let expected = vec![
@@ -785,10 +792,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn update_chain_tip_with_no_subtree_roots() {
+    fn sapling_update_chain_tip_with_no_subtree_roots() {
+        update_chain_tip_with_no_subtree_roots::<SaplingPoolTester>();
+    }
+
+    fn update_chain_tip_with_no_subtree_roots<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday::<T>();
 
         // Set up the following situation:
         //
@@ -816,10 +827,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn update_chain_tip_when_never_scanned() {
+    fn sapling_update_chain_tip_when_never_scanned() {
+        update_chain_tip_when_never_scanned::<SaplingPoolTester>();
+    }
+
+    fn update_chain_tip_when_never_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday::<T>();
 
         // Set up the following situation:
         //
@@ -830,16 +845,16 @@ pub(crate) mod tests {
 
         // Set up some shard root history before the wallet birthday.
         let last_shard_start = birthday.height() - 1000;
-        st.wallet_mut()
-            .put_sapling_subtree_roots(
-                0,
-                &[CommitmentTreeRoot::from_parts(
-                    last_shard_start,
-                    // fake a hash, the value doesn't matter
-                    Node::empty_leaf(),
-                )],
-            )
-            .unwrap();
+        T::put_subtree_roots(
+            &mut st,
+            0,
+            &[CommitmentTreeRoot::from_parts(
+                last_shard_start,
+                // fake a hash, the value doesn't matter
+                T::empty_tree_leaf(),
+            )],
+        )
+        .unwrap();
 
         // Update the chain tip.
         let tip_height = prior_tip_height + 500;
@@ -861,11 +876,15 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn update_chain_tip_unstable_max_scanned() {
+    fn sapling_update_chain_tip_unstable_max_scanned() {
+        update_chain_tip_unstable_max_scanned::<SaplingPoolTester>();
+    }
+
+    fn update_chain_tip_unstable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
         // this birthday is 1234 notes into the second shard
-        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday::<T>();
 
         // Set up the following situation:
         //
@@ -877,16 +896,16 @@ pub(crate) mod tests {
 
         // Set up some shard root history before the wallet birthday.
         let initial_shard_end = birthday.height() - 1000;
-        st.wallet_mut()
-            .put_sapling_subtree_roots(
-                0,
-                &[CommitmentTreeRoot::from_parts(
-                    initial_shard_end,
-                    // fake a hash, the value doesn't matter
-                    Node::empty_leaf(),
-                )],
-            )
-            .unwrap();
+        T::put_subtree_roots(
+            &mut st,
+            0,
+            &[CommitmentTreeRoot::from_parts(
+                initial_shard_end,
+                // fake a hash, the value doesn't matter
+                T::empty_tree_leaf(),
+            )],
+        )
+        .unwrap();
 
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
@@ -929,16 +948,16 @@ pub(crate) mod tests {
         // Now simulate shutting down, and then restarting 90 blocks later, after a shard
         // has been completed.
         let last_shard_start = prior_tip + 70;
-        st.wallet_mut()
-            .put_sapling_subtree_roots(
-                0,
-                &[CommitmentTreeRoot::from_parts(
-                    last_shard_start,
-                    // fake a hash, the value doesn't matter
-                    Node::empty_leaf(),
-                )],
-            )
-            .unwrap();
+        T::put_subtree_roots(
+            &mut st,
+            0,
+            &[CommitmentTreeRoot::from_parts(
+                last_shard_start,
+                // fake a hash, the value doesn't matter
+                T::empty_tree_leaf(),
+            )],
+        )
+        .unwrap();
 
         let new_tip = last_shard_start + 20;
         st.wallet_mut().update_chain_tip(new_tip).unwrap();
@@ -973,10 +992,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn update_chain_tip_stable_max_scanned() {
+    fn sapling_update_chain_tip_stable_max_scanned() {
+        update_chain_tip_stable_max_scanned::<SaplingPoolTester>();
+    }
+
+    fn update_chain_tip_stable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday::<T>();
 
         // Set up the following situation:
         //
@@ -989,16 +1012,16 @@ pub(crate) mod tests {
 
         // Set up some shard root history before the wallet birthday.
         let second_to_last_shard_start = birthday.height() - 1000;
-        st.wallet_mut()
-            .put_sapling_subtree_roots(
-                0,
-                &[CommitmentTreeRoot::from_parts(
-                    second_to_last_shard_start,
-                    // fake a hash, the value doesn't matter
-                    Node::empty_leaf(),
-                )],
-            )
-            .unwrap();
+        T::put_subtree_roots(
+            &mut st,
+            0,
+            &[CommitmentTreeRoot::from_parts(
+                second_to_last_shard_start,
+                // fake a hash, the value doesn't matter
+                T::empty_tree_leaf(),
+            )],
+        )
+        .unwrap();
 
         // We have scan ranges and a subtree, but have scanned no blocks.
         let summary = st.get_wallet_summary(1);
@@ -1033,10 +1056,7 @@ pub(crate) mod tests {
         // We have scanned a block, so we now have a starting tree position, 500 blocks above the
         // wallet birthday but before the end of the shard.
         let summary = st.get_wallet_summary(1);
-        assert_eq!(
-            summary.as_ref().map(|s| s.next_sapling_subtree_index()),
-            Some(0),
-        );
+        assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0),);
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
             Some(Ratio::new(1, 0x1 << SAPLING_SHARD_HEIGHT))
@@ -1045,16 +1065,16 @@ pub(crate) mod tests {
         // Now simulate shutting down, and then restarting 70 blocks later, after a shard
         // has been completed.
         let last_shard_start = prior_tip + 50;
-        st.wallet_mut()
-            .put_sapling_subtree_roots(
-                0,
-                &[CommitmentTreeRoot::from_parts(
-                    last_shard_start,
-                    // fake a hash, the value doesn't matter
-                    Node::empty_leaf(),
-                )],
-            )
-            .unwrap();
+        T::put_subtree_roots(
+            &mut st,
+            0,
+            &[CommitmentTreeRoot::from_parts(
+                last_shard_start,
+                // fake a hash, the value doesn't matter
+                T::empty_tree_leaf(),
+            )],
+        )
+        .unwrap();
 
         let new_tip = last_shard_start + 20;
         st.wallet_mut().update_chain_tip(new_tip).unwrap();
