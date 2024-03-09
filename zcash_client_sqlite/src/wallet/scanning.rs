@@ -542,7 +542,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 pub(crate) mod tests {
     use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
 
-    use sapling::{zip32::DiversifiableFullViewingKey, Node};
+    use sapling::Node;
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
         chain::CommitmentTreeRoot,
@@ -558,8 +558,11 @@ pub(crate) mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        testing::{pool::ShieldedPoolTester, AddressType, BlockCache, TestBuilder, TestState},
+        wallet::{
+            sapling::tests::SaplingPoolTester,
+            scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
+        },
         VERIFY_LOOKAHEAD,
     };
 
@@ -689,12 +692,8 @@ pub(crate) mod tests {
         );
     }
 
-    pub(crate) fn test_with_canopy_birthday() -> (
-        TestState<BlockCache>,
-        DiversifiableFullViewingKey,
-        AccountBirthday,
-        u32,
-    ) {
+    pub(crate) fn test_with_canopy_birthday<T: ShieldedPoolTester>(
+    ) -> (TestState<BlockCache>, T::Fvk, AccountBirthday, u32) {
         let st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(|network| {
@@ -719,7 +718,7 @@ pub(crate) mod tests {
             .build();
 
         let (_, _, birthday) = st.test_account().unwrap();
-        let dfvk = st.test_account_sapling().unwrap();
+        let dfvk = T::test_account_fvk(&st);
         let sap_active = st.sapling_activation_height();
 
         (st, dfvk, birthday, sap_active.into())
@@ -729,7 +728,7 @@ pub(crate) mod tests {
     fn create_account_creates_ignored_range() {
         use ScanPriority::*;
 
-        let (st, _, birthday, sap_active) = test_with_canopy_birthday();
+        let (st, _, birthday, sap_active) = test_with_canopy_birthday::<SaplingPoolTester>();
         let birthday_height = birthday.height().into();
 
         let expected = vec![
@@ -788,7 +787,7 @@ pub(crate) mod tests {
     fn update_chain_tip_with_no_subtree_roots() {
         use ScanPriority::*;
 
-        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday::<SaplingPoolTester>();
 
         // Set up the following situation:
         //
@@ -819,7 +818,7 @@ pub(crate) mod tests {
     fn update_chain_tip_when_never_scanned() {
         use ScanPriority::*;
 
-        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday::<SaplingPoolTester>();
 
         // Set up the following situation:
         //
@@ -865,7 +864,7 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         // this birthday is 1234 notes into the second shard
-        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday::<SaplingPoolTester>();
 
         // Set up the following situation:
         //
@@ -976,7 +975,7 @@ pub(crate) mod tests {
     fn update_chain_tip_stable_max_scanned() {
         use ScanPriority::*;
 
-        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday();
+        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday::<SaplingPoolTester>();
 
         // Set up the following situation:
         //
