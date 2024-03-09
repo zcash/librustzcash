@@ -1,10 +1,11 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{init::WalletMigrationError, ufvk_to_uivk, AccountType};
+use crate::wallet::{init::WalletMigrationError, AccountType};
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
+use zcash_address::unified::Encoding;
 use zcash_client_backend::keys::UnifiedSpendingKey;
 use zcash_keys::keys::{HdSeedFingerprint, UnifiedFullViewingKey};
 use zcash_primitives::consensus;
@@ -113,8 +114,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         ));
                     }
 
-                    let uivk = ufvk_to_uivk(&ufvk_parsed, &self.params)
-                        .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
+                    let uivk = ufvk_parsed
+                        .to_unified_incoming_viewing_key()
+                        .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?
+                        .to_uivk()
+                        .encode(&self.params.network_type());
 
                     transaction.execute(r#"
                         INSERT INTO accounts_new (id, account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk, birthday_height, recover_until_height)
