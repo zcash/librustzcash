@@ -42,6 +42,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// No account could be found corresponding to a provided spending key.
     KeyNotRecognized,
 
+    /// No shielded source of funds was available for an account.
+    NoShieldedSources,
+
     /// Zcash amount computation encountered an overflow or underflow.
     BalanceError(BalanceError),
 
@@ -120,6 +123,12 @@ where
                 write!(
                     f,
                     "Wallet does not contain an account corresponding to the provided spending key"
+                )
+            }
+            Error::NoShieldedSources => {
+                write!(
+                    f,
+                    "A wallet account contains no shielded sources of funds."
                 )
             }
             Error::BalanceError(e) => write!(

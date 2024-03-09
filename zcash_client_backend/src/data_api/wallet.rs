@@ -41,7 +41,7 @@ use sapling::{
 };
 use std::num::NonZeroU32;
 
-use super::InputSource;
+use super::{AccountSources, InputSource};
 use crate::{
     address::Address,
     data_api::{
@@ -269,7 +269,7 @@ where
         wallet_db,
         params,
         StandardFeeRule::PreZip313,
-        account.id(),
+        account.default_sources().ok_or(Error::NoShieldedSources)?,
         min_confirmations,
         to,
         amount,
@@ -380,7 +380,7 @@ where
     let proposal = propose_transfer(
         wallet_db,
         params,
-        account.id(),
+        account.default_sources().ok_or(Error::NoShieldedSources)?,
         input_selector,
         request,
         min_confirmations,
@@ -405,7 +405,7 @@ where
 pub fn propose_transfer<DbT, ParamsT, InputsT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
-    spend_from_account: <DbT as InputSource>::AccountId,
+    sources: AccountSources<<DbT as InputSource>::AccountId>,
     input_selector: &InputsT,
     request: zip321::TransactionRequest,
     min_confirmations: NonZeroU32,
@@ -435,7 +435,7 @@ where
             wallet_db,
             target_height,
             anchor_height,
-            spend_from_account,
+            sources,
             request,
         )
         .map_err(Error::from)
@@ -453,9 +453,10 @@ where
 /// * `wallet_db`: A read/write reference to the wallet database.
 /// * `params`: Consensus parameters.
 /// * `fee_rule`: The fee rule to use in creating the transaction.
-/// * `spend_from_account`: The unified account that controls the funds that will be spent
-///   in the resulting transaction. This procedure will return an error if the
-///   account ID does not correspond to an account known to the wallet.
+/// * `sources`: Metadata that describes the unified account and the pools from which
+///   funds may be spent in the resulting transaction. This procedure will return an
+///   error if the contained account ID does not correspond to an account known to
+///   the wallet.
 /// * `min_confirmations`: The minimum number of confirmations that a previously
 ///   received note must have in the blockchain in order to be considered for being
 ///   spent. A value of 10 confirmations is recommended and 0-conf transactions are
@@ -472,7 +473,7 @@ pub fn propose_standard_transfer_to_address<DbT, ParamsT, CommitmentTreeErrT>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     fee_rule: StandardFeeRule,
-    spend_from_account: <DbT as InputSource>::AccountId,
+    sources: AccountSources<<DbT as InputSource>::AccountId>,
     min_confirmations: NonZeroU32,
     to: &Address,
     amount: NonNegativeAmount,
@@ -520,7 +521,7 @@ where
     propose_transfer(
         wallet_db,
         params,
-        spend_from_account,
+        sources,
         &input_selector,
         request,
         min_confirmations,

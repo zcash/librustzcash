@@ -315,6 +315,28 @@ pub trait Account<AccountId: Copy> {
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+
+    /// Returns the default sources of funds that are available to spending by the account.
+    ///
+    /// This corresponds to the set of shielded pools for which the account's UFVK can
+    /// maintain balance.
+    fn default_sources(&self) -> Option<AccountSources<AccountId>> {
+        self.ufvk().map(|ufvk| {
+            #[cfg(not(feature = "orchard"))]
+            let use_orchard = false;
+            #[cfg(feature = "orchard")]
+            let use_orchard = ufvk.orchard().is_some();
+
+            let use_sapling = ufvk.sapling().is_some();
+
+            AccountSources {
+                account_id: self.id(),
+                use_orchard,
+                use_sapling,
+                use_transparent: false,
+            }
+        })
+    }
 }
 
 impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
@@ -334,6 +356,68 @@ impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         self.1.as_ref()
+    }
+}
+
+/// A type that describes what FVK components are known to the wallet for an account.
+#[derive(Clone, Copy, Debug)]
+pub struct AccountSources<AccountId> {
+    account_id: AccountId,
+    use_orchard: bool,
+    use_sapling: bool,
+    use_transparent: bool,
+}
+
+impl<AccountId: Copy> AccountSources<AccountId> {
+    /// Constructs AccountSources from its constituent parts
+    pub fn new(
+        account_id: AccountId,
+        use_orchard: bool,
+        use_sapling: bool,
+        use_transparent: bool,
+    ) -> Self {
+        Self {
+            account_id,
+            use_orchard,
+            use_sapling,
+            use_transparent,
+        }
+    }
+
+    /// Returns the id for the account to which this metadata applies.
+    pub fn account_id(&self) -> AccountId {
+        self.account_id
+    }
+
+    /// Returns whether the account has an Orchard balance and spendability determination
+    /// capability.
+    pub fn use_orchard(&self) -> bool {
+        self.use_orchard
+    }
+
+    /// Returns whether the account has an Sapling balance and spendability determination
+    /// capability.
+    pub fn use_sapling(&self) -> bool {
+        self.use_sapling
+    }
+
+    /// Returns whether the account has a Transparent balance determination capability.
+    pub fn use_transparent(&self) -> bool {
+        self.use_transparent
+    }
+
+    /// Restricts the sources to be used to those for which the given [`UnifiedSpendingKey`]
+    /// provides a spending capability.
+    pub fn filter_with_usk(&mut self, usk: &UnifiedSpendingKey) {
+        self.use_orchard &= usk.has_orchard();
+        self.use_sapling &= usk.has_sapling();
+        self.use_transparent &= usk.has_transparent();
+    }
+
+    /// Returns the [`UnifiedAddressRequest`] that will produce a [`UnifiedAddress`] having
+    /// receivers corresponding to the spending capabilities described by this value.
+    pub fn to_unified_address_request(&self) -> Option<UnifiedAddressRequest> {
+        UnifiedAddressRequest::new(self.use_orchard, self.use_sapling, self.use_transparent)
     }
 }
 
@@ -473,9 +557,8 @@ pub trait InputSource {
     /// be included.
     fn select_spendable_notes(
         &self,
-        account: Self::AccountId,
+        inputs_from: AccountSources<Self::AccountId>,
         target_value: NonNegativeAmount,
-        sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
@@ -1404,9 +1487,10 @@ pub mod testing {
     };
 
     use super::{
-        chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, AccountSources,
+        BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock,
+        SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite,
+        SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1457,9 +1541,8 @@ pub mod testing {
 
         fn select_spendable_notes(
             &self,
-            _account: Self::AccountId,
+            _inputs_from: AccountSources<Self::AccountId>,
             _target_value: NonNegativeAmount,
-            _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
         ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {

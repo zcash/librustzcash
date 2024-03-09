@@ -269,16 +269,43 @@ impl UnifiedSpendingKey {
         &self.transparent
     }
 
+    /// Returns whether the key provides transparent P2PKH spending capability.
+    pub fn has_transparent(&self) -> bool {
+        #[cfg(feature = "transparent-inputs")]
+        return true;
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        return false;
+    }
+
     /// Returns the Sapling extended spending key component of this unified spending key.
     #[cfg(feature = "sapling")]
     pub fn sapling(&self) -> &sapling::ExtendedSpendingKey {
         &self.sapling
     }
 
+    /// Returns whether the key provides Sapling spending capability.
+    pub fn has_sapling(&self) -> bool {
+        #[cfg(feature = "sapling")]
+        return true;
+
+        #[cfg(not(feature = "sapling"))]
+        return false;
+    }
+
     /// Returns the Orchard spending key component of this unified spending key.
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &orchard::keys::SpendingKey {
         &self.orchard
+    }
+
+    /// Returns whether the key provides Orchard spending capability.
+    pub fn has_orchard(&self) -> bool {
+        #[cfg(feature = "orchard")]
+        return true;
+
+        #[cfg(not(feature = "orchard"))]
+        return false;
     }
 
     /// Returns a binary encoding of this key suitable for decoding with [`decode`].

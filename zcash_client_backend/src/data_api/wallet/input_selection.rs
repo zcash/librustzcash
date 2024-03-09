@@ -21,7 +21,7 @@ use zcash_primitives::{
 
 use crate::{
     address::{Address, UnifiedAddress},
-    data_api::InputSource,
+    data_api::{AccountSources, InputSource},
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::{Note, ReceivedNote, WalletTransparentOutput},
@@ -148,7 +148,7 @@ pub trait InputSelector {
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
         anchor_height: BlockHeight,
-        account: <Self::InputSource as InputSource>::AccountId,
+        sources: AccountSources<<Self::InputSource as InputSource>::AccountId>,
         transaction_request: TransactionRequest,
     ) -> Result<
         Proposal<Self::FeeRule, <Self::InputSource as InputSource>::NoteRef>,
@@ -328,7 +328,7 @@ where
         wallet_db: &Self::InputSource,
         target_height: BlockHeight,
         anchor_height: BlockHeight,
-        account: <DbT as InputSource>::AccountId,
+        sources: AccountSources<<DbT as InputSource>::AccountId>,
         transaction_request: TransactionRequest,
     ) -> Result<
         Proposal<Self::FeeRule, DbT::NoteRef>,
@@ -454,19 +454,8 @@ where
                 Err(other) => return Err(other.into()),
             }
 
-            #[cfg(not(feature = "orchard"))]
-            let selectable_pools = &[ShieldedProtocol::Sapling];
-            #[cfg(feature = "orchard")]
-            let selectable_pools = &[ShieldedProtocol::Sapling, ShieldedProtocol::Orchard];
-
             shielded_inputs = wallet_db
-                .select_spendable_notes(
-                    account,
-                    amount_required,
-                    selectable_pools,
-                    anchor_height,
-                    &exclude,
-                )
+                .select_spendable_notes(sources, amount_required, anchor_height, &exclude)
                 .map_err(InputSelectorError::DataSource)?;
 
             let new_available = shielded_inputs
