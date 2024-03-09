@@ -147,7 +147,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
         h
     );
 
-    let to_extsk = T::sk(&[]);
+    let to_extsk = T::sk(&[0xf5; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
     let request = zip321::TransactionRequest::new(vec![Payment {
         recipient_address: to,
@@ -522,7 +522,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     );
 
     // Spend fails because there are insufficient verified notes
-    let extsk2 = T::sk(&[]);
+    let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
@@ -643,7 +643,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     assert_eq!(st.get_spendable_balance(account, 1), value);
 
     // Send some of the funds to another address, but don't mine the tx.
-    let extsk2 = T::sk(&[]);
+    let extsk2 = T::sk(&[0xf5; 32]);
     let to = T::sk_default_address(&extsk2);
     let min_confirmations = NonZeroU32::new(1).unwrap();
     let proposal = st
@@ -774,7 +774,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     assert_eq!(st.get_total_balance(account), value);
     assert_eq!(st.get_spendable_balance(account, 1), value);
 
-    let extsk2 = T::sk(&[]);
+    let extsk2 = T::sk(&[0xf5; 32]);
     let addr2 = T::sk_default_address(&extsk2);
 
     // TODO: This test was originally written to use the pre-zip-313 fee rule
@@ -1267,7 +1267,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     let initial_orchard_tree_size = 0;
 
     // Generate 9 blocks that have no value for us, starting at the birthday height.
-    let not_our_key = T::sk_to_fvk(&T::sk(&[]));
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = NonNegativeAmount::const_from_u64(10000);
     st.generate_block_at(
         birthday.height(),
@@ -1346,7 +1346,7 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
 
     // Create a gap of 10 blocks having no shielded outputs, then add a block that doesn't
     // belong to us so that we can get a checkpoint in the tree.
-    let not_our_key = T::sk_to_fvk(&T::sk(&[]));
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = NonNegativeAmount::const_from_u64(10000);
     st.generate_block_at(
         birthday.height() + 10,
