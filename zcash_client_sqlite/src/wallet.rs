@@ -1321,7 +1321,24 @@ pub(crate) fn get_target_and_anchor_heights(
                 min_confirmations,
             )?;
 
-            Ok(sapling_anchor_height.map(|h| (chain_tip_height + 1, h)))
+            #[cfg(feature = "orchard")]
+            let orchard_anchor_height = get_max_checkpointed_height(
+                conn,
+                ORCHARD_TABLES_PREFIX,
+                chain_tip_height,
+                min_confirmations,
+            )?;
+
+            #[cfg(not(feature = "orchard"))]
+            let orchard_anchor_height: Option<BlockHeight> = None;
+
+            let anchor_height = sapling_anchor_height
+                .zip(orchard_anchor_height)
+                .map(|(s, o)| std::cmp::min(s, o))
+                .or(sapling_anchor_height)
+                .or(orchard_anchor_height);
+
+            Ok(anchor_height.map(|h| (chain_tip_height + 1, h)))
         }
         None => Ok(None),
     }

@@ -381,15 +381,12 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         .map(|extended| ScanRange::from_parts(range.end..extended.end, ScanPriority::FoundNote))
         .filter(|range| !range.is_empty());
 
-    replace_queue_entries::<SqliteClientError>(
-        conn,
-        &query_range,
-        Some(scanned)
-            .into_iter()
-            .chain(extended_before)
-            .chain(extended_after),
-        false,
-    )?;
+    let replacement = Some(scanned)
+        .into_iter()
+        .chain(extended_before)
+        .chain(extended_after);
+
+    replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
 
     Ok(())
 }
