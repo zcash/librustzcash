@@ -53,6 +53,11 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 
+## [0.11.1] - 2024-03-09
+
+### Fixed
+- Documentation now correctly builds with all feature flags.
+
 ## [0.11.0] - 2024-03-01
 
 ### Added
