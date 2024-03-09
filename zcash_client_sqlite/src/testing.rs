@@ -501,6 +501,14 @@ impl<Cache> TestState<Cache> {
             .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
     }
 
+    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
+    #[cfg(feature = "orchard")]
+    pub(crate) fn test_account_orchard(&self) -> Option<orchard::keys::FullViewingKey> {
+        self.test_account
+            .as_ref()
+            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().orchard().cloned())
+    }
+
     /// Invokes [`create_spend_to_address`] with the given arguments.
     #[allow(deprecated)]
     #[allow(clippy::type_complexity)]

@@ -111,6 +111,8 @@ pub(crate) const PRUNING_DEPTH: u32 = 100;
 pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
+#[cfg(feature = "orchard")]
+pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
 #[cfg(not(feature = "transparent-inputs"))]
 pub(crate) const UA_TRANSPARENT: bool = false;

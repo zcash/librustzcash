@@ -565,9 +565,18 @@ pub(crate) mod tests {
         VERIFY_LOOKAHEAD,
     };
 
+    #[cfg(feature = "orchard")]
+    use crate::wallet::orchard::tests::OrchardPoolTester;
+
     #[test]
     fn sapling_scan_complete() {
         scan_complete::<SaplingPoolTester>();
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_scan_complete() {
+        scan_complete::<OrchardPoolTester>();
     }
 
     fn scan_complete<T: ShieldedPoolTester>() {
@@ -736,6 +745,12 @@ pub(crate) mod tests {
         create_account_creates_ignored_range::<SaplingPoolTester>();
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_create_account_creates_ignored_range() {
+        create_account_creates_ignored_range::<OrchardPoolTester>();
+    }
+
     fn create_account_creates_ignored_range<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
@@ -799,6 +814,12 @@ pub(crate) mod tests {
         update_chain_tip_with_no_subtree_roots::<SaplingPoolTester>();
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_with_no_subtree_roots() {
+        update_chain_tip_with_no_subtree_roots::<OrchardPoolTester>();
+    }
+
     fn update_chain_tip_with_no_subtree_roots<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
@@ -832,6 +853,12 @@ pub(crate) mod tests {
     #[test]
     fn sapling_update_chain_tip_when_never_scanned() {
         update_chain_tip_when_never_scanned::<SaplingPoolTester>();
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_when_never_scanned() {
+        update_chain_tip_when_never_scanned::<OrchardPoolTester>();
     }
 
     fn update_chain_tip_when_never_scanned<T: ShieldedPoolTester>() {
@@ -881,6 +908,12 @@ pub(crate) mod tests {
     #[test]
     fn sapling_update_chain_tip_unstable_max_scanned() {
         update_chain_tip_unstable_max_scanned::<SaplingPoolTester>();
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_unstable_max_scanned() {
+        update_chain_tip_unstable_max_scanned::<OrchardPoolTester>();
     }
 
     fn update_chain_tip_unstable_max_scanned<T: ShieldedPoolTester>() {
@@ -1013,6 +1046,12 @@ pub(crate) mod tests {
     #[test]
     fn sapling_update_chain_tip_stable_max_scanned() {
         update_chain_tip_stable_max_scanned::<SaplingPoolTester>();
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_stable_max_scanned() {
+        update_chain_tip_stable_max_scanned::<OrchardPoolTester>();
     }
 
     fn update_chain_tip_stable_max_scanned<T: ShieldedPoolTester>() {

@@ -1111,6 +1111,52 @@ mod tests {
         ShardTree::new(store, m)
     }
 
+    #[cfg(feature = "orchard")]
+    mod orchard {
+        use super::new_tree;
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        #[test]
+        fn append() {
+            super::check_append(new_tree::<OrchardPoolTester>);
+        }
+
+        #[test]
+        fn root_hashes() {
+            super::check_root_hashes(new_tree::<OrchardPoolTester>);
+        }
+
+        #[test]
+        fn witnesses() {
+            super::check_witnesses(new_tree::<OrchardPoolTester>);
+        }
+
+        #[test]
+        fn witness_consistency() {
+            super::check_witness_consistency(new_tree::<OrchardPoolTester>);
+        }
+
+        #[test]
+        fn checkpoint_rewind() {
+            super::check_checkpoint_rewind(new_tree::<OrchardPoolTester>);
+        }
+
+        #[test]
+        fn remove_mark() {
+            super::check_remove_mark(new_tree::<OrchardPoolTester>);
+        }
+
+        #[test]
+        fn rewind_remove_mark() {
+            super::check_rewind_remove_mark(new_tree::<OrchardPoolTester>);
+        }
+
+        #[test]
+        fn put_shard_roots() {
+            super::put_shard_roots::<OrchardPoolTester>()
+        }
+    }
+
     #[test]
     fn sapling_append() {
         check_append(new_tree::<SaplingPoolTester>);
