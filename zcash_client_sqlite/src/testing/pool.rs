@@ -1248,15 +1248,21 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 
     let received_tx_height = birthday.height() + 10;
 
-    let initial_sapling_tree_size =
-        u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
-            .try_into()
-            .unwrap();
+    let initial_sapling_tree_size = birthday
+        .sapling_frontier()
+        .value()
+        .map(|f| u64::from(f.position() + 1))
+        .unwrap_or(0)
+        .try_into()
+        .unwrap();
     #[cfg(feature = "orchard")]
-    let initial_orchard_tree_size =
-        u64::from(birthday.orchard_frontier().value().unwrap().position() + 1)
-            .try_into()
-            .unwrap();
+    let initial_orchard_tree_size = birthday
+        .orchard_frontier()
+        .value()
+        .map(|f| u64::from(f.position() + 1))
+        .unwrap_or(0)
+        .try_into()
+        .unwrap();
     #[cfg(not(feature = "orchard"))]
     let initial_orchard_tree_size = 0;
 

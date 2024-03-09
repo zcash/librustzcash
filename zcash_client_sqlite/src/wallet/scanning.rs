@@ -705,18 +705,18 @@ pub(crate) mod tests {
             .with_block_cache()
             .with_test_account(|network| {
                 // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
-                // activation. We set the Canopy frontier to be 1234 notes into the second shard.
+                // activation. We set the Canopy Sapling frontier to be 1234 notes into the second shard.
                 let birthday_height = network.activation_height(NetworkUpgrade::Canopy).unwrap();
-                let frontier_position = Position::from((0x1 << 16) + 1234);
-                let frontier = Frontier::from_parts(
-                    frontier_position,
+                let sapling_frontier_position = Position::from((0x1 << 16) + 1234);
+                let sapling_frontier = Frontier::from_parts(
+                    sapling_frontier_position,
                     Node::empty_leaf(),
-                    vec![Node::empty_leaf(); frontier_position.past_ommer_count().into()],
+                    vec![Node::empty_leaf(); sapling_frontier_position.past_ommer_count().into()],
                 )
                 .unwrap();
                 AccountBirthday::from_parts(
                     birthday_height,
-                    frontier,
+                    sapling_frontier,
                     #[cfg(feature = "orchard")]
                     Frontier::empty(),
                     None,
@@ -924,15 +924,21 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
 
         // Now, scan the max scanned block.
-        let initial_sapling_tree_size =
-            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
-                .try_into()
-                .unwrap();
+        let initial_sapling_tree_size = birthday
+            .sapling_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
         #[cfg(feature = "orchard")]
-        let initial_orchard_tree_size =
-            u64::from(birthday.orchard_frontier().value().unwrap().position() + 1)
-                .try_into()
-                .unwrap();
+        let initial_orchard_tree_size = birthday
+            .orchard_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
         #[cfg(not(feature = "orchard"))]
         let initial_orchard_tree_size = 0;
         st.generate_block_at(
@@ -1054,15 +1060,21 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
 
         // Now, scan the max scanned block.
-        let initial_sapling_tree_size =
-            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
-                .try_into()
-                .unwrap();
+        let initial_sapling_tree_size = birthday
+            .sapling_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
         #[cfg(feature = "orchard")]
-        let initial_orchard_tree_size =
-            u64::from(birthday.orchard_frontier().value().unwrap().position() + 1)
-                .try_into()
-                .unwrap();
+        let initial_orchard_tree_size = birthday
+            .orchard_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
         #[cfg(not(feature = "orchard"))]
         let initial_orchard_tree_size = 0;
         st.generate_block_at(
