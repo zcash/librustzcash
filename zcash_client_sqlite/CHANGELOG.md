@@ -11,6 +11,11 @@ and this library adheres to Rust's notion of
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
 
+## [0.9.1] - 2024-03-09
+
+### Fixed
+- Documentation now correctly builds with all feature flags.
+
 ## [0.9.0] - 2024-03-01
 
 ### Changed
