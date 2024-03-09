@@ -46,7 +46,8 @@ use crate::{
     error::SqliteClientError,
     testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
     wallet::{
-        block_max_scanned, commitment_tree, parse_scope, scanning::tests::test_with_canopy_birthday,
+        block_max_scanned, commitment_tree, parse_scope,
+        scanning::tests::test_with_nu5_birthday_offset,
     },
     AccountId, NoteId, ReceivedNoteId,
 };
@@ -1226,7 +1227,8 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
 }
 
 pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
-    let (mut st, dfvk, birthday, _) = test_with_canopy_birthday::<T>();
+    // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
+    let (mut st, dfvk, birthday, _) = test_with_nu5_birthday_offset::<T>(76);
 
     // Set up the following situation:
     //

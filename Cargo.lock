@@ -3102,21 +3102,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zcash_extensions"
-version = "0.0.0"
-dependencies = [
- "blake2b_simd",
- "ff",
- "jubjub",
- "orchard",
- "rand_core",
- "sapling-crypto",
- "zcash_address",
- "zcash_primitives",
- "zcash_proofs",
-]
-
-[[package]]
 name = "zcash_history"
 version = "0.4.0"
 dependencies = [

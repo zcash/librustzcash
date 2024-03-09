@@ -50,7 +50,7 @@ use zcash_client_backend::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     transaction::{
         components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
@@ -59,6 +59,7 @@ use zcash_primitives::{
     },
     zip32::DiversifierIndex,
 };
+use zcash_protocol::local_consensus::LocalNetwork;
 
 use crate::{
     chain::init::init_cache_database,
@@ -98,7 +99,7 @@ pub(crate) mod pool;
 
 /// A builder for a `zcash_client_sqlite` test.
 pub(crate) struct TestBuilder<Cache> {
-    network: Network,
+    network: LocalNetwork,
     cache: Cache,
     test_account_birthday: Option<AccountBirthday>,
 }
@@ -107,7 +108,20 @@ impl TestBuilder<()> {
     /// Constructs a new test.
     pub(crate) fn new() -> Self {
         TestBuilder {
-            network: Network::TestNetwork,
+            // Use a fake network where Sapling through NU5 activate at the same height.
+            // We pick 100,000 to be large enough to handle any hard-coded test offsets.
+            network: LocalNetwork {
+                overwinter: Some(BlockHeight::from_u32(1)),
+                sapling: Some(BlockHeight::from_u32(100_000)),
+                blossom: Some(BlockHeight::from_u32(100_000)),
+                heartwood: Some(BlockHeight::from_u32(100_000)),
+                canopy: Some(BlockHeight::from_u32(100_000)),
+                nu5: Some(BlockHeight::from_u32(100_000)),
+                #[cfg(feature = "unstable-nu6")]
+                nu6: None,
+                #[cfg(feature = "zfuture")]
+                z_future: None,
+            },
             cache: (),
             test_account_birthday: None,
         }
@@ -134,7 +148,7 @@ impl TestBuilder<()> {
 }
 
 impl<Cache> TestBuilder<Cache> {
-    pub(crate) fn with_test_account<F: FnOnce(&Network) -> AccountBirthday>(
+    pub(crate) fn with_test_account<F: FnOnce(&LocalNetwork) -> AccountBirthday>(
         mut self,
         birthday: F,
     ) -> Self {
@@ -215,7 +229,7 @@ pub(crate) struct TestState<Cache> {
     cache: Cache,
     latest_cached_block: Option<CachedBlock>,
     _data_file: NamedTempFile,
-    db_data: WalletDb<Connection, Network>,
+    db_data: WalletDb<Connection, LocalNetwork>,
     test_account: Option<(
         SecretVec<u8>,
         AccountId,
@@ -460,17 +474,17 @@ where
 
 impl<Cache> TestState<Cache> {
     /// Exposes an immutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet(&self) -> &WalletDb<Connection, Network> {
+    pub(crate) fn wallet(&self) -> &WalletDb<Connection, LocalNetwork> {
         &self.db_data
     }
 
     /// Exposes a mutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, Network> {
+    pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
         &mut self.db_data
     }
 
     /// Exposes the network in use.
-    pub(crate) fn network(&self) -> Network {
+    pub(crate) fn network(&self) -> LocalNetwork {
         self.db_data.params
     }
 
@@ -569,7 +583,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         #![allow(deprecated)]
         let params = self.network();
@@ -605,7 +619,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         propose_transfer::<_, _, _, Infallible>(
@@ -681,7 +695,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         propose_shielding::<_, _, _, Infallible>(
@@ -745,7 +759,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         let prover = test_prover();
@@ -1436,7 +1450,7 @@ pub(crate) fn input_selector(
     change_memo: Option<&str>,
     fallback_change_pool: ShieldedProtocol,
 ) -> GreedyInputSelector<
-    WalletDb<rusqlite::Connection, Network>,
+    WalletDb<rusqlite::Connection, LocalNetwork>,
     standard::SingleOutputChangeStrategy,
 > {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
@@ -1448,7 +1462,7 @@ pub(crate) fn input_selector(
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
 fn check_proposal_serialization_roundtrip(
-    db_data: &WalletDb<rusqlite::Connection, Network>,
+    db_data: &WalletDb<rusqlite::Connection, LocalNetwork>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
     let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);
