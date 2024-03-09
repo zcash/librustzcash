@@ -109,6 +109,7 @@ lazy_static = "1"
 assert_matches = "1.5"
 criterion = "0.4"
 proptest = "1"
+rand_chacha = "0.3"
 rand_xorshift = "0.3"
 
 # ZIP 32

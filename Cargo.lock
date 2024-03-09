@@ -3069,6 +3069,7 @@ dependencies = [
  "pasta_curves",
  "proptest",
  "prost",
+ "rand_chacha",
  "rand_core",
  "regex",
  "rusqlite",
