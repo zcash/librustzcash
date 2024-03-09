@@ -608,7 +608,9 @@ pub(crate) mod tests {
         // We'll start inserting leaf notes 5 notes after the end of the third subtree, with a gap
         // of 10 blocks. After `scan_cached_blocks`, the scan queue should have a requested scan
         // range of 300..310 with `FoundNote` priority, 310..320 with `Scanned` priority.
+        // We set both Sapling and Orchard to the same initial tree size for simplicity.
         let initial_sapling_tree_size = (0x1 << 16) * 3 + 5;
+        let initial_orchard_tree_size = (0x1 << 16) * 3 + 5;
         let initial_height = sapling_activation_height + 310;
 
         let value = NonNegativeAmount::const_from_u64(50000);
@@ -619,6 +621,7 @@ pub(crate) mod tests {
             AddressType::DefaultExternal,
             value,
             initial_sapling_tree_size,
+            initial_orchard_tree_size,
         );
 
         for _ in 1..=10 {
@@ -702,18 +705,18 @@ pub(crate) mod tests {
             .with_block_cache()
             .with_test_account(|network| {
                 // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
-                // activation. We set the Canopy frontier to be 1234 notes into the second shard.
+                // activation. We set the Canopy Sapling frontier to be 1234 notes into the second shard.
                 let birthday_height = network.activation_height(NetworkUpgrade::Canopy).unwrap();
-                let frontier_position = Position::from((0x1 << 16) + 1234);
-                let frontier = Frontier::from_parts(
-                    frontier_position,
+                let sapling_frontier_position = Position::from((0x1 << 16) + 1234);
+                let sapling_frontier = Frontier::from_parts(
+                    sapling_frontier_position,
                     Node::empty_leaf(),
-                    vec![Node::empty_leaf(); frontier_position.past_ommer_count().into()],
+                    vec![Node::empty_leaf(); sapling_frontier_position.past_ommer_count().into()],
                 )
                 .unwrap();
                 AccountBirthday::from_parts(
                     birthday_height,
-                    frontier,
+                    sapling_frontier,
                     #[cfg(feature = "orchard")]
                     Frontier::empty(),
                     None,
@@ -921,6 +924,23 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
 
         // Now, scan the max scanned block.
+        let initial_sapling_tree_size = birthday
+            .sapling_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
+        #[cfg(feature = "orchard")]
+        let initial_orchard_tree_size = birthday
+            .orchard_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
+        #[cfg(not(feature = "orchard"))]
+        let initial_orchard_tree_size = 0;
         st.generate_block_at(
             max_scanned,
             BlockHash([0u8; 32]),
@@ -928,9 +948,8 @@ pub(crate) mod tests {
             AddressType::DefaultExternal,
             // 1235 notes into into the second shard
             NonNegativeAmount::const_from_u64(10000),
-            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
-                .try_into()
-                .unwrap(),
+            initial_sapling_tree_size,
+            initial_orchard_tree_size,
         );
         st.scan_cached_blocks(max_scanned, 1);
 
@@ -1041,15 +1060,31 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
 
         // Now, scan the max scanned block.
+        let initial_sapling_tree_size = birthday
+            .sapling_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
+        #[cfg(feature = "orchard")]
+        let initial_orchard_tree_size = birthday
+            .orchard_frontier()
+            .value()
+            .map(|f| u64::from(f.position() + 1))
+            .unwrap_or(0)
+            .try_into()
+            .unwrap();
+        #[cfg(not(feature = "orchard"))]
+        let initial_orchard_tree_size = 0;
         st.generate_block_at(
             max_scanned,
             BlockHash([0u8; 32]),
             &dfvk,
             AddressType::DefaultExternal,
             NonNegativeAmount::const_from_u64(10000),
-            u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
-                .try_into()
-                .unwrap(),
+            initial_sapling_tree_size,
+            initial_orchard_tree_size,
         );
         st.scan_cached_blocks(max_scanned, 1);
 

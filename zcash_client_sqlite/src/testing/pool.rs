@@ -1248,10 +1248,23 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 
     let received_tx_height = birthday.height() + 10;
 
-    let initial_sapling_tree_size =
-        u64::from(birthday.sapling_frontier().value().unwrap().position() + 1)
-            .try_into()
-            .unwrap();
+    let initial_sapling_tree_size = birthday
+        .sapling_frontier()
+        .value()
+        .map(|f| u64::from(f.position() + 1))
+        .unwrap_or(0)
+        .try_into()
+        .unwrap();
+    #[cfg(feature = "orchard")]
+    let initial_orchard_tree_size = birthday
+        .orchard_frontier()
+        .value()
+        .map(|f| u64::from(f.position() + 1))
+        .unwrap_or(0)
+        .try_into()
+        .unwrap();
+    #[cfg(not(feature = "orchard"))]
+    let initial_orchard_tree_size = 0;
 
     // Generate 9 blocks that have no value for us, starting at the birthday height.
     let not_our_key = T::sk_to_fvk(&T::sk(&[]));
@@ -1263,6 +1276,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
         AddressType::DefaultExternal,
         not_our_value,
         initial_sapling_tree_size,
+        initial_orchard_tree_size,
     );
     for _ in 1..9 {
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1340,7 +1354,8 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         &not_our_key,
         AddressType::DefaultExternal,
         not_our_value,
-        st.latest_cached_block().unwrap().2,
+        st.latest_cached_block().unwrap().sapling_end_size,
+        st.latest_cached_block().unwrap().orchard_end_size,
     );
 
     // Scan the block

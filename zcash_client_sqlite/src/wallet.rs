@@ -2645,6 +2645,7 @@ mod tests {
             AddressType::DefaultExternal,
             not_our_value,
             17,
+            17,
         );
         st.scan_cached_blocks(end_height, 1);
 
@@ -2660,6 +2661,7 @@ mod tests {
             &not_our_key,
             AddressType::DefaultExternal,
             not_our_value,
+            0,
             0,
         );
         st.scan_cached_blocks(start_height, 1);
