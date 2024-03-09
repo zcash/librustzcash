@@ -381,6 +381,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
     }
 
+    fn get_seed_account(
+        &self,
+        seed: &HdSeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_seed_account(self.conn.borrow(), &self.params, seed, account_id)
+    }
+
     fn get_wallet_summary(
         &self,
         min_confirmations: u32,

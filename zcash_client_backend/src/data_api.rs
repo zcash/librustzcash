@@ -66,6 +66,7 @@ use std::{
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zcash_keys::keys::HdSeedFingerprint;
 
 use self::{chain::CommitmentTreeRoot, scanning::ScanRange};
 use crate::{
@@ -721,6 +722,14 @@ pub trait WalletRead {
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
+    /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
+    /// [`zip32::AccountId`], if any.
+    fn get_seed_account(
+        &self,
+        seed: &HdSeedFingerprint,
+        account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Returns the wallet balances and sync status for an account given the specified minimum
@@ -1471,6 +1480,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
+    use zcash_keys::keys::HdSeedFingerprint;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1639,6 +1649,14 @@ pub mod testing {
         fn get_account_for_ufvk(
             &self,
             _ufvk: &UnifiedFullViewingKey,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_seed_account(
+            &self,
+            _seed: &HdSeedFingerprint,
+            _account_id: zip32::AccountId,
         ) -> Result<Option<Self::Account>, Self::Error> {
             Ok(None)
         }
