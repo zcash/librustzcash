@@ -132,14 +132,14 @@ impl ConditionallySelectable for AccountId {
     }
 }
 
-/// A newtype wrapper for received note identifiers.
+/// An opaque type for received note identifiers.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReceivedNoteId(pub(crate) i64);
+pub struct ReceivedNoteId(pub(crate) ShieldedProtocol, pub(crate) i64);
 
 impl fmt::Display for ReceivedNoteId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ReceivedNoteId(id) => write!(f, "Received Note {}", id),
+            ReceivedNoteId(protocol, id) => write!(f, "Received {:?} Note: {}", protocol, id),
         }
     }
 }
@@ -408,10 +408,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         query: NullifierQuery,
     ) -> Result<Vec<(AccountId, sapling::Nullifier)>, Self::Error> {
-        match query {
-            NullifierQuery::Unspent => wallet::sapling::get_sapling_nullifiers(self.conn.borrow()),
-            NullifierQuery::All => wallet::sapling::get_all_sapling_nullifiers(self.conn.borrow()),
-        }
+        wallet::sapling::get_sapling_nullifiers(self.conn.borrow(), query)
     }
 
     #[cfg(feature = "orchard")]
@@ -581,9 +578,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
-                    wtx.sapling_outputs()
-                        .iter()
-                        .map(|out| out.note_commitment_tree_position())
+                    wtx.sapling_outputs().iter().map(|out| {
+                        (
+                            ShieldedProtocol::Sapling,
+                            out.note_commitment_tree_position(),
+                        )
+                    })
                 }));
 
                 last_scanned_height = Some(block.height());

@@ -1,6 +1,6 @@
-//! This migration adds tables to the wallet database that are needed to persist note commitment
-//! tree data using the `shardtree` crate, and migrates existing witness data into these data
-//! structures.
+//! This migration adds tables to the wallet database that are needed to persist Sapling note
+//! commitment tree data using the `shardtree` crate, and migrates existing witness data into these
+//! data structures.
 
 use std::collections::{BTreeSet, HashSet};
 
