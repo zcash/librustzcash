@@ -374,7 +374,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         &self,
         ufvk: &UnifiedFullViewingKey,
     ) -> Result<Option<AccountId>, Self::Error> {
-        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+        wallet::get_account_for_ufvk(self.conn.borrow(), ufvk)
     }
 
     fn get_wallet_summary(
