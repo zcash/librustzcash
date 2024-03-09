@@ -512,15 +512,25 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         &mut self,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
+        struct BlockPositions {
+            height: BlockHeight,
+            sapling_start_position: Position,
+            #[cfg(feature = "orchard")]
+            orchard_start_position: Position,
+        }
+
         self.transactionally(|wdb| {
-            let start_positions = blocks.first().map(|block| {
-                (
-                    block.height(),
-                    Position::from(
-                        u64::from(block.sapling().final_tree_size())
-                            - u64::try_from(block.sapling().commitments().len()).unwrap(),
-                    ),
-                )
+            let start_positions = blocks.first().map(|block| BlockPositions {
+                height: block.height(),
+                sapling_start_position: Position::from(
+                    u64::from(block.sapling().final_tree_size())
+                        - u64::try_from(block.sapling().commitments().len()).unwrap(),
+                ),
+                #[cfg(feature = "orchard")]
+                orchard_start_position: Position::from(
+                    u64::from(block.orchard().final_tree_size())
+                        - u64::try_from(block.orchard().commitments().len()).unwrap(),
+                ),
             });
             let mut sapling_commitments = vec![];
             #[cfg(feature = "orchard")]
@@ -655,7 +665,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             // We will have a start position and a last scanned height in all cases where
             // `blocks` is non-empty.
-            if let Some(((start_height, start_position), last_scanned_height)) =
+            if let Some((start_positions, last_scanned_height)) =
                 start_positions.zip(last_scanned_height)
             {
                 // Create subtrees from the note commitments in parallel.
@@ -665,7 +675,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         .par_chunks_mut(CHUNK_SIZE)
                         .enumerate()
                         .filter_map(|(i, chunk)| {
-                            let start = start_position + (i * CHUNK_SIZE) as u64;
+                            let start =
+                                start_positions.sapling_start_position + (i * CHUNK_SIZE) as u64;
                             let end = start + chunk.len() as u64;
 
                             shardtree::LocatedTree::from_iter(
@@ -695,7 +706,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         .par_chunks_mut(CHUNK_SIZE)
                         .enumerate()
                         .filter_map(|(i, chunk)| {
-                            let start = start_position + (i * CHUNK_SIZE) as u64;
+                            let start =
+                                start_positions.orchard_start_position + (i * CHUNK_SIZE) as u64;
                             let end = start + chunk.len() as u64;
 
                             shardtree::LocatedTree::from_iter(
@@ -725,7 +737,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     wdb.conn.0,
                     &wdb.params,
                     Range {
-                        start: start_height,
+                        start: start_positions.height,
                         end: last_scanned_height + 1,
                     },
                     &note_positions,
