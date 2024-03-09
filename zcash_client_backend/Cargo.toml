@@ -21,7 +21,16 @@ exclude = ["*.proto"]
 development = ["zcash_proofs"]
 
 [package.metadata.docs.rs]
-all-features = true
+# Manually specify features while `orchard` is not in the public API.
+#all-features = true
+features = [
+    "lightwalletd-tonic",
+    "transparent-inputs",
+    "test-dependencies",
+    "unstable",
+    "unstable-serialization",
+    "unstable-spanning-tree",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
