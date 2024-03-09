@@ -464,7 +464,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use incrementalmerkletree::Hashable;
+    use incrementalmerkletree::{Hashable, Level};
     use shardtree::error::ShardTreeError;
     use zcash_proofs::prover::LocalTxProver;
 
@@ -486,7 +486,9 @@ pub(crate) mod tests {
 
     use zcash_client_backend::{
         address::Address,
-        data_api::{chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees},
+        data_api::{
+            chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees, WalletSummary,
+        },
         keys::UnifiedSpendingKey,
         wallet::{Note, ReceivedNote},
         ShieldedProtocol,
@@ -544,6 +546,10 @@ pub(crate) mod tests {
             sapling::Node::empty_leaf()
         }
 
+        fn empty_tree_root(level: Level) -> Self::MerkleTreeHash {
+            sapling::Node::empty_root(level)
+        }
+
         fn put_subtree_roots<Cache>(
             st: &mut TestState<Cache>,
             start_index: u64,
@@ -551,6 +557,10 @@ pub(crate) mod tests {
         ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
             st.wallet_mut()
                 .put_sapling_subtree_roots(start_index, roots)
+        }
+
+        fn next_subtree_index(s: &WalletSummary<AccountId>) -> u64 {
+            s.next_sapling_subtree_index()
         }
 
         fn select_spendable_notes<Cache>(

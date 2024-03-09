@@ -4,6 +4,7 @@
 
 use std::{convert::Infallible, num::NonZeroU32};
 
+use incrementalmerkletree::Level;
 use rusqlite::params;
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
@@ -29,7 +30,7 @@ use zcash_client_backend::{
         chain::CommitmentTreeRoot,
         error::Error,
         wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
-        AccountBirthday, DecryptedTransaction, Ratio, WalletRead, WalletWrite,
+        AccountBirthday, DecryptedTransaction, Ratio, WalletRead, WalletSummary, WalletWrite,
     },
     decrypt_transaction,
     fees::{fixed, standard, DustOutputPolicy},
@@ -87,12 +88,15 @@ pub(crate) trait ShieldedPoolTester {
     fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool;
 
     fn empty_tree_leaf() -> Self::MerkleTreeHash;
+    fn empty_tree_root(level: Level) -> Self::MerkleTreeHash;
 
     fn put_subtree_roots<Cache>(
         st: &mut TestState<Cache>,
         start_index: u64,
         roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
     ) -> Result<(), ShardTreeError<commitment_tree::Error>>;
+
+    fn next_subtree_index(s: &WalletSummary<AccountId>) -> u64;
 
     fn select_spendable_notes<Cache>(
         st: &TestState<Cache>,
