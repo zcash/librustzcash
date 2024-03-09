@@ -89,6 +89,11 @@ and this library adheres to Rust's notion of
   allowed amounts having a decimal point but no decimal value to be parsed
   as valid.
 
+## [0.11.1] - 2024-03-09
+
+### Fixed
+- Documentation now correctly builds with all feature flags.
+
 ## [0.11.0] - 2024-03-01
 
 ### Added
