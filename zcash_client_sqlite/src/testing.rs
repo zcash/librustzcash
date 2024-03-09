@@ -166,10 +166,44 @@ impl<Cache> TestBuilder<Cache> {
     }
 }
 
+pub(crate) struct CachedBlock {
+    height: BlockHeight,
+    hash: BlockHash,
+    sapling_end_size: u32,
+}
+
+impl CachedBlock {
+    fn none(sapling_activation_height: BlockHeight) -> Self {
+        Self {
+            height: sapling_activation_height,
+            hash: BlockHash([0; 32]),
+            sapling_end_size: 0,
+        }
+    }
+
+    fn at(height: BlockHeight, hash: BlockHash, sapling_tree_size: u32) -> Self {
+        Self {
+            height,
+            hash,
+            sapling_end_size: sapling_tree_size,
+        }
+    }
+
+    fn roll_forward(self, cb: &CompactBlock) -> Self {
+        assert_eq!(self.height + 1, cb.height());
+        Self {
+            height: cb.height(),
+            hash: cb.hash(),
+            sapling_end_size: self.sapling_end_size
+                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+        }
+    }
+}
+
 /// The state for a `zcash_client_sqlite` test.
 pub(crate) struct TestState<Cache> {
     cache: Cache,
-    latest_cached_block: Option<(BlockHeight, BlockHash, u32)>,
+    latest_cached_block: Option<CachedBlock>,
     _data_file: NamedTempFile,
     db_data: WalletDb<Connection, Network>,
     test_account: Option<(
@@ -190,8 +224,8 @@ where
         self.cache.block_source()
     }
 
-    pub(crate) fn latest_cached_block(&self) -> &Option<(BlockHeight, BlockHash, u32)> {
-        &self.latest_cached_block
+    pub(crate) fn latest_cached_block(&self) -> Option<&CachedBlock> {
+        self.latest_cached_block.as_ref()
     }
 
     /// Creates a fake block at the expected next height containing a single output of the
@@ -202,19 +236,21 @@ where
         req: AddressType,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
-        let (height, prev_hash, initial_sapling_tree_size) = self
+        let cached_block = self
             .latest_cached_block
-            .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
+            .take()
+            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
+        let height = cached_block.height + 1;
 
         let (res, nf) = self.generate_block_at(
             height,
-            prev_hash,
+            cached_block.hash,
             fvk,
             req,
             value,
-            initial_sapling_tree_size,
+            cached_block.sapling_end_size,
         );
+        assert!(self.latest_cached_block.is_some());
 
         (height, res, nf)
     }
@@ -244,12 +280,9 @@ where
         );
         let res = self.cache.insert(&cb);
 
-        self.latest_cached_block = Some((
-            height,
-            cb.hash(),
-            initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ));
+        self.latest_cached_block = Some(
+            CachedBlock::at(height - 1, cb.hash(), initial_sapling_tree_size).roll_forward(&cb),
+        );
 
         (res, nf)
     }
@@ -263,29 +296,25 @@ where
         to: impl Into<Address>,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult) {
-        let (height, prev_hash, initial_sapling_tree_size) = self
+        let cached_block = self
             .latest_cached_block
-            .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
+            .take()
+            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
+        let height = cached_block.height + 1;
 
         let cb = fake_compact_block_spending(
             &self.network(),
             height,
-            prev_hash,
+            cached_block.hash,
             note,
             fvk,
             to.into(),
             value,
-            initial_sapling_tree_size,
+            cached_block.sapling_end_size,
         );
         let res = self.cache.insert(&cb);
 
-        self.latest_cached_block = Some((
-            height,
-            cb.hash(),
-            initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ));
+        self.latest_cached_block = Some(cached_block.roll_forward(&cb));
 
         (height, res)
     }
@@ -320,27 +349,23 @@ where
         tx_index: usize,
         tx: &Transaction,
     ) -> (BlockHeight, Cache::InsertResult) {
-        let (height, prev_hash, initial_sapling_tree_size) = self
+        let cached_block = self
             .latest_cached_block
-            .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
+            .take()
+            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
+        let height = cached_block.height + 1;
 
         let cb = fake_compact_block_from_tx(
             height,
-            prev_hash,
+            cached_block.hash,
             tx_index,
             tx,
-            initial_sapling_tree_size,
+            cached_block.sapling_end_size,
             0,
         );
         let res = self.cache.insert(&cb);
 
-        self.latest_cached_block = Some((
-            height,
-            cb.hash(),
-            initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ));
+        self.latest_cached_block = Some(cached_block.roll_forward(&cb));
 
         (height, res)
     }
@@ -399,7 +424,7 @@ where
         self.cache
             .block_source()
             .with_blocks::<_, Infallible>(None, None, |block: CompactBlock| {
-                self.latest_cached_block = Some((
+                self.latest_cached_block = Some(CachedBlock::at(
                     BlockHeight::from_u32(block.height.try_into().unwrap()),
                     BlockHash::from_slice(block.hash.as_slice()),
                     block.chain_metadata.unwrap().sapling_commitment_tree_size,

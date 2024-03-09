@@ -1340,7 +1340,7 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         &not_our_key,
         AddressType::DefaultExternal,
         not_our_value,
-        st.latest_cached_block().unwrap().2,
+        st.latest_cached_block().unwrap().sapling_end_size,
     );
 
     // Scan the block
