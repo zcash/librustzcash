@@ -256,6 +256,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
     type AccountId = AccountId;
+    type Account = (AccountId, Option<UnifiedFullViewingKey>);
 
     fn validate_seed(
         &self,
@@ -373,8 +374,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<AccountId>, Self::Error> {
-        wallet::get_account_for_ufvk(self.conn.borrow(), ufvk)
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
     }
 
     fn get_wallet_summary(

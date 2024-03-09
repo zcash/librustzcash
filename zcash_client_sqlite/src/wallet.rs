@@ -693,17 +693,18 @@ pub(crate) fn get_unified_full_viewing_keys<P: consensus::Parameters>(
 
 /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`],
 /// if any.
-pub(crate) fn get_account_for_ufvk(
+pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
+    params: &P,
     ufvk: &UnifiedFullViewingKey,
-) -> Result<Option<AccountId>, SqliteClientError> {
+) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
     #[cfg(feature = "transparent-inputs")]
     let transparent_item = ufvk.transparent().map(|k| k.serialize());
     #[cfg(not(feature = "transparent-inputs"))]
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT id
+        "SELECT id, ufvk
         FROM accounts
         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -711,13 +712,27 @@ pub(crate) fn get_account_for_ufvk(
     )?;
 
     let accounts = stmt
-        .query_and_then::<_, rusqlite::Error, _, _>(
+        .query_and_then::<_, SqliteClientError, _, _>(
             named_params![
                 ":orchard_fvk_item_cache": ufvk.orchard().map(|k| k.to_bytes()),
                 ":sapling_fvk_item_cache": ufvk.sapling().map(|k| k.to_bytes()),
                 ":p2pkh_fvk_item_cache": transparent_item,
             ],
-            |row| row.get::<_, u32>(0).map(AccountId),
+            |row| {
+                let account_id = row.get::<_, u32>(0).map(AccountId)?;
+                Ok((
+                    account_id,
+                    row.get::<_, Option<String>>(1)?
+                        .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
+                        .transpose()
+                        .map_err(|e| {
+                            SqliteClientError::CorruptedData(format!(
+                                "Could not decode unified full viewing key for account {:?}: {}",
+                                account_id, e
+                            ))
+                        })?,
+                ))
+            },
         )?
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -726,7 +741,7 @@ pub(crate) fn get_account_for_ufvk(
             "Mutiple account records correspond to a single UFVK".to_owned(),
         ))
     } else {
-        Ok(accounts.first().copied())
+        Ok(accounts.into_iter().next())
     }
 }
 

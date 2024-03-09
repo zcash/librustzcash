@@ -308,6 +308,35 @@ impl AccountBalance {
     }
 }
 
+/// A set of capabilities that a client account must provide.
+pub trait Account<AccountId: Copy> {
+    /// Returns the unique identifier for the account.
+    fn id(&self) -> AccountId;
+
+    /// Returns the UFVK that the wallet backend has stored for the account, if any.
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+}
+
+impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
+    fn id(&self) -> A {
+        self.0
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        Some(&self.1)
+    }
+}
+
+impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
+    fn id(&self) -> A {
+        self.0
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        self.1.as_ref()
+    }
+}
+
 /// A polymorphic ratio type, usually used for rational numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ratio<T> {
@@ -492,6 +521,9 @@ pub trait WalletRead {
     /// will be interpreted as belonging to that account.
     type AccountId: Copy + Debug + Eq + Hash;
 
+    /// The concrete account type used by this wallet backend.
+    type Account: Account<Self::AccountId>;
+
     /// Verifies that the given seed corresponds to the viewing key for the specified account.
     ///
     /// Returns:
@@ -602,11 +634,11 @@ pub trait WalletRead {
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
 
-    /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`], if any.
+    /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<Self::AccountId>, Self::Error>;
+    ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Returns the wallet balances and sync status for an account given the specified minimum
     /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
@@ -1438,6 +1470,7 @@ pub mod testing {
     impl WalletRead for MockWalletDb {
         type Error = ();
         type AccountId = u32;
+        type Account = (Self::AccountId, UnifiedFullViewingKey);
 
         fn validate_seed(
             &self,
@@ -1523,7 +1556,7 @@ pub mod testing {
         fn get_account_for_ufvk(
             &self,
             _ufvk: &UnifiedFullViewingKey,
-        ) -> Result<Option<Self::AccountId>, Self::Error> {
+        ) -> Result<Option<Self::Account>, Self::Error> {
             Ok(None)
         }
 
