@@ -8,10 +8,10 @@ use std::rc::Rc;
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
     data_api::NullifierQuery,
-    keys::UnifiedFullViewingKey,
     wallet::{Note, ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, ShieldedProtocol, TransferType,
 };
+use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
 use zcash_protocol::{
     consensus::{self, BlockHeight},
@@ -96,7 +96,7 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
 fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
-) -> Result<ReceivedNote<ReceivedNoteId, Note>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
@@ -136,37 +136,50 @@ fn to_spendable_note<P: consensus::Parameters>(
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
         })?);
 
-    let ufvk_str: String = row.get(7)?;
-    let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
-        .map_err(SqliteClientError::CorruptedData)?;
+    let ufvk_str: Option<String> = row.get(7)?;
+    let scope_code: Option<i64> = row.get(8)?;
 
-    let scope_code: i64 = row.get(8)?;
-    let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
-        SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
-    })?;
+    // If we don't have information about the recipient key scope or the ufvk we can't determine
+    // which spending key to use. This may be because the received note was associated with an
+    // imported viewing key, so we treat such notes as not spendable. Although this method is
+    // presently only called using the results of queries where both the ufvk and
+    // recipient_key_scope columns are checked to be non-null, this is method is written
+    // defensively to account for the fact that both of these are nullable columns in case it
+    // is used elsewhere in the future.
+    ufvk_str
+        .zip(scope_code)
+        .map(|(ufvk_str, scope_code)| {
+            let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+                .map_err(SqliteClientError::CorruptedData)?;
 
-    let recipient = match spending_key_scope {
-        Scope::Internal => ufvk
-            .sapling()
-            .and_then(|dfvk| dfvk.diversified_change_address(diversifier)),
-        Scope::External => ufvk
-            .sapling()
-            .and_then(|dfvk| dfvk.diversified_address(diversifier)),
-    }
-    .ok_or_else(|| SqliteClientError::CorruptedData("Diversifier invalid.".to_owned()))?;
+            let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
+                SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
+            })?;
 
-    Ok(ReceivedNote::from_parts(
-        note_id,
-        txid,
-        output_index,
-        Note::Sapling(sapling::Note::from_parts(
-            recipient,
-            sapling::value::NoteValue::from_raw(note_value),
-            rseed,
-        )),
-        spending_key_scope,
-        note_commitment_tree_position,
-    ))
+            let recipient = match spending_key_scope {
+                Scope::Internal => ufvk
+                    .sapling()
+                    .and_then(|dfvk| dfvk.diversified_change_address(diversifier)),
+                Scope::External => ufvk
+                    .sapling()
+                    .and_then(|dfvk| dfvk.diversified_address(diversifier)),
+            }
+            .ok_or_else(|| SqliteClientError::CorruptedData("Diversifier invalid.".to_owned()))?;
+
+            Ok(ReceivedNote::from_parts(
+                note_id,
+                txid,
+                output_index,
+                Note::Sapling(sapling::Note::from_parts(
+                    recipient,
+                    sapling::value::NoteValue::from_raw(note_value),
+                    rseed,
+                )),
+                spending_key_scope,
+                note_commitment_tree_position,
+            ))
+        })
+        .transpose()
 }
 
 // The `clippy::let_and_return` lint is explicitly allowed here because a bug in Clippy
@@ -179,29 +192,32 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     txid: &TxId,
     index: u32,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
-    let mut stmt_select_note = conn.prepare_cached(
-        "SELECT sapling_received_notes.id, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+    let result = conn.query_row_and_then(
+        "SELECT sapling_received_notes.id, txid, output_index,
+                diversifier, value, rcm, commitment_tree_position,
                 accounts.ufvk, recipient_key_scope
          FROM sapling_received_notes
          INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
-         WHERE txid = :txid AND accounts.ufvk IS NOT NULL
+         WHERE txid = :txid
+         AND accounts.ufvk IS NOT NULL
+         AND recipient_key_scope IS NOT NULL
          AND output_index = :output_index
          AND spent IS NULL",
-    )?;
+        named_params![
+           ":txid": txid.as_ref(),
+           ":output_index": index,
+        ],
+        |row| to_spendable_note(params, row),
+    );
 
-    let result = stmt_select_note
-        .query_and_then(
-            named_params![
-               ":txid": txid.as_ref(),
-               ":output_index": index,
-            ],
-            |r| to_spendable_note(params, r),
-        )?
-        .next()
-        .transpose();
-
-    result
+    // `OptionalExtension` doesn't work here because the error type of `Result` is already
+    // `SqliteClientError`
+    match result {
+        Ok(r) => Ok(r),
+        Err(SqliteClientError::DbError(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Utility method for determining whether we have any spendable notes
@@ -276,7 +292,9 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
              INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
              INNER JOIN transactions
                 ON transactions.id_tx = sapling_received_notes.tx
-             WHERE sapling_received_notes.account_id = :account AND ufvk IS NOT NULL
+             WHERE sapling_received_notes.account_id = :account
+             AND ufvk IS NOT NULL
+             AND recipient_key_scope IS NOT NULL
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
@@ -313,7 +331,9 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
         |r| to_spendable_note(params, r),
     )?;
 
-    notes.collect::<Result<_, _>>()
+    notes
+        .filter_map(|r| r.transpose())
+        .collect::<Result<_, _>>()
 }
 
 /// Retrieves the set of nullifiers for "potentially spendable" Sapling notes that the
@@ -420,12 +440,6 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let to = output.note().recipient();
     let diversifier = to.diversifier();
 
-    // FIXME: recipient key scope will always be available until IVK import is supported.
-    // Remove this expectation after #1175 merges.
-    let scope = output
-        .recipient_key_scope()
-        .expect("Key import is not yet supported.");
-
     let sql_args = named_params![
         ":tx": &tx_ref,
         ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
@@ -438,7 +452,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":is_change": output.is_change(),
         ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
-        ":recipient_key_scope": scope_code(scope),
+        ":recipient_key_scope": output.recipient_key_scope().map(scope_code)
     ];
 
     stmt_upsert_received_note
