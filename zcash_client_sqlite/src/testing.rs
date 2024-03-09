@@ -170,6 +170,7 @@ pub(crate) struct CachedBlock {
     height: BlockHeight,
     hash: BlockHash,
     sapling_end_size: u32,
+    orchard_end_size: u32,
 }
 
 impl CachedBlock {
@@ -178,14 +179,21 @@ impl CachedBlock {
             height: sapling_activation_height,
             hash: BlockHash([0; 32]),
             sapling_end_size: 0,
+            orchard_end_size: 0,
         }
     }
 
-    fn at(height: BlockHeight, hash: BlockHash, sapling_tree_size: u32) -> Self {
+    fn at(
+        height: BlockHeight,
+        hash: BlockHash,
+        sapling_tree_size: u32,
+        orchard_tree_size: u32,
+    ) -> Self {
         Self {
             height,
             hash,
             sapling_end_size: sapling_tree_size,
+            orchard_end_size: orchard_tree_size,
         }
     }
 
@@ -196,6 +204,8 @@ impl CachedBlock {
             hash: cb.hash(),
             sapling_end_size: self.sapling_end_size
                 + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+            orchard_end_size: self.orchard_end_size
+                + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
         }
     }
 }
@@ -249,6 +259,7 @@ where
             req,
             value,
             cached_block.sapling_end_size,
+            cached_block.orchard_end_size,
         );
         assert!(self.latest_cached_block.is_some());
 
@@ -260,6 +271,7 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn generate_block_at<Fvk: TestFvk>(
         &mut self,
         height: BlockHeight,
@@ -268,6 +280,7 @@ where
         req: AddressType,
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
+        initial_orchard_tree_size: u32,
     ) -> (Cache::InsertResult, Fvk::Nullifier) {
         let (cb, nf) = fake_compact_block(
             &self.network(),
@@ -277,11 +290,18 @@ where
             req,
             value,
             initial_sapling_tree_size,
+            initial_orchard_tree_size,
         );
         let res = self.cache.insert(&cb);
 
         self.latest_cached_block = Some(
-            CachedBlock::at(height - 1, cb.hash(), initial_sapling_tree_size).roll_forward(&cb),
+            CachedBlock::at(
+                height - 1,
+                cb.hash(),
+                initial_sapling_tree_size,
+                initial_orchard_tree_size,
+            )
+            .roll_forward(&cb),
         );
 
         (res, nf)
@@ -311,6 +331,7 @@ where
             to.into(),
             value,
             cached_block.sapling_end_size,
+            cached_block.orchard_end_size,
         );
         let res = self.cache.insert(&cb);
 
@@ -361,7 +382,7 @@ where
             tx_index,
             tx,
             cached_block.sapling_end_size,
-            0,
+            cached_block.orchard_end_size,
         );
         let res = self.cache.insert(&cb);
 
@@ -424,10 +445,12 @@ where
         self.cache
             .block_source()
             .with_blocks::<_, Infallible>(None, None, |block: CompactBlock| {
+                let chain_metadata = block.chain_metadata.unwrap();
                 self.latest_cached_block = Some(CachedBlock::at(
                     BlockHeight::from_u32(block.height.try_into().unwrap()),
                     BlockHash::from_slice(block.hash.as_slice()),
-                    block.chain_metadata.unwrap().sapling_commitment_tree_size,
+                    chain_metadata.sapling_commitment_tree_size,
+                    chain_metadata.orchard_commitment_tree_size,
                 ));
                 Ok(())
             })
@@ -1095,6 +1118,7 @@ fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
 
 /// Create a fake CompactBlock at the given height, containing a single output paying
 /// an address. Returns the CompactBlock and the nullifier for the new note.
+#[allow(clippy::too_many_arguments)]
 fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     params: &P,
     height: BlockHeight,
@@ -1103,6 +1127,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     req: AddressType,
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
+    initial_orchard_tree_size: u32,
 ) -> (CompactBlock, Fvk::Nullifier) {
     // Create a fake Note for the account
     let mut rng = OsRng;
@@ -1119,8 +1144,13 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
         &mut rng,
     );
 
-    let cb =
-        fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0);
+    let cb = fake_compact_block_from_compact_tx(
+        ctx,
+        height,
+        prev_hash,
+        initial_sapling_tree_size,
+        initial_orchard_tree_size,
+    );
     (cb, nf)
 }
 
@@ -1177,6 +1207,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     to: Address,
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
+    initial_orchard_tree_size: u32,
 ) -> CompactBlock {
     let mut rng = OsRng;
     let mut ctx = fake_compact_tx(&mut rng);
@@ -1254,7 +1285,13 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
         }
     }
 
-    fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
+    fake_compact_block_from_compact_tx(
+        ctx,
+        height,
+        prev_hash,
+        initial_sapling_tree_size,
+        initial_orchard_tree_size,
+    )
 }
 
 fn fake_compact_block_from_compact_tx(

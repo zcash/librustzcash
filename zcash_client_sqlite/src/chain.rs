@@ -414,6 +414,7 @@ mod tests {
             AddressType::DefaultExternal,
             NonNegativeAmount::const_from_u64(8),
             2,
+            2,
         );
         st.generate_next_block(
             &dfvk,
