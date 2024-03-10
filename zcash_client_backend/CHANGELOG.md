@@ -13,8 +13,10 @@ and this library adheres to Rust's notion of
   changes related to `Orchard` below are introduced under this feature
   flag.
 - `zcash_client_backend::data_api`:
+  - `Account`
   - `AccountBalance::with_orchard_balance_mut`
   - `AccountBirthday::orchard_frontier`
+  - `AccountSources`
   - `BlockMetadata::orchard_tree_size`
   - `DecryptedTransaction::{new, tx(), orchard_outputs()}`
   - `ScannedBlock::orchard`
@@ -48,11 +50,17 @@ and this library adheres to Rust's notion of
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
-    - Added `get_orchard_nullifiers`
+    - Added `Account` associated type.
+    - Added `get_orchard_nullifiers` method.
+    - `get_account_for_ufvk` now returns an `Self::Account` instead of a bare
+      `AccountId`
+    - Added `get_seed_account` method.
   - Changes to the `InputSource` trait:
-    - `select_spendable_notes` now takes its `target_value` argument as a
-      `NonNegativeAmount`. Also, the values of the returned map are also
-      `NonNegativeAmount`s instead of `Amount`s.
+    - `select_spendable_notes` has changed:
+      - It now takes its `target_value` argument as a `NonNegativeAmount`.
+      - Instead of an `AccountId`, it takes an `AccountSources` argument. The
+        separate `sources` argument has been removed.
+      - The values of the returned map are `NonNegativeAmount`s instead of `Amount`s.
   - Fields of `DecryptedTransaction` are now private. Use `DecryptedTransaction::new`
     and the newly provided accessors instead.
   - Fields of `SentTransaction` are now private. Use `SentTransaction::new`
@@ -64,6 +72,10 @@ and this library adheres to Rust's notion of
     - `fn put_orchard_subtree_roots`
   - Added method `WalletRead::validate_seed`
   - Removed `Error::AccountNotFound` variant.
+  - `wallet::input_selection::InputSelector::propose_transaction` now takes an
+    `AccountSources` rather than a bare `AccountId`.
+  - `wallet::{propose_transfer, propose_standard_transfer_to_address}` now
+    each take an `AccountSources` instead of a bare `AccountId`.
 - `zcash_client_backend::decrypt`:
   - Fields of `DecryptedOutput` are now private. Use `DecryptedOutput::new`
     and the newly provided accessors instead.

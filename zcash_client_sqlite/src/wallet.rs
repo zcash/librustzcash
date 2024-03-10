@@ -218,7 +218,7 @@ impl Account {
     /// Returns the default Unified Address for the account,
     /// along with the diversifier index that generated it.
     ///
-    /// The diversifier index may be non-zero if the Unified Address includes a Sapling  
+    /// The diversifier index may be non-zero if the Unified Address includes a Sapling
     /// receiver, and there was no valid Sapling receiver at diversifier index zero.
     pub fn default_address(
         &self,
@@ -291,11 +291,11 @@ struct AccountSqlValues<'a> {
     account_type: u32,
     hd_seed_fingerprint: Option<&'a [u8]>,
     hd_account_index: Option<u32>,
-    ufvk: Option<String>,
+    ufvk: Option<&'a UnifiedFullViewingKey>,
     uivk: String,
 }
 
-/// Returns (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk) for a given account.  
+/// Returns (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk) for a given account.
 fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
     account: &'a Account,
     params: &P,
@@ -305,14 +305,14 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
             account_type: AccountType::Zip32.into(),
             hd_seed_fingerprint: Some(hdaccount.hd_seed_fingerprint().as_bytes()),
             hd_account_index: Some(hdaccount.account_index().into()),
-            ufvk: Some(hdaccount.ufvk().encode(params)),
+            ufvk: Some(hdaccount.ufvk()),
             uivk: ufvk_to_uivk(hdaccount.ufvk(), params)?,
         },
         Account::Imported(ImportedAccount::Full(ufvk)) => AccountSqlValues {
             account_type: AccountType::Imported.into(),
             hd_seed_fingerprint: None,
             hd_account_index: None,
-            ufvk: Some(ufvk.encode(params)),
+            ufvk: Some(ufvk),
             uivk: ufvk_to_uivk(ufvk, params)?,
         },
         Account::Imported(ImportedAccount::Incoming(uivk)) => AccountSqlValues {
@@ -357,21 +357,49 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     birthday: AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
     let args = get_sql_values_for_account_parameters(&account, params)?;
-    let account_id: AccountId = conn.query_row(r#"
-        INSERT INTO accounts (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk, birthday_height, recover_until_height)
-        VALUES (:account_type, :hd_seed_fingerprint, :hd_account_index, :ufvk, :uivk, :birthday_height, :recover_until_height)
+
+    let orchard_item = args
+        .ufvk
+        .and_then(|ufvk| ufvk.orchard().map(|k| k.to_bytes()));
+    let sapling_item = args
+        .ufvk
+        .and_then(|ufvk| ufvk.sapling().map(|k| k.to_bytes()));
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_item = args
+        .ufvk
+        .and_then(|ufvk| ufvk.transparent().map(|k| k.serialize()));
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_item: Option<Vec<u8>> = None;
+
+    let account_id: AccountId = conn.query_row(
+        r#"
+        INSERT INTO accounts (
+            account_type, hd_seed_fingerprint, hd_account_index,
+            ufvk, uivk,
+            orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+            birthday_height, recover_until_height
+        )
+        VALUES (
+            :account_type, :hd_seed_fingerprint, :hd_account_index,
+            :ufvk, :uivk,
+            :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
+            :birthday_height, :recover_until_height
+        )
         RETURNING id;
         "#,
         named_params![
             ":account_type": args.account_type,
             ":hd_seed_fingerprint": args.hd_seed_fingerprint,
             ":hd_account_index": args.hd_account_index,
-            ":ufvk": args.ufvk,
+            ":ufvk": args.ufvk.map(|ufvk| ufvk.encode(params)),
             ":uivk": args.uivk,
+            ":orchard_fvk_item_cache": orchard_item,
+            ":sapling_fvk_item_cache": sapling_item,
+            ":p2pkh_fvk_item_cache": transparent_item,
             ":birthday_height": u32::from(birthday.height()),
             ":recover_until_height": birthday.recover_until().map(u32::from)
         ],
-        |row| Ok(AccountId(row.get(0)?))
+        |row| Ok(AccountId(row.get(0)?)),
     )?;
 
     // If a birthday frontier is available, insert it into the note commitment tree. If the
@@ -671,17 +699,92 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     ufvk: &UnifiedFullViewingKey,
-) -> Result<Option<AccountId>, SqliteClientError> {
-    conn.query_row(
-        "SELECT id FROM accounts WHERE ufvk = ?",
-        [&ufvk.encode(params)],
+) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_item = ufvk.transparent().map(|k| k.serialize());
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_item: Option<Vec<u8>> = None;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, ufvk
+        FROM accounts
+        WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
+           OR sapling_fvk_item_cache = :sapling_fvk_item_cache
+           OR p2pkh_fvk_item_cache = :p2pkh_fvk_item_cache",
+    )?;
+
+    let accounts = stmt
+        .query_and_then::<_, SqliteClientError, _, _>(
+            named_params![
+                ":orchard_fvk_item_cache": ufvk.orchard().map(|k| k.to_bytes()),
+                ":sapling_fvk_item_cache": ufvk.sapling().map(|k| k.to_bytes()),
+                ":p2pkh_fvk_item_cache": transparent_item,
+            ],
+            |row| {
+                let account_id = row.get::<_, u32>(0).map(AccountId)?;
+                Ok((
+                    account_id,
+                    row.get::<_, Option<String>>(1)?
+                        .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
+                        .transpose()
+                        .map_err(|e| {
+                            SqliteClientError::CorruptedData(format!(
+                                "Could not decode unified full viewing key for account {:?}: {}",
+                                account_id, e
+                            ))
+                        })?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if accounts.len() > 1 {
+        Err(SqliteClientError::CorruptedData(
+            "Mutiple account records correspond to a single UFVK".to_owned(),
+        ))
+    } else {
+        Ok(accounts.into_iter().next())
+    }
+}
+
+/// Returns the account id corresponding to a given [`UnifiedFullViewingKey`],
+/// if any.
+pub(crate) fn get_seed_account<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    seed: &HdSeedFingerprint,
+    account_id: zip32::AccountId,
+) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, ufvk
+        FROM accounts
+        WHERE hd_seed_fingerprint = :hd_seed_fingerprint
+          AND hd_account_index = :account_id",
+    )?;
+
+    let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
+        named_params![
+            ":hd_seed_fingerprint": seed.as_bytes(),
+            ":hd_account_index": u32::from(account_id),
+        ],
         |row| {
-            let acct = row.get(0)?;
-            Ok(AccountId(acct))
+            let account_id = row.get::<_, u32>(0).map(AccountId)?;
+            Ok((
+                account_id,
+                row.get::<_, Option<String>>(1)?
+                    .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
+                    .transpose()
+                    .map_err(|e| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Could not decode unified full viewing key for account {:?}: {}",
+                            account_id, e
+                        ))
+                    })?,
+            ))
         },
-    )
-    .optional()
-    .map_err(SqliteClientError::from)
+    )?;
+
+    accounts.next().transpose()
 }
 
 pub(crate) trait ScanProgress {
@@ -2343,7 +2446,7 @@ mod tests {
         let st = TestBuilder::new()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
-        let account = st.test_account().unwrap();
+        let account = st.test_account().unwrap().0.account_id();
 
         // The account should have no summary information
         assert_eq!(st.get_wallet_summary(0), None);
@@ -2357,11 +2460,11 @@ mod tests {
         );
 
         // The default address is set for the test account
-        assert_matches!(st.wallet().get_current_address(account.0), Ok(Some(_)));
+        assert_matches!(st.wallet().get_current_address(account), Ok(Some(_)));
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet().get_current_address(AccountId(account.0 .0 + 1)),
+            st.wallet().get_current_address(AccountId(account.0 + 1)),
             Ok(None)
         );
     }
@@ -2375,10 +2478,10 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (account_id, _, _) = st.test_account().unwrap();
+        let (sources, _, _) = st.test_account().unwrap();
         let uaddr = st
             .wallet()
-            .get_current_address(account_id)
+            .get_current_address(sources.account_id())
             .unwrap()
             .unwrap();
         let taddr = uaddr.transparent().unwrap();
@@ -2386,7 +2489,7 @@ mod tests {
         let height_1 = BlockHeight::from_u32(12345);
         let bal_absent = st
             .wallet()
-            .get_transparent_balances(account_id, height_1)
+            .get_transparent_balances(sources.account_id(), height_1)
             .unwrap();
         assert!(bal_absent.is_empty());
 
@@ -2438,7 +2541,7 @@ mod tests {
         );
 
         assert_matches!(
-            st.wallet().get_transparent_balances(account_id, height_2),
+            st.wallet().get_transparent_balances(sources.account_id(), height_2),
             Ok(h) if h.get(taddr) == Some(&value)
         );
 
@@ -2463,7 +2566,7 @@ mod tests {
         let st = TestBuilder::new()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
-        let account_id = st.test_account().unwrap().0;
+        let account_id = st.test_account().unwrap().0.account_id();
         let account_parameters = get_account(st.wallet(), account_id).unwrap().unwrap();
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
@@ -2483,10 +2586,10 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let (account_id, usk, _) = st.test_account().unwrap();
+        let (sources, usk, _) = st.test_account().unwrap();
         let uaddr = st
             .wallet()
-            .get_current_address(account_id)
+            .get_current_address(sources.account_id())
             .unwrap()
             .unwrap();
         let taddr = uaddr.transparent().unwrap();
@@ -2508,14 +2611,17 @@ mod tests {
                 .get_wallet_summary(min_confirmations)
                 .unwrap()
                 .unwrap();
-            let balance = summary.account_balances().get(&account_id).unwrap();
+            let balance = summary
+                .account_balances()
+                .get(&sources.account_id())
+                .unwrap();
             assert_eq!(balance.unshielded(), expected);
 
             // Check the older APIs for consistency.
             let max_height = st.wallet().chain_height().unwrap().unwrap() + 1 - min_confirmations;
             assert_eq!(
                 st.wallet()
-                    .get_transparent_balances(account_id, max_height)
+                    .get_transparent_balances(sources.account_id(), max_height)
                     .unwrap()
                     .get(taddr)
                     .cloned()

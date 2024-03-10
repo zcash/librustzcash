@@ -45,6 +45,7 @@ use zcash_client_backend::{
     zip321,
 };
 use zcash_client_backend::{
+    data_api::AccountSources,
     fees::{standard, DustOutputPolicy},
     ShieldedProtocol,
 };
@@ -512,10 +513,20 @@ impl<Cache> TestState<Cache> {
     }
 
     /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
-    pub(crate) fn test_account(&self) -> Option<(AccountId, UnifiedSpendingKey, AccountBirthday)> {
-        self.test_account
-            .as_ref()
-            .map(|(_, a, k, b)| (*a, k.clone(), b.clone()))
+    pub(crate) fn test_account(
+        &self,
+    ) -> Option<(
+        AccountSources<AccountId>,
+        UnifiedSpendingKey,
+        AccountBirthday,
+    )> {
+        self.test_account.as_ref().map(|(_, a, k, b)| {
+            (
+                AccountSources::new(*a, k.has_orchard(), k.has_sapling(), k.has_transparent()),
+                k.clone(),
+                b.clone(),
+            )
+        })
     }
 
     /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
@@ -615,7 +626,7 @@ impl<Cache> TestState<Cache> {
     #[allow(clippy::type_complexity)]
     pub(crate) fn propose_transfer<InputsT>(
         &mut self,
-        spend_from_account: AccountId,
+        account_sources: AccountSources<AccountId>,
         input_selector: &InputsT,
         request: zip321::TransactionRequest,
         min_confirmations: NonZeroU32,
@@ -635,7 +646,7 @@ impl<Cache> TestState<Cache> {
         propose_transfer::<_, _, _, Infallible>(
             &mut self.db_data,
             &params,
-            spend_from_account,
+            account_sources,
             input_selector,
             request,
             min_confirmations,
@@ -647,7 +658,7 @@ impl<Cache> TestState<Cache> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn propose_standard_transfer<CommitmentTreeErrT>(
         &mut self,
-        spend_from_account: AccountId,
+        account_sources: AccountSources<AccountId>,
         fee_rule: StandardFeeRule,
         min_confirmations: NonZeroU32,
         to: &Address,
@@ -669,7 +680,7 @@ impl<Cache> TestState<Cache> {
             &mut self.db_data,
             &params,
             fee_rule,
-            spend_from_account,
+            account_sources,
             min_confirmations,
             to,
             amount,

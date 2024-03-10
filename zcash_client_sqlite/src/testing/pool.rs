@@ -128,7 +128,8 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -175,7 +176,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let proposal = st
         .propose_transfer(
-            account,
+            sources,
             input_selector,
             request,
             NonZeroU32::new(1).unwrap(),
@@ -275,7 +276,8 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -318,7 +320,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     );
     let proposal0 = st
         .propose_transfer(
-            account,
+            sources,
             &input_selector,
             request0,
             NonZeroU32::new(1).unwrap(),
@@ -479,7 +481,8 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -527,7 +530,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     let to = T::sk_default_address(&extsk2);
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             StandardFeeRule::Zip317,
             NonZeroU32::new(2).unwrap(),
             &to,
@@ -557,7 +560,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     // Spend still fails
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             StandardFeeRule::Zip317,
             NonZeroU32::new(10).unwrap(),
             &to,
@@ -592,7 +595,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     let min_confirmations = NonZeroU32::new(10).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             StandardFeeRule::Zip317,
             min_confirmations,
             &to,
@@ -626,7 +629,8 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // TODO: This test was originally written to use the pre-zip-313 fee rule
@@ -649,7 +653,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     let min_confirmations = NonZeroU32::new(1).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             fee_rule,
             min_confirmations,
             &to,
@@ -669,7 +673,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     // A second proposal fails because there are no usable notes
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             fee_rule,
             NonZeroU32::new(1).unwrap(),
             &to,
@@ -699,7 +703,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     // Second proposal still fails
     assert_matches!(
         st.propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             fee_rule,
             NonZeroU32::new(1).unwrap(),
             &to,
@@ -732,7 +736,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     let min_confirmations = NonZeroU32::new(1).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             fee_rule,
             min_confirmations,
             &to,
@@ -763,7 +767,8 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -797,7 +802,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     > {
         let min_confirmations = NonZeroU32::new(1).unwrap();
         let proposal = st.propose_standard_transfer(
-            account,
+            sources,
             fee_rule,
             min_confirmations,
             &addr2,
@@ -858,7 +863,8 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note
@@ -880,7 +886,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     let min_confirmations = NonZeroU32::new(1).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             fee_rule,
             min_confirmations,
             &to,
@@ -904,7 +910,8 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet in a single note owned by the internal spending key
@@ -945,7 +952,7 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     let min_confirmations = NonZeroU32::new(1).unwrap();
     let proposal = st
         .propose_standard_transfer::<Infallible>(
-            account,
+            sources,
             fee_rule,
             min_confirmations,
             &to,
@@ -1080,7 +1087,8 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet
@@ -1173,7 +1181,8 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account_id, usk, _) = st.test_account().unwrap();
+    let (sources, usk, _) = st.test_account().unwrap();
+    let account_id = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     let uaddr = st
@@ -1301,10 +1310,10 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     st.scan_cached_blocks(birthday.height() + 5, 20);
 
     // Verify that the received note is not considered spendable
-    let account = st.test_account().unwrap();
+    let account = st.test_account().unwrap().0.account_id();
     let spendable = T::select_spendable_notes(
         &st,
-        account.0,
+        account,
         NonNegativeAmount::const_from_u64(300000),
         received_tx_height + 10,
         &[],
@@ -1319,7 +1328,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     // Verify that the received note is now considered spendable
     let spendable = T::select_spendable_notes(
         &st,
-        account.0,
+        account,
         NonNegativeAmount::const_from_u64(300000),
         received_tx_height + 10,
         &[],
@@ -1335,7 +1344,8 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         .with_test_account(AccountBirthday::from_sapling_activation)
         .build();
 
-    let (account, usk, birthday) = st.test_account().unwrap();
+    let (sources, usk, birthday) = st.test_account().unwrap();
+    let account = sources.account_id();
     let dfvk = T::test_account_fvk(&st);
 
     // Generate a block with funds belonging to our wallet.

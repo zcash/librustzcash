@@ -60,9 +60,9 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, AccountSources, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -214,20 +214,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 
     fn select_spendable_notes(
         &self,
-        account: AccountId,
+        sources: AccountSources<AccountId>,
         target_value: NonNegativeAmount,
-        _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        wallet::sapling::select_spendable_sapling_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )
+        if sources.use_sapling() {
+            wallet::sapling::select_spendable_sapling_notes(
+                self.conn.borrow(),
+                &self.params,
+                sources.account_id(),
+                target_value,
+                anchor_height,
+                exclude,
+            )
+        } else {
+            Ok(vec![])
+        }
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -258,6 +261,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
     type AccountId = AccountId;
+    type Account = (AccountId, Option<UnifiedFullViewingKey>);
 
     fn validate_seed(
         &self,
@@ -375,8 +379,16 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<AccountId>, Self::Error> {
+    ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+    }
+
+    fn get_seed_account(
+        &self,
+        seed: &HdSeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_seed_account(self.conn.borrow(), &self.params, seed, account_id)
     }
 
     fn get_wallet_summary(
@@ -1318,7 +1330,7 @@ mod tests {
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
 
-    use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
+    use crate::{testing::TestBuilder, AccountId};
 
     #[cfg(feature = "unstable")]
     use {
@@ -1333,7 +1345,7 @@ mod tests {
             .build();
 
         assert!({
-            let account = st.test_account().unwrap().0;
+            let account = st.test_account().unwrap().0.account_id();
             st.wallet()
                 .validate_seed(account, st.test_seed().unwrap())
                 .unwrap()
@@ -1349,7 +1361,7 @@ mod tests {
 
         // check that passing an invalid seed results in a failure
         assert!({
-            let account = st.test_account().unwrap().0;
+            let account = st.test_account().unwrap().0.account_id();
             !st.wallet()
                 .validate_seed(account, &SecretVec::new(vec![1u8; 32]))
                 .unwrap()
@@ -1361,20 +1373,29 @@ mod tests {
         let mut st = TestBuilder::new()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
-        let account = st.test_account().unwrap();
+        let sources = st.test_account().unwrap().0;
 
-        let current_addr = st.wallet().get_current_address(account.0).unwrap();
+        let current_addr = st
+            .wallet()
+            .get_current_address(sources.account_id())
+            .unwrap();
         assert!(current_addr.is_some());
 
         // TODO: Add Orchard
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.0, DEFAULT_UA_REQUEST)
+            .get_next_available_address(
+                sources.account_id(),
+                sources.to_unified_address_request().unwrap(),
+            )
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = st.wallet().get_current_address(account.0).unwrap();
+        let addr2_cur = st
+            .wallet()
+            .get_current_address(sources.account_id())
+            .unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1386,17 +1407,20 @@ mod tests {
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
-        let account = st.test_account().unwrap();
+        let sources = st.test_account().unwrap().0;
 
         let (_, usk, _) = st.test_account().unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
         let (taddr, _) = usk.default_transparent_address();
 
-        let receivers = st.wallet().get_transparent_receivers(account.0).unwrap();
+        let receivers = st
+            .wallet()
+            .get_transparent_receivers(sources.account_id())
+            .unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
-            ufvk.default_address(DEFAULT_UA_REQUEST)
+            ufvk.default_address(sources.to_unified_address_request().unwrap())
                 .expect("A valid default address exists for the UFVK")
                 .0
                 .transparent()
