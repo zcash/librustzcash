@@ -106,8 +106,20 @@ where
     #[cfg(not(feature = "orchard"))]
     let (change_pool, sapling_change) = (ShieldedProtocol::Sapling, 1);
 
+    let sapling_input_count = sapling
+        .bundle_type()
+        .num_spends(sapling.inputs().len())
+        .map_err(ChangeError::BundleError)?;
+    let sapling_output_count = sapling
+        .bundle_type()
+        .num_outputs(
+            sapling.inputs().len(),
+            sapling.outputs().len() + sapling_change,
+        )
+        .map_err(ChangeError::BundleError)?;
+
     #[cfg(feature = "orchard")]
-    let orchard_num_actions = orchard
+    let orchard_action_count = orchard
         .bundle_type()
         .num_actions(
             orchard.inputs().len(),
@@ -115,7 +127,7 @@ where
         )
         .map_err(ChangeError::BundleError)?;
     #[cfg(not(feature = "orchard"))]
-    let orchard_num_actions = 0;
+    let orchard_action_count = 0;
 
     let fee_amount = fee_rule
         .fee_required(
@@ -123,18 +135,9 @@ where
             target_height,
             transparent_inputs,
             transparent_outputs,
-            sapling
-                .bundle_type()
-                .num_spends(sapling.inputs().len())
-                .map_err(ChangeError::BundleError)?,
-            sapling
-                .bundle_type()
-                .num_outputs(
-                    sapling.inputs().len(),
-                    sapling.outputs().len() + sapling_change,
-                )
-                .map_err(ChangeError::BundleError)?,
-            orchard_num_actions,
+            sapling_input_count,
+            sapling_output_count,
+            orchard_action_count,
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
