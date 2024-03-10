@@ -565,9 +565,18 @@ pub(crate) mod tests {
         VERIFY_LOOKAHEAD,
     };
 
+    #[cfg(feature = "orchard")]
+    use crate::wallet::orchard::tests::OrchardPoolTester;
+
     #[test]
     fn sapling_scan_complete() {
         scan_complete::<SaplingPoolTester>();
+    }
+
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_scan_complete() {
+        scan_complete::<OrchardPoolTester>();
     }
 
     fn scan_complete<T: ShieldedPoolTester>() {
@@ -699,14 +708,16 @@ pub(crate) mod tests {
         );
     }
 
-    pub(crate) fn test_with_canopy_birthday<T: ShieldedPoolTester>(
+    pub(crate) fn test_with_nu5_birthday_offset<T: ShieldedPoolTester>(
+        offset: u32,
     ) -> (TestState<BlockCache>, T::Fvk, AccountBirthday, u32) {
         let st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(|network| {
-                // We use Canopy activation as an arbitrary birthday height that's greater than Sapling
-                // activation. We set the Canopy Sapling frontier to be 1234 notes into the second shard.
-                let birthday_height = network.activation_height(NetworkUpgrade::Canopy).unwrap();
+                // We set the Sapling frontier at the birthday height to be 1234 notes
+                // into the second shard.
+                let birthday_height =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + offset;
                 let sapling_frontier_position = Position::from((0x1 << 16) + 1234);
                 let sapling_frontier = Frontier::from_parts(
                     sapling_frontier_position,
@@ -736,10 +747,17 @@ pub(crate) mod tests {
         create_account_creates_ignored_range::<SaplingPoolTester>();
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_create_account_creates_ignored_range() {
+        create_account_creates_ignored_range::<OrchardPoolTester>();
+    }
+
     fn create_account_creates_ignored_range<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (st, _, birthday, sap_active) = test_with_canopy_birthday::<T>();
+        // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
+        let (st, _, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
         let birthday_height = birthday.height().into();
 
         let expected = vec![
@@ -799,10 +817,17 @@ pub(crate) mod tests {
         update_chain_tip_with_no_subtree_roots::<SaplingPoolTester>();
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_with_no_subtree_roots() {
+        update_chain_tip_with_no_subtree_roots::<OrchardPoolTester>();
+    }
+
     fn update_chain_tip_with_no_subtree_roots<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday::<T>();
+        // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
+        let (mut st, _, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
 
         // Set up the following situation:
         //
@@ -834,10 +859,17 @@ pub(crate) mod tests {
         update_chain_tip_when_never_scanned::<SaplingPoolTester>();
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_when_never_scanned() {
+        update_chain_tip_when_never_scanned::<OrchardPoolTester>();
+    }
+
     fn update_chain_tip_when_never_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (mut st, _, birthday, sap_active) = test_with_canopy_birthday::<T>();
+        // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
+        let (mut st, _, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
 
         // Set up the following situation:
         //
@@ -883,11 +915,18 @@ pub(crate) mod tests {
         update_chain_tip_unstable_max_scanned::<SaplingPoolTester>();
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_unstable_max_scanned() {
+        update_chain_tip_unstable_max_scanned::<OrchardPoolTester>();
+    }
+
     fn update_chain_tip_unstable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
+        // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         // this birthday is 1234 notes into the second shard
-        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday::<T>();
+        let (mut st, dfvk, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
 
         // Set up the following situation:
         //
@@ -1015,10 +1054,17 @@ pub(crate) mod tests {
         update_chain_tip_stable_max_scanned::<SaplingPoolTester>();
     }
 
+    #[cfg(feature = "orchard")]
+    #[test]
+    fn orchard_update_chain_tip_stable_max_scanned() {
+        update_chain_tip_stable_max_scanned::<OrchardPoolTester>();
+    }
+
     fn update_chain_tip_stable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
-        let (mut st, dfvk, birthday, sap_active) = test_with_canopy_birthday::<T>();
+        // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
+        let (mut st, dfvk, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
 
         // Set up the following situation:
         //

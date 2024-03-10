@@ -7,7 +7,8 @@ use std::fs::File;
 
 use nonempty::NonEmpty;
 use prost::Message;
-use rand_core::{CryptoRng, OsRng, RngCore};
+use rand_chacha::ChaChaRng;
+use rand_core::{CryptoRng, RngCore, SeedableRng};
 use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
 use tempfile::NamedTempFile;
@@ -50,7 +51,7 @@ use zcash_client_backend::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     transaction::{
         components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
@@ -59,6 +60,7 @@ use zcash_primitives::{
     },
     zip32::DiversifierIndex,
 };
+use zcash_protocol::local_consensus::LocalNetwork;
 
 use crate::{
     chain::init::init_cache_database,
@@ -98,18 +100,33 @@ pub(crate) mod pool;
 
 /// A builder for a `zcash_client_sqlite` test.
 pub(crate) struct TestBuilder<Cache> {
-    network: Network,
+    network: LocalNetwork,
     cache: Cache,
     test_account_birthday: Option<AccountBirthday>,
+    rng: ChaChaRng,
 }
 
 impl TestBuilder<()> {
     /// Constructs a new test.
     pub(crate) fn new() -> Self {
         TestBuilder {
-            network: Network::TestNetwork,
+            // Use a fake network where Sapling through NU5 activate at the same height.
+            // We pick 100,000 to be large enough to handle any hard-coded test offsets.
+            network: LocalNetwork {
+                overwinter: Some(BlockHeight::from_u32(1)),
+                sapling: Some(BlockHeight::from_u32(100_000)),
+                blossom: Some(BlockHeight::from_u32(100_000)),
+                heartwood: Some(BlockHeight::from_u32(100_000)),
+                canopy: Some(BlockHeight::from_u32(100_000)),
+                nu5: Some(BlockHeight::from_u32(100_000)),
+                #[cfg(feature = "unstable-nu6")]
+                nu6: None,
+                #[cfg(feature = "zfuture")]
+                z_future: None,
+            },
             cache: (),
             test_account_birthday: None,
+            rng: ChaChaRng::seed_from_u64(0),
         }
     }
 
@@ -119,6 +136,7 @@ impl TestBuilder<()> {
             network: self.network,
             cache: BlockCache::new(),
             test_account_birthday: self.test_account_birthday,
+            rng: self.rng,
         }
     }
 
@@ -129,12 +147,13 @@ impl TestBuilder<()> {
             network: self.network,
             cache: FsBlockCache::new(),
             test_account_birthday: self.test_account_birthday,
+            rng: self.rng,
         }
     }
 }
 
 impl<Cache> TestBuilder<Cache> {
-    pub(crate) fn with_test_account<F: FnOnce(&Network) -> AccountBirthday>(
+    pub(crate) fn with_test_account<F: FnOnce(&LocalNetwork) -> AccountBirthday>(
         mut self,
         birthday: F,
     ) -> Self {
@@ -162,6 +181,7 @@ impl<Cache> TestBuilder<Cache> {
             _data_file: data_file,
             db_data,
             test_account,
+            rng: self.rng,
         }
     }
 }
@@ -215,13 +235,14 @@ pub(crate) struct TestState<Cache> {
     cache: Cache,
     latest_cached_block: Option<CachedBlock>,
     _data_file: NamedTempFile,
-    db_data: WalletDb<Connection, Network>,
+    db_data: WalletDb<Connection, LocalNetwork>,
     test_account: Option<(
         SecretVec<u8>,
         AccountId,
         UnifiedSpendingKey,
         AccountBirthday,
     )>,
+    rng: ChaChaRng,
 }
 
 impl<Cache: TestCache> TestState<Cache>
@@ -291,6 +312,7 @@ where
             value,
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            &mut self.rng,
         );
         let res = self.cache.insert(&cb);
 
@@ -332,6 +354,7 @@ where
             value,
             cached_block.sapling_end_size,
             cached_block.orchard_end_size,
+            &mut self.rng,
         );
         let res = self.cache.insert(&cb);
 
@@ -383,6 +406,7 @@ where
             tx,
             cached_block.sapling_end_size,
             cached_block.orchard_end_size,
+            &mut self.rng,
         );
         let res = self.cache.insert(&cb);
 
@@ -460,17 +484,17 @@ where
 
 impl<Cache> TestState<Cache> {
     /// Exposes an immutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet(&self) -> &WalletDb<Connection, Network> {
+    pub(crate) fn wallet(&self) -> &WalletDb<Connection, LocalNetwork> {
         &self.db_data
     }
 
     /// Exposes a mutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, Network> {
+    pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
         &mut self.db_data
     }
 
     /// Exposes the network in use.
-    pub(crate) fn network(&self) -> Network {
+    pub(crate) fn network(&self) -> LocalNetwork {
         self.db_data.params
     }
 
@@ -499,6 +523,14 @@ impl<Cache> TestState<Cache> {
         self.test_account
             .as_ref()
             .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
+    }
+
+    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
+    #[cfg(feature = "orchard")]
+    pub(crate) fn test_account_orchard(&self) -> Option<orchard::keys::FullViewingKey> {
+        self.test_account
+            .as_ref()
+            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().orchard().cloned())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.
@@ -561,7 +593,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         #![allow(deprecated)]
         let params = self.network();
@@ -597,7 +629,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         propose_transfer::<_, _, _, Infallible>(
@@ -673,7 +705,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         propose_shielding::<_, _, _, Infallible>(
@@ -737,7 +769,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         let prover = test_prover();
@@ -1128,10 +1160,8 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    mut rng: impl RngCore + CryptoRng,
 ) -> (CompactBlock, Fvk::Nullifier) {
-    // Create a fake Note for the account
-    let mut rng = OsRng;
-
     // Create a fake CompactBlock containing the note
     let mut ctx = fake_compact_tx(&mut rng);
     let nf = fvk.add_output(
@@ -1150,6 +1180,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
         prev_hash,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        rng,
     );
     (cb, nf)
 }
@@ -1162,6 +1193,7 @@ fn fake_compact_block_from_tx(
     tx: &Transaction,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    rng: impl RngCore,
 ) -> CompactBlock {
     // Create a fake CompactTx containing the transaction.
     let mut ctx = CompactTx {
@@ -1192,6 +1224,7 @@ fn fake_compact_block_from_tx(
         prev_hash,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        rng,
     )
 }
 
@@ -1208,8 +1241,8 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    mut rng: impl RngCore + CryptoRng,
 ) -> CompactBlock {
-    let mut rng = OsRng;
     let mut ctx = fake_compact_tx(&mut rng);
 
     // Create a fake spend and a fake Note for the change
@@ -1291,6 +1324,7 @@ fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
         prev_hash,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        rng,
     )
 }
 
@@ -1300,8 +1334,8 @@ fn fake_compact_block_from_compact_tx(
     prev_hash: BlockHash,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    mut rng: impl RngCore,
 ) -> CompactBlock {
-    let mut rng = OsRng;
     let mut cb = CompactBlock {
         hash: {
             let mut hash = vec![0; 32];
@@ -1428,7 +1462,7 @@ pub(crate) fn input_selector(
     change_memo: Option<&str>,
     fallback_change_pool: ShieldedProtocol,
 ) -> GreedyInputSelector<
-    WalletDb<rusqlite::Connection, Network>,
+    WalletDb<rusqlite::Connection, LocalNetwork>,
     standard::SingleOutputChangeStrategy,
 > {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
@@ -1440,7 +1474,7 @@ pub(crate) fn input_selector(
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
 fn check_proposal_serialization_roundtrip(
-    db_data: &WalletDb<rusqlite::Connection, Network>,
+    db_data: &WalletDb<rusqlite::Connection, LocalNetwork>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
     let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);
