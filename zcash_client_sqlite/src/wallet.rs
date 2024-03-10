@@ -1733,7 +1733,7 @@ pub(crate) fn get_max_height_hash(
 pub(crate) fn get_min_unspent_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
-    conn.query_row(
+    let min_sapling: Option<BlockHeight> = conn.query_row(
         "SELECT MIN(tx.block)
          FROM sapling_received_notes n
          JOIN transactions tx ON tx.id_tx = n.tx
@@ -1743,8 +1743,27 @@ pub(crate) fn get_min_unspent_height(
             row.get(0)
                 .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
         },
-    )
-    .map_err(SqliteClientError::from)
+    )?;
+    #[cfg(feature = "orchard")]
+    let min_orchard: Option<BlockHeight> = conn.query_row(
+        "SELECT MIN(tx.block)
+         FROM orchard_received_notes n
+         JOIN transactions tx ON tx.id_tx = n.tx
+         WHERE n.spent IS NULL",
+        [],
+        |row| {
+            row.get(0)
+                .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
+        },
+    )?;
+    #[cfg(not(feature = "orchard"))]
+    let min_orchard = None;
+
+    Ok(min_sapling
+        .zip(min_orchard)
+        .map(|(s, o)| s.min(o))
+        .or(min_sapling)
+        .or(min_orchard))
 }
 
 /// Truncates the database to the given height.
@@ -1793,6 +1812,18 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             WHERE id IN (
                 SELECT rn.id
                 FROM sapling_received_notes rn
+                LEFT OUTER JOIN transactions tx
+                ON tx.id_tx = rn.tx
+                WHERE tx.block IS NOT NULL AND tx.block > ?
+            );",
+            [u32::from(block_height)],
+        )?;
+        #[cfg(feature = "orchard")]
+        conn.execute(
+            "DELETE FROM orchard_received_notes
+            WHERE id IN (
+                SELECT rn.id
+                FROM orchard_received_notes rn
                 LEFT OUTER JOIN transactions tx
                 ON tx.id_tx = rn.tx
                 WHERE tx.block IS NOT NULL AND tx.block > ?
