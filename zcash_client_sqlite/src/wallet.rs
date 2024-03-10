@@ -1206,24 +1206,31 @@ pub(crate) fn get_received_memo(
     conn: &rusqlite::Connection,
     note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
-    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
-        ShieldedProtocol::Sapling => conn
-            .query_row(
-                "SELECT memo FROM sapling_received_notes
-                JOIN transactions ON sapling_received_notes.tx = transactions.id_tx
+    let fetch_memo = |table_prefix: &'static str, output_col: &'static str| {
+        conn.query_row(
+            &format!(
+                "SELECT memo FROM {table_prefix}_received_notes
+                JOIN transactions ON {table_prefix}_received_notes.tx = transactions.id_tx
                 WHERE transactions.txid = :txid
-                AND sapling_received_notes.output_index = :output_index",
-                named_params![
-                    ":txid": note_id.txid().as_ref(),
-                    ":output_index": note_id.output_index()
-                ],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten(),
-        _ => {
+                AND {table_prefix}_received_notes.{output_col} = :output_index"
+            ),
+            named_params![
+                ":txid": note_id.txid().as_ref(),
+                ":output_index": note_id.output_index()
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+    };
+
+    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
+        ShieldedProtocol::Sapling => fetch_memo(SAPLING_TABLES_PREFIX, "output_index")?.flatten(),
+        #[cfg(feature = "orchard")]
+        ShieldedProtocol::Orchard => fetch_memo(ORCHARD_TABLES_PREFIX, "action_index")?.flatten(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedProtocol::Orchard => {
             return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
-                note_id.protocol(),
+                ShieldedProtocol::Orchard,
             )))
         }
     };
