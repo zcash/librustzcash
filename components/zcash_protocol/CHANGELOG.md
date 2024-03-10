@@ -11,6 +11,11 @@ and this library adheres to Rust's notion of
 - `zcash_protocol::memo`:
   - `impl TryFrom<&MemoBytes> for Memo`
 
+### Removed
+- `unstable-nu6` and `zfuture` feature flags (use `--cfg zcash_unstable=\"nu6\"`
+  or `--cfg zcash_unstable=\"zfuture\"` in `RUSTFLAGS` and `RUSTDOCFLAGS`
+  instead).
+
 ## [0.1.0] - 2024-03-06
 The entries below are relative to the `zcash_primitives` crate as of the tag
 `zcash_primitives-0.14.0`.

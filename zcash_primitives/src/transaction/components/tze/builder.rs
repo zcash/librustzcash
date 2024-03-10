@@ -1,5 +1,4 @@
 //! Types and functions for building TZE transaction components
-#![cfg(feature = "zfuture")]
 
 use std::fmt;
 

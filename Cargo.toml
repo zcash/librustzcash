@@ -7,8 +7,7 @@ members = [
     "components/zcash_protocol",
     "zcash_client_backend",
     "zcash_client_sqlite",
-    # Disabled until we replace the `zfutures` feature flag with a compiler flag.
-    # "zcash_extensions",
+    "zcash_extensions",
     "zcash_history",
     "zcash_keys",
     "zcash_primitives",
