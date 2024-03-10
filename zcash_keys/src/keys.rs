@@ -980,58 +980,57 @@ impl UnifiedIncomingViewingKey {
         #[cfg(feature = "transparent-inputs")]
         let mut transparent = None;
 
+        let mut unknown = vec![];
+
         // We can use as-parsed order here for efficiency, because we're breaking out the
         // receivers we support from the unknown receivers.
-        let unknown = uivk
-            .items_as_parsed()
-            .iter()
-            .filter_map(|receiver| match receiver {
-                #[cfg(feature = "orchard")]
+        for receiver in uivk.items_as_parsed() {
+            match receiver {
                 unified::Ivk::Orchard(data) => {
-                    Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
-                        .ok_or(UnifiedError::InvalidShieldedKey(ShieldedProtocol::Orchard))
-                        .map(|addr| {
-                            orchard = Some(addr);
-                            None
-                        })
-                        .transpose()
+                    #[cfg(feature = "orchard")]
+                    {
+                        orchard = Some(
+                            Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
+                                .ok_or(UnifiedError::InvalidShieldedKey(
+                                    ShieldedProtocol::Orchard,
+                                ))?,
+                        );
+                    }
+
+                    #[cfg(not(feature = "orchard"))]
+                    unknown.push((u32::from(unified::Typecode::Orchard), data.to_vec()));
                 }
-                #[cfg(not(feature = "orchard"))]
-                unified::Ivk::Orchard(data) => Some(Ok::<_, UnifiedError>((
-                    u32::from(unified::Typecode::Orchard),
-                    data.to_vec(),
-                ))),
-                #[cfg(feature = "sapling")]
                 unified::Ivk::Sapling(data) => {
-                    Option::from(::sapling::zip32::IncomingViewingKey::from_bytes(data))
-                        .ok_or(UnifiedError::InvalidShieldedKey(ShieldedProtocol::Sapling))
-                        .map(|pa| {
-                            sapling = Some(pa);
-                            None
-                        })
-                        .transpose()
+                    #[cfg(feature = "sapling")]
+                    {
+                        sapling = Some(
+                            Option::from(::sapling::zip32::IncomingViewingKey::from_bytes(data))
+                                .ok_or(UnifiedError::InvalidShieldedKey(
+                                    ShieldedProtocol::Sapling,
+                                ))?,
+                        );
+                    }
+
+                    #[cfg(not(feature = "sapling"))]
+                    unknown.push((u32::from(unified::Typecode::Sapling), data.to_vec()));
                 }
-                #[cfg(not(feature = "sapling"))]
-                unified::Ivk::Sapling(data) => Some(Ok::<_, UnifiedError>((
-                    u32::from(unified::Typecode::Sapling),
-                    data.to_vec(),
-                ))),
-                #[cfg(feature = "transparent-inputs")]
-                unified::Ivk::P2pkh(data) => legacy::ExternalIvk::deserialize(data)
-                    .map_err(UnifiedError::InvalidTransparentKey)
-                    .map(|tivk| {
-                        transparent = Some(tivk);
-                        None
-                    })
-                    .transpose(),
-                #[cfg(not(feature = "transparent-inputs"))]
-                unified::Ivk::P2pkh(data) => Some(Ok::<_, UnifiedError>((
-                    u32::from(unified::Typecode::P2pkh),
-                    data.to_vec(),
-                ))),
-                unified::Ivk::Unknown { typecode, data } => Some(Ok((*typecode, data.clone()))),
-            })
-            .collect::<Result<_, _>>()?;
+                unified::Ivk::P2pkh(data) => {
+                    #[cfg(feature = "transparent-inputs")]
+                    {
+                        transparent = Some(
+                            legacy::ExternalIvk::deserialize(data)
+                                .map_err(UnifiedError::InvalidTransparentKey)?,
+                        );
+                    }
+
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    unknown.push((u32::from(unified::Typecode::P2pkh), data.to_vec()));
+                }
+                unified::Ivk::Unknown { typecode, data } => {
+                    unknown.push((*typecode, data.clone()));
+                }
+            }
+        }
 
         Ok(Self {
             #[cfg(feature = "transparent-inputs")]
