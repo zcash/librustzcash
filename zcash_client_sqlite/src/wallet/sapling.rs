@@ -197,12 +197,14 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
                 diversifier, value, rcm, commitment_tree_position,
                 accounts.ufvk, recipient_key_scope
          FROM sapling_received_notes
-         INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
+         INNER JOIN accounts ON accounts.id = sapling_received_notes.account_id
          INNER JOIN transactions ON transactions.id_tx = sapling_received_notes.tx
          WHERE txid = :txid
+         AND output_index = :output_index
          AND accounts.ufvk IS NOT NULL
          AND recipient_key_scope IS NOT NULL
-         AND output_index = :output_index
+         AND nf IS NOT NULL
+         AND commitment_tree_position IS NOT NULL
          AND spent IS NULL",
         named_params![
            ":txid": txid.as_ref(),
@@ -284,17 +286,20 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     let mut stmt_select_notes = conn.prepare_cached(
         "WITH eligible AS (
              SELECT
-                 sapling_received_notes.id AS id, txid, output_index, diversifier, value, rcm, commitment_tree_position,
+                 sapling_received_notes.id AS id, txid, output_index,
+                 diversifier, value, rcm, commitment_tree_position,
                  SUM(value)
                     OVER (PARTITION BY sapling_received_notes.account_id, spent ORDER BY sapling_received_notes.id) AS so_far,
                  accounts.ufvk as ufvk, recipient_key_scope
              FROM sapling_received_notes
-             INNER JOIN accounts on accounts.id = sapling_received_notes.account_id
+             INNER JOIN accounts
+                ON accounts.id = sapling_received_notes.account_id
              INNER JOIN transactions
                 ON transactions.id_tx = sapling_received_notes.tx
              WHERE sapling_received_notes.account_id = :account
-             AND ufvk IS NOT NULL
+             AND accounts.ufvk IS NOT NULL
              AND recipient_key_scope IS NOT NULL
+             AND nf IS NOT NULL
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
@@ -310,10 +315,14 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
                 AND unscanned.block_range_end > :wallet_birthday
              )
          )
-         SELECT id, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
+         SELECT id, txid, output_index,
+                diversifier, value, rcm, commitment_tree_position,
+                ufvk, recipient_key_scope
          FROM eligible WHERE so_far < :target_value
          UNION
-         SELECT id, txid, output_index, diversifier, value, rcm, commitment_tree_position, ufvk, recipient_key_scope
+         SELECT id, txid, output_index,
+                diversifier, value, rcm, commitment_tree_position,
+                ufvk, recipient_key_scope
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 

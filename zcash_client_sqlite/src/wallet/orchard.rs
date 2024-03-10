@@ -200,6 +200,8 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
          INNER JOIN transactions ON transactions.id_tx = orchard_received_notes.tx
          WHERE txid = :txid
          AND action_index = :action_index
+         AND accounts.ufvk IS NOT NULL
+         AND recipient_key_scope IS NOT NULL
          AND nf IS NOT NULL
          AND spent IS NULL",
         named_params![
@@ -289,10 +291,14 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
                     OVER (PARTITION BY orchard_received_notes.account_id, spent ORDER BY orchard_received_notes.id) AS so_far,
                  accounts.ufvk as ufvk, recipient_key_scope
              FROM orchard_received_notes
-             INNER JOIN accounts on accounts.id = orchard_received_notes.account_id
+             INNER JOIN accounts
+                ON accounts.id = orchard_received_notes.account_id
              INNER JOIN transactions
                 ON transactions.id_tx = orchard_received_notes.tx
              WHERE orchard_received_notes.account_id = :account
+             AND accounts.ufvk IS NOT NULL
+             AND recipient_key_scope IS NOT NULL
+             AND nf IS NOT NULL
              AND commitment_tree_position IS NOT NULL
              AND spent IS NULL
              AND transactions.block <= :anchor_height
