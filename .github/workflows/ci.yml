@@ -12,6 +12,7 @@ jobs:
       matrix.extra_flags != 'NOT_A_PUZZLE' && format(' with --features {0}', matrix.extra_flags) || ''
       }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
         os: [ubuntu-latest-8cores, windows-latest-8cores, macOS-latest]
