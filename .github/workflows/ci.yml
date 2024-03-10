@@ -23,7 +23,6 @@ jobs:
           - NOT_A_PUZZLE
           - Orchard
           - NU6
-          - ZFuture
 
         include:
           - target: Linux
@@ -38,14 +37,10 @@ jobs:
             rustflags: '--cfg zcash_unstable="orchard"'
           - state: NU6
             extra_flags: unstable-nu6
-          - state: ZFuture
-            extra_flags: zfuture
 
         exclude:
           - target: macOS
             state: NU6
-          - target: macOS
-            state: ZFuture
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
@@ -79,6 +74,63 @@ jobs:
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
           -- --ignored
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  # States that we want to ensure can be built, but that we don't actively run tests for.
+  check-msrv:
+    name: >
+      Check${{
+      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
+      }} build on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
+    strategy:
+      matrix:
+        target:
+          - Linux
+          - macOS
+          - Windows
+        state:
+          - ZFuture
+
+        include:
+          - target: Linux
+            os: ubuntu-latest
+          - target: macOS
+            os: macOS-latest
+          - target: Windows
+            os: windows-latest
+
+          - state: ZFuture
+            extra_flags: zfuture
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run check
+        run: >
+          cargo check
+          --release
+          --workspace
+          --tests
+          ${{ steps.prepare.outputs.feature-flags }}
       - name: Verify working directory is clean
         run: git diff --exit-code
 
