@@ -554,6 +554,7 @@ pub(crate) mod tests {
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
         transaction::components::amount::NonNegativeAmount,
     };
+    use zcash_protocol::ShieldedProtocol;
 
     use crate::{
         error::SqliteClientError,
@@ -566,7 +567,10 @@ pub(crate) mod tests {
     };
 
     #[cfg(feature = "orchard")]
-    use crate::wallet::orchard::tests::OrchardPoolTester;
+    use {
+        crate::wallet::orchard::tests::OrchardPoolTester, orchard::tree::MerkleHashOrchard,
+        zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+    };
 
     #[test]
     fn sapling_scan_complete() {
@@ -714,22 +718,32 @@ pub(crate) mod tests {
         let st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(|network| {
-                // We set the Sapling frontier at the birthday height to be 1234 notes
-                // into the second shard.
+                // We set the Sapling and Orchard frontiers at the birthday height to be
+                // 1234 notes into the second shard.
                 let birthday_height =
                     network.activation_height(NetworkUpgrade::Nu5).unwrap() + offset;
-                let sapling_frontier_position = Position::from((0x1 << 16) + 1234);
+                let frontier_position = Position::from((0x1 << 16) + 1234);
                 let sapling_frontier = Frontier::from_parts(
-                    sapling_frontier_position,
+                    frontier_position,
                     Node::empty_leaf(),
-                    vec![Node::empty_leaf(); sapling_frontier_position.past_ommer_count().into()],
+                    vec![Node::empty_leaf(); frontier_position.past_ommer_count().into()],
+                )
+                .unwrap();
+                #[cfg(feature = "orchard")]
+                let orchard_frontier = Frontier::from_parts(
+                    frontier_position,
+                    MerkleHashOrchard::empty_leaf(),
+                    vec![
+                        MerkleHashOrchard::empty_leaf();
+                        frontier_position.past_ommer_count().into()
+                    ],
                 )
                 .unwrap();
                 AccountBirthday::from_parts(
                     birthday_height,
                     sapling_frontier,
                     #[cfg(feature = "orchard")]
-                    Frontier::empty(),
+                    orchard_frontier,
                     None,
                 )
             })
@@ -1138,9 +1152,15 @@ pub(crate) mod tests {
         // wallet birthday but before the end of the shard.
         let summary = st.get_wallet_summary(1);
         assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0),);
+
+        // Progress denominator depends on which pools are enabled (which changes the
+        // initial tree states in `test_with_nu5_birthday_offset`).
+        let expected_denom = 1 << SAPLING_SHARD_HEIGHT;
+        #[cfg(feature = "orchard")]
+        let expected_denom = expected_denom + (1 << ORCHARD_SHARD_HEIGHT);
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
-            Some(Ratio::new(1, 0x1 << SAPLING_SHARD_HEIGHT))
+            Some(Ratio::new(1, expected_denom))
         );
 
         // Now simulate shutting down, and then restarting 70 blocks later, after a shard
@@ -1178,10 +1198,18 @@ pub(crate) mod tests {
 
         // We've crossed a subtree boundary, and so still only have one scanned note but have two
         // shards worth of notes to scan.
+        let expected_denom = expected_denom
+            + match T::SHIELDED_PROTOCOL {
+                ShieldedProtocol::Sapling => 1 << SAPLING_SHARD_HEIGHT,
+                #[cfg(feature = "orchard")]
+                ShieldedProtocol::Orchard => 1 << ORCHARD_SHARD_HEIGHT,
+                #[cfg(not(feature = "orchard"))]
+                ShieldedProtocol::Orchard => unreachable!(),
+            };
         let summary = st.get_wallet_summary(1);
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
-            Some(Ratio::new(1, 0x1 << (SAPLING_SHARD_HEIGHT + 1)))
+            Some(Ratio::new(1, expected_denom))
         );
     }
 
