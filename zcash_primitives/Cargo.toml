@@ -123,16 +123,6 @@ test-dependencies = [
     "zcash_protocol/test-dependencies",
 ]
 
-#! ### Experimental features
-#!
-#! ⚠️ Enabling these features will likely make your code incompatible with current Zcash
-#! consensus rules!
-
-## Exposes the in-development NU6 features.
-unstable-nu6 = ["zcash_protocol/unstable-nu6"]
-
-## Exposes early in-development features that are not yet planned for any network upgrade.
-zfuture = ["zcash_protocol/zfuture"]
 [lib]
 bench = false
 

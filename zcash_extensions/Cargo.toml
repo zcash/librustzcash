@@ -16,7 +16,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 blake2b_simd.workspace = true
-zcash_primitives = { workspace = true, features = ["zfuture" ] }
+zcash_primitives.workspace = true
 
 [dev-dependencies]
 ff.workspace = true
@@ -29,7 +29,6 @@ zcash_proofs.workspace = true
 
 [features]
 transparent-inputs = []
-unstable-nu6 = ["zcash_primitives/unstable-nu6"]
 
 [lib]
 bench = false

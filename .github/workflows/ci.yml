@@ -36,7 +36,7 @@ jobs:
             extra_flags: orchard
             rustflags: '--cfg zcash_unstable="orchard"'
           - state: NU6
-            extra_flags: unstable-nu6
+            rustflags: '--cfg zcash_unstable="nu6"'
 
         exclude:
           - target: macOS
@@ -103,7 +103,7 @@ jobs:
             os: windows-latest
 
           - state: ZFuture
-            extra_flags: zfuture
+            rustflags: '--cfg zcash_unstable="zfuture"'
 
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}

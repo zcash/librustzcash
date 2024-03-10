@@ -119,9 +119,9 @@ impl TestBuilder<()> {
                 heartwood: Some(BlockHeight::from_u32(100_000)),
                 canopy: Some(BlockHeight::from_u32(100_000)),
                 nu5: Some(BlockHeight::from_u32(100_000)),
-                #[cfg(feature = "unstable-nu6")]
+                #[cfg(zcash_unstable = "nu6")]
                 nu6: None,
-                #[cfg(feature = "zfuture")]
+                #[cfg(zcash_unstable = "zfuture")]
                 z_future: None,
             },
             cache: (),
