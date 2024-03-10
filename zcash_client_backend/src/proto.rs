@@ -326,6 +326,8 @@ pub enum ProposalDecodingError<DbError> {
     ProposalInvalid(ProposalError),
     /// An inputs field for the given protocol was present, but contained no input note references.
     EmptyShieldedInputs(ShieldedProtocol),
+    /// A memo field was provided for a transparent output.
+    TransparentMemo,
     /// Change outputs to the specified pool are not supported.
     InvalidChangeRecipient(PoolType),
 }
@@ -378,6 +380,9 @@ impl<E: Display> Display for ProposalDecodingError<E> {
                 "An inputs field was present for {:?}, but contained no note references.",
                 protocol
             ),
+            ProposalDecodingError::TransparentMemo => {
+                write!(f, "Transparent outputs cannot have memos.")
+            }
             ProposalDecodingError::InvalidChangeRecipient(pool_type) => write!(
                 f,
                 "Change outputs to the {} pool are not supported.",
@@ -704,20 +709,26 @@ impl proposal::Proposal {
                             .proposed_change
                             .iter()
                             .map(|cv| -> Result<ChangeValue, ProposalDecodingError<_>> {
+                                let value = NonNegativeAmount::from_u64(cv.value)
+                                    .map_err(|_| ProposalDecodingError::BalanceInvalid)?;
+                                let memo = cv
+                                    .memo
+                                    .as_ref()
+                                    .map(|bytes| {
+                                        MemoBytes::from_bytes(&bytes.value)
+                                            .map_err(ProposalDecodingError::MemoInvalid)
+                                    })
+                                    .transpose()?;
                                 match cv.pool_type()? {
                                     PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                                        Ok(ChangeValue::sapling(
-                                            NonNegativeAmount::from_u64(cv.value).map_err(
-                                                |_| ProposalDecodingError::BalanceInvalid,
-                                            )?,
-                                            cv.memo
-                                                .as_ref()
-                                                .map(|bytes| {
-                                                    MemoBytes::from_bytes(&bytes.value)
-                                                        .map_err(ProposalDecodingError::MemoInvalid)
-                                                })
-                                                .transpose()?,
-                                        ))
+                                        Ok(ChangeValue::sapling(value, memo))
+                                    }
+                                    #[cfg(feature = "orchard")]
+                                    PoolType::Shielded(ShieldedProtocol::Orchard) => {
+                                        Ok(ChangeValue::orchard(value, memo))
+                                    }
+                                    PoolType::Transparent if memo.is_some() => {
+                                        Err(ProposalDecodingError::TransparentMemo)
                                     }
                                     t => Err(ProposalDecodingError::InvalidChangeRecipient(t)),
                                 }

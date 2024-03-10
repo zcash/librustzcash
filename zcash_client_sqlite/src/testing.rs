@@ -806,7 +806,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
     ) -> NonNegativeAmount {
         self.with_account_balance(account, min_confirmations, |balance| {
-            balance.sapling_balance().spendable_value()
+            balance.spendable_value()
         })
     }
 
@@ -816,8 +816,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
     ) -> NonNegativeAmount {
         self.with_account_balance(account, min_confirmations, |balance| {
-            balance.sapling_balance().value_pending_spendability()
-                + balance.sapling_balance().change_pending_confirmation()
+            balance.value_pending_spendability() + balance.change_pending_confirmation()
         })
         .unwrap()
     }
@@ -829,7 +828,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
     ) -> NonNegativeAmount {
         self.with_account_balance(account, min_confirmations, |balance| {
-            balance.sapling_balance().change_pending_confirmation()
+            balance.change_pending_confirmation()
         })
     }
 
