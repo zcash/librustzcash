@@ -317,7 +317,10 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
          FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
     )?;
 
-    let excluded: Vec<Value> = exclude.iter().map(|n| Value::from(n.1)).collect();
+    let excluded: Vec<Value> = exclude
+        .iter()
+        .filter_map(|n| matches!(n.0, ShieldedProtocol::Sapling).then(|| Value::from(n.1)))
+        .collect();
     let excluded_ptr = Rc::new(excluded);
 
     let notes = stmt_select_notes.query_and_then(
