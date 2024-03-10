@@ -809,7 +809,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             #[cfg(feature = "orchard")]
-            #[allow(unused_assignments)] // Remove this when the todo!()s below are implemented.
             for output in d_tx.orchard_outputs() {
                 match output.transfer_type() {
                     TransferType::Outgoing | TransferType::WalletInternal => {
@@ -842,8 +841,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         )?;
 
                         if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            todo!();
-                            //wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+                            wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                         }
                     }
                     TransferType::Incoming => {
@@ -858,8 +856,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             }
                         }
 
-                        todo!()
-                        //wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                     }
                 }
             }
@@ -872,21 +869,31 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             // If we have some transparent outputs:
             if d_tx.tx().transparent_bundle().iter().any(|b| !b.vout.is_empty()) {
-                let nullifiers = wdb.get_sapling_nullifiers(NullifierQuery::All)?;
-                // If the transaction contains shielded spends from our wallet, we will store z->t
+                // If the transaction contains spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address.
-                if let Some((account_id, _)) = nullifiers.iter().find(
+                let sapling_from_account = wdb.get_sapling_nullifiers(NullifierQuery::All)?.into_iter().find(
                     |(_, nf)|
-                        d_tx.tx().sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
+                        d_tx.tx().sapling_bundle().into_iter().flat_map(|b| b.shielded_spends().iter())
                         .any(|input| nf == input.nullifier())
-                ) {
+                ).map(|(account_id, _)| account_id);
+
+                #[cfg(feature = "orchard")]
+                let orchard_from_account = wdb.get_orchard_nullifiers(NullifierQuery::All)?.into_iter().find(
+                    |(_, nf)|
+                        d_tx.tx().orchard_bundle().iter().flat_map(|b| b.actions().iter())
+                        .any(|input| nf == input.nullifier())
+                ).map(|(account_id, _)| account_id);
+                #[cfg(not(feature = "orchard"))]
+                let orchard_from_account = None;
+
+                if let Some(account_id) = sapling_from_account.or(orchard_from_account) {
                     for (output_index, txout) in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
                             wallet::put_sent_output(
                                 wdb.conn.0,
                                 &wdb.params,
-                                *account_id,
+                                account_id,
                                 tx_ref,
                                 output_index,
                                 &Recipient::Transparent(address),
