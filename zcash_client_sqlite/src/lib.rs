@@ -960,6 +960,19 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     )?;
                 }
             }
+            if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
+                #[cfg(feature = "orchard")]
+                for action in _bundle.actions() {
+                    wallet::orchard::mark_orchard_note_spent(
+                        wdb.conn.0,
+                        tx_ref,
+                        action.nullifier(),
+                    )?;
+                }
+
+                #[cfg(not(feature = "orchard"))]
+                panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
+            }
 
             #[cfg(feature = "transparent-inputs")]
             for utxo_outpoint in sent_tx.utxos_spent() {
