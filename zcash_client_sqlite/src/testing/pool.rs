@@ -689,7 +689,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     // until just before the first transaction expires
     for i in 1..42 {
         st.generate_next_block(
-            &T::sk_to_fvk(&T::sk(&[i as u8])),
+            &T::sk_to_fvk(&T::sk(&[i as u8; 32])),
             AddressType::DefaultExternal,
             value,
         );
@@ -717,7 +717,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
 
     // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
     let (h43, _, _) = st.generate_next_block(
-        &T::sk_to_fvk(&T::sk(&[42])),
+        &T::sk_to_fvk(&T::sk(&[42; 32])),
         AddressType::DefaultExternal,
         value,
     );
@@ -837,7 +837,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     // so that the first transaction expires
     for i in 1..=42 {
         st.generate_next_block(
-            &T::sk_to_fvk(&T::sk(&[i as u8])),
+            &T::sk_to_fvk(&T::sk(&[i as u8; 32])),
             AddressType::DefaultExternal,
             value,
         );
