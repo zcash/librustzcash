@@ -1,11 +1,9 @@
-use std::rc::Rc;
-
 use incrementalmerkletree::Position;
 use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed},
 };
-use rusqlite::{named_params, params, types::Value, Connection, Row};
+use rusqlite::{named_params, params, Connection, Row};
 
 use zcash_client_backend::{
     data_api::NullifierQuery,
@@ -23,7 +21,7 @@ use zip32::Scope;
 
 use crate::{error::SqliteClientError, AccountId, ReceivedNoteId};
 
-use super::{memo_repr, parse_scope, scope_code, wallet_birthday};
+use super::{memo_repr, parse_scope, scope_code};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedOrchardOutput {
@@ -191,56 +189,13 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
     Option<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>,
     SqliteClientError,
 > {
-    let result = conn.query_row_and_then(
-        "SELECT orchard_received_notes.id, txid, action_index,
-                diversifier, value, rho, rseed, commitment_tree_position,
-                accounts.ufvk, recipient_key_scope
-         FROM orchard_received_notes
-         INNER JOIN accounts on accounts.id = orchard_received_notes.account_id
-         INNER JOIN transactions ON transactions.id_tx = orchard_received_notes.tx
-         WHERE txid = :txid
-         AND action_index = :action_index
-         AND accounts.ufvk IS NOT NULL
-         AND recipient_key_scope IS NOT NULL
-         AND nf IS NOT NULL
-         AND spent IS NULL",
-        named_params![
-           ":txid": txid.as_ref(),
-           ":action_index": index,
-        ],
-        |row| to_spendable_note(params, row),
-    );
-
-    // `OptionalExtension` doesn't work here because the error type of `Result` is already
-    // `SqliteClientError`
-    match result {
-        Ok(r) => Ok(r),
-        Err(SqliteClientError::DbError(rusqlite::Error::QueryReturnedNoRows)) => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
-/// Utility method for determining whether we have any spendable notes
-///
-/// If the tip shard has unscanned ranges below the anchor height and greater than or equal to
-/// the wallet birthday, none of our notes can be spent because we cannot construct witnesses at
-/// the provided anchor height.
-fn unscanned_tip_exists(
-    conn: &Connection,
-    anchor_height: BlockHeight,
-) -> Result<bool, rusqlite::Error> {
-    // v_orchard_shard_unscanned_ranges only returns ranges ending on or after wallet birthday, so
-    // we don't need to refer to the birthday in this query.
-    conn.query_row(
-        "SELECT EXISTS (
-             SELECT 1 FROM v_orchard_shard_unscanned_ranges range
-             WHERE range.block_range_start <= :anchor_height
-             AND :anchor_height BETWEEN
-                range.subtree_start_height
-                AND IFNULL(range.subtree_end_height, :anchor_height)
-         )",
-        named_params![":anchor_height": u32::from(anchor_height),],
-        |row| row.get::<_, bool>(0),
+    super::common::get_spendable_note(
+        conn,
+        params,
+        txid,
+        index,
+        ShieldedProtocol::Orchard,
+        to_spendable_note,
     )
 }
 
@@ -253,98 +208,16 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     exclude: &[ReceivedNoteId],
 ) -> Result<Vec<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>, SqliteClientError>
 {
-    let birthday_height = match wallet_birthday(conn)? {
-        Some(birthday) => birthday,
-        None => {
-            // the wallet birthday can only be unknown if there are no accounts in the wallet; in
-            // such a case, the wallet has no notes to spend.
-            return Ok(vec![]);
-        }
-    };
-
-    if unscanned_tip_exists(conn, anchor_height)? {
-        return Ok(vec![]);
-    }
-
-    // The goal of this SQL statement is to select the oldest notes until the required
-    // value has been reached.
-    // 1) Use a window function to create a view of all notes, ordered from oldest to
-    //    newest, with an additional column containing a running sum:
-    //    - Unspent notes accumulate the values of all unspent notes in that note's
-    //      account, up to itself.
-    //    - Spent notes accumulate the values of all notes in the transaction they were
-    //      spent in, up to itself.
-    //
-    // 2) Select all unspent notes in the desired account, along with their running sum.
-    //
-    // 3) Select all notes for which the running sum was less than the required value, as
-    //    well as a single note for which the sum was greater than or equal to the
-    //    required value, bringing the sum of all selected notes across the threshold.
-    //
-    // 4) Match the selected notes against the witnesses at the desired height.
-    let mut stmt_select_notes = conn.prepare_cached(
-        "WITH eligible AS (
-             SELECT
-                 orchard_received_notes.id AS id, txid, action_index,
-                 diversifier, value, rho, rseed, commitment_tree_position,
-                 SUM(value)
-                    OVER (PARTITION BY orchard_received_notes.account_id, spent ORDER BY orchard_received_notes.id) AS so_far,
-                 accounts.ufvk as ufvk, recipient_key_scope
-             FROM orchard_received_notes
-             INNER JOIN accounts
-                ON accounts.id = orchard_received_notes.account_id
-             INNER JOIN transactions
-                ON transactions.id_tx = orchard_received_notes.tx
-             WHERE orchard_received_notes.account_id = :account
-             AND accounts.ufvk IS NOT NULL
-             AND recipient_key_scope IS NOT NULL
-             AND nf IS NOT NULL
-             AND commitment_tree_position IS NOT NULL
-             AND spent IS NULL
-             AND transactions.block <= :anchor_height
-             AND orchard_received_notes.id NOT IN rarray(:exclude)
-             AND NOT EXISTS (
-                SELECT 1 FROM v_orchard_shard_unscanned_ranges unscanned
-                -- select all the unscanned ranges involving the shard containing this note
-                WHERE orchard_received_notes.commitment_tree_position >= unscanned.start_position
-                AND orchard_received_notes.commitment_tree_position < unscanned.end_position_exclusive
-                -- exclude unscanned ranges that start above the anchor height (they don't affect spendability)
-                AND unscanned.block_range_start <= :anchor_height
-                -- exclude unscanned ranges that end below the wallet birthday
-                AND unscanned.block_range_end > :wallet_birthday
-             )
-         )
-         SELECT id, txid, action_index,
-                diversifier, value, rho, rseed, commitment_tree_position,
-                ufvk, recipient_key_scope
-         FROM eligible WHERE so_far < :target_value
-         UNION
-         SELECT id, txid, action_index,
-                diversifier, value, rho, rseed, commitment_tree_position,
-                ufvk, recipient_key_scope
-         FROM (SELECT * from eligible WHERE so_far >= :target_value LIMIT 1)",
-    )?;
-
-    let excluded: Vec<Value> = exclude
-        .iter()
-        .filter_map(|n| matches!(n.0, ShieldedProtocol::Orchard).then(|| Value::from(n.1)))
-        .collect();
-    let excluded_ptr = Rc::new(excluded);
-
-    let notes = stmt_select_notes.query_and_then(
-        named_params![
-            ":account": account.0,
-            ":anchor_height": &u32::from(anchor_height),
-            ":target_value": &u64::from(target_value),
-            ":exclude": &excluded_ptr,
-            ":wallet_birthday": u32::from(birthday_height)
-        ],
-        |r| to_spendable_note(params, r),
-    )?;
-
-    notes
-        .filter_map(|r| r.transpose())
-        .collect::<Result<_, _>>()
+    super::common::select_spendable_notes(
+        conn,
+        params,
+        account,
+        target_value,
+        anchor_height,
+        exclude,
+        ShieldedProtocol::Orchard,
+        to_spendable_note,
+    )
 }
 
 /// Records the specified shielded output as having been received.

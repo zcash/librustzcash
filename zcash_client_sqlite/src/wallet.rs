@@ -129,6 +129,7 @@ use {
 };
 
 pub mod commitment_tree;
+pub(crate) mod common;
 pub mod init;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
