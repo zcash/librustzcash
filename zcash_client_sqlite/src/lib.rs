@@ -887,7 +887,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 #[cfg(not(feature = "orchard"))]
                 let orchard_from_account = None;
 
-                if let Some(account_id) = sapling_from_account.or(orchard_from_account) {
+                if let Some(account_id) = orchard_from_account.or(sapling_from_account) {
                     for (output_index, txout) in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
                             wallet::put_sent_output(
