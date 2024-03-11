@@ -445,8 +445,15 @@ where
                     )
                     .map_err(InputSelectorError::Proposal);
                 }
-                Err(ChangeError::DustInputs { mut sapling, .. }) => {
+                Err(ChangeError::DustInputs {
+                    mut sapling,
+                    #[cfg(feature = "orchard")]
+                    mut orchard,
+                    ..
+                }) => {
                     exclude.append(&mut sapling);
+                    #[cfg(feature = "orchard")]
+                    exclude.append(&mut orchard);
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
                     amount_required = required;
