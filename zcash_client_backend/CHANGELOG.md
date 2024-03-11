@@ -22,6 +22,7 @@ and this library adheres to Rust's notion of
   - `SentTransaction::new`
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
+  - `WalletSummary::next_orchard_subtree_index`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
 - `zcash_client_backend::fees`:
   - `orchard`
@@ -64,6 +65,8 @@ and this library adheres to Rust's notion of
     - `fn put_orchard_subtree_roots`
   - Added method `WalletRead::validate_seed`
   - Removed `Error::AccountNotFound` variant.
+  - `WalletSummary::new` now takes an additional `next_orchard_subtree_index`
+    argument when the `orchard` feature flag is enabled.
 - `zcash_client_backend::decrypt`:
   - Fields of `DecryptedOutput` are now private. Use `DecryptedOutput::new`
     and the newly provided accessors instead.

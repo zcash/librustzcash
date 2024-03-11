@@ -956,7 +956,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     >;
 
     #[cfg(feature = "orchard")]
-    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
             &'a mut ShardTree<
@@ -967,16 +967,41 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
-        todo!()
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let shard_store = SqliteShardStore::from_connection(&tx, ORCHARD_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let result = {
+            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            callback(&mut shardtree)?
+        };
+
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(result)
     }
 
     #[cfg(feature = "orchard")]
     fn put_orchard_subtree_roots(
         &mut self,
-        _start_index: u64,
-        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
-        todo!()
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        put_shard_roots::<_, { ORCHARD_SHARD_HEIGHT * 2 }, ORCHARD_SHARD_HEIGHT>(
+            &tx,
+            ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(())
     }
 }
 
@@ -1027,7 +1052,7 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
     >;
 
     #[cfg(feature = "orchard")]
-    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
             &'a mut ShardTree<
@@ -1038,16 +1063,28 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
-        todo!()
+        let mut shardtree = ShardTree::new(
+            SqliteShardStore::from_connection(self.conn.0, ORCHARD_TABLES_PREFIX)
+                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+            PRUNING_DEPTH.try_into().unwrap(),
+        );
+        let result = callback(&mut shardtree)?;
+
+        Ok(result)
     }
 
     #[cfg(feature = "orchard")]
     fn put_orchard_subtree_roots(
         &mut self,
-        _start_index: u64,
-        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
-        todo!()
+        put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
+            self.conn.0,
+            ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
     }
 }
 
