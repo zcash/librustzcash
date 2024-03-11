@@ -652,6 +652,10 @@ mod tests {
                         block.block_time(),
                         block.sapling().final_tree_size(),
                         block.sapling().commitments().len().try_into().unwrap(),
+                        #[cfg(feature = "orchard")]
+                        block.orchard().final_tree_size(),
+                        #[cfg(feature = "orchard")]
+                        block.orchard().commitments().len().try_into().unwrap(),
                     )?;
 
                     for tx in block.transactions() {

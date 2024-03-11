@@ -427,7 +427,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
 /// belonging to a wallet.
 pub trait InputSource {
     /// The type of errors produced by a wallet backend.
-    type Error;
+    type Error: Debug;
 
     /// Backend-specific account identifier.
     ///
@@ -498,7 +498,7 @@ pub trait InputSource {
 /// be abstracted away from any particular data storage substrate.
 pub trait WalletRead {
     /// The type of errors that may be generated when querying a wallet data store.
-    type Error;
+    type Error: Debug;
 
     /// The type of the account identifier.
     ///
@@ -1312,7 +1312,8 @@ pub trait WalletWrite: WalletRead {
 /// At present, this only serves the Sapling protocol, but it will be modified to
 /// also provide operations related to Orchard note commitment trees in the future.
 pub trait WalletCommitmentTrees {
-    type Error;
+    type Error: Debug;
+
     /// The type of the backing [`ShardStore`] for the Sapling note commitment tree.
     type SaplingShardStore<'a>: ShardStore<
         H = sapling::Node,
