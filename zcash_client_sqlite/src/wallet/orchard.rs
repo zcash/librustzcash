@@ -246,4 +246,11 @@ pub(crate) mod tests {
     fn scan_cached_blocks_detects_spends_out_of_order() {
         testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
     }
+
+    #[test]
+    fn cross_pool_exchange() {
+        use crate::wallet::sapling::tests::SaplingPoolTester;
+
+        testing::pool::cross_pool_exchange::<OrchardPoolTester, SaplingPoolTester>()
+    }
 }

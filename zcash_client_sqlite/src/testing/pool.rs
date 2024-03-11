@@ -53,6 +53,9 @@ use crate::{
     AccountId, NoteId, ReceivedNoteId,
 };
 
+#[cfg(feature = "orchard")]
+use zcash_primitives::consensus::NetworkUpgrade;
+
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::{
@@ -1397,6 +1400,90 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
             T::SHIELDED_PROTOCOL,
         ),
         Ok(_)
+    );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn cross_pool_exchange<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(|params| AccountBirthday::from_activation(params, NetworkUpgrade::Nu5))
+        .build();
+
+    let (account, usk, birthday) = st.test_account().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+
+    let p1_fvk = P1::test_account_fvk(&st);
+    let p1_to = P1::fvk_default_address(&p1_fvk);
+
+    let note_value = NonNegativeAmount::const_from_u64(300000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(birthday.height(), 2);
+
+    let initial_balance = (note_value * 2).unwrap();
+    assert_eq!(st.get_total_balance(account), initial_balance);
+    assert_eq!(st.get_spendable_balance(account, 1), initial_balance);
+
+    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
+        recipient_address: p1_to,
+        amount: transfer_amount,
+        memo: None,
+        label: None,
+        message: None,
+        other_params: vec![],
+    }])
+    .unwrap();
+
+    let fee_rule = StandardFeeRule::Zip317;
+    let input_selector = GreedyInputSelector::new(
+        standard::SingleOutputChangeStrategy::new(fee_rule, None, P1::SHIELDED_PROTOCOL),
+        DustOutputPolicy::default(),
+    );
+    let proposal0 = st
+        .propose_transfer(
+            account,
+            &input_selector,
+            p0_to_p1,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+
+    let _min_target_height = proposal0.min_target_height();
+    assert_eq!(proposal0.steps().len(), 1);
+    let step0 = &proposal0.steps().head;
+
+    // We expect 4 logical actions, two per pool (due to padding).
+    let expected_fee = NonNegativeAmount::const_from_u64(20000);
+    assert_eq!(step0.balance().fee_required(), expected_fee);
+
+    let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
+    let proposed_change = step0.balance().proposed_change();
+    assert_eq!(proposed_change.len(), 1);
+    let change_output = proposed_change.get(0).unwrap();
+    // Since this is a cross-pool transfer, change will be sent to the preferred pool.
+    assert_eq!(
+        change_output.output_pool(),
+        std::cmp::max(ShieldedProtocol::Sapling, ShieldedProtocol::Orchard)
+    );
+    assert_eq!(change_output.value(), expected_change);
+
+    let create_proposed_result =
+        st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal0);
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+
+    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(
+        st.get_total_balance(account),
+        (initial_balance - expected_fee).unwrap()
+    );
+    assert_eq!(
+        st.get_spendable_balance(account, 1),
+        (initial_balance - expected_fee).unwrap()
     );
 }
 
