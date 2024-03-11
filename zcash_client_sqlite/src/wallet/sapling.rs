@@ -620,6 +620,12 @@ pub(crate) mod tests {
 
             Ok(None)
         }
+
+        fn received_note_count(
+            summary: &zcash_client_backend::data_api::chain::ScanSummary,
+        ) -> usize {
+            summary.received_sapling_note_count()
+        }
     }
 
     pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
@@ -700,5 +706,18 @@ pub(crate) mod tests {
     #[test]
     fn checkpoint_gaps() {
         testing::pool::checkpoint_gaps::<SaplingPoolTester>()
+    }
+
+    #[test]
+    fn scan_cached_blocks_detects_spends_out_of_order() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn cross_pool_exchange() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::cross_pool_exchange::<SaplingPoolTester, OrchardPoolTester>()
     }
 }

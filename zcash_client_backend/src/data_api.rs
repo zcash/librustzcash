@@ -92,6 +92,9 @@ use {
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
+#[cfg(feature = "test-dependencies")]
+use zcash_primitives::consensus::NetworkUpgrade;
+
 pub mod chain;
 pub mod error;
 pub mod scanning;
@@ -1154,6 +1157,26 @@ impl AccountBirthday {
     }
 
     #[cfg(feature = "test-dependencies")]
+    /// Constructs a new [`AccountBirthday`] at the given network upgrade's activation,
+    /// with no "recover until" height.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the activation height for the given network upgrade is not set.
+    pub fn from_activation<P: zcash_primitives::consensus::Parameters>(
+        params: &P,
+        network_upgrade: NetworkUpgrade,
+    ) -> AccountBirthday {
+        AccountBirthday::from_parts(
+            params.activation_height(network_upgrade).unwrap(),
+            Frontier::empty(),
+            #[cfg(feature = "orchard")]
+            Frontier::empty(),
+            None,
+        )
+    }
+
+    #[cfg(feature = "test-dependencies")]
     /// Constructs a new [`AccountBirthday`] at Sapling activation, with no
     /// "recover until" height.
     ///
@@ -1163,15 +1186,7 @@ impl AccountBirthday {
     pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
     ) -> AccountBirthday {
-        use zcash_primitives::consensus::NetworkUpgrade;
-
-        AccountBirthday::from_parts(
-            params.activation_height(NetworkUpgrade::Sapling).unwrap(),
-            Frontier::empty(),
-            #[cfg(feature = "orchard")]
-            Frontier::empty(),
-            None,
-        )
+        Self::from_activation(params, NetworkUpgrade::Sapling)
     }
 }
 
