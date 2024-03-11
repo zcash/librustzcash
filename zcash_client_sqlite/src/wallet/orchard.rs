@@ -235,4 +235,9 @@ pub(crate) mod tests {
     fn checkpoint_gaps() {
         testing::pool::checkpoint_gaps::<OrchardPoolTester>()
     }
+
+    #[test]
+    fn scan_cached_blocks_detects_spends_out_of_order() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
+    }
 }

@@ -1396,3 +1396,42 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         Ok(_)
     );
 }
+
+pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(AccountBirthday::from_sapling_activation)
+        .build();
+
+    let account = st.test_account().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Wallet summary is not yet available
+    assert_eq!(st.get_wallet_summary(0), None);
+
+    // Create a fake CompactBlock sending value to the address
+    let value = NonNegativeAmount::const_from_u64(5);
+    let (received_height, _, nf) = st.generate_next_block(
+        &dfvk,
+        AddressType::DefaultExternal,
+        value
+    );
+
+    // Create a second fake CompactBlock spending value from the address
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let to2 = T::fvk_default_address(&not_our_key);
+    let value2 = NonNegativeAmount::const_from_u64(2);
+    let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+
+    // Scan the spending block first.
+    st.scan_cached_blocks(spent_height, 1);
+
+    // Account balance should equal the change
+    assert_eq!(st.get_total_balance(account.0), (value - value2).unwrap());
+
+    // Now scan the block in which we received the note that was spent.
+    st.scan_cached_blocks(received_height, 1);
+
+    // Account balance should be the same.
+    assert_eq!(st.get_total_balance(account.0), (value - value2).unwrap());
+}
