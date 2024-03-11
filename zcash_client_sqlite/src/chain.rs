@@ -322,295 +322,85 @@ where
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use std::num::NonZeroU32;
+    use crate::{testing, wallet::sapling::tests::SaplingPoolTester};
 
-    use sapling::zip32::ExtendedSpendingKey;
-    use zcash_primitives::{
-        block::BlockHash,
-        transaction::{components::amount::NonNegativeAmount, fees::zip317::FeeRule},
-    };
-
-    use zcash_client_backend::{
-        address::Address,
-        data_api::{
-            chain::error::Error, wallet::input_selection::GreedyInputSelector, AccountBirthday,
-            WalletRead,
-        },
-        fees::{zip317::SingleOutputChangeStrategy, DustOutputPolicy},
-        scanning::ScanError,
-        wallet::OvkPolicy,
-        zip321::{Payment, TransactionRequest},
-        ShieldedProtocol,
-    };
-
-    use crate::{
-        testing::{AddressType, TestBuilder},
-        wallet::truncate_to_height,
-    };
+    #[cfg(feature = "orchard")]
+    use crate::wallet::orchard::tests::OrchardPoolTester;
 
     #[test]
-    fn valid_chain_states() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
-            .build();
-
-        let dfvk = st.test_account_sapling().unwrap();
-
-        // Empty chain should return None
-        assert_matches!(st.wallet().chain_height(), Ok(None));
-
-        // Create a fake CompactBlock sending value to the address
-        let (h1, _, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(5),
-        );
-
-        // Scan the cache
-        st.scan_cached_blocks(h1, 1);
-
-        // Create a second fake CompactBlock sending more value to the address
-        let (h2, _, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(7),
-        );
-
-        // Scanning should detect no inconsistencies
-        st.scan_cached_blocks(h2, 1);
+    fn valid_chain_states_sapling() {
+        testing::pool::valid_chain_states::<SaplingPoolTester>()
     }
 
     #[test]
-    fn invalid_chain_cache_disconnected() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
-            .build();
-
-        let dfvk = st.test_account_sapling().unwrap();
-
-        // Create some fake CompactBlocks
-        let (h, _, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(5),
-        );
-        let (last_contiguous_height, _, _) = st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(7),
-        );
-
-        // Scanning the cache should find no inconsistencies
-        st.scan_cached_blocks(h, 2);
-
-        // Create more fake CompactBlocks that don't connect to the scanned ones
-        let disconnect_height = last_contiguous_height + 1;
-        st.generate_block_at(
-            disconnect_height,
-            BlockHash([1; 32]),
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(8),
-            2,
-            2,
-        );
-        st.generate_next_block(
-            &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(3),
-        );
-
-        // Data+cache chain should be invalid at the data/cache boundary
-        assert_matches!(
-            st.try_scan_cached_blocks(
-                disconnect_height,
-                2
-            ),
-            Err(Error::Scan(ScanError::PrevHashMismatch { at_height }))
-                if at_height == disconnect_height
-        );
+    #[cfg(feature = "orchard")]
+    fn valid_chain_states_orchard() {
+        testing::pool::valid_chain_states::<OrchardPoolTester>()
     }
 
     #[test]
-    fn data_db_truncation() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
-            .build();
-        let account = st.test_account().unwrap();
-
-        let dfvk = st.test_account_sapling().unwrap();
-
-        // Wallet summary is not yet available
-        assert_eq!(st.get_wallet_summary(0), None);
-
-        // Create fake CompactBlocks sending value to the address
-        let value = NonNegativeAmount::const_from_u64(5);
-        let value2 = NonNegativeAmount::const_from_u64(7);
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
-
-        // Scan the cache
-        st.scan_cached_blocks(h, 2);
-
-        // Account balance should reflect both received notes
-        assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
-
-        // "Rewind" to height of last scanned block
-        st.wallet_mut()
-            .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
-            .unwrap();
-
-        // Account balance should be unaltered
-        assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
-
-        // Rewind so that one block is dropped
-        st.wallet_mut()
-            .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
-            .unwrap();
-
-        // Account balance should only contain the first received note
-        assert_eq!(st.get_total_balance(account.0), value);
-
-        // Scan the cache again
-        st.scan_cached_blocks(h, 2);
-
-        // Account balance should again reflect both received notes
-        assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
+    fn invalid_chain_cache_disconnected_sapling() {
+        testing::pool::invalid_chain_cache_disconnected::<SaplingPoolTester>()
     }
 
     #[test]
-    fn scan_cached_blocks_allows_blocks_out_of_order() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
-            .build();
-        let account = st.test_account().unwrap();
-
-        let (_, usk, _) = st.test_account().unwrap();
-        let dfvk = st.test_account_sapling().unwrap();
-
-        // Create a block with height SAPLING_ACTIVATION_HEIGHT
-        let value = NonNegativeAmount::const_from_u64(50000);
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        st.scan_cached_blocks(h1, 1);
-        assert_eq!(st.get_total_balance(account.0), value);
-
-        // Create blocks to reach SAPLING_ACTIVATION_HEIGHT + 2
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-        let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-
-        // Scan the later block first
-        st.scan_cached_blocks(h3, 1);
-
-        // Now scan the block of height SAPLING_ACTIVATION_HEIGHT + 1
-        st.scan_cached_blocks(h2, 1);
-        assert_eq!(
-            st.get_total_balance(account.0),
-            NonNegativeAmount::const_from_u64(150_000)
-        );
-
-        // We can spend the received notes
-        let req = TransactionRequest::new(vec![Payment {
-            recipient_address: Address::Sapling(dfvk.default_address().1),
-            amount: NonNegativeAmount::const_from_u64(110_000),
-            memo: None,
-            label: None,
-            message: None,
-            other_params: vec![],
-        }])
-        .unwrap();
-        let input_selector = GreedyInputSelector::new(
-            SingleOutputChangeStrategy::new(FeeRule::standard(), None, ShieldedProtocol::Sapling),
-            DustOutputPolicy::default(),
-        );
-        assert_matches!(
-            st.spend(
-                &input_selector,
-                &usk,
-                req,
-                OvkPolicy::Sender,
-                NonZeroU32::new(1).unwrap(),
-            ),
-            Ok(_)
-        );
+    fn invalid_chain_cache_disconnected_orchard() {
+        #[cfg(feature = "orchard")]
+        testing::pool::invalid_chain_cache_disconnected::<OrchardPoolTester>()
     }
 
     #[test]
-    fn scan_cached_blocks_finds_received_notes() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
-            .build();
-        let account = st.test_account().unwrap();
-
-        let dfvk = st.test_account_sapling().unwrap();
-
-        // Wallet summary is not yet available
-        assert_eq!(st.get_wallet_summary(0), None);
-
-        // Create a fake CompactBlock sending value to the address
-        let value = NonNegativeAmount::const_from_u64(5);
-        let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-
-        // Scan the cache
-        let summary = st.scan_cached_blocks(h1, 1);
-        assert_eq!(summary.scanned_range().start, h1);
-        assert_eq!(summary.scanned_range().end, h1 + 1);
-        assert_eq!(summary.received_sapling_note_count(), 1);
-
-        // Account balance should reflect the received note
-        assert_eq!(st.get_total_balance(account.0), value);
-
-        // Create a second fake CompactBlock sending more value to the address
-        let value2 = NonNegativeAmount::const_from_u64(7);
-        let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
-
-        // Scan the cache again
-        let summary = st.scan_cached_blocks(h2, 1);
-        assert_eq!(summary.scanned_range().start, h2);
-        assert_eq!(summary.scanned_range().end, h2 + 1);
-        assert_eq!(summary.received_sapling_note_count(), 1);
-
-        // Account balance should reflect both received notes
-        assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
+    fn data_db_truncation_sapling() {
+        testing::pool::data_db_truncation::<SaplingPoolTester>()
     }
 
     #[test]
-    fn scan_cached_blocks_finds_change_notes() {
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
-            .build();
-        let account = st.test_account().unwrap();
-        let dfvk = st.test_account_sapling().unwrap();
+    #[cfg(feature = "orchard")]
+    fn data_db_truncation_orchard() {
+        testing::pool::data_db_truncation::<OrchardPoolTester>()
+    }
 
-        // Wallet summary is not yet available
-        assert_eq!(st.get_wallet_summary(0), None);
+    #[test]
+    fn scan_cached_blocks_allows_blocks_out_of_order_sapling() {
+        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<SaplingPoolTester>()
+    }
 
-        // Create a fake CompactBlock sending value to the address
-        let value = NonNegativeAmount::const_from_u64(5);
-        let (received_height, _, nf) =
-            st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn scan_cached_blocks_allows_blocks_out_of_order_orchard() {
+        testing::pool::scan_cached_blocks_allows_blocks_out_of_order::<OrchardPoolTester>()
+    }
 
-        // Scan the cache
-        st.scan_cached_blocks(received_height, 1);
+    #[test]
+    fn scan_cached_blocks_finds_received_notes_sapling() {
+        testing::pool::scan_cached_blocks_finds_received_notes::<SaplingPoolTester>()
+    }
 
-        // Account balance should reflect the received note
-        assert_eq!(st.get_total_balance(account.0), value);
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn scan_cached_blocks_finds_received_notes_orchard() {
+        testing::pool::scan_cached_blocks_finds_received_notes::<OrchardPoolTester>()
+    }
 
-        // Create a second fake CompactBlock spending value from the address
-        let extsk2 = ExtendedSpendingKey::master(&[0]);
-        let to2 = extsk2.default_address().1;
-        let value2 = NonNegativeAmount::const_from_u64(2);
-        let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+    #[test]
+    fn scan_cached_blocks_finds_change_notes_sapling() {
+        testing::pool::scan_cached_blocks_finds_change_notes::<SaplingPoolTester>()
+    }
 
-        // Scan the cache again
-        st.scan_cached_blocks(spent_height, 1);
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn scan_cached_blocks_finds_change_notes_orchard() {
+        testing::pool::scan_cached_blocks_finds_change_notes::<OrchardPoolTester>()
+    }
 
-        // Account balance should equal the change
-        assert_eq!(st.get_total_balance(account.0), (value - value2).unwrap());
+    #[test]
+    fn scan_cached_blocks_detects_spends_out_of_order_sapling() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn scan_cached_blocks_detects_spends_out_of_order_orchard() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
     }
 }

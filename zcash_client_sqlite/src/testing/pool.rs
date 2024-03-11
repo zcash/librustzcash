@@ -27,7 +27,7 @@ use zcash_client_backend::{
     address::Address,
     data_api::{
         self,
-        chain::CommitmentTreeRoot,
+        chain::{self, CommitmentTreeRoot, ScanSummary},
         error::Error,
         wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
         AccountBirthday, DecryptedTransaction, Ratio, WalletRead, WalletSummary, WalletWrite,
@@ -35,6 +35,7 @@ use zcash_client_backend::{
     decrypt_transaction,
     fees::{fixed, standard, DustOutputPolicy},
     keys::UnifiedSpendingKey,
+    scanning::ScanError,
     wallet::{Note, OvkPolicy, ReceivedNote},
     zip321::{self, Payment, TransactionRequest},
     ShieldedProtocol,
@@ -47,7 +48,7 @@ use crate::{
     testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
     wallet::{
         block_max_scanned, commitment_tree, parse_scope,
-        scanning::tests::test_with_nu5_birthday_offset,
+        scanning::tests::test_with_nu5_birthday_offset, truncate_to_height,
     },
     AccountId, NoteId, ReceivedNoteId,
 };
@@ -120,6 +121,8 @@ pub(crate) trait ShieldedPoolTester {
         tx: &Transaction,
         fvk: &Self::Fvk,
     ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError>;
+
+    fn received_note_count(summary: &ScanSummary) -> usize;
 }
 
 pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
@@ -1397,6 +1400,273 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     );
 }
 
+pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(AccountBirthday::from_sapling_activation)
+        .build();
+
+    let dfvk = T::test_account_fvk(&st);
+
+    // Empty chain should return None
+    assert_matches!(st.wallet().chain_height(), Ok(None));
+
+    // Create a fake CompactBlock sending value to the address
+    let (h1, _, _) = st.generate_next_block(
+        &dfvk,
+        AddressType::DefaultExternal,
+        NonNegativeAmount::const_from_u64(5),
+    );
+
+    // Scan the cache
+    st.scan_cached_blocks(h1, 1);
+
+    // Create a second fake CompactBlock sending more value to the address
+    let (h2, _, _) = st.generate_next_block(
+        &dfvk,
+        AddressType::DefaultExternal,
+        NonNegativeAmount::const_from_u64(7),
+    );
+
+    // Scanning should detect no inconsistencies
+    st.scan_cached_blocks(h2, 1);
+}
+
+pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(AccountBirthday::from_sapling_activation)
+        .build();
+
+    let dfvk = T::test_account_fvk(&st);
+
+    // Create some fake CompactBlocks
+    let (h, _, _) = st.generate_next_block(
+        &dfvk,
+        AddressType::DefaultExternal,
+        NonNegativeAmount::const_from_u64(5),
+    );
+    let (last_contiguous_height, _, _) = st.generate_next_block(
+        &dfvk,
+        AddressType::DefaultExternal,
+        NonNegativeAmount::const_from_u64(7),
+    );
+
+    // Scanning the cache should find no inconsistencies
+    st.scan_cached_blocks(h, 2);
+
+    // Create more fake CompactBlocks that don't connect to the scanned ones
+    let disconnect_height = last_contiguous_height + 1;
+    st.generate_block_at(
+        disconnect_height,
+        BlockHash([1; 32]),
+        &dfvk,
+        AddressType::DefaultExternal,
+        NonNegativeAmount::const_from_u64(8),
+        2,
+        2,
+    );
+    st.generate_next_block(
+        &dfvk,
+        AddressType::DefaultExternal,
+        NonNegativeAmount::const_from_u64(3),
+    );
+
+    // Data+cache chain should be invalid at the data/cache boundary
+    assert_matches!(
+        st.try_scan_cached_blocks(
+            disconnect_height,
+            2
+        ),
+        Err(chain::error::Error::Scan(ScanError::PrevHashMismatch { at_height }))
+            if at_height == disconnect_height
+    );
+}
+
+pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(AccountBirthday::from_sapling_activation)
+        .build();
+
+    let account = st.test_account().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Wallet summary is not yet available
+    assert_eq!(st.get_wallet_summary(0), None);
+
+    // Create fake CompactBlocks sending value to the address
+    let value = NonNegativeAmount::const_from_u64(5);
+    let value2 = NonNegativeAmount::const_from_u64(7);
+    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+
+    // Scan the cache
+    st.scan_cached_blocks(h, 2);
+
+    // Account balance should reflect both received notes
+    assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
+
+    // "Rewind" to height of last scanned block
+    st.wallet_mut()
+        .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
+        .unwrap();
+
+    // Account balance should be unaltered
+    assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
+
+    // Rewind so that one block is dropped
+    st.wallet_mut()
+        .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
+        .unwrap();
+
+    // Account balance should only contain the first received note
+    assert_eq!(st.get_total_balance(account.0), value);
+
+    // Scan the cache again
+    st.scan_cached_blocks(h, 2);
+
+    // Account balance should again reflect both received notes
+    assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
+}
+
+pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(AccountBirthday::from_sapling_activation)
+        .build();
+
+    let account = st.test_account().unwrap();
+    let (_, usk, _) = st.test_account().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    let value = NonNegativeAmount::const_from_u64(50000);
+    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    st.scan_cached_blocks(h1, 1);
+    assert_eq!(st.get_total_balance(account.0), value);
+
+    // Create blocks to reach height + 2
+    let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+    // Scan the later block first
+    st.scan_cached_blocks(h3, 1);
+
+    // Now scan the block of height height + 1
+    st.scan_cached_blocks(h2, 1);
+    assert_eq!(
+        st.get_total_balance(account.0),
+        NonNegativeAmount::const_from_u64(150_000)
+    );
+
+    // We can spend the received notes
+    let req = TransactionRequest::new(vec![Payment {
+        recipient_address: T::fvk_default_address(&dfvk),
+        amount: NonNegativeAmount::const_from_u64(110_000),
+        memo: None,
+        label: None,
+        message: None,
+        other_params: vec![],
+    }])
+    .unwrap();
+
+    #[allow(deprecated)]
+    let input_selector = GreedyInputSelector::new(
+        standard::SingleOutputChangeStrategy::new(
+            StandardFeeRule::Zip317,
+            None,
+            T::SHIELDED_PROTOCOL,
+        ),
+        DustOutputPolicy::default(),
+    );
+    assert_matches!(
+        st.spend(
+            &input_selector,
+            &usk,
+            req,
+            OvkPolicy::Sender,
+            NonZeroU32::new(1).unwrap(),
+        ),
+        Ok(_)
+    );
+}
+
+pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(AccountBirthday::from_sapling_activation)
+        .build();
+
+    let account = st.test_account().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Wallet summary is not yet available
+    assert_eq!(st.get_wallet_summary(0), None);
+
+    // Create a fake CompactBlock sending value to the address
+    let value = NonNegativeAmount::const_from_u64(5);
+    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+    // Scan the cache
+    let summary = st.scan_cached_blocks(h1, 1);
+    assert_eq!(summary.scanned_range().start, h1);
+    assert_eq!(summary.scanned_range().end, h1 + 1);
+    assert_eq!(T::received_note_count(&summary), 1);
+
+    // Account balance should reflect the received note
+    assert_eq!(st.get_total_balance(account.0), value);
+
+    // Create a second fake CompactBlock sending more value to the address
+    let value2 = NonNegativeAmount::const_from_u64(7);
+    let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+
+    // Scan the cache again
+    let summary = st.scan_cached_blocks(h2, 1);
+    assert_eq!(summary.scanned_range().start, h2);
+    assert_eq!(summary.scanned_range().end, h2 + 1);
+    assert_eq!(T::received_note_count(&summary), 1);
+
+    // Account balance should reflect both received notes
+    assert_eq!(st.get_total_balance(account.0), (value + value2).unwrap());
+}
+
+// TODO: This test can probably be entirely removed, as the following test duplicates it entirely.
+pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_test_account(AccountBirthday::from_sapling_activation)
+        .build();
+
+    let account = st.test_account().unwrap();
+    let dfvk = T::test_account_fvk(&st);
+
+    // Wallet summary is not yet available
+    assert_eq!(st.get_wallet_summary(0), None);
+
+    // Create a fake CompactBlock sending value to the address
+    let value = NonNegativeAmount::const_from_u64(5);
+    let (received_height, _, nf) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+
+    // Scan the cache
+    st.scan_cached_blocks(received_height, 1);
+
+    // Account balance should reflect the received note
+    assert_eq!(st.get_total_balance(account.0), value);
+
+    // Create a second fake CompactBlock spending value from the address
+    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
+    let to2 = T::fvk_default_address(&not_our_key);
+    let value2 = NonNegativeAmount::const_from_u64(2);
+    let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+
+    // Scan the cache again
+    st.scan_cached_blocks(spent_height, 1);
+
+    // Account balance should equal the change
+    assert_eq!(st.get_total_balance(account.0), (value - value2).unwrap());
+}
+
 pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -1411,11 +1681,8 @@ pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTest
 
     // Create a fake CompactBlock sending value to the address
     let value = NonNegativeAmount::const_from_u64(5);
-    let (received_height, _, nf) = st.generate_next_block(
-        &dfvk,
-        AddressType::DefaultExternal,
-        value
-    );
+    let (received_height, _, nf) =
+        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));

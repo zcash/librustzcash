@@ -620,6 +620,12 @@ pub(crate) mod tests {
 
             Ok(None)
         }
+
+        fn received_note_count(
+            summary: &zcash_client_backend::data_api::chain::ScanSummary,
+        ) -> usize {
+            summary.received_sapling_note_count()
+        }
     }
 
     pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
