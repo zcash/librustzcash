@@ -744,7 +744,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         .map(|res| (res.subtree, res.checkpoints))
                         .collect::<Vec<_>>();
 
-                    // Update the Sapling note commitment tree with all newly read note commitments
+                    // Update the Orchard note commitment tree with all newly read note commitments
                     let mut orchard_subtrees = orchard_subtrees.into_iter();
                     wdb.with_orchard_tree_mut::<_, _, Self::Error>(move |orchard_tree| {
                         for (tree, checkpoints) in &mut orchard_subtrees {

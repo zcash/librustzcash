@@ -442,7 +442,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from each of the the shards tables. The minimum of the two
+    // Read the maximum height from each of the shards tables. The minimum of the two
     // gives the start of a height range that covers the last incomplete shard of both the
     // Sapling and Orchard pools.
     let sapling_shard_tip = tip_shard_end_height(conn, SAPLING_TABLES_PREFIX)?;
