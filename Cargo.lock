@@ -1087,8 +1087,7 @@ dependencies = [
 [[package]]
 name = "incrementalmerkletree"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "361c467824d4d9d4f284be4b2608800839419dccc4d4608f28345237fe354623"
+source = "git+https://github.com/nuttycom/incrementalmerkletree?rev=fa147c89c6c98a03bba745538f4e68d4eaed5146#fa147c89c6c98a03bba745538f4e68d4eaed5146"
 dependencies = [
  "either",
  "proptest",
@@ -2245,8 +2244,7 @@ dependencies = [
 [[package]]
 name = "shardtree"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbf20c7a2747d9083092e3a3eeb9a7ed75577ae364896bebbc5e0bdcd4e97735"
+source = "git+https://github.com/nuttycom/incrementalmerkletree?rev=fa147c89c6c98a03bba745538f4e68d4eaed5146#fa147c89c6c98a03bba745538f4e68d4eaed5146"
 dependencies = [
  "assert_matches",
  "bitflags 2.4.1",
@@ -3055,6 +3053,7 @@ name = "zcash_client_sqlite"
 version = "0.9.1"
 dependencies = [
  "assert_matches",
+ "bls12_381",
  "bs58",
  "byteorder",
  "document-features",
