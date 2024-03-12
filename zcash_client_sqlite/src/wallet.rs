@@ -1805,6 +1805,10 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         wdb.with_sapling_tree_mut(|tree| {
             tree.truncate_removing_checkpoint(&block_height).map(|_| ())
         })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_orchard_tree_mut(|tree| {
+            tree.truncate_removing_checkpoint(&block_height).map(|_| ())
+        })?;
 
         // Rewind received notes
         conn.execute(
