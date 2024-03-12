@@ -3048,23 +3048,6 @@ mod tests {
         // Scan a block above the wallet's birthday height.
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
         let not_our_value = NonNegativeAmount::const_from_u64(10000);
-        let end_height = st.sapling_activation_height() + 2;
-        let _ = st.generate_block_at(
-            end_height,
-            BlockHash([37; 32]),
-            &not_our_key,
-            AddressType::DefaultExternal,
-            not_our_value,
-            17,
-            17,
-        );
-        st.scan_cached_blocks(end_height, 1);
-
-        // The wallet should still have no fully-scanned block, as no scanned block range
-        // overlaps the wallet's birthday.
-        assert_eq!(block_fully_scanned(&st), None);
-
-        // Scan the block at the wallet's birthday height.
         let start_height = st.sapling_activation_height();
         let _ = st.generate_block_at(
             start_height,
@@ -3075,15 +3058,26 @@ mod tests {
             0,
             0,
         );
+        let (mid_height, _, _) =
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        let (end_height, _, _) =
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+
+        // Scan the last block first
+        st.scan_cached_blocks(end_height, 1);
+
+        // The wallet should still have no fully-scanned block, as no scanned block range
+        // overlaps the wallet's birthday.
+        assert_eq!(block_fully_scanned(&st), None);
+
+        // Scan the block at the wallet's birthday height.
         st.scan_cached_blocks(start_height, 1);
 
         // The fully-scanned height should now be that of the scanned block.
         assert_eq!(block_fully_scanned(&st), Some(start_height));
 
         // Scan the block in between the two previous blocks.
-        let (h, _, _) =
-            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
-        st.scan_cached_blocks(h, 1);
+        st.scan_cached_blocks(mid_height, 1);
 
         // The fully-scanned height should now be the latest block, as the two disjoint
         // ranges have been connected.
