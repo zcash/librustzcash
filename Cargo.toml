@@ -52,11 +52,12 @@ bitvec = "1"
 blake2s_simd = "1"
 bls12_381 = "0.8"
 jubjub = "0.10"
-sapling = { package = "sapling-crypto", version = "0.1.1" }
+sapling = { package = "sapling-crypto", version = "0.1.2" }
 
 # - Orchard
 nonempty = "0.7"
 orchard = { version = "0.7.1", default-features = false }
+pasta_curves = "0.5"
 
 # - Transparent
 hdwallet = "0.4"
@@ -107,6 +108,7 @@ lazy_static = "1"
 assert_matches = "1.5"
 criterion = "0.4"
 proptest = "1"
+rand_chacha = "0.3"
 rand_xorshift = "0.3"
 
 # ZIP 32

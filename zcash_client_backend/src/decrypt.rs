@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 
-use sapling::note_encryption::{
-    try_sapling_note_decryption, try_sapling_output_recovery, PreparedIncomingViewingKey,
-};
+use sapling::note_encryption::{PreparedIncomingViewingKey, SaplingDomain};
+use zcash_note_encryption::{try_note_decryption, try_output_recovery_with_ovk};
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::MemoBytes,
-    transaction::components::sapling::zip212_enforcement,
+    transaction::components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
     transaction::Transaction,
     zip32::Scope,
 };
 
-use crate::keys::UnifiedFullViewingKey;
+use crate::{data_api::DecryptedTransaction, keys::UnifiedFullViewingKey};
+
+#[cfg(feature = "orchard")]
+use orchard::note_encryption::OrchardDomain;
 
 /// An enumeration of the possible relationships a TXO can have to the wallet.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -29,43 +31,91 @@ pub enum TransferType {
 
 /// A decrypted shielded output.
 pub struct DecryptedOutput<Note, AccountId> {
-    /// The index of the output within [`shielded_outputs`].
-    ///
-    /// [`shielded_outputs`]: zcash_primitives::transaction::TransactionData
-    pub index: usize,
+    index: usize,
+    note: Note,
+    account: AccountId,
+    memo: MemoBytes,
+    transfer_type: TransferType,
+}
+
+impl<Note, AccountId: Copy> DecryptedOutput<Note, AccountId> {
+    pub fn new(
+        index: usize,
+        note: Note,
+        account: AccountId,
+        memo: MemoBytes,
+        transfer_type: TransferType,
+    ) -> Self {
+        Self {
+            index,
+            note,
+            account,
+            memo,
+            transfer_type,
+        }
+    }
+
+    /// The index of the output within the shielded outputs of the Sapling bundle or the actions of
+    /// the Orchard bundle, depending upon the type of [`Self::note`].
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
     /// The note within the output.
-    pub note: Note,
+    pub fn note(&self) -> &Note {
+        &self.note
+    }
+
     /// The account that decrypted the note.
-    pub account: AccountId,
+    pub fn account(&self) -> &AccountId {
+        &self.account
+    }
+
     /// The memo bytes included with the note.
-    pub memo: MemoBytes,
-    /// True if this output was recovered using an [`OutgoingViewingKey`], meaning that
-    /// this is a logical output of the transaction.
-    ///
-    /// [`OutgoingViewingKey`]: sapling::keys::OutgoingViewingKey
-    pub transfer_type: TransferType,
+    pub fn memo(&self) -> &MemoBytes {
+        &self.memo
+    }
+
+    /// Returns a [`TransferType`] value that is determined based upon what type of key was used to
+    /// decrypt the transaction.
+    pub fn transfer_type(&self) -> TransferType {
+        self.transfer_type
+    }
+}
+
+impl<A> DecryptedOutput<sapling::Note, A> {
+    pub fn note_value(&self) -> NonNegativeAmount {
+        NonNegativeAmount::from_u64(self.note.value().inner())
+            .expect("Sapling note value is expected to have been validated by consensus.")
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<A> DecryptedOutput<orchard::note::Note, A> {
+    pub fn note_value(&self) -> NonNegativeAmount {
+        NonNegativeAmount::from_u64(self.note.value().inner())
+            .expect("Orchard note value is expected to have been validated by consensus.")
+    }
 }
 
 /// Scans a [`Transaction`] for any information that can be decrypted by the set of
 /// [`UnifiedFullViewingKey`]s.
-pub fn decrypt_transaction<P: consensus::Parameters, A: Clone>(
+pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
     params: &P,
     height: BlockHeight,
-    tx: &Transaction,
-    ufvks: &HashMap<A, UnifiedFullViewingKey>,
-) -> Vec<DecryptedOutput<sapling::Note, A>> {
+    tx: &'a Transaction,
+    ufvks: &HashMap<AccountId, UnifiedFullViewingKey>,
+) -> DecryptedTransaction<'a, AccountId> {
     let zip212_enforcement = zip212_enforcement(params, height);
-    tx.sapling_bundle()
+    let sapling_bundle = tx.sapling_bundle();
+    let sapling_outputs = sapling_bundle
         .iter()
         .flat_map(|bundle| {
             ufvks
                 .iter()
-                .flat_map(move |(account, ufvk)| {
-                    ufvk.sapling()
-                        .into_iter()
-                        .map(|dfvk| (account.to_owned(), dfvk))
-                })
-                .flat_map(move |(account, dfvk)| {
+                .flat_map(|(account, ufvk)| ufvk.sapling().into_iter().map(|dfvk| (*account, dfvk)))
+                .flat_map(|(account, dfvk)| {
+                    let sapling_domain = SaplingDomain::new(zip212_enforcement);
                     let ivk_external =
                         PreparedIncomingViewingKey::new(&dfvk.to_ivk(Scope::External));
                     let ivk_internal =
@@ -77,31 +127,101 @@ pub fn decrypt_transaction<P: consensus::Parameters, A: Clone>(
                         .iter()
                         .enumerate()
                         .flat_map(move |(index, output)| {
-                            let account = account.clone();
-                            try_sapling_note_decryption(&ivk_external, output, zip212_enforcement)
+                            try_note_decryption(&sapling_domain, &ivk_external, output)
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {
-                                    try_sapling_note_decryption(
-                                        &ivk_internal,
-                                        output,
-                                        zip212_enforcement,
-                                    )
-                                    .map(|ret| (ret, TransferType::WalletInternal))
+                                    try_note_decryption(&sapling_domain, &ivk_internal, output)
+                                        .map(|ret| (ret, TransferType::WalletInternal))
                                 })
                                 .or_else(|| {
-                                    try_sapling_output_recovery(&ovk, output, zip212_enforcement)
-                                        .map(|ret| (ret, TransferType::Outgoing))
+                                    try_output_recovery_with_ovk(
+                                        &sapling_domain,
+                                        &ovk,
+                                        output,
+                                        output.cv(),
+                                        output.out_ciphertext(),
+                                    )
+                                    .map(|ret| (ret, TransferType::Outgoing))
                                 })
                                 .into_iter()
-                                .map(move |((note, _, memo), transfer_type)| DecryptedOutput {
-                                    index,
-                                    note,
-                                    account: account.clone(),
-                                    memo: MemoBytes::from_bytes(&memo).expect("correct length"),
-                                    transfer_type,
+                                .map(move |((note, _, memo), transfer_type)| {
+                                    DecryptedOutput::new(
+                                        index,
+                                        note,
+                                        account,
+                                        MemoBytes::from_bytes(&memo).expect("correct length"),
+                                        transfer_type,
+                                    )
                                 })
                         })
                 })
         })
-        .collect()
+        .collect();
+
+    #[cfg(feature = "orchard")]
+    let orchard_bundle = tx.orchard_bundle();
+    #[cfg(feature = "orchard")]
+    let orchard_outputs = orchard_bundle
+        .iter()
+        .flat_map(|bundle| {
+            ufvks
+                .iter()
+                .flat_map(move |(account, ufvk)| {
+                    ufvk.orchard()
+                        .into_iter()
+                        .map(|fvk| (account.to_owned(), fvk))
+                })
+                .flat_map(move |(account, fvk)| {
+                    let ivk_external = orchard::keys::PreparedIncomingViewingKey::new(
+                        &fvk.to_ivk(Scope::External),
+                    );
+                    let ivk_internal = orchard::keys::PreparedIncomingViewingKey::new(
+                        &fvk.to_ivk(Scope::Internal),
+                    );
+                    let ovk = fvk.to_ovk(Scope::External);
+
+                    bundle
+                        .actions()
+                        .iter()
+                        .enumerate()
+                        .flat_map(move |(index, action)| {
+                            let domain = OrchardDomain::for_nullifier(*action.nullifier());
+                            let account = account;
+                            try_note_decryption(&domain, &ivk_external, action)
+                                .map(|ret| (ret, TransferType::Incoming))
+                                .or_else(|| {
+                                    try_note_decryption(&domain, &ivk_internal, action)
+                                        .map(|ret| (ret, TransferType::WalletInternal))
+                                })
+                                .or_else(|| {
+                                    try_output_recovery_with_ovk(
+                                        &domain,
+                                        &ovk,
+                                        action,
+                                        action.cv_net(),
+                                        &action.encrypted_note().out_ciphertext,
+                                    )
+                                    .map(|ret| (ret, TransferType::Outgoing))
+                                })
+                                .into_iter()
+                                .map(move |((note, _, memo), transfer_type)| {
+                                    DecryptedOutput::new(
+                                        index,
+                                        note,
+                                        account,
+                                        MemoBytes::from_bytes(&memo).expect("correct length"),
+                                        transfer_type,
+                                    )
+                                })
+                        })
+                })
+        })
+        .collect();
+
+    DecryptedTransaction::new(
+        tx,
+        sapling_outputs,
+        #[cfg(feature = "orchard")]
+        orchard_outputs,
+    )
 }

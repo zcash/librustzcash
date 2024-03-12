@@ -81,7 +81,7 @@ use zcash_primitives::{
     consensus::BlockHeight,
     memo::{Memo, MemoBytes},
     transaction::{
-        components::amount::{Amount, BalanceError, NonNegativeAmount},
+        components::amount::{BalanceError, NonNegativeAmount},
         Transaction, TxId,
     },
 };
@@ -91,6 +91,9 @@ use {
     crate::wallet::TransparentAddressMetadata,
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
+
+#[cfg(feature = "test-dependencies")]
+use zcash_primitives::consensus::NetworkUpgrade;
 
 pub mod chain;
 pub mod error;
@@ -350,6 +353,8 @@ pub struct WalletSummary<AccountId: Eq + Hash> {
     fully_scanned_height: BlockHeight,
     scan_progress: Option<Ratio<u64>>,
     next_sapling_subtree_index: u64,
+    #[cfg(feature = "orchard")]
+    next_orchard_subtree_index: u64,
 }
 
 impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
@@ -359,14 +364,17 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         chain_tip_height: BlockHeight,
         fully_scanned_height: BlockHeight,
         scan_progress: Option<Ratio<u64>>,
-        next_sapling_subtree_idx: u64,
+        next_sapling_subtree_index: u64,
+        #[cfg(feature = "orchard")] next_orchard_subtree_index: u64,
     ) -> Self {
         Self {
             account_balances,
             chain_tip_height,
             fully_scanned_height,
             scan_progress,
-            next_sapling_subtree_index: next_sapling_subtree_idx,
+            next_sapling_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_orchard_subtree_index,
         }
     }
 
@@ -402,6 +410,13 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         self.next_sapling_subtree_index
     }
 
+    /// Returns the Orchard subtree index that should start the next range of subtree
+    /// roots passed to [`WalletCommitmentTrees::put_orchard_subtree_roots`].
+    #[cfg(feature = "orchard")]
+    pub fn next_orchard_subtree_index(&self) -> u64 {
+        self.next_orchard_subtree_index
+    }
+
     /// Returns whether or not wallet scanning is complete.
     pub fn is_synced(&self) -> bool {
         self.chain_tip_height == self.fully_scanned_height
@@ -412,7 +427,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
 /// belonging to a wallet.
 pub trait InputSource {
     /// The type of errors produced by a wallet backend.
-    type Error;
+    type Error: Debug;
 
     /// Backend-specific account identifier.
     ///
@@ -445,7 +460,7 @@ pub trait InputSource {
     fn select_spendable_notes(
         &self,
         account: Self::AccountId,
-        target_value: Amount,
+        target_value: NonNegativeAmount,
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
@@ -483,7 +498,7 @@ pub trait InputSource {
 /// be abstracted away from any particular data storage substrate.
 pub trait WalletRead {
     /// The type of errors that may be generated when querying a wallet data store.
-    type Error;
+    type Error: Debug;
 
     /// The type of the account identifier.
     ///
@@ -497,10 +512,10 @@ pub trait WalletRead {
     /// Returns:
     /// - `Ok(true)` if the viewing key for the specified account can be derived from the
     ///   provided seed.
-    /// - `Ok(false)` if the derived seed does not match, or the specified account is not
+    /// - `Ok(false)` if the derived viewing key does not match, or the specified account is not
     ///   present in the database.
     /// - `Err(_)` if a Unified Spending Key cannot be derived from the seed for the
-    ///   specified account.
+    ///   specified account or the account has no known ZIP-32 derivation.
     fn validate_seed(
         &self,
         account_id: Self::AccountId,
@@ -662,7 +677,7 @@ pub trait WalletRead {
         &self,
         _account: Self::AccountId,
         _max_height: BlockHeight,
-    ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+    ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
     }
 
@@ -872,13 +887,47 @@ impl<A> ScannedBlock<A> {
 }
 
 /// A transaction that was detected during scanning of the blockchain,
-/// including its decrypted Sapling outputs.
+/// including its decrypted Sapling and/or Orchard outputs.
 ///
 /// The purpose of this struct is to permit atomic updates of the
 /// wallet database when transactions are successfully decrypted.
 pub struct DecryptedTransaction<'a, AccountId> {
-    pub tx: &'a Transaction,
-    pub sapling_outputs: &'a Vec<DecryptedOutput<sapling::Note, AccountId>>,
+    tx: &'a Transaction,
+    sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
+    #[cfg(feature = "orchard")]
+    orchard_outputs: Vec<DecryptedOutput<orchard::note::Note, AccountId>>,
+}
+
+impl<'a, AccountId> DecryptedTransaction<'a, AccountId> {
+    /// Constructs a new [`DecryptedTransaction`] from its constituent parts.
+    pub fn new(
+        tx: &'a Transaction,
+        sapling_outputs: Vec<DecryptedOutput<sapling::Note, AccountId>>,
+        #[cfg(feature = "orchard")] orchard_outputs: Vec<
+            DecryptedOutput<orchard::note::Note, AccountId>,
+        >,
+    ) -> Self {
+        Self {
+            tx,
+            sapling_outputs,
+            #[cfg(feature = "orchard")]
+            orchard_outputs,
+        }
+    }
+
+    /// Returns the raw transaction data.
+    pub fn tx(&self) -> &Transaction {
+        self.tx
+    }
+    /// Returns the Sapling outputs that were decrypted from the transaction.
+    pub fn sapling_outputs(&self) -> &[DecryptedOutput<sapling::Note, AccountId>] {
+        &self.sapling_outputs
+    }
+    /// Returns the Orchard outputs that were decrypted from the transaction.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_outputs(&self) -> &[DecryptedOutput<orchard::note::Note, AccountId>] {
+        &self.orchard_outputs
+    }
 }
 
 /// A transaction that was constructed and sent by the wallet.
@@ -887,13 +936,61 @@ pub struct DecryptedTransaction<'a, AccountId> {
 /// wallet database when transactions are created and submitted
 /// to the network.
 pub struct SentTransaction<'a, AccountId> {
-    pub tx: &'a Transaction,
-    pub created: time::OffsetDateTime,
-    pub account: AccountId,
-    pub outputs: Vec<SentTransactionOutput<AccountId>>,
-    pub fee_amount: Amount,
+    tx: &'a Transaction,
+    created: time::OffsetDateTime,
+    account: AccountId,
+    outputs: Vec<SentTransactionOutput<AccountId>>,
+    fee_amount: NonNegativeAmount,
     #[cfg(feature = "transparent-inputs")]
-    pub utxos_spent: Vec<OutPoint>,
+    utxos_spent: Vec<OutPoint>,
+}
+
+impl<'a, AccountId> SentTransaction<'a, AccountId> {
+    /// Constructs a new [`SentTransaction`] from its constituent parts.
+    pub fn new(
+        tx: &'a Transaction,
+        created: time::OffsetDateTime,
+        account: AccountId,
+        outputs: Vec<SentTransactionOutput<AccountId>>,
+        fee_amount: NonNegativeAmount,
+        #[cfg(feature = "transparent-inputs")] utxos_spent: Vec<OutPoint>,
+    ) -> Self {
+        Self {
+            tx,
+            created,
+            account,
+            outputs,
+            fee_amount,
+            #[cfg(feature = "transparent-inputs")]
+            utxos_spent,
+        }
+    }
+
+    /// Returns the transaction that was sent.
+    pub fn tx(&self) -> &Transaction {
+        self.tx
+    }
+    /// Returns the timestamp of the transaction's creation.
+    pub fn created(&self) -> time::OffsetDateTime {
+        self.created
+    }
+    /// Returns the id for the account that created the outputs.
+    pub fn account_id(&self) -> &AccountId {
+        &self.account
+    }
+    /// Returns the outputs of the transaction.
+    pub fn outputs(&self) -> &[SentTransactionOutput<AccountId>] {
+        self.outputs.as_ref()
+    }
+    /// Returns the fee paid by the transaction.
+    pub fn fee_amount(&self) -> NonNegativeAmount {
+        self.fee_amount
+    }
+    /// Returns the list of UTXOs spent in the created transaction.
+    #[cfg(feature = "transparent-inputs")]
+    pub fn utxos_spent(&self) -> &[OutPoint] {
+        self.utxos_spent.as_ref()
+    }
 }
 
 /// An output of a transaction generated by the wallet.
@@ -961,6 +1058,9 @@ impl<AccountId> SentTransactionOutput<AccountId> {
 pub struct AccountBirthday {
     height: BlockHeight,
     sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
+    #[cfg(feature = "orchard")]
+    orchard_frontier:
+        Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>,
     recover_until: Option<BlockHeight>,
 }
 
@@ -1002,11 +1102,17 @@ impl AccountBirthday {
     pub fn from_parts(
         height: BlockHeight,
         sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
+        #[cfg(feature = "orchard")] orchard_frontier: Frontier<
+            orchard::tree::MerkleHashOrchard,
+            { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+        >,
         recover_until: Option<BlockHeight>,
     ) -> Self {
         Self {
             height,
             sapling_frontier,
+            #[cfg(feature = "orchard")]
+            orchard_frontier,
             recover_until,
         }
     }
@@ -1028,6 +1134,8 @@ impl AccountBirthday {
         Ok(Self {
             height: BlockHeight::try_from(treestate.height + 1)?,
             sapling_frontier: treestate.sapling_tree()?.to_frontier(),
+            #[cfg(feature = "orchard")]
+            orchard_frontier: treestate.orchard_tree()?.to_frontier(),
             recover_until,
         })
     }
@@ -1038,6 +1146,16 @@ impl AccountBirthday {
         &self,
     ) -> &Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }> {
         &self.sapling_frontier
+    }
+
+    /// Returns the Orchard note commitment tree frontier as of the end of the block at
+    /// [`Self::height`].
+    #[cfg(feature = "orchard")]
+    pub fn orchard_frontier(
+        &self,
+    ) -> &Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>
+    {
+        &self.orchard_frontier
     }
 
     /// Returns the birthday height of the account.
@@ -1051,6 +1169,26 @@ impl AccountBirthday {
     }
 
     #[cfg(feature = "test-dependencies")]
+    /// Constructs a new [`AccountBirthday`] at the given network upgrade's activation,
+    /// with no "recover until" height.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the activation height for the given network upgrade is not set.
+    pub fn from_activation<P: zcash_primitives::consensus::Parameters>(
+        params: &P,
+        network_upgrade: NetworkUpgrade,
+    ) -> AccountBirthday {
+        AccountBirthday::from_parts(
+            params.activation_height(network_upgrade).unwrap(),
+            Frontier::empty(),
+            #[cfg(feature = "orchard")]
+            Frontier::empty(),
+            None,
+        )
+    }
+
+    #[cfg(feature = "test-dependencies")]
     /// Constructs a new [`AccountBirthday`] at Sapling activation, with no
     /// "recover until" height.
     ///
@@ -1060,13 +1198,7 @@ impl AccountBirthday {
     pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
     ) -> AccountBirthday {
-        use zcash_primitives::consensus::NetworkUpgrade;
-
-        AccountBirthday::from_parts(
-            params.activation_height(NetworkUpgrade::Sapling).unwrap(),
-            Frontier::empty(),
-            None,
-        )
+        Self::from_activation(params, NetworkUpgrade::Sapling)
     }
 }
 
@@ -1102,6 +1234,8 @@ pub trait WalletWrite: WalletRead {
     /// By convention, wallets should only allow a new account to be generated after confirmed
     /// funds have been received by the currently-available account (in order to enable automated
     /// account recovery).
+    ///
+    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
     fn create_account(
@@ -1178,7 +1312,8 @@ pub trait WalletWrite: WalletRead {
 /// At present, this only serves the Sapling protocol, but it will be modified to
 /// also provide operations related to Orchard note commitment trees in the future.
 pub trait WalletCommitmentTrees {
-    type Error;
+    type Error: Debug;
+
     /// The type of the backing [`ShardStore`] for the Sapling note commitment tree.
     type SaplingShardStore<'a>: ShardStore<
         H = sapling::Node,
@@ -1254,7 +1389,7 @@ pub mod testing {
         block::BlockHash,
         consensus::{BlockHeight, Network},
         memo::Memo,
-        transaction::{components::Amount, Transaction, TxId},
+        transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     };
 
     use crate::{
@@ -1319,7 +1454,7 @@ pub mod testing {
         fn select_spendable_notes(
             &self,
             _account: Self::AccountId,
-            _target_value: Amount,
+            _target_value: NonNegativeAmount,
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
@@ -1464,7 +1599,7 @@ pub mod testing {
             &self,
             _account: Self::AccountId,
             _max_height: BlockHeight,
-        ) -> Result<HashMap<TransparentAddress, Amount>, Self::Error> {
+        ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
             Ok(HashMap::new())
         }
 

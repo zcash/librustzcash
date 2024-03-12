@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.9.0"
+version = "0.9.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -15,7 +15,14 @@ rust-version.workspace = true
 categories.workspace = true
 
 [package.metadata.docs.rs]
-all-features = true
+# Manually specify features while `orchard` is not in the public API.
+#all-features = true
+features = [
+    "multicore",
+    "test-dependencies",
+    "transparent-inputs",
+    "unstable",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -24,6 +31,7 @@ zcash_client_backend = { workspace = true, features = ["unstable-serialization",
 zcash_encoding.workspace = true
 zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
 zcash_primitives.workspace = true
+zcash_protocol.workspace = true
 zip32.workspace = true
 
 # Dependencies exposed in a public API:
@@ -43,6 +51,7 @@ jubjub.workspace = true
 
 # - Secret management
 secrecy.workspace = true
+subtle.workspace = true
 
 # - Shielded protocols
 orchard = { workspace = true, optional = true }
@@ -70,9 +79,11 @@ maybe-rayon.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
+pasta_curves.workspace = true
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 nonempty.workspace = true
 proptest.workspace = true
+rand_chacha.workspace = true
 rand_core.workspace = true
 regex = "1.4"
 tempfile = "3.5.0"
@@ -80,6 +91,7 @@ zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
 zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 

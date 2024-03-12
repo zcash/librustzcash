@@ -1,30 +1,47 @@
 name: CI checks
 
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches: main
 
 jobs:
   test:
     name: >
-      Test on ${{ matrix.os }}${{
-      matrix.extra_flags != 'NOT_A_PUZZLE' && format(' with --features {0}', matrix.extra_flags) || ''
-      }}
+      Test${{
+      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
+      }} on ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
-        extra_flags:
+        target:
+          - Linux
+          - macOS
+          - Windows
+        state:
           - NOT_A_PUZZLE
-          - orchard
-          - unstable-nu6
-          - zfuture
+          - Orchard
+          - NU6
+
         include:
-          - extra_flags: orchard
+          - target: Linux
+            os: ubuntu-latest-8cores
+          - target: macOS
+            os: macOS-latest
+          - target: Windows
+            os: windows-latest-8cores
+
+          - state: Orchard
+            extra_flags: orchard
             rustflags: '--cfg zcash_unstable="orchard"'
+          - state: NU6
+            rustflags: '--cfg zcash_unstable="nu6"'
+
         exclude:
-          - os: macOS-latest
-            extra_flags: unstable-nu6
-          - os: macOS-latest
-            extra_flags: zfuture
+          - target: macOS
+            state: NU6
+
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
       RUSTDOCFLAGS: ${{ matrix.rustflags }}
@@ -34,7 +51,16 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
         with:
-          extra-features: ${{ matrix.extra_flags != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
       - name: Run tests
         run: >
           cargo test
@@ -51,6 +77,63 @@ jobs:
       - name: Verify working directory is clean
         run: git diff --exit-code
 
+  # States that we want to ensure can be built, but that we don't actively run tests for.
+  check-msrv:
+    name: >
+      Check${{
+      matrix.state != 'NOT_A_PUZZLE' && format(' {0}', matrix.state) || ''
+      }} build on ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.state != 'NOT_A_PUZZLE' }}
+    strategy:
+      matrix:
+        target:
+          - Linux
+          - macOS
+          - Windows
+        state:
+          - ZFuture
+
+        include:
+          - target: Linux
+            os: ubuntu-latest
+          - target: macOS
+            os: macOS-latest
+          - target: Windows
+            os: windows-latest
+
+          - state: ZFuture
+            rustflags: '--cfg zcash_unstable="zfuture"'
+
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      RUSTDOCFLAGS: ${{ matrix.rustflags }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - id: prepare
+        uses: ./.github/actions/prepare
+        with:
+          extra-features: ${{ matrix.state != 'NOT_A_PUZZLE' && matrix.extra_flags || '' }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run check
+        run: >
+          cargo check
+          --release
+          --workspace
+          --tests
+          ${{ steps.prepare.outputs.feature-flags }}
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
   build-latest:
     name: Latest build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -61,6 +144,15 @@ jobs:
       - uses: actions/checkout@v4
       - id: prepare
         uses: ./.github/actions/prepare
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-latest
       - uses: dtolnay/rust-toolchain@stable
         id: toolchain
       - run: rustup override set ${{steps.toolchain.outputs.name}}
@@ -124,7 +216,6 @@ jobs:
 
   clippy:
     name: Clippy (MSRV)
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -143,7 +234,6 @@ jobs:
 
   clippy-beta:
     name: Clippy (beta)
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -176,6 +266,15 @@ jobs:
       - uses: actions/checkout@v4
       - id: prepare
         uses: ./.github/actions/prepare
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: codecov-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Generate coverage report
         run: >
           cargo tarpaulin
@@ -205,7 +304,6 @@ jobs:
 
   fmt:
     name: Rustfmt
-    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

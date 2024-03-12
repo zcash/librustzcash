@@ -9,9 +9,8 @@ use zcash_client_backend::{
     PoolType,
 };
 use zcash_keys::keys::AddressGenerationError;
-use zcash_primitives::{
-    consensus::BlockHeight, transaction::components::amount::BalanceError, zip32::AccountId,
-};
+use zcash_primitives::zip32;
+use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
 
 use crate::wallet::commitment_tree;
 use crate::PRUNING_DEPTH;
@@ -73,11 +72,16 @@ pub enum SqliteClientError {
     AddressGeneration(AddressGenerationError),
 
     /// The account for which information was requested does not belong to the wallet.
-    AccountUnknown(AccountId),
+    AccountUnknown,
 
-    /// An error occurred deriving a spending key from a seed and an account
-    /// identifier.
-    KeyDerivationError(AccountId),
+    /// The account was imported, and ZIP-32 derivation information is not known for it.
+    UnknownZip32Derivation,
+
+    /// An error occurred deriving a spending key from a seed and a ZIP-32 account index.
+    KeyDerivationError(zip32::AccountId),
+
+    /// An error occurred while processing an account due to a failure in deriving the account's keys.
+    BadAccountData(String),
 
     /// A caller attempted to initialize the accounts table with a discontinuous
     /// set of account identifiers.
@@ -149,9 +153,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::BlockConflict(h) => write!(f, "A block hash conflict occurred at height {}; rewind required.", u32::from(*h)),
             SqliteClientError::NonSequentialBlocks => write!(f, "`put_blocks` requires that the provided block range be sequential"),
             SqliteClientError::AddressGeneration(e) => write!(f, "{}", e),
-            SqliteClientError::AccountUnknown(acct_id) => write!(f, "Account {} does not belong to this wallet.", u32::from(*acct_id)),
-
+            SqliteClientError::AccountUnknown => write!(f, "The account with the given ID does not belong to this wallet."),
+            SqliteClientError::UnknownZip32Derivation => write!(f, "ZIP-32 derivation information is not known for this account."),
             SqliteClientError::KeyDerivationError(acct_id) => write!(f, "Key derivation failed for account {}", u32::from(*acct_id)),
+            SqliteClientError::BadAccountData(e) => write!(f, "Failed to add account: {}", e),
             SqliteClientError::AccountIdDiscontinuity => write!(f, "Wallet account identifiers must be sequential."),
             SqliteClientError::AccountIdOutOfRange => write!(f, "Wallet account identifiers must be less than 0x7FFFFFFF."),
             #[cfg(feature = "transparent-inputs")]

@@ -197,13 +197,25 @@ impl TryFrom<MemoBytes> for Memo {
     /// Returns an error if the provided slice does not represent a valid `Memo` (for
     /// example, if the slice is not 512 bytes, or the encoded `Memo` is non-canonical).
     fn try_from(bytes: MemoBytes) -> Result<Self, Self::Error> {
+        Self::try_from(&bytes)
+    }
+}
+
+impl TryFrom<&MemoBytes> for Memo {
+    type Error = Error;
+
+    /// Parses a `Memo` from its ZIP 302 serialization.
+    ///
+    /// Returns an error if the provided slice does not represent a valid `Memo` (for
+    /// example, if the slice is not 512 bytes, or the encoded `Memo` is non-canonical).
+    fn try_from(bytes: &MemoBytes) -> Result<Self, Self::Error> {
         match bytes.0[0] {
             0xF6 if bytes.0.iter().skip(1).all(|&b| b == 0) => Ok(Memo::Empty),
             0xFF => Ok(Memo::Arbitrary(Box::new(bytes.0[1..].try_into().unwrap()))),
             b if b <= 0xF4 => str::from_utf8(bytes.as_slice())
                 .map(|r| Memo::Text(TextMemo(r.to_owned())))
                 .map_err(Error::InvalidUtf8),
-            _ => Ok(Memo::Future(bytes)),
+            _ => Ok(Memo::Future(bytes.clone())),
         }
     }
 }

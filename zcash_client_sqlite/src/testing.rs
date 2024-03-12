@@ -7,7 +7,8 @@ use std::fs::File;
 
 use nonempty::NonEmpty;
 use prost::Message;
-use rand_core::{OsRng, RngCore};
+use rand_chacha::ChaChaRng;
+use rand_core::{CryptoRng, RngCore, SeedableRng};
 use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
 use tempfile::NamedTempFile;
@@ -18,9 +19,8 @@ use tempfile::TempDir;
 use sapling::{
     note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
-    value::NoteValue,
     zip32::DiversifiableFullViewingKey,
-    Note, Nullifier, PaymentAddress,
+    Note, Nullifier,
 };
 #[allow(deprecated)]
 use zcash_client_backend::{
@@ -51,7 +51,7 @@ use zcash_client_backend::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::{self, BlockHeight, Network, NetworkUpgrade, Parameters},
+    consensus::{self, BlockHeight, NetworkUpgrade, Parameters},
     memo::{Memo, MemoBytes},
     transaction::{
         components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
@@ -60,6 +60,7 @@ use zcash_primitives::{
     },
     zip32::DiversifierIndex,
 };
+use zcash_protocol::local_consensus::LocalNetwork;
 
 use crate::{
     chain::init::init_cache_database,
@@ -72,6 +73,14 @@ use crate::{
 };
 
 use super::BlockDb;
+
+#[cfg(feature = "orchard")]
+use {
+    group::ff::{Field, PrimeField},
+    orchard::note_encryption::{OrchardDomain, OrchardNoteEncryption},
+    pasta_curves::pallas,
+    zcash_client_backend::proto::compact_formats::CompactOrchardAction,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -87,20 +96,37 @@ use crate::{
     FsBlockDb,
 };
 
+pub(crate) mod pool;
+
 /// A builder for a `zcash_client_sqlite` test.
 pub(crate) struct TestBuilder<Cache> {
-    network: Network,
+    network: LocalNetwork,
     cache: Cache,
     test_account_birthday: Option<AccountBirthday>,
+    rng: ChaChaRng,
 }
 
 impl TestBuilder<()> {
     /// Constructs a new test.
     pub(crate) fn new() -> Self {
         TestBuilder {
-            network: Network::TestNetwork,
+            // Use a fake network where Sapling through NU5 activate at the same height.
+            // We pick 100,000 to be large enough to handle any hard-coded test offsets.
+            network: LocalNetwork {
+                overwinter: Some(BlockHeight::from_u32(1)),
+                sapling: Some(BlockHeight::from_u32(100_000)),
+                blossom: Some(BlockHeight::from_u32(100_000)),
+                heartwood: Some(BlockHeight::from_u32(100_000)),
+                canopy: Some(BlockHeight::from_u32(100_000)),
+                nu5: Some(BlockHeight::from_u32(100_000)),
+                #[cfg(zcash_unstable = "nu6")]
+                nu6: None,
+                #[cfg(zcash_unstable = "zfuture")]
+                z_future: None,
+            },
             cache: (),
             test_account_birthday: None,
+            rng: ChaChaRng::seed_from_u64(0),
         }
     }
 
@@ -110,6 +136,7 @@ impl TestBuilder<()> {
             network: self.network,
             cache: BlockCache::new(),
             test_account_birthday: self.test_account_birthday,
+            rng: self.rng,
         }
     }
 
@@ -120,12 +147,13 @@ impl TestBuilder<()> {
             network: self.network,
             cache: FsBlockCache::new(),
             test_account_birthday: self.test_account_birthday,
+            rng: self.rng,
         }
     }
 }
 
 impl<Cache> TestBuilder<Cache> {
-    pub(crate) fn with_test_account<F: FnOnce(&Network) -> AccountBirthday>(
+    pub(crate) fn with_test_account<F: FnOnce(&LocalNetwork) -> AccountBirthday>(
         mut self,
         birthday: F,
     ) -> Self {
@@ -153,6 +181,51 @@ impl<Cache> TestBuilder<Cache> {
             _data_file: data_file,
             db_data,
             test_account,
+            rng: self.rng,
+        }
+    }
+}
+
+pub(crate) struct CachedBlock {
+    height: BlockHeight,
+    hash: BlockHash,
+    sapling_end_size: u32,
+    orchard_end_size: u32,
+}
+
+impl CachedBlock {
+    fn none(sapling_activation_height: BlockHeight) -> Self {
+        Self {
+            height: sapling_activation_height,
+            hash: BlockHash([0; 32]),
+            sapling_end_size: 0,
+            orchard_end_size: 0,
+        }
+    }
+
+    fn at(
+        height: BlockHeight,
+        hash: BlockHash,
+        sapling_tree_size: u32,
+        orchard_tree_size: u32,
+    ) -> Self {
+        Self {
+            height,
+            hash,
+            sapling_end_size: sapling_tree_size,
+            orchard_end_size: orchard_tree_size,
+        }
+    }
+
+    fn roll_forward(self, cb: &CompactBlock) -> Self {
+        assert_eq!(self.height + 1, cb.height());
+        Self {
+            height: cb.height(),
+            hash: cb.hash(),
+            sapling_end_size: self.sapling_end_size
+                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
+            orchard_end_size: self.orchard_end_size
+                + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
         }
     }
 }
@@ -160,15 +233,16 @@ impl<Cache> TestBuilder<Cache> {
 /// The state for a `zcash_client_sqlite` test.
 pub(crate) struct TestState<Cache> {
     cache: Cache,
-    latest_cached_block: Option<(BlockHeight, BlockHash, u32)>,
+    latest_cached_block: Option<CachedBlock>,
     _data_file: NamedTempFile,
-    db_data: WalletDb<Connection, Network>,
+    db_data: WalletDb<Connection, LocalNetwork>,
     test_account: Option<(
         SecretVec<u8>,
         AccountId,
         UnifiedSpendingKey,
         AccountBirthday,
     )>,
+    rng: ChaChaRng,
 }
 
 impl<Cache: TestCache> TestState<Cache>
@@ -181,31 +255,34 @@ where
         self.cache.block_source()
     }
 
-    pub(crate) fn latest_cached_block(&self) -> &Option<(BlockHeight, BlockHash, u32)> {
-        &self.latest_cached_block
+    pub(crate) fn latest_cached_block(&self) -> Option<&CachedBlock> {
+        self.latest_cached_block.as_ref()
     }
 
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
-    pub(crate) fn generate_next_block(
+    pub(crate) fn generate_next_block<Fvk: TestFvk>(
         &mut self,
-        dfvk: &DiversifiableFullViewingKey,
+        fvk: &Fvk,
         req: AddressType,
         value: NonNegativeAmount,
-    ) -> (BlockHeight, Cache::InsertResult, Nullifier) {
-        let (height, prev_hash, initial_sapling_tree_size) = self
+    ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
+        let cached_block = self
             .latest_cached_block
-            .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
+            .take()
+            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
+        let height = cached_block.height + 1;
 
         let (res, nf) = self.generate_block_at(
             height,
-            prev_hash,
-            dfvk,
+            cached_block.hash,
+            fvk,
             req,
             value,
-            initial_sapling_tree_size,
+            cached_block.sapling_end_size,
+            cached_block.orchard_end_size,
         );
+        assert!(self.latest_cached_block.is_some());
 
         (height, res, nf)
     }
@@ -215,68 +292,73 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
-    pub(crate) fn generate_block_at(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn generate_block_at<Fvk: TestFvk>(
         &mut self,
         height: BlockHeight,
         prev_hash: BlockHash,
-        dfvk: &DiversifiableFullViewingKey,
+        fvk: &Fvk,
         req: AddressType,
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
-    ) -> (Cache::InsertResult, Nullifier) {
+        initial_orchard_tree_size: u32,
+    ) -> (Cache::InsertResult, Fvk::Nullifier) {
         let (cb, nf) = fake_compact_block(
             &self.network(),
             height,
             prev_hash,
-            dfvk,
+            fvk,
             req,
             value,
             initial_sapling_tree_size,
+            initial_orchard_tree_size,
+            &mut self.rng,
         );
         let res = self.cache.insert(&cb);
 
-        self.latest_cached_block = Some((
-            height,
-            cb.hash(),
-            initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ));
+        self.latest_cached_block = Some(
+            CachedBlock::at(
+                height - 1,
+                cb.hash(),
+                initial_sapling_tree_size,
+                initial_orchard_tree_size,
+            )
+            .roll_forward(&cb),
+        );
 
         (res, nf)
     }
 
     /// Creates a fake block at the expected next height spending the given note, and
     /// inserts it into the cache.
-    pub(crate) fn generate_next_block_spending(
+    pub(crate) fn generate_next_block_spending<Fvk: TestFvk>(
         &mut self,
-        dfvk: &DiversifiableFullViewingKey,
-        note: (Nullifier, NonNegativeAmount),
-        to: PaymentAddress,
+        fvk: &Fvk,
+        note: (Fvk::Nullifier, NonNegativeAmount),
+        to: impl Into<Address>,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult) {
-        let (height, prev_hash, initial_sapling_tree_size) = self
+        let cached_block = self
             .latest_cached_block
-            .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
+            .take()
+            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
+        let height = cached_block.height + 1;
 
         let cb = fake_compact_block_spending(
             &self.network(),
             height,
-            prev_hash,
+            cached_block.hash,
             note,
-            dfvk,
-            to,
+            fvk,
+            to.into(),
             value,
-            initial_sapling_tree_size,
+            cached_block.sapling_end_size,
+            cached_block.orchard_end_size,
+            &mut self.rng,
         );
         let res = self.cache.insert(&cb);
 
-        self.latest_cached_block = Some((
-            height,
-            cb.hash(),
-            initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ));
+        self.latest_cached_block = Some(cached_block.roll_forward(&cb));
 
         (height, res)
     }
@@ -311,27 +393,24 @@ where
         tx_index: usize,
         tx: &Transaction,
     ) -> (BlockHeight, Cache::InsertResult) {
-        let (height, prev_hash, initial_sapling_tree_size) = self
+        let cached_block = self
             .latest_cached_block
-            .map(|(prev_height, prev_hash, end_size)| (prev_height + 1, prev_hash, end_size))
-            .unwrap_or_else(|| (self.sapling_activation_height(), BlockHash([0; 32]), 0));
+            .take()
+            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
+        let height = cached_block.height + 1;
 
         let cb = fake_compact_block_from_tx(
             height,
-            prev_hash,
+            cached_block.hash,
             tx_index,
             tx,
-            initial_sapling_tree_size,
-            0,
+            cached_block.sapling_end_size,
+            cached_block.orchard_end_size,
+            &mut self.rng,
         );
         let res = self.cache.insert(&cb);
 
-        self.latest_cached_block = Some((
-            height,
-            cb.hash(),
-            initial_sapling_tree_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ));
+        self.latest_cached_block = Some(cached_block.roll_forward(&cb));
 
         (height, res)
     }
@@ -390,10 +469,12 @@ where
         self.cache
             .block_source()
             .with_blocks::<_, Infallible>(None, None, |block: CompactBlock| {
-                self.latest_cached_block = Some((
+                let chain_metadata = block.chain_metadata.unwrap();
+                self.latest_cached_block = Some(CachedBlock::at(
                     BlockHeight::from_u32(block.height.try_into().unwrap()),
                     BlockHash::from_slice(block.hash.as_slice()),
-                    block.chain_metadata.unwrap().sapling_commitment_tree_size,
+                    chain_metadata.sapling_commitment_tree_size,
+                    chain_metadata.orchard_commitment_tree_size,
                 ));
                 Ok(())
             })
@@ -403,17 +484,17 @@ where
 
 impl<Cache> TestState<Cache> {
     /// Exposes an immutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet(&self) -> &WalletDb<Connection, Network> {
+    pub(crate) fn wallet(&self) -> &WalletDb<Connection, LocalNetwork> {
         &self.db_data
     }
 
     /// Exposes a mutable reference to the test's [`WalletDb`].
-    pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, Network> {
+    pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
         &mut self.db_data
     }
 
     /// Exposes the network in use.
-    pub(crate) fn network(&self) -> Network {
+    pub(crate) fn network(&self) -> LocalNetwork {
         self.db_data.params
     }
 
@@ -442,6 +523,14 @@ impl<Cache> TestState<Cache> {
         self.test_account
             .as_ref()
             .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
+    }
+
+    /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
+    #[cfg(feature = "orchard")]
+    pub(crate) fn test_account_orchard(&self) -> Option<orchard::keys::FullViewingKey> {
+        self.test_account
+            .as_ref()
+            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().orchard().cloned())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.
@@ -504,7 +593,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         #![allow(deprecated)]
         let params = self.network();
@@ -540,7 +629,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: InputSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: InputSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         propose_transfer::<_, _, _, Infallible>(
@@ -616,7 +705,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         propose_shielding::<_, _, _, Infallible>(
@@ -680,7 +769,7 @@ impl<Cache> TestState<Cache> {
         >,
     >
     where
-        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, Network>>,
+        InputsT: ShieldingSelector<InputSource = WalletDb<Connection, LocalNetwork>>,
     {
         let params = self.network();
         let prover = test_prover();
@@ -717,7 +806,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
     ) -> NonNegativeAmount {
         self.with_account_balance(account, min_confirmations, |balance| {
-            balance.sapling_balance().spendable_value()
+            balance.spendable_value()
         })
     }
 
@@ -727,8 +816,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
     ) -> NonNegativeAmount {
         self.with_account_balance(account, min_confirmations, |balance| {
-            balance.sapling_balance().value_pending_spendability()
-                + balance.sapling_balance().change_pending_confirmation()
+            balance.value_pending_spendability() + balance.change_pending_confirmation()
         })
         .unwrap()
     }
@@ -740,7 +828,7 @@ impl<Cache> TestState<Cache> {
         min_confirmations: u32,
     ) -> NonNegativeAmount {
         self.with_account_balance(account, min_confirmations, |balance| {
-            balance.sapling_balance().change_pending_confirmation()
+            balance.change_pending_confirmation()
         })
     }
 
@@ -758,6 +846,211 @@ impl<Cache> TestState<Cache> {
     }
 }
 
+/// Trait used by tests that require a full viewing key.
+pub(crate) trait TestFvk {
+    type Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey>;
+
+    #[cfg(feature = "orchard")]
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey>;
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nf: Self::Nullifier,
+        rng: &mut R,
+    );
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        req: AddressType,
+        value: NonNegativeAmount,
+        initial_sapling_tree_size: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier;
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        nf: Self::Nullifier,
+        req: AddressType,
+        value: NonNegativeAmount,
+        initial_sapling_tree_size: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        self.add_spend(ctx, nf, rng);
+        self.add_output(
+            ctx,
+            params,
+            height,
+            req,
+            value,
+            initial_sapling_tree_size,
+            rng,
+        )
+    }
+}
+
+impl TestFvk for DiversifiableFullViewingKey {
+    type Nullifier = Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+        Some(self.fvk().ovk)
+    }
+
+    #[cfg(feature = "orchard")]
+    fn orchard_ovk(&self, _: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+        None
+    }
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nf: Self::Nullifier,
+        _: &mut R,
+    ) {
+        let cspend = CompactSaplingSpend { nf: nf.to_vec() };
+        ctx.spends.push(cspend);
+    }
+
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        req: AddressType,
+        value: NonNegativeAmount,
+        initial_sapling_tree_size: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        let recipient = match req {
+            AddressType::DefaultExternal => self.default_address().1,
+            AddressType::DiversifiedExternal(idx) => self.find_address(idx).unwrap().1,
+            AddressType::Internal => self.change_address().1,
+        };
+
+        let position = initial_sapling_tree_size + ctx.outputs.len() as u32;
+
+        let (cout, note) =
+            compact_sapling_output(params, height, recipient, value, self.sapling_ovk(), rng);
+        ctx.outputs.push(cout);
+
+        note.nf(&self.fvk().vk.nk, position as u64)
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl TestFvk for orchard::keys::FullViewingKey {
+    type Nullifier = orchard::note::Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+        None
+    }
+
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+        Some(self.to_ovk(scope))
+    }
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        revealed_spent_note_nullifier: Self::Nullifier,
+        rng: &mut R,
+    ) {
+        // Generate a dummy recipient.
+        let recipient = loop {
+            let mut bytes = [0; 32];
+            rng.fill_bytes(&mut bytes);
+            let sk = orchard::keys::SpendingKey::from_bytes(bytes);
+            if sk.is_some().into() {
+                break orchard::keys::FullViewingKey::from(&sk.unwrap())
+                    .address_at(0u32, zip32::Scope::External);
+            }
+        };
+
+        let (cact, _) = compact_orchard_action(
+            revealed_spent_note_nullifier,
+            recipient,
+            NonNegativeAmount::ZERO,
+            self.orchard_ovk(zip32::Scope::Internal),
+            rng,
+        );
+        ctx.actions.push(cact);
+    }
+
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        _: &P,
+        _: BlockHeight,
+        req: AddressType,
+        value: NonNegativeAmount,
+        _: u32,
+        mut rng: &mut R,
+    ) -> Self::Nullifier {
+        // Generate a dummy nullifier
+        let revealed_spent_note_nullifier =
+            orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+                .unwrap();
+
+        let (j, scope) = match req {
+            AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
+            AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
+            AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
+        };
+
+        let (cact, note) = compact_orchard_action(
+            revealed_spent_note_nullifier,
+            self.address_at(j, scope),
+            value,
+            self.orchard_ovk(scope),
+            rng,
+        );
+        ctx.actions.push(cact);
+
+        note.nullifier(self)
+    }
+
+    // Override so we can merge the spend and output into a single action.
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        _: &P,
+        _: BlockHeight,
+        revealed_spent_note_nullifier: Self::Nullifier,
+        req: AddressType,
+        value: NonNegativeAmount,
+        _: u32,
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        let (j, scope) = match req {
+            AddressType::DefaultExternal => (0u32.into(), zip32::Scope::External),
+            AddressType::DiversifiedExternal(idx) => (idx, zip32::Scope::External),
+            AddressType::Internal => (0u32.into(), zip32::Scope::Internal),
+        };
+
+        let (cact, note) = compact_orchard_action(
+            revealed_spent_note_nullifier,
+            self.address_at(j, scope),
+            value,
+            self.orchard_ovk(scope),
+            rng,
+        );
+        ctx.actions.push(cact);
+
+        // Return the nullifier of the newly created output note
+        note.nullifier(self)
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) enum AddressType {
     DefaultExternal,
@@ -765,75 +1058,138 @@ pub(crate) enum AddressType {
     Internal,
 }
 
-/// Create a fake CompactBlock at the given height, containing a single output paying
-/// an address. Returns the CompactBlock and the nullifier for the new note.
-pub(crate) fn fake_compact_block<P: consensus::Parameters>(
+/// Creates a `CompactSaplingOutput` at the given height paying the given recipient.
+///
+/// Returns the `CompactSaplingOutput` and the new note.
+fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
     params: &P,
     height: BlockHeight,
-    prev_hash: BlockHash,
-    dfvk: &DiversifiableFullViewingKey,
-    req: AddressType,
+    recipient: sapling::PaymentAddress,
     value: NonNegativeAmount,
-    initial_sapling_tree_size: u32,
-) -> (CompactBlock, Nullifier) {
-    let to = match req {
-        AddressType::DefaultExternal => dfvk.default_address().1,
-        AddressType::DiversifiedExternal(idx) => dfvk.find_address(idx).unwrap().1,
-        AddressType::Internal => dfvk.change_address().1,
-    };
-
-    // Create a fake Note for the account
-    let mut rng = OsRng;
-    let rseed = generate_random_rseed(zip212_enforcement(params, height), &mut rng);
-    let note = Note::from_parts(to, NoteValue::from_raw(value.into_u64()), rseed);
-    let encryptor = sapling_note_encryption(
-        Some(dfvk.fvk().ovk),
-        note.clone(),
-        *MemoBytes::empty().as_array(),
-        &mut rng,
+    ovk: Option<sapling::keys::OutgoingViewingKey>,
+    rng: &mut R,
+) -> (CompactSaplingOutput, sapling::Note) {
+    let rseed = generate_random_rseed(zip212_enforcement(params, height), rng);
+    let note = Note::from_parts(
+        recipient,
+        sapling::value::NoteValue::from_raw(value.into_u64()),
+        rseed,
     );
+    let encryptor = sapling_note_encryption(ovk, note.clone(), *MemoBytes::empty().as_array(), rng);
     let cmu = note.cmu().to_bytes().to_vec();
     let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
-    // Create a fake CompactBlock containing the note
-    let cout = CompactSaplingOutput {
-        cmu,
-        ephemeral_key,
-        ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+    (
+        CompactSaplingOutput {
+            cmu,
+            ephemeral_key,
+            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        },
+        note,
+    )
+}
+
+/// Creates a `CompactOrchardAction` at the given height paying the given recipient.
+///
+/// Returns the `CompactOrchardAction` and the new note.
+#[cfg(feature = "orchard")]
+fn compact_orchard_action<R: RngCore + CryptoRng>(
+    nullifier: orchard::note::Nullifier,
+    recipient: orchard::Address,
+    value: NonNegativeAmount,
+    ovk: Option<orchard::keys::OutgoingViewingKey>,
+    rng: &mut R,
+) -> (CompactOrchardAction, orchard::Note) {
+    let rseed = {
+        loop {
+            let mut bytes = [0; 32];
+            rng.fill_bytes(&mut bytes);
+            let rseed = orchard::note::RandomSeed::from_bytes(bytes, &nullifier);
+            if rseed.is_some().into() {
+                break rseed.unwrap();
+            }
+        }
     };
+    let note = orchard::Note::from_parts(
+        recipient,
+        orchard::value::NoteValue::from_raw(value.into_u64()),
+        nullifier,
+        rseed,
+    )
+    .unwrap();
+    let encryptor = OrchardNoteEncryption::new(ovk, note, *MemoBytes::empty().as_array());
+    let cmx = orchard::note::ExtractedNoteCommitment::from(note.commitment());
+    let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0.to_vec();
+    let enc_ciphertext = encryptor.encrypt_note_plaintext();
+
+    (
+        CompactOrchardAction {
+            nullifier: nullifier.to_bytes().to_vec(),
+            cmx: cmx.to_bytes().to_vec(),
+            ephemeral_key,
+            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        },
+        note,
+    )
+}
+
+/// Creates a fake `CompactTx` with a random transaction ID and no spends or outputs.
+fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
     let mut ctx = CompactTx::default();
     let mut txid = vec![0; 32];
     rng.fill_bytes(&mut txid);
     ctx.hash = txid;
-    ctx.outputs.push(cout);
-    let mut cb = CompactBlock {
-        hash: {
-            let mut hash = vec![0; 32];
-            rng.fill_bytes(&mut hash);
-            hash
-        },
-        height: height.into(),
-        ..Default::default()
-    };
-    cb.prev_hash.extend_from_slice(&prev_hash.0);
-    cb.vtx.push(ctx);
-    cb.chain_metadata = Some(compact::ChainMetadata {
-        sapling_commitment_tree_size: initial_sapling_tree_size
-            + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-        ..Default::default()
-    });
-    (cb, note.nf(&dfvk.fvk().vk.nk, 0))
+
+    ctx
+}
+
+/// Create a fake CompactBlock at the given height, containing a single output paying
+/// an address. Returns the CompactBlock and the nullifier for the new note.
+#[allow(clippy::too_many_arguments)]
+fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
+    params: &P,
+    height: BlockHeight,
+    prev_hash: BlockHash,
+    fvk: &Fvk,
+    req: AddressType,
+    value: NonNegativeAmount,
+    initial_sapling_tree_size: u32,
+    initial_orchard_tree_size: u32,
+    mut rng: impl RngCore + CryptoRng,
+) -> (CompactBlock, Fvk::Nullifier) {
+    // Create a fake CompactBlock containing the note
+    let mut ctx = fake_compact_tx(&mut rng);
+    let nf = fvk.add_output(
+        &mut ctx,
+        params,
+        height,
+        req,
+        value,
+        initial_sapling_tree_size,
+        &mut rng,
+    );
+
+    let cb = fake_compact_block_from_compact_tx(
+        ctx,
+        height,
+        prev_hash,
+        initial_sapling_tree_size,
+        initial_orchard_tree_size,
+        rng,
+    );
+    (cb, nf)
 }
 
 /// Create a fake CompactBlock at the given height containing only the given transaction.
-pub(crate) fn fake_compact_block_from_tx(
+fn fake_compact_block_from_tx(
     height: BlockHeight,
     prev_hash: BlockHash,
     tx_index: usize,
     tx: &Transaction,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    rng: impl RngCore,
 ) -> CompactBlock {
     // Create a fake CompactTx containing the transaction.
     let mut ctx = CompactTx {
@@ -864,95 +1220,118 @@ pub(crate) fn fake_compact_block_from_tx(
         prev_hash,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        rng,
     )
 }
 
 /// Create a fake CompactBlock at the given height, spending a single note from the
 /// given address.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn fake_compact_block_spending<P: consensus::Parameters>(
+fn fake_compact_block_spending<P: consensus::Parameters, Fvk: TestFvk>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    (nf, in_value): (Nullifier, NonNegativeAmount),
-    dfvk: &DiversifiableFullViewingKey,
-    to: PaymentAddress,
+    (nf, in_value): (Fvk::Nullifier, NonNegativeAmount),
+    fvk: &Fvk,
+    to: Address,
     value: NonNegativeAmount,
     initial_sapling_tree_size: u32,
+    initial_orchard_tree_size: u32,
+    mut rng: impl RngCore + CryptoRng,
 ) -> CompactBlock {
-    let zip212_enforcement = zip212_enforcement(params, height);
-    let mut rng = OsRng;
-    let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
+    let mut ctx = fake_compact_tx(&mut rng);
 
-    // Create a fake CompactBlock containing the note
-    let cspend = CompactSaplingSpend { nf: nf.to_vec() };
-    let mut ctx = CompactTx::default();
-    let mut txid = vec![0; 32];
-    rng.fill_bytes(&mut txid);
-    ctx.hash = txid;
-    ctx.spends.push(cspend);
+    // Create a fake spend and a fake Note for the change
+    fvk.add_logical_action(
+        &mut ctx,
+        params,
+        height,
+        nf,
+        AddressType::Internal,
+        (in_value - value).unwrap(),
+        initial_sapling_tree_size,
+        &mut rng,
+    );
 
     // Create a fake Note for the payment
-    ctx.outputs.push({
-        let note = Note::from_parts(
-            to,
-            sapling::value::NoteValue::from_raw(value.into_u64()),
-            rseed,
-        );
-        let encryptor = sapling_note_encryption(
-            Some(dfvk.fvk().ovk),
-            note.clone(),
-            *MemoBytes::empty().as_array(),
-            &mut rng,
-        );
-        let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
-        let enc_ciphertext = encryptor.encrypt_note_plaintext();
+    match to {
+        Address::Sapling(recipient) => ctx.outputs.push(
+            compact_sapling_output(
+                params,
+                height,
+                recipient,
+                value,
+                fvk.sapling_ovk(),
+                &mut rng,
+            )
+            .0,
+        ),
+        Address::Transparent(_) => panic!("transparent addresses not supported in compact blocks"),
+        Address::Unified(ua) => {
+            // This is annoying to implement, because the protocol-aware UA type has no
+            // concept of ZIP 316 preference order.
+            let mut done = false;
 
-        CompactSaplingOutput {
-            cmu,
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            #[cfg(feature = "orchard")]
+            if let Some(recipient) = ua.orchard() {
+                // Generate a dummy nullifier
+                let nullifier =
+                    orchard::note::Nullifier::from_bytes(&pallas::Base::random(&mut rng).to_repr())
+                        .unwrap();
+
+                ctx.actions.push(
+                    compact_orchard_action(
+                        nullifier,
+                        *recipient,
+                        value,
+                        fvk.orchard_ovk(zip32::Scope::External),
+                        &mut rng,
+                    )
+                    .0,
+                );
+                done = true;
+            }
+
+            if !done {
+                if let Some(recipient) = ua.sapling() {
+                    ctx.outputs.push(
+                        compact_sapling_output(
+                            params,
+                            height,
+                            *recipient,
+                            value,
+                            fvk.sapling_ovk(),
+                            &mut rng,
+                        )
+                        .0,
+                    );
+                    done = true;
+                }
+            }
+            if !done {
+                panic!("No supported shielded receiver to send funds to");
+            }
         }
-    });
+    }
 
-    // Create a fake Note for the change
-    ctx.outputs.push({
-        let change_addr = dfvk.default_address().1;
-        let rseed = generate_random_rseed(zip212_enforcement, &mut rng);
-        let note = Note::from_parts(
-            change_addr,
-            NoteValue::from_raw((in_value - value).unwrap().into_u64()),
-            rseed,
-        );
-        let encryptor = sapling_note_encryption(
-            Some(dfvk.fvk().ovk),
-            note.clone(),
-            *MemoBytes::empty().as_array(),
-            &mut rng,
-        );
-        let cmu = note.cmu().to_bytes().to_vec();
-        let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
-        let enc_ciphertext = encryptor.encrypt_note_plaintext();
-
-        CompactSaplingOutput {
-            cmu,
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
-        }
-    });
-
-    fake_compact_block_from_compact_tx(ctx, height, prev_hash, initial_sapling_tree_size, 0)
+    fake_compact_block_from_compact_tx(
+        ctx,
+        height,
+        prev_hash,
+        initial_sapling_tree_size,
+        initial_orchard_tree_size,
+        rng,
+    )
 }
 
-pub(crate) fn fake_compact_block_from_compact_tx(
+fn fake_compact_block_from_compact_tx(
     ctx: CompactTx,
     height: BlockHeight,
     prev_hash: BlockHash,
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
+    mut rng: impl RngCore,
 ) -> CompactBlock {
-    let mut rng = OsRng;
     let mut cb = CompactBlock {
         hash: {
             let mut hash = vec![0; 32];
@@ -1079,7 +1458,7 @@ pub(crate) fn input_selector(
     change_memo: Option<&str>,
     fallback_change_pool: ShieldedProtocol,
 ) -> GreedyInputSelector<
-    WalletDb<rusqlite::Connection, Network>,
+    WalletDb<rusqlite::Connection, LocalNetwork>,
     standard::SingleOutputChangeStrategy,
 > {
     let change_memo = change_memo.map(|m| MemoBytes::from(m.parse::<Memo>().unwrap()));
@@ -1090,8 +1469,8 @@ pub(crate) fn input_selector(
 
 // Checks that a protobuf proposal serialized from the provided proposal value correctly parses to
 // the same proposal value.
-pub(crate) fn check_proposal_serialization_roundtrip(
-    db_data: &WalletDb<rusqlite::Connection, Network>,
+fn check_proposal_serialization_roundtrip(
+    db_data: &WalletDb<rusqlite::Connection, LocalNetwork>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
     let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);

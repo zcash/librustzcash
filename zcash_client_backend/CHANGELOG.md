@@ -14,11 +14,15 @@ and this library adheres to Rust's notion of
   flag.
 - `zcash_client_backend::data_api`:
   - `AccountBalance::with_orchard_balance_mut`
+  - `AccountBirthday::orchard_frontier`
   - `BlockMetadata::orchard_tree_size`
+  - `DecryptedTransaction::{new, tx(), orchard_outputs()}`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
+  - `SentTransaction::new`
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
+  - `WalletSummary::next_orchard_subtree_index`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
   - `chain::BlockCache` trait
 - `zcash_client_backend::fees`:
@@ -44,20 +48,41 @@ and this library adheres to Rust's notion of
 
 ### Changed
 - `zcash_client_backend::data_api`:
+  - Arguments to `AccountBirthday::from_parts` have changed.
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `get_orchard_nullifiers`
+  - Changes to the `InputSource` trait:
+    - `select_spendable_notes` now takes its `target_value` argument as a
+      `NonNegativeAmount`. Also, the values of the returned map are also
+      `NonNegativeAmount`s instead of `Amount`s.
+  - Fields of `DecryptedTransaction` are now private. Use `DecryptedTransaction::new`
+    and the newly provided accessors instead.
+  - Fields of `SentTransaction` are now private. Use `SentTransaction::new`
+    and the newly provided accessors instead.
   - `ShieldedProtocol` has a new `Orchard` variant.
   - `WalletCommitmentTrees`
     - `type OrchardShardStore`
     - `fn with_orchard_tree_mut`
     - `fn put_orchard_subtree_roots`
   - Added method `WalletRead::validate_seed`
+  - Removed `Error::AccountNotFound` variant.
+  - `WalletSummary::new` now takes an additional `next_orchard_subtree_index`
+    argument when the `orchard` feature flag is enabled.
+- `zcash_client_backend::decrypt`:
+  - Fields of `DecryptedOutput` are now private. Use `DecryptedOutput::new`
+    and the newly provided accessors instead.
+  - `decrypt_transaction` now returns a `DecryptedTransaction<AccountId>`
+    instead of a `DecryptedOutput<sapling::Note>` and will decrypt Orchard
+    outputs when the `orchard` feature is enabled. In addition, the type
+    constraint on its `<AccountId>` parameter has been strengthened to `Copy`.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 - `zcash_client_backend::scanning`:
   - `testing::fake_compact_block` is now public.
+- `zcash_client_backend::proto`:
+  - `ProposalDecodingError` has a new variant `TransparentMemo`.
 - `zcash_client_backend::zip321::render::amount_str` now takes a
   `NonNegativeAmount` rather than a signed `Amount` as its argument.
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a
@@ -73,6 +98,11 @@ and this library adheres to Rust's notion of
 - This release fixes an error in amount parsing in `zip321` that previously
   allowed amounts having a decimal point but no decimal value to be parsed
   as valid.
+
+## [0.11.1] - 2024-03-09
+
+### Fixed
+- Documentation now correctly builds with all feature flags.
 
 ## [0.11.0] - 2024-03-01
 

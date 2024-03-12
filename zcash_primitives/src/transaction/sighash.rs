@@ -11,7 +11,7 @@ use crate::{
     sapling::{self, bundle::GrothProofBytes},
 };
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 use {super::components::Amount, crate::extensions::transparent::Precondition};
 
 pub const SIGHASH_ALL: u8 = 0x01;
@@ -29,7 +29,7 @@ pub enum SignableInput<'a> {
         script_pubkey: &'a Script,
         value: NonNegativeAmount,
     },
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     Tze {
         index: usize,
         precondition: &'a Precondition,
@@ -42,7 +42,7 @@ impl<'a> SignableInput<'a> {
         match self {
             SignableInput::Shielded => SIGHASH_ALL,
             SignableInput::Transparent { hash_type, .. } => *hash_type,
-            #[cfg(feature = "zfuture")]
+            #[cfg(zcash_unstable = "zfuture")]
             SignableInput::Tze { .. } => SIGHASH_ALL,
         }
     }
@@ -92,7 +92,7 @@ pub fn signature_hash<
 
         TxVersion::Zip225 => v5_signature_hash(tx, signable_input, txid_parts),
 
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         TxVersion::ZFuture => v5_signature_hash(tx, signable_input, txid_parts),
     })
 }
