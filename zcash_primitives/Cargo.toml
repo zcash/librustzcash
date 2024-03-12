@@ -64,7 +64,7 @@ hdwallet = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true }
 
 # - ZIP 339
-bip0039 = { version = "0.10", features = ["std", "all-languages"] }
+bip0039 = { version = "0.12", features = ["std", "all-languages"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
