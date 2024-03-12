@@ -31,7 +31,7 @@ fn per_protocol_names(protocol: ShieldedProtocol) -> (&'static str, &'static str
 fn unscanned_tip_exists(
     conn: &Connection,
     anchor_height: BlockHeight,
-    table_prefix: &str,
+    table_prefix: &'static str,
 ) -> Result<bool, rusqlite::Error> {
     // v_sapling_shard_unscanned_ranges only returns ranges ending on or after wallet birthday, so
     // we don't need to refer to the birthday in this query.
@@ -140,8 +140,6 @@ where
     // 3) Select all notes for which the running sum was less than the required value, as
     //    well as a single note for which the sum was greater than or equal to the
     //    required value, bringing the sum of all selected notes across the threshold.
-    //
-    // 4) Match the selected notes against the witnesses at the desired height.
     let mut stmt_select_notes = conn.prepare_cached(
         &format!(
             "WITH eligible AS (

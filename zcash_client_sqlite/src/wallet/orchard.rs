@@ -140,6 +140,13 @@ fn to_spendable_note<P: consensus::Parameters>(
     let ufvk_str: Option<String> = row.get(8)?;
     let scope_code: Option<i64> = row.get(9)?;
 
+    // If we don't have information about the recipient key scope or the ufvk we can't determine
+    // which spending key to use. This may be because the received note was associated with an
+    // imported viewing key, so we treat such notes as not spendable. Although this method is
+    // presently only called using the results of queries where both the ufvk and
+    // recipient_key_scope columns are checked to be non-null, this is method is written
+    // defensively to account for the fact that both of these are nullable columns in case it
+    // is used elsewhere in the future.
     ufvk_str
         .zip(scope_code)
         .map(|(ufvk_str, scope_code)| {
@@ -176,10 +183,6 @@ fn to_spendable_note<P: consensus::Parameters>(
         .transpose()
 }
 
-// The `clippy::let_and_return` lint is explicitly allowed here because a bug in Clippy
-// (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
-// is required in order to resolve the borrows involved in the `query_and_then` call.
-#[allow(clippy::let_and_return)]
 pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
     conn: &Connection,
     params: &P,
@@ -299,7 +302,7 @@ pub(crate) fn get_orchard_nullifiers(
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = match query {
         NullifierQuery::Unspent => conn.prepare(
-            "SELECT rn.id, rn.account_id, rn.nf
+            "SELECT rn.account_id, rn.nf
              FROM orchard_received_notes rn
              LEFT OUTER JOIN transactions tx
              ON tx.id_tx = rn.spent
@@ -307,15 +310,15 @@ pub(crate) fn get_orchard_nullifiers(
              AND nf IS NOT NULL",
         )?,
         NullifierQuery::All => conn.prepare(
-            "SELECT rn.id, rn.account_id, rn.nf
+            "SELECT rn.account_id, rn.nf
              FROM orchard_received_notes rn
              WHERE nf IS NOT NULL",
         )?,
     };
 
     let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account = AccountId(row.get(1)?);
-        let nf_bytes: [u8; 32] = row.get(2)?;
+        let account = AccountId(row.get(0)?);
+        let nf_bytes: [u8; 32] = row.get(1)?;
         Ok::<_, rusqlite::Error>((account, Nullifier::from_bytes(&nf_bytes).unwrap()))
     })?;
 
