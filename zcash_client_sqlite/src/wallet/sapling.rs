@@ -588,7 +588,9 @@ pub(crate) mod tests {
         testing::pool::shield_transparent::<SaplingPoolTester>()
     }
 
+    // FIXME: This requires fixes to the test framework.
     #[test]
+    #[cfg(feature = "orchard")]
     fn birthday_in_anchor_shard() {
         testing::pool::birthday_in_anchor_shard::<SaplingPoolTester>()
     }
