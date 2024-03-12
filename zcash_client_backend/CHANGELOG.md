@@ -42,7 +42,7 @@ and this library adheres to Rust's notion of
 
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
-  build client code without `orchard` dependendencies. Additions and
+  build client code without `orchard` dependencies. Additions and
   changes related to `Orchard` below are introduced under this feature
   flag.
 - `zcash_client_backend::data_api`:
@@ -232,7 +232,7 @@ and this library adheres to Rust's notion of
 ### Changed
 - Migrated to `zcash_primitives 0.14`, `orchard 0.7`.
 - Several structs and functions now take an `AccountId` type parameter
-  parameter in order to decouple the concept of an account identifier from
+  in order to decouple the concept of an account identifier from
   the ZIP 32 account index. Many APIs that previously referenced
   `zcash_primitives::zip32::AccountId` now reference the generic type.
   Impacted types and functions are:
@@ -518,7 +518,7 @@ and this library adheres to Rust's notion of
   - `chain::CommitmentTreeRoot`
   - `scanning` A new module containing types required for `suggest_scan_ranges`
   - `testing::MockWalletDb::new`
-  - `wallet::input_sellection::Proposal::{min_target_height, min_anchor_height}`
+  - `wallet::input_selection::Proposal::{min_target_height, min_anchor_height}`
   - `SAPLING_SHARD_HEIGHT` constant
 - `zcash_client_backend::proto::compact_formats`:
   - `impl<A: sapling::Authorization> From<&sapling::SpendDescription<A>> for CompactSaplingSpend`
@@ -616,7 +616,7 @@ and this library adheres to Rust's notion of
   - `wallet::input_selection`:
     - `Proposal::target_height` (use `Proposal::min_target_height` instead).
 - `zcash_client_backend::data_api::chain::validate_chain` (logic merged into
-  `chain::scan_cached_blocks`.
+  `chain::scan_cached_blocks`).
 - `zcash_client_backend::data_api::chain::error::{ChainError, Cause}` have been
   replaced by `zcash_client_backend::scanning::ScanError`
 - `zcash_client_backend::proto::compact_formats`:
@@ -771,8 +771,8 @@ and this library adheres to Rust's notion of
   - `WalletWrite::get_next_available_address`
   - `WalletWrite::put_received_transparent_utxo`
   - `impl From<prost::DecodeError> for error::Error`
-  - `chain::error`: a module containing error types type that that can occur only
-    in chain validation and sync have been separated out from errors related to
+  - `chain::error`: a module containing error types that can occur only
+    in chain validation and sync, separated out from errors related to
     other wallet operations.
   - `input_selection`: a module containing types related to the process
     of selecting inputs to be spent, given a transaction request.
@@ -805,7 +805,7 @@ and this library adheres to Rust's notion of
   likely to be modified and/or moved to a different module in a future
   release:
   - `zcash_client_backend::address::UnifiedAddress`
-  - `zcash_client_backend::keys::{UnifiedSpendingKey`, `UnifiedFullViewingKey`, `Era`, `DecodingError`}
+  - `zcash_client_backend::keys::{UnifiedSpendingKey, UnifiedFullViewingKey, Era, DecodingError}`
   - `zcash_client_backend::encoding::AddressCodec`
   - `zcash_client_backend::encoding::encode_payment_address`
   - `zcash_client_backend::encoding::encode_transparent_address`
