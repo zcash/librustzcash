@@ -779,6 +779,46 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     }
 }
 
+/// Returns the account id corresponding to a given [`HdSeedFingerprint`]
+/// and [`zip32::AccountId`], if any.
+pub(crate) fn get_seed_account<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    seed: &HdSeedFingerprint,
+    account_id: zip32::AccountId,
+) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, ufvk
+        FROM accounts
+        WHERE hd_seed_fingerprint = :hd_seed_fingerprint
+          AND hd_account_index = :account_id",
+    )?;
+
+    let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
+        named_params![
+            ":hd_seed_fingerprint": seed.as_bytes(),
+            ":hd_account_index": u32::from(account_id),
+        ],
+        |row| {
+            let account_id = row.get::<_, u32>(0).map(AccountId)?;
+            Ok((
+                account_id,
+                row.get::<_, Option<String>>(1)?
+                    .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
+                    .transpose()
+                    .map_err(|e| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Could not decode unified full viewing key for account {:?}: {}",
+                            account_id, e
+                        ))
+                    })?,
+            ))
+        },
+    )?;
+
+    accounts.next().transpose()
+}
+
 pub(crate) trait ScanProgress {
     fn sapling_scan_progress(
         &self,

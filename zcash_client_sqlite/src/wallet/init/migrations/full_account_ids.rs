@@ -69,8 +69,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     (account_type = {account_type_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
                 )
             );
-            CREATE UNIQUE INDEX accounts_uivk ON accounts_new ("uivk");
-            CREATE UNIQUE INDEX accounts_ufvk ON accounts_new ("ufvk");
+            CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
+            CREATE UNIQUE INDEX accounts_uivk ON accounts_new (uivk);
+            CREATE UNIQUE INDEX accounts_ufvk ON accounts_new (ufvk);
             "#),
         )?;
 
