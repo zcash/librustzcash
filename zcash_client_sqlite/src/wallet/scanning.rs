@@ -381,15 +381,12 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         .map(|extended| ScanRange::from_parts(range.end..extended.end, ScanPriority::FoundNote))
         .filter(|range| !range.is_empty());
 
-    replace_queue_entries::<SqliteClientError>(
-        conn,
-        &query_range,
-        Some(scanned)
-            .into_iter()
-            .chain(extended_before)
-            .chain(extended_after),
-        false,
-    )?;
+    let replacement = Some(scanned)
+        .into_iter()
+        .chain(extended_before)
+        .chain(extended_after);
+
+    replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
 
     Ok(())
 }
@@ -445,7 +442,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from each of the the shards tables. The minimum of the two
+    // Read the maximum height from each of the shards tables. The minimum of the two
     // gives the start of a height range that covers the last incomplete shard of both the
     // Sapling and Orchard pools.
     let sapling_shard_tip = tip_shard_end_height(conn, SAPLING_TABLES_PREFIX)?;

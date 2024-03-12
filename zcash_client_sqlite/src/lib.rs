@@ -69,13 +69,13 @@ use zcash_client_backend::{
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
-    DecryptedOutput, ShieldedProtocol, TransferType,
+    DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
 };
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, PoolType};
+use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -111,6 +111,7 @@ pub(crate) const PRUNING_DEPTH: u32 = 100;
 pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
+
 #[cfg(feature = "orchard")]
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
@@ -208,7 +209,20 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                 txid,
                 index,
             ),
-            ShieldedProtocol::Orchard => Ok(None),
+            ShieldedProtocol::Orchard => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_orchard_note(
+                    self.conn.borrow(),
+                    &self.params,
+                    txid,
+                    index,
+                );
+
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                    ShieldedProtocol::Orchard,
+                )));
+            }
         }
     }
 
@@ -220,14 +234,25 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        wallet::sapling::select_spendable_sapling_notes(
+        let received_iter = std::iter::empty();
+        let received_iter = received_iter.chain(wallet::sapling::select_spendable_sapling_notes(
             self.conn.borrow(),
             &self.params,
             account,
             target_value,
             anchor_height,
             exclude,
-        )
+        )?);
+        #[cfg(feature = "orchard")]
+        let received_iter = received_iter.chain(wallet::orchard::select_spendable_orchard_notes(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            target_value,
+            anchor_height,
+            exclude,
+        )?);
+        Ok(received_iter.collect())
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -719,7 +744,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         .map(|res| (res.subtree, res.checkpoints))
                         .collect::<Vec<_>>();
 
-                    // Update the Sapling note commitment tree with all newly read note commitments
+                    // Update the Orchard note commitment tree with all newly read note commitments
                     let mut orchard_subtrees = orchard_subtrees.into_iter();
                     wdb.with_orchard_tree_mut::<_, _, Self::Error>(move |orchard_tree| {
                         for (tree, checkpoints) in &mut orchard_subtrees {
@@ -934,6 +959,19 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         spend.nullifier(),
                     )?;
                 }
+            }
+            if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
+                #[cfg(feature = "orchard")]
+                for action in _bundle.actions() {
+                    wallet::orchard::mark_orchard_note_spent(
+                        wdb.conn.0,
+                        tx_ref,
+                        action.nullifier(),
+                    )?;
+                }
+
+                #[cfg(not(feature = "orchard"))]
+                panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
             }
 
             #[cfg(feature = "transparent-inputs")]

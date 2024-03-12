@@ -17,30 +17,26 @@ use super::{
 #[cfg(feature = "orchard")]
 use super::orchard as orchard_fees;
 
+pub(crate) struct NetFlows {
+    t_in: NonNegativeAmount,
+    t_out: NonNegativeAmount,
+    sapling_in: NonNegativeAmount,
+    sapling_out: NonNegativeAmount,
+    orchard_in: NonNegativeAmount,
+    orchard_out: NonNegativeAmount,
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn single_change_output_balance<
-    P: consensus::Parameters,
-    NoteRefT: Clone,
-    F: FeeRule,
-    E,
->(
-    params: &P,
-    fee_rule: &F,
-    target_height: BlockHeight,
+pub(crate) fn calculate_net_flows<NoteRefT: Clone, F: FeeRule, E>(
     transparent_inputs: &[impl transparent::InputView],
     transparent_outputs: &[impl transparent::OutputView],
     sapling: &impl sapling_fees::BundleView<NoteRefT>,
     #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
-    dust_output_policy: &DustOutputPolicy,
-    default_dust_threshold: NonNegativeAmount,
-    change_memo: Option<MemoBytes>,
-    _fallback_change_pool: ShieldedProtocol,
-) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
+) -> Result<NetFlows, ChangeError<E, NoteRefT>>
 where
     E: From<F::Error> + From<BalanceError>,
 {
     let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
-    let underflow = || ChangeError::StrategyError(E::from(BalanceError::Underflow));
 
     let t_in = transparent_inputs
         .iter()
@@ -85,13 +81,30 @@ where
     #[cfg(not(feature = "orchard"))]
     let orchard_out = NonNegativeAmount::ZERO;
 
+    Ok(NetFlows {
+        t_in,
+        t_out,
+        sapling_in,
+        sapling_out,
+        orchard_in,
+        orchard_out,
+    })
+}
+
+pub(crate) fn single_change_output_policy<NoteRefT: Clone, F: FeeRule, E>(
+    _net_flows: &NetFlows,
+    _fallback_change_pool: ShieldedProtocol,
+) -> Result<(ShieldedProtocol, usize, usize), ChangeError<E, NoteRefT>>
+where
+    E: From<F::Error> + From<BalanceError>,
+{
     // TODO: implement a less naive strategy for selecting the pool to which change will be sent.
     #[cfg(feature = "orchard")]
     let (change_pool, sapling_change, orchard_change) =
-        if orchard_in.is_positive() || orchard_out.is_positive() {
+        if _net_flows.orchard_in.is_positive() || _net_flows.orchard_out.is_positive() {
             // Send change to Orchard if we're spending any Orchard inputs or creating any Orchard outputs
             (ShieldedProtocol::Orchard, 0, 1)
-        } else if sapling_in.is_positive() || sapling_out.is_positive() {
+        } else if _net_flows.sapling_in.is_positive() || _net_flows.sapling_out.is_positive() {
             // Otherwise, send change to Sapling if we're spending any Sapling inputs or creating any
             // Sapling outputs, so that we avoid pool-crossing.
             (ShieldedProtocol::Sapling, 1, 0)
@@ -104,18 +117,68 @@ where
             }
         };
     #[cfg(not(feature = "orchard"))]
-    let (change_pool, sapling_change) = (ShieldedProtocol::Sapling, 1);
+    let (change_pool, sapling_change, orchard_change) = (ShieldedProtocol::Sapling, 1, 0);
+
+    Ok((change_pool, sapling_change, orchard_change))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn single_change_output_balance<
+    P: consensus::Parameters,
+    NoteRefT: Clone,
+    F: FeeRule,
+    E,
+>(
+    params: &P,
+    fee_rule: &F,
+    target_height: BlockHeight,
+    transparent_inputs: &[impl transparent::InputView],
+    transparent_outputs: &[impl transparent::OutputView],
+    sapling: &impl sapling_fees::BundleView<NoteRefT>,
+    #[cfg(feature = "orchard")] orchard: &impl orchard_fees::BundleView<NoteRefT>,
+    dust_output_policy: &DustOutputPolicy,
+    default_dust_threshold: NonNegativeAmount,
+    change_memo: Option<MemoBytes>,
+    _fallback_change_pool: ShieldedProtocol,
+) -> Result<TransactionBalance, ChangeError<E, NoteRefT>>
+where
+    E: From<F::Error> + From<BalanceError>,
+{
+    let overflow = || ChangeError::StrategyError(E::from(BalanceError::Overflow));
+    let underflow = || ChangeError::StrategyError(E::from(BalanceError::Underflow));
+
+    let net_flows = calculate_net_flows::<NoteRefT, F, E>(
+        transparent_inputs,
+        transparent_outputs,
+        sapling,
+        #[cfg(feature = "orchard")]
+        orchard,
+    )?;
+    let (change_pool, sapling_change, _orchard_change) =
+        single_change_output_policy::<NoteRefT, F, E>(&net_flows, _fallback_change_pool)?;
+
+    let sapling_input_count = sapling
+        .bundle_type()
+        .num_spends(sapling.inputs().len())
+        .map_err(ChangeError::BundleError)?;
+    let sapling_output_count = sapling
+        .bundle_type()
+        .num_outputs(
+            sapling.inputs().len(),
+            sapling.outputs().len() + sapling_change,
+        )
+        .map_err(ChangeError::BundleError)?;
 
     #[cfg(feature = "orchard")]
-    let orchard_num_actions = orchard
+    let orchard_action_count = orchard
         .bundle_type()
         .num_actions(
             orchard.inputs().len(),
-            orchard.outputs().len() + orchard_change,
+            orchard.outputs().len() + _orchard_change,
         )
         .map_err(ChangeError::BundleError)?;
     #[cfg(not(feature = "orchard"))]
-    let orchard_num_actions = 0;
+    let orchard_action_count = 0;
 
     let fee_amount = fee_rule
         .fee_required(
@@ -123,23 +186,16 @@ where
             target_height,
             transparent_inputs,
             transparent_outputs,
-            sapling
-                .bundle_type()
-                .num_spends(sapling.inputs().len())
-                .map_err(ChangeError::BundleError)?,
-            sapling
-                .bundle_type()
-                .num_outputs(
-                    sapling.inputs().len(),
-                    sapling.outputs().len() + sapling_change,
-                )
-                .map_err(ChangeError::BundleError)?,
-            orchard_num_actions,
+            sapling_input_count,
+            sapling_output_count,
+            orchard_action_count,
         )
         .map_err(|fee_error| ChangeError::StrategyError(E::from(fee_error)))?;
 
-    let total_in = (t_in + sapling_in + orchard_in).ok_or_else(overflow)?;
-    let total_out = (t_out + sapling_out + orchard_out + fee_amount).ok_or_else(overflow)?;
+    let total_in =
+        (net_flows.t_in + net_flows.sapling_in + net_flows.orchard_in).ok_or_else(overflow)?;
+    let total_out = (net_flows.t_out + net_flows.sapling_out + net_flows.orchard_out + fee_amount)
+        .ok_or_else(overflow)?;
 
     let proposed_change = (total_in - total_out).ok_or(ChangeError::InsufficientFunds {
         available: total_in,

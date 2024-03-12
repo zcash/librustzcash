@@ -76,6 +76,8 @@ and this library adheres to Rust's notion of
     constraint on its `<AccountId>` parameter has been strengthened to `Copy`.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
+  - `ChangeError::DustInputs` now has an `orchard` field behind the `orchard`
+    feature flag.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
 - `zcash_client_backend::zip321::render::amount_str` now takes a

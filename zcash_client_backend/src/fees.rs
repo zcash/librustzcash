@@ -149,6 +149,9 @@ pub enum ChangeError<E, NoteRefT> {
         transparent: Vec<OutPoint>,
         /// The identifiers for Sapling inputs having no current economic value
         sapling: Vec<NoteRefT>,
+        /// The identifiers for Orchard inputs having no current economic value
+        #[cfg(feature = "orchard")]
+        orchard: Vec<NoteRefT>,
     },
     /// An error occurred that was specific to the change selection strategy in use.
     StrategyError(E),
@@ -169,9 +172,13 @@ impl<E, NoteRefT> ChangeError<E, NoteRefT> {
             ChangeError::DustInputs {
                 transparent,
                 sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
             } => ChangeError::DustInputs {
                 transparent,
                 sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
             },
             ChangeError::StrategyError(e) => ChangeError::StrategyError(f(e)),
             ChangeError::BundleError(e) => ChangeError::BundleError(e),
@@ -194,10 +201,21 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for ChangeError<CE, N> {
             ChangeError::DustInputs {
                 transparent,
                 sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
             } => {
+                #[cfg(feature = "orchard")]
+                let orchard_len = orchard.len();
+                #[cfg(not(feature = "orchard"))]
+                let orchard_len = 0;
+
                 // we can't encode the UA to its string representation because we
                 // don't have network parameters here
-                write!(f, "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.", transparent.len() + sapling.len())
+                write!(
+                    f,
+                    "Insufficient funds: {} dust inputs were present, but would cost more to spend than they are worth.",
+                    transparent.len() + sapling.len() + orchard_len,
+                )
             }
             ChangeError::StrategyError(err) => {
                 write!(f, "{}", err)
