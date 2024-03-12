@@ -264,7 +264,7 @@ pub trait BlockSource {
 ///                .collect())
 ///        }
 ///
-///        fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+///        fn get_tip_height(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
 ///            let cached_blocks = self.cached_blocks.lock().unwrap();
 ///            let blocks: Vec<&CompactBlock> = match range {
 ///                Some(range) => cached_blocks
@@ -344,8 +344,8 @@ pub trait BlockSource {
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
 ///
 ///    // Find highest block in the block cache
-///    let cache_tip = block_cache.cache_tip(None).unwrap();
-///    assert_eq!(cache_tip, Some(BlockHeight::from_u32(2)));
+///    let get_tip_height = block_cache.get_tip_height(None).unwrap();
+///    assert_eq!(get_tip_height, Some(BlockHeight::from_u32(2)));
 ///
 ///    // Read from the block cache
 ///    let blocks_from_cache = block_cache.read(&range).unwrap();
@@ -355,7 +355,7 @@ pub trait BlockSource {
 ///    block_cache.truncate(BlockHeight::from_u32(1)).unwrap();
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 1);
 ///    assert_eq!(
-///        block_cache.cache_tip(None).unwrap(),
+///        block_cache.get_tip_height(None).unwrap(),
 ///        Some(BlockHeight::from_u32(1))
 ///    );
 ///
@@ -365,24 +365,43 @@ pub trait BlockSource {
 ///        block_cache.delete(&range).await.unwrap();
 ///    });
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
-///    assert_eq!(block_cache.cache_tip(None).unwrap(), None);
+///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
 #[cfg(feature = "sync")]
 pub trait BlockCache: BlockSource + Send + Sync {
-    /// Returns a range of compact blocks from the cache.
+    /// Retrieves contiguous compact blocks specified by the given `range` from the block cache.
+    ///
+    /// Returns `Ok(Vec<CompactBlock>)` on success, otherwise returns an error.
+    ///
+    /// Short reads are allowed, meaning that returning fewer blocks than requested should not
+    /// return an error as long as all blocks are sequentially continuous in height.
+    ///
+    /// # Errors
+    ///
+    /// This method should return an error if there are gaps in the requested range of blocks,
+    /// indicating there are blocks missing from the cache.
     fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error>;
 
-    /// Returns the height of highest block known to the block cache within a specified range.
+    /// Finds the height of the highest block known to the block cache within a specified range.
     /// If `range` is `None`, returns the tip of the entire cache.
-    fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error>;
+    ///
+    /// Returns `Ok(Some(BlockHeight))` on success, otherwise returns an error.
+    /// If no blocks are found in the cache, returns Ok(`None`).
+    fn get_tip_height(&self, range: Option<&ScanRange>)
+        -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Inserts a set of compact blocks into the block cache.
+    /// Inserts a vec of compact blocks into the block cache.
+    ///
+    /// Returns `Ok(())` on success, otherwise returns an error.
     fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
 
     /// Removes all cached blocks above a specified block height.
+    ///
+    /// Returns `Ok(())` on success, otherwise returns an error.
     fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error>;
 
     /// Deletes a range of compact blocks from the block cache.
+    ///
     /// Returns a `JoinHandle` from a `tokio::spawn` task.
     fn delete(&self, range: &ScanRange) -> JoinHandle<Result<(), Self::Error>>;
 }
