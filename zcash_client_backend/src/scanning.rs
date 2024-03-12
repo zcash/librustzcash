@@ -624,7 +624,7 @@ where
             self.orchard.add_outputs(
                 block_hash,
                 txid,
-                |action| OrchardDomain::for_nullifier(action.nullifier()),
+                |action| OrchardDomain::for_compact_action(action),
                 &tx.actions
                     .iter()
                     .enumerate()
@@ -888,7 +888,7 @@ where
                             index: i,
                         }
                     })?;
-                    Ok((OrchardDomain::for_nullifier(action.nullifier()), action))
+                    Ok((OrchardDomain::for_compact_action(&action), action))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             batch_runners
