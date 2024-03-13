@@ -404,12 +404,10 @@ where
                     &shielded_inputs
                         .iter()
                         .cloned()
-                        .filter_map(|i| {
-                            i.traverse_opt(|wn| match wn {
-                                Note::Sapling(n) => Some(n),
-                                #[cfg(feature = "orchard")]
-                                _ => None,
-                            })
+                        .filter_map(|i| match i.note() {
+                            Note::Sapling(n) => Some((*i.internal_note_id(), n.value())),
+                            #[cfg(feature = "orchard")]
+                            Note::Orchard(_) => None,
                         })
                         .collect::<Vec<_>>()[..],
                     &sapling_outputs[..],
@@ -419,11 +417,9 @@ where
                     ::orchard::builder::BundleType::DEFAULT,
                     &shielded_inputs
                         .iter()
-                        .filter_map(|i| {
-                            i.clone().traverse_opt(|wn| match wn {
-                                Note::Orchard(n) => Some(n),
-                                _ => None,
-                            })
+                        .filter_map(|i| match i.note() {
+                            Note::Sapling(_) => None,
+                            Note::Orchard(n) => Some((*i.internal_note_id(), n.value())),
                         })
                         .collect::<Vec<_>>()[..],
                     &orchard_outputs[..],

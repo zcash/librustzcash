@@ -95,6 +95,8 @@ and this library adheres to Rust's notion of
 ### Removed
 - `zcash_client_backend::PoolType::is_receiver`: use
   `zcash_keys::Address::has_receiver` instead.
+- `zcash_client_backend::wallet::ReceivedNote::traverse_opt` removed as
+  unnecessary.
 
 ### Fixed
 - This release fixes an error in amount parsing in `zip321` that previously
