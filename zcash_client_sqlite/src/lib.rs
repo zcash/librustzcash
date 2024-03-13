@@ -60,9 +60,9 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountKind, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -100,7 +100,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    AccountType, SubtreeScanProgress,
+    SubtreeScanProgress,
 };
 
 #[cfg(test)]
@@ -307,10 +307,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = wallet::get_account(self, account_id)? {
-            if let AccountType::Derived {
+            if let AccountKind::Derived {
                 seed_fingerprint,
                 account_index,
-            } = account.kind
+            } = account.kind()
             {
                 let seed_fingerprint_match = HdSeedFingerprint::from_seed(seed) == seed_fingerprint;
 
@@ -507,7 +507,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let account_id = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountType::Derived {
+                AccountKind::Derived {
                     seed_fingerprint,
                     account_index,
                 },

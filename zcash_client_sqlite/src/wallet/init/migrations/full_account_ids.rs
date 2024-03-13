@@ -1,11 +1,11 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{account_kind_code, init::WalletMigrationError, ufvk_to_uivk, AccountType};
+use crate::wallet::{account_kind_code, init::WalletMigrationError, ufvk_to_uivk};
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_client_backend::keys::UnifiedSpendingKey;
+use zcash_client_backend::{data_api::AccountKind, keys::UnifiedSpendingKey};
 use zcash_keys::keys::{HdSeedFingerprint, UnifiedFullViewingKey};
 use zcash_primitives::consensus;
 
@@ -44,11 +44,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        let account_type_derived = account_kind_code(AccountType::Derived {
+        let account_type_derived = account_kind_code(AccountKind::Derived {
             seed_fingerprint: HdSeedFingerprint::from_bytes([0; 32]),
             account_index: zip32::AccountId::ZERO,
         });
-        let account_type_imported = account_kind_code(AccountType::Imported);
+        let account_type_imported = account_kind_code(AccountKind::Imported);
         transaction.execute_batch(
             &format!(r#"
             PRAGMA foreign_keys = OFF;

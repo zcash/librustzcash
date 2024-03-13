@@ -16,6 +16,7 @@ and this library adheres to Rust's notion of
   - `Account`
   - `AccountBalance::with_orchard_balance_mut`
   - `AccountBirthday::orchard_frontier`
+  - `AccountKind`
   - `BlockMetadata::orchard_tree_size`
   - `DecryptedTransaction::{new, tx(), orchard_outputs()}`
   - `ScannedBlock::orchard`

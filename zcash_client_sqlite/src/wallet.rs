@@ -81,7 +81,7 @@ use zcash_client_backend::{
     address::{Address, UnifiedAddress},
     data_api::{
         scanning::{ScanPriority, ScanRange},
-        AccountBalance, AccountBirthday, BlockMetadata, Ratio, SentTransactionOutput,
+        AccountBalance, AccountBirthday, AccountKind, BlockMetadata, Ratio, SentTransactionOutput,
         WalletSummary, SAPLING_SHARD_HEIGHT,
     },
     encoding::AddressCodec,
@@ -138,27 +138,13 @@ pub(crate) mod scanning;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
-/// This tracks the allowed values of the `account_type` column of the `accounts` table
-/// and should not be made public.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum AccountType {
-    /// An account derived from a known seed.
-    Derived {
-        seed_fingerprint: HdSeedFingerprint,
-        account_index: zip32::AccountId,
-    },
-
-    /// An account imported from a viewing key.
-    Imported,
-}
-
 fn parse_account_kind(
     account_type: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
-) -> Result<AccountType, SqliteClientError> {
+) -> Result<AccountKind, SqliteClientError> {
     match (account_type, hd_seed_fingerprint, hd_account_index) {
-        (0, Some(seed_fp), Some(account_index)) => Ok(AccountType::Derived {
+        (0, Some(seed_fp), Some(account_index)) => Ok(AccountKind::Derived {
             seed_fingerprint: HdSeedFingerprint::from_bytes(seed_fp),
             account_index: zip32::AccountId::try_from(account_index).map_err(|_| {
                 SqliteClientError::CorruptedData(
@@ -166,7 +152,7 @@ fn parse_account_kind(
                 )
             })?,
         }),
-        (1, None, None) => Ok(AccountType::Imported),
+        (1, None, None) => Ok(AccountKind::Imported),
         (0, None, None) | (1, Some(_), Some(_)) => Err(SqliteClientError::CorruptedData(
             "Wallet DB account_type constraint violated".to_string(),
         )),
@@ -176,10 +162,10 @@ fn parse_account_kind(
     }
 }
 
-fn account_kind_code(value: AccountType) -> u32 {
+fn account_kind_code(value: AccountKind) -> u32 {
     match value {
-        AccountType::Derived { .. } => 0,
-        AccountType::Imported => 1,
+        AccountKind::Derived { .. } => 0,
+        AccountKind::Imported => 1,
     }
 }
 
@@ -203,7 +189,7 @@ pub(crate) enum ViewingKey {
 #[derive(Debug, Clone)]
 pub(crate) struct Account {
     account_id: AccountId,
-    pub(crate) kind: AccountType,
+    kind: AccountKind,
     viewing_key: ViewingKey,
 }
 
@@ -227,6 +213,10 @@ impl Account {
 impl zcash_client_backend::data_api::Account<AccountId> for Account {
     fn id(&self) -> AccountId {
         self.account_id
+    }
+
+    fn kind(&self) -> AccountKind {
+        self.kind
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -333,16 +323,16 @@ pub(crate) fn ufvk_to_uivk<P: consensus::Parameters>(
 pub(crate) fn add_account<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    kind: AccountType,
+    kind: AccountKind,
     viewing_key: ViewingKey,
     birthday: AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
     let (hd_seed_fingerprint, hd_account_index) = match kind {
-        AccountType::Derived {
+        AccountKind::Derived {
             seed_fingerprint,
             account_index,
         } => (Some(seed_fingerprint), Some(account_index)),
-        AccountType::Imported => (None, None),
+        AccountKind::Imported => (None, None),
     };
 
     let orchard_item = viewing_key
@@ -2695,12 +2685,12 @@ mod tests {
     use std::num::NonZeroU32;
 
     use sapling::zip32::ExtendedSpendingKey;
-    use zcash_client_backend::data_api::{AccountBirthday, WalletRead};
+    use zcash_client_backend::data_api::{AccountBirthday, AccountKind, WalletRead};
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
         testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::{get_account, AccountType},
+        wallet::get_account,
         AccountId,
     };
 
@@ -2853,7 +2843,7 @@ mod tests {
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(
             account_parameters.kind,
-            AccountType::Derived{account_index, ..} if account_index == expected_account_index
+            AccountKind::Derived{account_index, ..} if account_index == expected_account_index
         );
     }
 
