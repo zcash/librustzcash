@@ -315,18 +315,42 @@ impl AccountBalance {
     }
 }
 
+/// The kinds of accounts supported by `zcash_client_backend`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AccountKind {
+    /// An account derived from a known seed.
+    Derived {
+        seed_fingerprint: HdSeedFingerprint,
+        account_index: zip32::AccountId,
+    },
+
+    /// An account imported from a viewing key.
+    Imported,
+}
+
 /// A set of capabilities that a client account must provide.
 pub trait Account<AccountId: Copy> {
     /// Returns the unique identifier for the account.
     fn id(&self) -> AccountId;
 
+    /// Returns whether this account is derived or imported, and the derivation parameters
+    /// if applicable.
+    fn kind(&self) -> AccountKind;
+
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
+    ///
+    /// Accounts for which this returns `None` cannot be used in wallet contexts, because
+    /// they are unable to maintain an accurate balance.
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
 }
 
 impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     fn id(&self) -> A {
         self.0
+    }
+
+    fn kind(&self) -> AccountKind {
+        AccountKind::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -337,6 +361,10 @@ impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
 impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
     fn id(&self) -> A {
         self.0
+    }
+
+    fn kind(&self) -> AccountKind {
+        AccountKind::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -546,9 +574,15 @@ pub trait WalletRead {
     /// Returns a vector with the IDs of all accounts known to this wallet.
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error>;
 
+    /// Returns the account corresponding to the given ID, if any.
+    fn get_account(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
     /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
     /// [`zip32::AccountId`], if any.
-    fn get_seed_account(
+    fn get_derived_account(
         &self,
         seed: &HdSeedFingerprint,
         account_id: zip32::AccountId,
@@ -1525,7 +1559,14 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_seed_account(
+        fn get_account(
+            &self,
+            _account_id: Self::AccountId,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_derived_account(
             &self,
             _seed: &HdSeedFingerprint,
             _account_id: zip32::AccountId,

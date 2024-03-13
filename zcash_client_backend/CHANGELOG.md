@@ -16,6 +16,7 @@ and this library adheres to Rust's notion of
   - `Account`
   - `AccountBalance::with_orchard_balance_mut`
   - `AccountBirthday::orchard_frontier`
+  - `AccountKind`
   - `BlockMetadata::orchard_tree_size`
   - `DecryptedTransaction::{new, tx(), orchard_outputs()}`
   - `ScannedBlock::orchard`
@@ -53,10 +54,11 @@ and this library adheres to Rust's notion of
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `Account` associated type.
+    - Added `get_account` method.
+    - Added `get_derived_account` method.
+    - `get_account_for_ufvk` now returns `Self::Account` instead of a bare
+      `AccountId`.
     - Added `get_orchard_nullifiers` method.
-    - `get_account_for_ufvk` now returns an `Self::Account` instead of a bare
-      `AccountId`
-    - Added `get_seed_account` method.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a
       `NonNegativeAmount`. Also, the values of the returned map are also

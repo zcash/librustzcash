@@ -224,7 +224,7 @@ mod tests {
         let expected_tables = vec![
             r#"CREATE TABLE "accounts" (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_type INTEGER NOT NULL DEFAULT 0,
+                account_kind INTEGER NOT NULL DEFAULT 0,
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
                 ufvk TEXT,
@@ -234,7 +234,7 @@ mod tests {
                 p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
-                CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
+                CHECK ( (account_kind = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_kind = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
             )"#,
             r#"CREATE TABLE "addresses" (
                 account_id INTEGER NOT NULL,
@@ -1282,9 +1282,7 @@ mod tests {
     #[test]
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
-        use zcash_client_backend::data_api::AccountBirthday;
-
-        use crate::wallet::{get_account, Account};
+        use zcash_client_backend::data_api::{AccountBirthday, AccountKind, WalletRead};
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1300,8 +1298,11 @@ mod tests {
             .create_account(&Secret::new(seed.to_vec()), birthday)
             .unwrap();
         assert_matches!(
-            get_account(&db_data, account_id),
-            Ok(Some(Account::Zip32(hdaccount))) if hdaccount.account_index() == zip32::AccountId::ZERO
+            db_data.get_account(account_id),
+            Ok(Some(account)) if matches!(
+                account.kind,
+                AccountKind::Derived{account_index, ..} if account_index == zip32::AccountId::ZERO,
+            )
         );
 
         for tv in &test_vectors::UNIFIED[..3] {
