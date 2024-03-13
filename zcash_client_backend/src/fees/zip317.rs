@@ -237,6 +237,9 @@ mod tests {
         ShieldedProtocol,
     };
 
+    #[cfg(feature = "orchard")]
+    use crate::data_api::wallet::input_selection::OrchardPayment;
+
     #[test]
     fn change_without_dust() {
         let change_strategy = SingleOutputChangeStrategy::new(
@@ -277,6 +280,50 @@ mod tests {
             Ok(balance) if
                 balance.proposed_change() == [ChangeValue::sapling(NonNegativeAmount::const_from_u64(5000), None)] &&
                 balance.fee_required() == NonNegativeAmount::const_from_u64(10000)
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn cross_pool_change_without_dust() {
+        let change_strategy = SingleOutputChangeStrategy::new(
+            Zip317FeeRule::standard(),
+            None,
+            ShieldedProtocol::Orchard,
+        );
+
+        // spend a single Sapling note that is sufficient to pay the fee
+        let result = change_strategy.compute_balance(
+            &Network::TestNetwork,
+            Network::TestNetwork
+                .activation_height(NetworkUpgrade::Nu5)
+                .unwrap(),
+            &Vec::<TestTransparentInput>::new(),
+            &Vec::<TxOut>::new(),
+            &(
+                sapling::builder::BundleType::DEFAULT,
+                &[TestSaplingInput {
+                    note_id: 0,
+                    value: NonNegativeAmount::const_from_u64(55000),
+                }][..],
+                &Vec::<Infallible>::new()[..],
+            ),
+            #[cfg(feature = "orchard")]
+            &(
+                orchard::builder::BundleType::DEFAULT,
+                &Vec::<Infallible>::new()[..],
+                &[OrchardPayment::new(NonNegativeAmount::const_from_u64(
+                    30000,
+                ))][..],
+            ),
+            &DustOutputPolicy::default(),
+        );
+
+        assert_matches!(
+            result,
+            Ok(balance) if
+                balance.proposed_change() == [ChangeValue::orchard(NonNegativeAmount::const_from_u64(5000), None)] &&
+                balance.fee_required() == NonNegativeAmount::const_from_u64(20000)
         );
     }
 

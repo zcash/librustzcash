@@ -273,13 +273,13 @@ impl sapling::OutputView for SaplingPayment {
 #[cfg(feature = "orchard")]
 pub(crate) struct OrchardPayment(NonNegativeAmount);
 
-// TODO: introduce this method when it is needed for testing.
-// #[cfg(test)]
-// impl OrchardPayment {
-//     pub(crate) fn new(amount: NonNegativeAmount) -> Self {
-//         OrchardPayment(amount)
-//     }
-// }
+#[cfg(test)]
+#[cfg(feature = "orchard")]
+impl OrchardPayment {
+    pub(crate) fn new(amount: NonNegativeAmount) -> Self {
+        OrchardPayment(amount)
+    }
+}
 
 #[cfg(feature = "orchard")]
 impl orchard_fees::OutputView for OrchardPayment {
