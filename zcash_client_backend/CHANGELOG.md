@@ -24,12 +24,14 @@ and this library adheres to Rust's notion of
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
   - `WalletSummary::next_orchard_subtree_index`
+  - `chain::ChainState`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`
 - `zcash_client_backend::proto`:
   - `service::TreeState::orchard_tree`
+  - `service::TreeState::to_chain_state`
   - `impl TryFrom<&CompactOrchardAction> for CompactAction`
   - `CompactOrchardAction::{cmx, nf, ephemeral_key}`
 - `zcash_client_backend::scanning`:
