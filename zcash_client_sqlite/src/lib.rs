@@ -32,7 +32,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use incrementalmerkletree::Position;
+use incrementalmerkletree::{Position, Retention};
 use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -58,7 +58,7 @@ use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
         self,
-        chain::{BlockSource, CommitmentTreeRoot},
+        chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
@@ -75,7 +75,12 @@ use zcash_client_backend::{
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT;
+use {
+    incrementalmerkletree::frontier::Frontier,
+    shardtree::store::{Checkpoint, ShardStore},
+    std::collections::BTreeMap,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -92,7 +97,6 @@ use {
 
 pub mod chain;
 pub mod error;
-
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
@@ -544,6 +548,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
+        from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
         struct BlockPositions {
@@ -704,60 +709,173 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             {
                 // Create subtrees from the note commitments in parallel.
                 const CHUNK_SIZE: usize = 1024;
-                {
-                    let sapling_subtrees = sapling_commitments
-                        .par_chunks_mut(CHUNK_SIZE)
-                        .enumerate()
-                        .filter_map(|(i, chunk)| {
-                            let start =
-                                start_positions.sapling_start_position + (i * CHUNK_SIZE) as u64;
-                            let end = start + chunk.len() as u64;
+                let sapling_subtrees = sapling_commitments
+                    .par_chunks_mut(CHUNK_SIZE)
+                    .enumerate()
+                    .filter_map(|(i, chunk)| {
+                        let start =
+                            start_positions.sapling_start_position + (i * CHUNK_SIZE) as u64;
+                        let end = start + chunk.len() as u64;
 
-                            shardtree::LocatedTree::from_iter(
-                                start..end,
-                                SAPLING_SHARD_HEIGHT.into(),
-                                chunk.iter_mut().map(|n| n.take().expect("always Some")),
-                            )
+                        shardtree::LocatedTree::from_iter(
+                            start..end,
+                            SAPLING_SHARD_HEIGHT.into(),
+                            chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                        )
+                    })
+                    .map(|res| (res.subtree, res.checkpoints))
+                    .collect::<Vec<_>>();
+
+                #[cfg(feature = "orchard")]
+                let orchard_subtrees = orchard_commitments
+                    .par_chunks_mut(CHUNK_SIZE)
+                    .enumerate()
+                    .filter_map(|(i, chunk)| {
+                        let start =
+                            start_positions.orchard_start_position + (i * CHUNK_SIZE) as u64;
+                        let end = start + chunk.len() as u64;
+
+                        shardtree::LocatedTree::from_iter(
+                            start..end,
+                            ORCHARD_SHARD_HEIGHT.into(),
+                            chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                        )
+                    })
+                    .map(|res| (res.subtree, res.checkpoints))
+                    .collect::<Vec<_>>();
+
+                // Collect the complete set of Sapling checkpoints
+                #[cfg(feature = "orchard")]
+                let sapling_checkpoint_positions: BTreeMap<BlockHeight, Position> =
+                    sapling_subtrees
+                        .iter()
+                        .flat_map(|(_, checkpoints)| checkpoints.iter())
+                        .map(|(k, v)| (*k, *v))
+                        .collect();
+
+                #[cfg(feature = "orchard")]
+                let orchard_checkpoint_positions: BTreeMap<BlockHeight, Position> =
+                    orchard_subtrees
+                        .iter()
+                        .flat_map(|(_, checkpoints)| checkpoints.iter())
+                        .map(|(k, v)| (*k, *v))
+                        .collect();
+
+                #[cfg(feature = "orchard")]
+                fn ensure_checkpoints<
+                    'a,
+                    H,
+                    I: Iterator<Item = &'a BlockHeight>,
+                    const DEPTH: u8,
+                >(
+                    // An iterator of checkpoints heights for which we wish to ensure that
+                    // checkpoints exists.
+                    checkpoint_heights: I,
+                    // The map of checkpoint positions from which we will draw note commitment tree
+                    // position information for the newly created checkpoints.
+                    existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
+                    // The frontier whose position will be used for an inserted checkpoint when
+                    // there is no preceding checkpoint in existing_checkpoint_positions.
+                    state_final_tree: &Frontier<H, DEPTH>,
+                ) -> Vec<(BlockHeight, Checkpoint)> {
+                    checkpoint_heights
+                        .flat_map(|from_checkpoint_height| {
+                            existing_checkpoint_positions
+                                .range::<BlockHeight, _>(..=*from_checkpoint_height)
+                                .last()
+                                .map_or_else(
+                                    || {
+                                        Some((
+                                            *from_checkpoint_height,
+                                            state_final_tree
+                                                .value()
+                                                .map_or_else(Checkpoint::tree_empty, |t| {
+                                                    Checkpoint::at_position(t.position())
+                                                }),
+                                        ))
+                                    },
+                                    |(to_prev_height, position)| {
+                                        if *to_prev_height < *from_checkpoint_height {
+                                            Some((
+                                                *from_checkpoint_height,
+                                                Checkpoint::at_position(*position),
+                                            ))
+                                        } else {
+                                            // The checkpoint already exists, so we don't need to
+                                            // do anything.
+                                            None
+                                        }
+                                    },
+                                )
+                                .into_iter()
                         })
-                        .map(|res| (res.subtree, res.checkpoints))
-                        .collect::<Vec<_>>();
+                        .collect::<Vec<_>>()
+                }
 
-                    // Update the Sapling note commitment tree with all newly read note commitments
-                    let mut sapling_subtrees = sapling_subtrees.into_iter();
-                    wdb.with_sapling_tree_mut::<_, _, Self::Error>(move |sapling_tree| {
-                        for (tree, checkpoints) in &mut sapling_subtrees {
+                #[cfg(feature = "orchard")]
+                let missing_sapling_checkpoints = ensure_checkpoints(
+                    orchard_checkpoint_positions.keys(),
+                    &sapling_checkpoint_positions,
+                    from_state.final_sapling_tree(),
+                );
+                #[cfg(feature = "orchard")]
+                let missing_orchard_checkpoints = ensure_checkpoints(
+                    sapling_checkpoint_positions.keys(),
+                    &orchard_checkpoint_positions,
+                    from_state.final_orchard_tree(),
+                );
+
+                // Update the Sapling note commitment tree with all newly read note commitments
+                {
+                    let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
+                    wdb.with_sapling_tree_mut::<_, _, Self::Error>(|sapling_tree| {
+                        sapling_tree.insert_frontier(
+                            from_state.final_sapling_tree().clone(),
+                            Retention::Checkpoint {
+                                id: from_state.block_height(),
+                                is_marked: false,
+                            },
+                        )?;
+
+                        for (tree, checkpoints) in &mut sapling_subtrees_iter {
                             sapling_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height
+                        #[cfg(feature = "orchard")]
+                        for (height, checkpoint) in &missing_sapling_checkpoints {
+                            sapling_tree
+                                .store_mut()
+                                .add_checkpoint(*height, checkpoint.clone())
+                                .map_err(ShardTreeError::Storage)?;
                         }
 
                         Ok(())
                     })?;
                 }
 
-                // Create subtrees from the note commitments in parallel.
+                // Update the Orchard note commitment tree with all newly read note commitments
                 #[cfg(feature = "orchard")]
                 {
-                    let orchard_subtrees = orchard_commitments
-                        .par_chunks_mut(CHUNK_SIZE)
-                        .enumerate()
-                        .filter_map(|(i, chunk)| {
-                            let start =
-                                start_positions.orchard_start_position + (i * CHUNK_SIZE) as u64;
-                            let end = start + chunk.len() as u64;
-
-                            shardtree::LocatedTree::from_iter(
-                                start..end,
-                                ORCHARD_SHARD_HEIGHT.into(),
-                                chunk.iter_mut().map(|n| n.take().expect("always Some")),
-                            )
-                        })
-                        .map(|res| (res.subtree, res.checkpoints))
-                        .collect::<Vec<_>>();
-
-                    // Update the Orchard note commitment tree with all newly read note commitments
                     let mut orchard_subtrees = orchard_subtrees.into_iter();
-                    wdb.with_orchard_tree_mut::<_, _, Self::Error>(move |orchard_tree| {
+                    wdb.with_orchard_tree_mut::<_, _, Self::Error>(|orchard_tree| {
+                        orchard_tree.insert_frontier(
+                            from_state.final_orchard_tree().clone(),
+                            Retention::Checkpoint {
+                                id: from_state.block_height(),
+                                is_marked: false,
+                            },
+                        )?;
+
                         for (tree, checkpoints) in &mut orchard_subtrees {
                             orchard_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        for (height, checkpoint) in &missing_orchard_checkpoints {
+                            orchard_tree
+                                .store_mut()
+                                .add_checkpoint(*height, checkpoint.clone())
+                                .map_err(ShardTreeError::Storage)?;
                         }
 
                         Ok(())

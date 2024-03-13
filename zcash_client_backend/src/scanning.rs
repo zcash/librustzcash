@@ -624,7 +624,7 @@ where
             self.orchard.add_outputs(
                 block_hash,
                 txid,
-                |action| OrchardDomain::for_compact_action(action),
+                OrchardDomain::for_compact_action,
                 &tx.actions
                     .iter()
                     .enumerate()

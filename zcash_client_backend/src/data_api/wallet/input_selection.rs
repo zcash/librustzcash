@@ -403,8 +403,9 @@ where
                     ::sapling::builder::BundleType::DEFAULT,
                     &shielded_inputs
                         .iter()
+                        .cloned()
                         .filter_map(|i| {
-                            i.clone().traverse_opt(|wn| match wn {
+                            i.traverse_opt(|wn| match wn {
                                 Note::Sapling(n) => Some(n),
                                 #[cfg(feature = "orchard")]
                                 _ => None,

@@ -78,10 +78,12 @@ maybe-rayon.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+bls12_381.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 pasta_curves.workspace = true
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 nonempty.workspace = true
+orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true

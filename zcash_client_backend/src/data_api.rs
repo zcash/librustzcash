@@ -68,7 +68,10 @@ use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zcash_keys::keys::HdSeedFingerprint;
 
-use self::{chain::CommitmentTreeRoot, scanning::ScanRange};
+use self::{
+    chain::{ChainState, CommitmentTreeRoot},
+    scanning::ScanRange,
+};
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
@@ -1300,9 +1303,15 @@ pub trait WalletWrite: WalletRead {
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
     ///
-    /// `blocks` must be sequential, in order of increasing block height
-    fn put_blocks(&mut self, blocks: Vec<ScannedBlock<Self::AccountId>>)
-        -> Result<(), Self::Error>;
+    /// ### Arguments
+    /// - `from_state` must be the chain state for the block height prior to the first
+    ///   block in `blocks`.
+    /// - `blocks` must be sequential, in order of increasing block height.
+    fn put_blocks(
+        &mut self,
+        from_state: &ChainState,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
+    ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
     ///
@@ -1442,9 +1451,11 @@ pub mod testing {
     };
 
     use super::{
-        chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        chain::{ChainState, CommitmentTreeRoot},
+        scanning::ScanRange,
+        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
+        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1684,6 +1695,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
+            _from_state: &ChainState,
             _blocks: Vec<ScannedBlock<Self::AccountId>>,
         ) -> Result<(), Self::Error> {
             Ok(())
