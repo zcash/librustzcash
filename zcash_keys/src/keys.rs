@@ -1514,6 +1514,8 @@ mod tests {
 
     #[test]
     fn uivk_round_trip() {
+        use zcash_primitives::consensus::NetworkType;
+
         #[cfg(feature = "orchard")]
         let orchard = {
             let sk =
@@ -1549,7 +1551,7 @@ mod tests {
         #[cfg(any(feature = "orchard", feature = "sapling"))]
         {
             let uivk = uivk.expect("Orchard or Sapling ivk is present.");
-            let encoded = uivk.to_uivk().encode(&Network::Main);
+            let encoded = uivk.to_uivk().encode(&NetworkType::Main);
 
             // Test encoded form against known values; these test vectors contain Orchard receivers
             // that will be treated as unknown if the `orchard` feature is not enabled.

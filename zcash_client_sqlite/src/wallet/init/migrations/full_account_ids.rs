@@ -59,6 +59,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 hd_account_index INTEGER,
                 ufvk TEXT,
                 uivk TEXT NOT NULL,
+                orchard_fvk_item_cache BLOB,
+                sapling_fvk_item_cache BLOB,
+                p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
                 CHECK (
@@ -67,8 +70,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     (account_type = {account_type_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
                 )
             );
-            CREATE UNIQUE INDEX accounts_uivk ON accounts_new ("uivk");
-            CREATE UNIQUE INDEX accounts_ufvk ON accounts_new ("ufvk");
+            CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
+            CREATE UNIQUE INDEX accounts_uivk ON accounts_new (uivk);
+            CREATE UNIQUE INDEX accounts_ufvk ON accounts_new (ufvk);
             "#),
         )?;
 
@@ -120,19 +124,40 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         .to_uivk()
                         .encode(&self.params.network_type());
 
-                    transaction.execute(r#"
-                        INSERT INTO accounts_new (id, account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk, birthday_height, recover_until_height)
-                        VALUES (:account_id, :account_type, :seed_id, :account_index, :ufvk, :uivk, :birthday_height, :recover_until_height);
-                    "#, named_params![
-                        ":account_id": account_id,
-                        ":account_type": account_type,
-                        ":seed_id": seed_id.as_bytes(),
-                        ":account_index": account_index,
-                        ":ufvk": ufvk,
-                        ":uivk": uivk,
-                        ":birthday_height": birthday_height,
-                        ":recover_until_height": recover_until_height,
-                    ])?;
+                    #[cfg(feature = "transparent-inputs")]
+                    let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
+                    #[cfg(not(feature = "transparent-inputs"))]
+                    let transparent_item: Option<Vec<u8>> = None;
+
+                    transaction.execute(
+                        r#"
+                        INSERT INTO accounts_new (
+                            id, account_type, hd_seed_fingerprint, hd_account_index,
+                            ufvk, uivk,
+                            orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+                            birthday_height, recover_until_height
+                        )
+                        VALUES (
+                            :account_id, :account_type, :seed_id, :account_index,
+                            :ufvk, :uivk,
+                            :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
+                            :birthday_height, :recover_until_height
+                        );
+                        "#,
+                        named_params![
+                            ":account_id": account_id,
+                            ":account_type": account_type,
+                            ":seed_id": seed_id.as_bytes(),
+                            ":account_index": account_index,
+                            ":ufvk": ufvk,
+                            ":uivk": uivk,
+                            ":orchard_fvk_item_cache": ufvk_parsed.orchard().map(|k| k.to_bytes()),
+                            ":sapling_fvk_item_cache": ufvk_parsed.sapling().map(|k| k.to_bytes()),
+                            ":p2pkh_fvk_item_cache": transparent_item,
+                            ":birthday_height": birthday_height,
+                            ":recover_until_height": recover_until_height,
+                        ],
+                    )?;
                 }
             } else {
                 return Err(WalletMigrationError::SeedRequired);
@@ -177,7 +202,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 memo BLOB,
                 spent INTEGER,
                 commitment_tree_position INTEGER,
-                recipient_key_scope INTEGER NOT NULL DEFAULT 0,
+                recipient_key_scope INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
                 FOREIGN KEY (spent) REFERENCES transactions(id_tx),

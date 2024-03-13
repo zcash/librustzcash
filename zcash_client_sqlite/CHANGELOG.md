@@ -35,6 +35,12 @@ and this library adheres to Rust's notion of
   - `init::WalletMigrationError` has added variants:
     - `WalletMigrationError::AddressGeneration`
     - `WalletMigrationError::CannotRevert`
+- The `v_transactions` and `v_tx_outputs` views now include Orchard notes.
+
+## [0.9.1] - 2024-03-09
+
+### Fixed
+- Documentation now correctly builds with all feature flags.
 
 ## [0.9.0] - 2024-03-01
 

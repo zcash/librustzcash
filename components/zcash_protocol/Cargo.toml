@@ -45,14 +45,3 @@ test-dependencies = [
 
 ## Exposes support for working with a local consensus (e.g. regtest).
 local-consensus = []
-
-#! ### Experimental features
-#!
-#! ⚠️ Enabling these features will likely make your code incompatible with current Zcash
-#! consensus rules!
-
-## Exposes the in-development NU6 features.
-unstable-nu6 = []
-
-## Exposes early in-development features that are not yet planned for any network upgrade.
-zfuture = []

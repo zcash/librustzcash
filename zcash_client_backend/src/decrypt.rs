@@ -185,7 +185,7 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                         .iter()
                         .enumerate()
                         .flat_map(move |(index, action)| {
-                            let domain = OrchardDomain::for_nullifier(*action.nullifier());
+                            let domain = OrchardDomain::for_action(action);
                             let account = account;
                             try_note_decryption(&domain, &ivk_external, action)
                                 .map(|ret| (ret, TransferType::Incoming))

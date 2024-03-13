@@ -403,8 +403,9 @@ where
                     ::sapling::builder::BundleType::DEFAULT,
                     &shielded_inputs
                         .iter()
+                        .cloned()
                         .filter_map(|i| {
-                            i.clone().traverse_opt(|wn| match wn {
+                            i.traverse_opt(|wn| match wn {
                                 Note::Sapling(n) => Some(n),
                                 #[cfg(feature = "orchard")]
                                 _ => None,
@@ -445,8 +446,15 @@ where
                     )
                     .map_err(InputSelectorError::Proposal);
                 }
-                Err(ChangeError::DustInputs { mut sapling, .. }) => {
+                Err(ChangeError::DustInputs {
+                    mut sapling,
+                    #[cfg(feature = "orchard")]
+                    mut orchard,
+                    ..
+                }) => {
                     exclude.append(&mut sapling);
+                    #[cfg(feature = "orchard")]
+                    exclude.append(&mut orchard);
                 }
                 Err(ChangeError::InsufficientFunds { required, .. }) => {
                     amount_required = required;

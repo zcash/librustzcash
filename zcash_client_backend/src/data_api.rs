@@ -66,8 +66,12 @@ use std::{
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zcash_keys::keys::HdSeedFingerprint;
 
-use self::{chain::CommitmentTreeRoot, scanning::ScanRange};
+use self::{
+    chain::{ChainState, CommitmentTreeRoot},
+    scanning::ScanRange,
+};
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
@@ -91,6 +95,9 @@ use {
     crate::wallet::TransparentAddressMetadata,
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
+
+#[cfg(feature = "test-dependencies")]
+use zcash_primitives::consensus::NetworkUpgrade;
 
 pub mod chain;
 pub mod error;
@@ -308,6 +315,35 @@ impl AccountBalance {
     }
 }
 
+/// A set of capabilities that a client account must provide.
+pub trait Account<AccountId: Copy> {
+    /// Returns the unique identifier for the account.
+    fn id(&self) -> AccountId;
+
+    /// Returns the UFVK that the wallet backend has stored for the account, if any.
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+}
+
+impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
+    fn id(&self) -> A {
+        self.0
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        Some(&self.1)
+    }
+}
+
+impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
+    fn id(&self) -> A {
+        self.0
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        self.1.as_ref()
+    }
+}
+
 /// A polymorphic ratio type, usually used for rational numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ratio<T> {
@@ -350,6 +386,8 @@ pub struct WalletSummary<AccountId: Eq + Hash> {
     fully_scanned_height: BlockHeight,
     scan_progress: Option<Ratio<u64>>,
     next_sapling_subtree_index: u64,
+    #[cfg(feature = "orchard")]
+    next_orchard_subtree_index: u64,
 }
 
 impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
@@ -359,14 +397,17 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         chain_tip_height: BlockHeight,
         fully_scanned_height: BlockHeight,
         scan_progress: Option<Ratio<u64>>,
-        next_sapling_subtree_idx: u64,
+        next_sapling_subtree_index: u64,
+        #[cfg(feature = "orchard")] next_orchard_subtree_index: u64,
     ) -> Self {
         Self {
             account_balances,
             chain_tip_height,
             fully_scanned_height,
             scan_progress,
-            next_sapling_subtree_index: next_sapling_subtree_idx,
+            next_sapling_subtree_index,
+            #[cfg(feature = "orchard")]
+            next_orchard_subtree_index,
         }
     }
 
@@ -402,6 +443,13 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
         self.next_sapling_subtree_index
     }
 
+    /// Returns the Orchard subtree index that should start the next range of subtree
+    /// roots passed to [`WalletCommitmentTrees::put_orchard_subtree_roots`].
+    #[cfg(feature = "orchard")]
+    pub fn next_orchard_subtree_index(&self) -> u64 {
+        self.next_orchard_subtree_index
+    }
+
     /// Returns whether or not wallet scanning is complete.
     pub fn is_synced(&self) -> bool {
         self.chain_tip_height == self.fully_scanned_height
@@ -412,7 +460,7 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
 /// belonging to a wallet.
 pub trait InputSource {
     /// The type of errors produced by a wallet backend.
-    type Error;
+    type Error: Debug;
 
     /// Backend-specific account identifier.
     ///
@@ -483,7 +531,7 @@ pub trait InputSource {
 /// be abstracted away from any particular data storage substrate.
 pub trait WalletRead {
     /// The type of errors that may be generated when querying a wallet data store.
-    type Error;
+    type Error: Debug;
 
     /// The type of the account identifier.
     ///
@@ -491,6 +539,9 @@ pub trait WalletRead {
     /// authority, such that both received notes and change spendable by that spending authority
     /// will be interpreted as belonging to that account.
     type AccountId: Copy + Debug + Eq + Hash;
+
+    /// The concrete account type used by this wallet backend.
+    type Account: Account<Self::AccountId>;
 
     /// Verifies that the given seed corresponds to the viewing key for the specified account.
     ///
@@ -602,11 +653,19 @@ pub trait WalletRead {
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
 
-    /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`], if any.
+    /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<Self::AccountId>, Self::Error>;
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
+    /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
+    /// [`zip32::AccountId`], if any.
+    fn get_seed_account(
+        &self,
+        seed: &HdSeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Returns the wallet balances and sync status for an account given the specified minimum
     /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
@@ -1154,6 +1213,26 @@ impl AccountBirthday {
     }
 
     #[cfg(feature = "test-dependencies")]
+    /// Constructs a new [`AccountBirthday`] at the given network upgrade's activation,
+    /// with no "recover until" height.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the activation height for the given network upgrade is not set.
+    pub fn from_activation<P: zcash_primitives::consensus::Parameters>(
+        params: &P,
+        network_upgrade: NetworkUpgrade,
+    ) -> AccountBirthday {
+        AccountBirthday::from_parts(
+            params.activation_height(network_upgrade).unwrap(),
+            Frontier::empty(),
+            #[cfg(feature = "orchard")]
+            Frontier::empty(),
+            None,
+        )
+    }
+
+    #[cfg(feature = "test-dependencies")]
     /// Constructs a new [`AccountBirthday`] at Sapling activation, with no
     /// "recover until" height.
     ///
@@ -1163,15 +1242,7 @@ impl AccountBirthday {
     pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
     ) -> AccountBirthday {
-        use zcash_primitives::consensus::NetworkUpgrade;
-
-        AccountBirthday::from_parts(
-            params.activation_height(NetworkUpgrade::Sapling).unwrap(),
-            Frontier::empty(),
-            #[cfg(feature = "orchard")]
-            Frontier::empty(),
-            None,
-        )
+        Self::from_activation(params, NetworkUpgrade::Sapling)
     }
 }
 
@@ -1232,9 +1303,15 @@ pub trait WalletWrite: WalletRead {
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
     ///
-    /// `blocks` must be sequential, in order of increasing block height
-    fn put_blocks(&mut self, blocks: Vec<ScannedBlock<Self::AccountId>>)
-        -> Result<(), Self::Error>;
+    /// ### Arguments
+    /// - `from_state` must be the chain state for the block height prior to the first
+    ///   block in `blocks`.
+    /// - `blocks` must be sequential, in order of increasing block height.
+    fn put_blocks(
+        &mut self,
+        from_state: &ChainState,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
+    ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
     ///
@@ -1285,7 +1362,8 @@ pub trait WalletWrite: WalletRead {
 /// At present, this only serves the Sapling protocol, but it will be modified to
 /// also provide operations related to Orchard note commitment trees in the future.
 pub trait WalletCommitmentTrees {
-    type Error;
+    type Error: Debug;
+
     /// The type of the backing [`ShardStore`] for the Sapling note commitment tree.
     type SaplingShardStore<'a>: ShardStore<
         H = sapling::Node,
@@ -1356,6 +1434,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
+    use zcash_keys::keys::HdSeedFingerprint;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1372,9 +1451,11 @@ pub mod testing {
     };
 
     use super::{
-        chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        chain::{ChainState, CommitmentTreeRoot},
+        scanning::ScanRange,
+        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
+        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1438,6 +1519,7 @@ pub mod testing {
     impl WalletRead for MockWalletDb {
         type Error = ();
         type AccountId = u32;
+        type Account = (Self::AccountId, UnifiedFullViewingKey);
 
         fn validate_seed(
             &self,
@@ -1523,7 +1605,15 @@ pub mod testing {
         fn get_account_for_ufvk(
             &self,
             _ufvk: &UnifiedFullViewingKey,
-        ) -> Result<Option<Self::AccountId>, Self::Error> {
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_seed_account(
+            &self,
+            _seed: &HdSeedFingerprint,
+            _account_id: zip32::AccountId,
+        ) -> Result<Option<Self::Account>, Self::Error> {
             Ok(None)
         }
 
@@ -1605,6 +1695,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
+            _from_state: &ChainState,
             _blocks: Vec<ScannedBlock<Self::AccountId>>,
         ) -> Result<(), Self::Error> {
             Ok(())

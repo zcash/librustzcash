@@ -1,5 +1,4 @@
 //! Structs representing the TZE components within Zcash transactions.
-#![cfg(feature = "zfuture")]
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::convert::TryFrom;

@@ -4,7 +4,7 @@ use crate::{
     transaction::fees::{transparent, zip317},
 };
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 use crate::transaction::fees::tze;
 
 /// A fee rule that always returns a fixed fee, irrespective of the structure of
@@ -62,7 +62,7 @@ impl super::FeeRule for FeeRule {
     }
 }
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 impl super::FutureFeeRule for FeeRule {
     fn fee_required_zfuture<P: consensus::Parameters>(
         &self,

@@ -33,6 +33,9 @@ and this library adheres to Rust's notion of
   - `impl From<NonNegativeAmount> for orchard::NoteValue`
 - The `local_consensus` module and feature flag have been removed; use the module
   from the `zcash_protocol` crate instead.
+- `unstable-nu6` and `zfuture` feature flags (use `--cfg zcash_unstable=\"nu6\"`
+  or `--cfg zcash_unstable=\"zfuture\"` in `RUSTFLAGS` and `RUSTDOCFLAGS`
+  instead).
 
 ## [0.14.0] - 2024-03-01
 ### Added

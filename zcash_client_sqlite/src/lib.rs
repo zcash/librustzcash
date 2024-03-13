@@ -32,7 +32,7 @@
 // Catch documentation errors caused by code changes.
 #![deny(rustdoc::broken_intra_doc_links)]
 
-use incrementalmerkletree::Position;
+use incrementalmerkletree::{Position, Retention};
 use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -58,7 +58,7 @@ use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
         self,
-        chain::{BlockSource, CommitmentTreeRoot},
+        chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
         ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
@@ -69,13 +69,18 @@ use zcash_client_backend::{
     },
     proto::compact_formats::CompactBlock,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
-    DecryptedOutput, ShieldedProtocol, TransferType,
+    DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
 };
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
 #[cfg(feature = "orchard")]
-use zcash_client_backend::{data_api::ORCHARD_SHARD_HEIGHT, PoolType};
+use {
+    incrementalmerkletree::frontier::Frontier,
+    shardtree::store::{Checkpoint, ShardStore},
+    std::collections::BTreeMap,
+    zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
+};
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -92,7 +97,6 @@ use {
 
 pub mod chain;
 pub mod error;
-
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
@@ -111,6 +115,9 @@ pub(crate) const PRUNING_DEPTH: u32 = 100;
 pub(crate) const VERIFY_LOOKAHEAD: u32 = 10;
 
 pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
+
+#[cfg(feature = "orchard")]
+pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
 #[cfg(not(feature = "transparent-inputs"))]
 pub(crate) const UA_TRANSPARENT: bool = false;
@@ -206,7 +213,20 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                 txid,
                 index,
             ),
-            ShieldedProtocol::Orchard => Ok(None),
+            ShieldedProtocol::Orchard => {
+                #[cfg(feature = "orchard")]
+                return wallet::orchard::get_spendable_orchard_note(
+                    self.conn.borrow(),
+                    &self.params,
+                    txid,
+                    index,
+                );
+
+                #[cfg(not(feature = "orchard"))]
+                return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
+                    ShieldedProtocol::Orchard,
+                )));
+            }
         }
     }
 
@@ -218,14 +238,25 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
     ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        wallet::sapling::select_spendable_sapling_notes(
+        let received_iter = std::iter::empty();
+        let received_iter = received_iter.chain(wallet::sapling::select_spendable_sapling_notes(
             self.conn.borrow(),
             &self.params,
             account,
             target_value,
             anchor_height,
             exclude,
-        )
+        )?);
+        #[cfg(feature = "orchard")]
+        let received_iter = received_iter.chain(wallet::orchard::select_spendable_orchard_notes(
+            self.conn.borrow(),
+            &self.params,
+            account,
+            target_value,
+            anchor_height,
+            exclude,
+        )?);
+        Ok(received_iter.collect())
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -256,6 +287,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
     type AccountId = AccountId;
+    type Account = (AccountId, Option<UnifiedFullViewingKey>);
 
     fn validate_seed(
         &self,
@@ -373,8 +405,16 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<AccountId>, Self::Error> {
+    ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+    }
+
+    fn get_seed_account(
+        &self,
+        seed: &HdSeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_seed_account(self.conn.borrow(), &self.params, seed, account_id)
     }
 
     fn get_wallet_summary(
@@ -414,10 +454,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     #[cfg(feature = "orchard")]
     fn get_orchard_nullifiers(
         &self,
-        _query: NullifierQuery,
+        query: NullifierQuery,
     ) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, Self::Error> {
-        // FIXME! Orchard.
-        Ok(vec![])
+        wallet::orchard::get_orchard_nullifiers(self.conn.borrow(), query)
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -509,19 +548,32 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
+        from_state: &ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
+        struct BlockPositions {
+            height: BlockHeight,
+            sapling_start_position: Position,
+            #[cfg(feature = "orchard")]
+            orchard_start_position: Position,
+        }
+
         self.transactionally(|wdb| {
-            let start_positions = blocks.first().map(|block| {
-                (
-                    block.height(),
-                    Position::from(
-                        u64::from(block.sapling().final_tree_size())
-                            - u64::try_from(block.sapling().commitments().len()).unwrap(),
-                    ),
-                )
+            let start_positions = blocks.first().map(|block| BlockPositions {
+                height: block.height(),
+                sapling_start_position: Position::from(
+                    u64::from(block.sapling().final_tree_size())
+                        - u64::try_from(block.sapling().commitments().len()).unwrap(),
+                ),
+                #[cfg(feature = "orchard")]
+                orchard_start_position: Position::from(
+                    u64::from(block.orchard().final_tree_size())
+                        - u64::try_from(block.orchard().commitments().len()).unwrap(),
+                ),
             });
             let mut sapling_commitments = vec![];
+            #[cfg(feature = "orchard")]
+            let mut orchard_commitments = vec![];
             let mut last_scanned_height = None;
             let mut note_positions = vec![];
             for block in blocks.into_iter() {
@@ -540,6 +592,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     block.block_time(),
                     block.sapling().final_tree_size(),
                     block.sapling().commitments().len().try_into().unwrap(),
+                    #[cfg(feature = "orchard")]
+                    block.orchard().final_tree_size(),
+                    #[cfg(feature = "orchard")]
+                    block.orchard().commitments().len().try_into().unwrap(),
                 )?;
 
                 for tx in block.transactions() {
@@ -548,6 +604,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     // Mark notes as spent and remove them from the scanning cache
                     for spend in tx.sapling_spends() {
                         wallet::sapling::mark_sapling_note_spent(wdb.conn.0, tx_row, spend.nf())?;
+                    }
+                    #[cfg(feature = "orchard")]
+                    for spend in tx.orchard_spends() {
+                        wallet::orchard::mark_orchard_note_spent(wdb.conn.0, tx_row, spend.nf())?;
                     }
 
                     for output in tx.sapling_outputs() {
@@ -567,6 +627,24 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                         wallet::sapling::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
                     }
+                    #[cfg(feature = "orchard")]
+                    for output in tx.orchard_outputs() {
+                        // Check whether this note was spent in a later block range that
+                        // we previously scanned.
+                        let spent_in = output
+                            .nf()
+                            .map(|nf| {
+                                wallet::query_nullifier_map::<_, Scope>(
+                                    wdb.conn.0,
+                                    ShieldedProtocol::Orchard,
+                                    &nf.to_bytes(),
+                                )
+                            })
+                            .transpose()?
+                            .flatten();
+
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_row, spent_in)?;
+                    }
                 }
 
                 // Insert the new nullifiers from this block into the nullifier map.
@@ -576,19 +654,44 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     ShieldedProtocol::Sapling,
                     block.sapling().nullifier_map(),
                 )?;
+                #[cfg(feature = "orchard")]
+                wallet::insert_nullifier_map(
+                    wdb.conn.0,
+                    block.height(),
+                    ShieldedProtocol::Orchard,
+                    &block
+                        .orchard()
+                        .nullifier_map()
+                        .iter()
+                        .map(|(txid, idx, nfs)| {
+                            (*txid, *idx, nfs.iter().map(|nf| nf.to_bytes()).collect())
+                        })
+                        .collect::<Vec<_>>(),
+                )?;
 
                 note_positions.extend(block.transactions().iter().flat_map(|wtx| {
-                    wtx.sapling_outputs().iter().map(|out| {
+                    let iter = wtx.sapling_outputs().iter().map(|out| {
                         (
                             ShieldedProtocol::Sapling,
                             out.note_commitment_tree_position(),
                         )
-                    })
+                    });
+                    #[cfg(feature = "orchard")]
+                    let iter = iter.chain(wtx.orchard_outputs().iter().map(|out| {
+                        (
+                            ShieldedProtocol::Orchard,
+                            out.note_commitment_tree_position(),
+                        )
+                    }));
+
+                    iter
                 }));
 
                 last_scanned_height = Some(block.height());
                 let block_commitments = block.into_commitments();
                 sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
+                #[cfg(feature = "orchard")]
+                orchard_commitments.extend(block_commitments.orchard.into_iter().map(Some));
             }
 
             // Prune the nullifier map of entries we no longer need.
@@ -601,16 +704,17 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             // We will have a start position and a last scanned height in all cases where
             // `blocks` is non-empty.
-            if let Some(((start_height, start_position), last_scanned_height)) =
+            if let Some((start_positions, last_scanned_height)) =
                 start_positions.zip(last_scanned_height)
             {
                 // Create subtrees from the note commitments in parallel.
                 const CHUNK_SIZE: usize = 1024;
-                let subtrees = sapling_commitments
+                let sapling_subtrees = sapling_commitments
                     .par_chunks_mut(CHUNK_SIZE)
                     .enumerate()
                     .filter_map(|(i, chunk)| {
-                        let start = start_position + (i * CHUNK_SIZE) as u64;
+                        let start =
+                            start_positions.sapling_start_position + (i * CHUNK_SIZE) as u64;
                         let end = start + chunk.len() as u64;
 
                         shardtree::LocatedTree::from_iter(
@@ -622,15 +726,161 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map(|res| (res.subtree, res.checkpoints))
                     .collect::<Vec<_>>();
 
-                // Update the Sapling note commitment tree with all newly read note commitments
-                let mut subtrees = subtrees.into_iter();
-                wdb.with_sapling_tree_mut::<_, _, Self::Error>(move |sapling_tree| {
-                    for (tree, checkpoints) in &mut subtrees {
-                        sapling_tree.insert_tree(tree, checkpoints)?;
-                    }
+                #[cfg(feature = "orchard")]
+                let orchard_subtrees = orchard_commitments
+                    .par_chunks_mut(CHUNK_SIZE)
+                    .enumerate()
+                    .filter_map(|(i, chunk)| {
+                        let start =
+                            start_positions.orchard_start_position + (i * CHUNK_SIZE) as u64;
+                        let end = start + chunk.len() as u64;
 
-                    Ok(())
-                })?;
+                        shardtree::LocatedTree::from_iter(
+                            start..end,
+                            ORCHARD_SHARD_HEIGHT.into(),
+                            chunk.iter_mut().map(|n| n.take().expect("always Some")),
+                        )
+                    })
+                    .map(|res| (res.subtree, res.checkpoints))
+                    .collect::<Vec<_>>();
+
+                // Collect the complete set of Sapling checkpoints
+                #[cfg(feature = "orchard")]
+                let sapling_checkpoint_positions: BTreeMap<BlockHeight, Position> =
+                    sapling_subtrees
+                        .iter()
+                        .flat_map(|(_, checkpoints)| checkpoints.iter())
+                        .map(|(k, v)| (*k, *v))
+                        .collect();
+
+                #[cfg(feature = "orchard")]
+                let orchard_checkpoint_positions: BTreeMap<BlockHeight, Position> =
+                    orchard_subtrees
+                        .iter()
+                        .flat_map(|(_, checkpoints)| checkpoints.iter())
+                        .map(|(k, v)| (*k, *v))
+                        .collect();
+
+                #[cfg(feature = "orchard")]
+                fn ensure_checkpoints<
+                    'a,
+                    H,
+                    I: Iterator<Item = &'a BlockHeight>,
+                    const DEPTH: u8,
+                >(
+                    // An iterator of checkpoints heights for which we wish to ensure that
+                    // checkpoints exists.
+                    checkpoint_heights: I,
+                    // The map of checkpoint positions from which we will draw note commitment tree
+                    // position information for the newly created checkpoints.
+                    existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
+                    // The frontier whose position will be used for an inserted checkpoint when
+                    // there is no preceding checkpoint in existing_checkpoint_positions.
+                    state_final_tree: &Frontier<H, DEPTH>,
+                ) -> Vec<(BlockHeight, Checkpoint)> {
+                    checkpoint_heights
+                        .flat_map(|from_checkpoint_height| {
+                            existing_checkpoint_positions
+                                .range::<BlockHeight, _>(..=*from_checkpoint_height)
+                                .last()
+                                .map_or_else(
+                                    || {
+                                        Some((
+                                            *from_checkpoint_height,
+                                            state_final_tree
+                                                .value()
+                                                .map_or_else(Checkpoint::tree_empty, |t| {
+                                                    Checkpoint::at_position(t.position())
+                                                }),
+                                        ))
+                                    },
+                                    |(to_prev_height, position)| {
+                                        if *to_prev_height < *from_checkpoint_height {
+                                            Some((
+                                                *from_checkpoint_height,
+                                                Checkpoint::at_position(*position),
+                                            ))
+                                        } else {
+                                            // The checkpoint already exists, so we don't need to
+                                            // do anything.
+                                            None
+                                        }
+                                    },
+                                )
+                                .into_iter()
+                        })
+                        .collect::<Vec<_>>()
+                }
+
+                #[cfg(feature = "orchard")]
+                let missing_sapling_checkpoints = ensure_checkpoints(
+                    orchard_checkpoint_positions.keys(),
+                    &sapling_checkpoint_positions,
+                    from_state.final_sapling_tree(),
+                );
+                #[cfg(feature = "orchard")]
+                let missing_orchard_checkpoints = ensure_checkpoints(
+                    sapling_checkpoint_positions.keys(),
+                    &orchard_checkpoint_positions,
+                    from_state.final_orchard_tree(),
+                );
+
+                // Update the Sapling note commitment tree with all newly read note commitments
+                {
+                    let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
+                    wdb.with_sapling_tree_mut::<_, _, Self::Error>(|sapling_tree| {
+                        sapling_tree.insert_frontier(
+                            from_state.final_sapling_tree().clone(),
+                            Retention::Checkpoint {
+                                id: from_state.block_height(),
+                                is_marked: false,
+                            },
+                        )?;
+
+                        for (tree, checkpoints) in &mut sapling_subtrees_iter {
+                            sapling_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height
+                        #[cfg(feature = "orchard")]
+                        for (height, checkpoint) in &missing_sapling_checkpoints {
+                            sapling_tree
+                                .store_mut()
+                                .add_checkpoint(*height, checkpoint.clone())
+                                .map_err(ShardTreeError::Storage)?;
+                        }
+
+                        Ok(())
+                    })?;
+                }
+
+                // Update the Orchard note commitment tree with all newly read note commitments
+                #[cfg(feature = "orchard")]
+                {
+                    let mut orchard_subtrees = orchard_subtrees.into_iter();
+                    wdb.with_orchard_tree_mut::<_, _, Self::Error>(|orchard_tree| {
+                        orchard_tree.insert_frontier(
+                            from_state.final_orchard_tree().clone(),
+                            Retention::Checkpoint {
+                                id: from_state.block_height(),
+                                is_marked: false,
+                            },
+                        )?;
+
+                        for (tree, checkpoints) in &mut orchard_subtrees {
+                            orchard_tree.insert_tree(tree, checkpoints)?;
+                        }
+
+                        for (height, checkpoint) in &missing_orchard_checkpoints {
+                            orchard_tree
+                                .store_mut()
+                                .add_checkpoint(*height, checkpoint.clone())
+                                .map_err(ShardTreeError::Storage)?;
+                        }
+
+                        Ok(())
+                    })?;
+                }
 
                 // Update now-expired transactions that didn't get mined.
                 wallet::update_expired_notes(wdb.conn.0, last_scanned_height)?;
@@ -639,7 +889,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     wdb.conn.0,
                     &wdb.params,
                     Range {
-                        start: start_height,
+                        start: start_positions.height,
                         end: last_scanned_height + 1,
                     },
                     &note_positions,
@@ -711,7 +961,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             #[cfg(feature = "orchard")]
-            #[allow(unused_assignments)] // Remove this when the todo!()s below are implemented.
             for output in d_tx.orchard_outputs() {
                 match output.transfer_type() {
                     TransferType::Outgoing | TransferType::WalletInternal => {
@@ -744,8 +993,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         )?;
 
                         if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            todo!();
-                            //wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+                            wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                         }
                     }
                     TransferType::Incoming => {
@@ -760,8 +1008,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             }
                         }
 
-                        todo!()
-                        //wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
                     }
                 }
             }
@@ -774,21 +1021,31 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             // If we have some transparent outputs:
             if d_tx.tx().transparent_bundle().iter().any(|b| !b.vout.is_empty()) {
-                let nullifiers = wdb.get_sapling_nullifiers(NullifierQuery::All)?;
-                // If the transaction contains shielded spends from our wallet, we will store z->t
+                // If the transaction contains spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address.
-                if let Some((account_id, _)) = nullifiers.iter().find(
+                let sapling_from_account = wdb.get_sapling_nullifiers(NullifierQuery::All)?.into_iter().find(
                     |(_, nf)|
-                        d_tx.tx().sapling_bundle().iter().flat_map(|b| b.shielded_spends().iter())
+                        d_tx.tx().sapling_bundle().into_iter().flat_map(|b| b.shielded_spends().iter())
                         .any(|input| nf == input.nullifier())
-                ) {
+                ).map(|(account_id, _)| account_id);
+
+                #[cfg(feature = "orchard")]
+                let orchard_from_account = wdb.get_orchard_nullifiers(NullifierQuery::All)?.into_iter().find(
+                    |(_, nf)|
+                        d_tx.tx().orchard_bundle().iter().flat_map(|b| b.actions().iter())
+                        .any(|input| nf == input.nullifier())
+                ).map(|(account_id, _)| account_id);
+                #[cfg(not(feature = "orchard"))]
+                let orchard_from_account = None;
+
+                if let Some(account_id) = orchard_from_account.or(sapling_from_account) {
                     for (output_index, txout) in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
                             wallet::put_sent_output(
                                 wdb.conn.0,
                                 &wdb.params,
-                                *account_id,
+                                account_id,
                                 tx_ref,
                                 output_index,
                                 &Recipient::Transparent(address),
@@ -830,6 +1087,19 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     )?;
                 }
             }
+            if let Some(_bundle) = sent_tx.tx().orchard_bundle() {
+                #[cfg(feature = "orchard")]
+                for action in _bundle.actions() {
+                    wallet::orchard::mark_orchard_note_spent(
+                        wdb.conn.0,
+                        tx_ref,
+                        action.nullifier(),
+                    )?;
+                }
+
+                #[cfg(not(feature = "orchard"))]
+                panic!("Sent a transaction with Orchard Actions without `orchard` enabled?");
+            }
 
             #[cfg(feature = "transparent-inputs")]
             for utxo_outpoint in sent_tx.utxos_spent() {
@@ -863,8 +1133,21 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         )?;
                     }
                     #[cfg(feature = "orchard")]
-                    Recipient::InternalAccount(_account, Note::Orchard(_note)) => {
-                        todo!();
+                    Recipient::InternalAccount(account, Note::Orchard(note)) => {
+                        wallet::orchard::put_received_note(
+                            wdb.conn.0,
+                            &DecryptedOutput::new(
+                                output.output_index(),
+                                *note,
+                                *account,
+                                output
+                                    .memo()
+                                    .map_or_else(MemoBytes::empty, |memo| memo.clone()),
+                                TransferType::WalletInternal,
+                            ),
+                            tx_ref,
+                            None,
+                        )?;
                     }
                     _ => (),
                 }
@@ -954,7 +1237,7 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
     >;
 
     #[cfg(feature = "orchard")]
-    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
             &'a mut ShardTree<
@@ -965,16 +1248,41 @@ impl<P: consensus::Parameters> WalletCommitmentTrees for WalletDb<rusqlite::Conn
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
-        todo!()
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let shard_store = SqliteShardStore::from_connection(&tx, ORCHARD_TABLES_PREFIX)
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        let result = {
+            let mut shardtree = ShardTree::new(shard_store, PRUNING_DEPTH.try_into().unwrap());
+            callback(&mut shardtree)?
+        };
+
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(result)
     }
 
     #[cfg(feature = "orchard")]
     fn put_orchard_subtree_roots(
         &mut self,
-        _start_index: u64,
-        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
-        todo!()
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        put_shard_roots::<_, { ORCHARD_SHARD_HEIGHT * 2 }, ORCHARD_SHARD_HEIGHT>(
+            &tx,
+            ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )?;
+        tx.commit()
+            .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?;
+        Ok(())
     }
 }
 
@@ -1025,7 +1333,7 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
     >;
 
     #[cfg(feature = "orchard")]
-    fn with_orchard_tree_mut<F, A, E>(&mut self, _callback: F) -> Result<A, E>
+    fn with_orchard_tree_mut<F, A, E>(&mut self, mut callback: F) -> Result<A, E>
     where
         for<'a> F: FnMut(
             &'a mut ShardTree<
@@ -1036,16 +1344,28 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
         ) -> Result<A, E>,
         E: From<ShardTreeError<Self::Error>>,
     {
-        todo!()
+        let mut shardtree = ShardTree::new(
+            SqliteShardStore::from_connection(self.conn.0, ORCHARD_TABLES_PREFIX)
+                .map_err(|e| ShardTreeError::Storage(commitment_tree::Error::Query(e)))?,
+            PRUNING_DEPTH.try_into().unwrap(),
+        );
+        let result = callback(&mut shardtree)?;
+
+        Ok(result)
     }
 
     #[cfg(feature = "orchard")]
     fn put_orchard_subtree_roots(
         &mut self,
-        _start_index: u64,
-        _roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
+        start_index: u64,
+        roots: &[CommitmentTreeRoot<orchard::tree::MerkleHashOrchard>],
     ) -> Result<(), ShardTreeError<Self::Error>> {
-        todo!()
+        put_shard_roots::<_, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }, ORCHARD_SHARD_HEIGHT>(
+            self.conn.0,
+            ORCHARD_TABLES_PREFIX,
+            start_index,
+            roots,
+        )
     }
 }
 

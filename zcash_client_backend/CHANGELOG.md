@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
   changes related to `Orchard` below are introduced under this feature
   flag.
 - `zcash_client_backend::data_api`:
+  - `Account`
   - `AccountBalance::with_orchard_balance_mut`
   - `AccountBirthday::orchard_frontier`
   - `BlockMetadata::orchard_tree_size`
@@ -22,6 +23,7 @@ and this library adheres to Rust's notion of
   - `SentTransaction::new`
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
+  - `WalletSummary::next_orchard_subtree_index`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
 - `zcash_client_backend::fees`:
   - `orchard`
@@ -48,7 +50,11 @@ and this library adheres to Rust's notion of
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
-    - Added `get_orchard_nullifiers`
+    - Added `Account` associated type.
+    - Added `get_orchard_nullifiers` method.
+    - `get_account_for_ufvk` now returns an `Self::Account` instead of a bare
+      `AccountId`
+    - Added `get_seed_account` method.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a
       `NonNegativeAmount`. Also, the values of the returned map are also
@@ -64,6 +70,8 @@ and this library adheres to Rust's notion of
     - `fn put_orchard_subtree_roots`
   - Added method `WalletRead::validate_seed`
   - Removed `Error::AccountNotFound` variant.
+  - `WalletSummary::new` now takes an additional `next_orchard_subtree_index`
+    argument when the `orchard` feature flag is enabled.
 - `zcash_client_backend::decrypt`:
   - Fields of `DecryptedOutput` are now private. Use `DecryptedOutput::new`
     and the newly provided accessors instead.
@@ -73,6 +81,10 @@ and this library adheres to Rust's notion of
     constraint on its `<AccountId>` parameter has been strengthened to `Copy`.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
+  - `ChangeError::DustInputs` now has an `orchard` field behind the `orchard`
+    feature flag.
+- `zcash_client_backend::proto`:
+  - `ProposalDecodingError` has a new variant `TransparentMemo`.
 - `zcash_client_backend::zip321::render::amount_str` now takes a
   `NonNegativeAmount` rather than a signed `Amount` as its argument.
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a
@@ -88,6 +100,11 @@ and this library adheres to Rust's notion of
 - This release fixes an error in amount parsing in `zip321` that previously
   allowed amounts having a decimal point but no decimal value to be parsed
   as valid.
+
+## [0.11.1] - 2024-03-09
+
+### Fixed
+- Documentation now correctly builds with all feature flags.
 
 ## [0.11.0] - 2024-03-01
 

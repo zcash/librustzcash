@@ -21,7 +21,7 @@ use super::{
     Authorization, Transaction, TransactionData, TxDigests, TxIn,
 };
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 use super::components::tze;
 
 #[test]
@@ -44,7 +44,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     let txo = Transaction::read(&txn_bytes[..], tx.consensus_branch_id).unwrap();
 
     prop_assert_eq!(tx.version, txo.version);
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     prop_assert_eq!(tx.tze_bundle.as_ref(), txo.tze_bundle.as_ref());
     prop_assert_eq!(tx.lock_time, txo.lock_time);
     prop_assert_eq!(
@@ -115,7 +115,7 @@ proptest! {
     }
 }
 
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 proptest! {
     #[test]
     #[ignore]
@@ -196,7 +196,7 @@ impl Authorization for TestUnauthorized {
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(feature = "zfuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::Authorized;
 }
 
@@ -246,7 +246,7 @@ fn zip_0244() {
                 },
             });
 
-        #[cfg(not(feature = "zfuture"))]
+        #[cfg(not(zcash_unstable = "zfuture"))]
         let tdata = TransactionData::from_parts(
             txdata.version(),
             txdata.consensus_branch_id(),
@@ -257,7 +257,7 @@ fn zip_0244() {
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
         );
-        #[cfg(feature = "zfuture")]
+        #[cfg(zcash_unstable = "zfuture")]
         let tdata = TransactionData::from_parts_zfuture(
             txdata.version(),
             txdata.consensus_branch_id(),

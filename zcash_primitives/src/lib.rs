@@ -26,6 +26,6 @@ pub mod merkle_tree;
 use sapling;
 pub mod transaction;
 pub use zip32;
-#[cfg(feature = "zfuture")]
+#[cfg(zcash_unstable = "zfuture")]
 pub mod extensions;
 pub mod zip339;
