@@ -13,6 +13,7 @@ and this library adheres to Rust's notion of
   changes related to `Orchard` below are introduced under this feature
   flag.
 - `zcash_client_backend::data_api`:
+  - `Account`
   - `AccountBalance::with_orchard_balance_mut`
   - `AccountBirthday::orchard_frontier`
   - `BlockMetadata::orchard_tree_size`
@@ -52,7 +53,11 @@ and this library adheres to Rust's notion of
   - Arguments to `BlockMetadata::from_parts` have changed.
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
-    - Added `get_orchard_nullifiers`
+    - Added `Account` associated type.
+    - Added `get_orchard_nullifiers` method.
+    - `get_account_for_ufvk` now returns an `Self::Account` instead of a bare
+      `AccountId`
+    - Added `get_seed_account` method.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a
       `NonNegativeAmount`. Also, the values of the returned map are also
@@ -81,6 +86,8 @@ and this library adheres to Rust's notion of
   - Arguments to `ChangeStrategy::compute_balance` have changed.
 - `zcash_client_backend::scanning`:
   - `testing::fake_compact_block` is now public.
+  - `ChangeError::DustInputs` now has an `orchard` field behind the `orchard`
+    feature flag.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
 - `zcash_client_backend::zip321::render::amount_str` now takes a

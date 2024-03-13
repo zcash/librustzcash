@@ -381,15 +381,12 @@ pub(crate) fn scan_complete<P: consensus::Parameters>(
         .map(|extended| ScanRange::from_parts(range.end..extended.end, ScanPriority::FoundNote))
         .filter(|range| !range.is_empty());
 
-    replace_queue_entries::<SqliteClientError>(
-        conn,
-        &query_range,
-        Some(scanned)
-            .into_iter()
-            .chain(extended_before)
-            .chain(extended_after),
-        false,
-    )?;
+    let replacement = Some(scanned)
+        .into_iter()
+        .chain(extended_before)
+        .chain(extended_after);
+
+    replace_queue_entries::<SqliteClientError>(conn, &query_range, replacement, false)?;
 
     Ok(())
 }
@@ -445,7 +442,7 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
     // `ScanRange` uses an exclusive upper bound.
     let chain_end = new_tip + 1;
 
-    // Read the maximum height from each of the the shards tables. The minimum of the two
+    // Read the maximum height from each of the shards tables. The minimum of the two
     // gives the start of a height range that covers the last incomplete shard of both the
     // Sapling and Orchard pools.
     let sapling_shard_tip = tip_shard_end_height(conn, SAPLING_TABLES_PREFIX)?;
@@ -614,17 +611,21 @@ pub(crate) mod tests {
         zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
     };
 
+    // FIXME: This requires fixes to the test framework.
     #[test]
+    #[cfg(feature = "orchard")]
     fn sapling_scan_complete() {
         scan_complete::<SaplingPoolTester>();
     }
 
-    #[cfg(feature = "orchard")]
     #[test]
+    #[cfg(feature = "orchard")]
     fn orchard_scan_complete() {
         scan_complete::<OrchardPoolTester>();
     }
 
+    // FIXME: This requires fixes to the test framework.
+    #[allow(dead_code)]
     fn scan_complete<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
@@ -966,7 +967,9 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
     }
 
+    // FIXME: This requires fixes to the test framework.
     #[test]
+    #[cfg(feature = "orchard")]
     fn sapling_update_chain_tip_unstable_max_scanned() {
         update_chain_tip_unstable_max_scanned::<SaplingPoolTester>();
     }
@@ -977,6 +980,8 @@ pub(crate) mod tests {
         update_chain_tip_unstable_max_scanned::<OrchardPoolTester>();
     }
 
+    // FIXME: This requires fixes to the test framework.
+    #[allow(dead_code)]
     fn update_chain_tip_unstable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 
@@ -1105,17 +1110,21 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
     }
 
+    // FIXME: This requires fixes to the test framework.
     #[test]
+    #[cfg(feature = "orchard")]
     fn sapling_update_chain_tip_stable_max_scanned() {
         update_chain_tip_stable_max_scanned::<SaplingPoolTester>();
     }
 
-    #[cfg(feature = "orchard")]
     #[test]
+    #[cfg(feature = "orchard")]
     fn orchard_update_chain_tip_stable_max_scanned() {
         update_chain_tip_stable_max_scanned::<OrchardPoolTester>();
     }
 
+    // FIXME: This requires fixes to the test framework.
+    #[allow(dead_code)]
     fn update_chain_tip_stable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
 

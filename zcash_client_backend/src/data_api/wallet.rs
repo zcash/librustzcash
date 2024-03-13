@@ -45,8 +45,8 @@ use super::InputSource;
 use crate::{
     address::Address,
     data_api::{
-        error::Error, SentTransaction, SentTransactionOutput, WalletCommitmentTrees, WalletRead,
-        WalletWrite,
+        error::Error, Account, SentTransaction, SentTransactionOutput, WalletCommitmentTrees,
+        WalletRead, WalletWrite,
     },
     decrypt_transaction,
     fees::{self, DustOutputPolicy},
@@ -269,7 +269,7 @@ where
         wallet_db,
         params,
         StandardFeeRule::PreZip313,
-        account,
+        account.id(),
         min_confirmations,
         to,
         amount,
@@ -380,7 +380,7 @@ where
     let proposal = propose_transfer(
         wallet_db,
         params,
-        account,
+        account.id(),
         input_selector,
         request,
         min_confirmations,
@@ -694,7 +694,8 @@ where
     let account = wallet_db
         .get_account_for_ufvk(&usk.to_unified_full_viewing_key())
         .map_err(Error::DataSource)?
-        .ok_or(Error::KeyNotRecognized)?;
+        .ok_or(Error::KeyNotRecognized)?
+        .id();
 
     let (sapling_anchor, sapling_inputs) =
         if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Sapling)) {

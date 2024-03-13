@@ -1,24 +1,36 @@
 use incrementalmerkletree::Position;
-use rusqlite::{named_params, params, Connection};
+use orchard::{
+    keys::Diversifier,
+    note::{Note, Nullifier, RandomSeed, Rho},
+};
+use rusqlite::{named_params, params, Connection, Row};
 
 use zcash_client_backend::{
-    data_api::NullifierQuery, wallet::WalletOrchardOutput, DecryptedOutput, TransferType,
+    data_api::NullifierQuery,
+    wallet::{ReceivedNote, WalletOrchardOutput},
+    DecryptedOutput, ShieldedProtocol, TransferType,
 };
-use zcash_protocol::memo::MemoBytes;
+use zcash_keys::keys::UnifiedFullViewingKey;
+use zcash_primitives::transaction::TxId;
+use zcash_protocol::{
+    consensus::{self, BlockHeight},
+    memo::MemoBytes,
+    value::Zatoshis,
+};
 use zip32::Scope;
 
-use crate::{error::SqliteClientError, AccountId};
+use crate::{error::SqliteClientError, AccountId, ReceivedNoteId};
 
-use super::{memo_repr, scope_code};
+use super::{memo_repr, parse_scope, scope_code};
 
 /// This trait provides a generalization over shielded output representations.
 pub(crate) trait ReceivedOrchardOutput {
     fn index(&self) -> usize;
     fn account_id(&self) -> AccountId;
-    fn note(&self) -> &orchard::note::Note;
+    fn note(&self) -> &Note;
     fn memo(&self) -> Option<&MemoBytes>;
     fn is_change(&self) -> bool;
-    fn nullifier(&self) -> Option<&orchard::note::Nullifier>;
+    fn nullifier(&self) -> Option<&Nullifier>;
     fn note_commitment_tree_position(&self) -> Option<Position>;
     fn recipient_key_scope(&self) -> Option<Scope>;
 }
@@ -30,7 +42,7 @@ impl ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
     fn account_id(&self) -> AccountId {
         *WalletOrchardOutput::account_id(self)
     }
-    fn note(&self) -> &orchard::note::Note {
+    fn note(&self) -> &Note {
         WalletOrchardOutput::note(self)
     }
     fn memo(&self) -> Option<&MemoBytes> {
@@ -39,7 +51,7 @@ impl ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
     fn is_change(&self) -> bool {
         WalletOrchardOutput::is_change(self)
     }
-    fn nullifier(&self) -> Option<&orchard::note::Nullifier> {
+    fn nullifier(&self) -> Option<&Nullifier> {
         self.nf()
     }
     fn note_commitment_tree_position(&self) -> Option<Position> {
@@ -50,7 +62,7 @@ impl ReceivedOrchardOutput for WalletOrchardOutput<AccountId> {
     }
 }
 
-impl ReceivedOrchardOutput for DecryptedOutput<orchard::note::Note, AccountId> {
+impl ReceivedOrchardOutput for DecryptedOutput<Note, AccountId> {
     fn index(&self) -> usize {
         self.index()
     }
@@ -66,7 +78,7 @@ impl ReceivedOrchardOutput for DecryptedOutput<orchard::note::Note, AccountId> {
     fn is_change(&self) -> bool {
         self.transfer_type() == TransferType::WalletInternal
     }
-    fn nullifier(&self) -> Option<&orchard::note::Nullifier> {
+    fn nullifier(&self) -> Option<&Nullifier> {
         None
     }
     fn note_commitment_tree_position(&self) -> Option<Position> {
@@ -79,6 +91,136 @@ impl ReceivedOrchardOutput for DecryptedOutput<orchard::note::Note, AccountId> {
             Some(Scope::External)
         }
     }
+}
+
+fn to_spendable_note<P: consensus::Parameters>(
+    params: &P,
+    row: &Row,
+) -> Result<
+    Option<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>,
+    SqliteClientError,
+> {
+    let note_id = ReceivedNoteId(ShieldedProtocol::Orchard, row.get(0)?);
+    let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
+    let action_index = row.get(2)?;
+    let diversifier = {
+        let d: Vec<_> = row.get(3)?;
+        if d.len() != 11 {
+            return Err(SqliteClientError::CorruptedData(
+                "Invalid diversifier length".to_string(),
+            ));
+        }
+        let mut tmp = [0; 11];
+        tmp.copy_from_slice(&d);
+        Diversifier::from_bytes(tmp)
+    };
+
+    let note_value: u64 = row.get::<_, i64>(4)?.try_into().map_err(|_e| {
+        SqliteClientError::CorruptedData("Note values must be nonnegative".to_string())
+    })?;
+
+    let rho = {
+        let rho_bytes: [u8; 32] = row.get(5)?;
+        Option::from(Rho::from_bytes(&rho_bytes))
+            .ok_or_else(|| SqliteClientError::CorruptedData("Invalid rho.".to_string()))
+    }?;
+
+    let rseed = {
+        let rseed_bytes: [u8; 32] = row.get(6)?;
+        Option::from(RandomSeed::from_bytes(rseed_bytes, &rho)).ok_or_else(|| {
+            SqliteClientError::CorruptedData("Invalid Orchard random seed.".to_string())
+        })
+    }?;
+
+    let note_commitment_tree_position =
+        Position::from(u64::try_from(row.get::<_, i64>(7)?).map_err(|_| {
+            SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
+        })?);
+
+    let ufvk_str: Option<String> = row.get(8)?;
+    let scope_code: Option<i64> = row.get(9)?;
+
+    // If we don't have information about the recipient key scope or the ufvk we can't determine
+    // which spending key to use. This may be because the received note was associated with an
+    // imported viewing key, so we treat such notes as not spendable. Although this method is
+    // presently only called using the results of queries where both the ufvk and
+    // recipient_key_scope columns are checked to be non-null, this is method is written
+    // defensively to account for the fact that both of these are nullable columns in case it
+    // is used elsewhere in the future.
+    ufvk_str
+        .zip(scope_code)
+        .map(|(ufvk_str, scope_code)| {
+            let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str)
+                .map_err(SqliteClientError::CorruptedData)?;
+
+            let spending_key_scope = parse_scope(scope_code).ok_or_else(|| {
+                SqliteClientError::CorruptedData(format!("Invalid key scope code {}", scope_code))
+            })?;
+            let recipient = ufvk
+                .orchard()
+                .map(|fvk| fvk.to_ivk(spending_key_scope).address(diversifier))
+                .ok_or_else(|| {
+                    SqliteClientError::CorruptedData("Diversifier invalid.".to_owned())
+                })?;
+
+            let note = Option::from(Note::from_parts(
+                recipient,
+                orchard::value::NoteValue::from_raw(note_value),
+                rho,
+                rseed,
+            ))
+            .ok_or_else(|| SqliteClientError::CorruptedData("Invalid Orchard note.".to_string()))?;
+
+            Ok(ReceivedNote::from_parts(
+                note_id,
+                txid,
+                action_index,
+                zcash_client_backend::wallet::Note::Orchard(note),
+                spending_key_scope,
+                note_commitment_tree_position,
+            ))
+        })
+        .transpose()
+}
+
+pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    txid: &TxId,
+    index: u32,
+) -> Result<
+    Option<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>,
+    SqliteClientError,
+> {
+    super::common::get_spendable_note(
+        conn,
+        params,
+        txid,
+        index,
+        ShieldedProtocol::Orchard,
+        to_spendable_note,
+    )
+}
+
+pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
+    conn: &Connection,
+    params: &P,
+    account: AccountId,
+    target_value: Zatoshis,
+    anchor_height: BlockHeight,
+    exclude: &[ReceivedNoteId],
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>, SqliteClientError>
+{
+    super::common::select_spendable_notes(
+        conn,
+        params,
+        account,
+        target_value,
+        anchor_height,
+        exclude,
+        ShieldedProtocol::Orchard,
+        to_spendable_note,
+    )
 }
 
 /// Records the specified shielded output as having been received.
@@ -94,27 +236,23 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
 ) -> Result<(), SqliteClientError> {
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO orchard_received_notes
-        (tx, action_index, account_id, diversifier, value, rseed, memo, nf,
-         is_change, spent, commitment_tree_position,
-         recipient_key_scope)
+        (
+            tx, action_index, account_id,
+            diversifier, value, rho, rseed, memo, nf,
+            is_change, spent, commitment_tree_position,
+            recipient_key_scope
+        )
         VALUES (
-            :tx,
-            :action_index,
-            :account_id,
-            :diversifier,
-            :value,
-            :rseed,
-            :memo,
-            :nf,
-            :is_change,
-            :spent,
-            :commitment_tree_position,
+            :tx, :action_index, :account_id,
+            :diversifier, :value, :rho, :rseed, :memo, :nf,
+            :is_change, :spent, :commitment_tree_position,
             :recipient_key_scope
         )
         ON CONFLICT (tx, action_index) DO UPDATE
         SET account_id = :account_id,
             diversifier = :diversifier,
             value = :value,
+            rho = :rho,
             rseed = :rseed,
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
@@ -130,10 +268,11 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
 
     let sql_args = named_params![
         ":tx": &tx_ref,
-        ":output_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
+        ":action_index": i64::try_from(output.index()).expect("output indices are representable as i64"),
         ":account_id": output.account_id().0,
         ":diversifier": diversifier.as_array(),
         ":value": output.note().value().inner(),
+        ":rho": output.note().rho().to_bytes(),
         ":rseed": &rseed.as_bytes(),
         ":nf": output.nullifier().map(|nf| nf.to_bytes()),
         ":memo": memo_repr(output.memo()),
@@ -159,11 +298,11 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
 pub(crate) fn get_orchard_nullifiers(
     conn: &Connection,
     query: NullifierQuery,
-) -> Result<Vec<(AccountId, orchard::note::Nullifier)>, SqliteClientError> {
+) -> Result<Vec<(AccountId, Nullifier)>, SqliteClientError> {
     // Get the nullifiers for the notes we are tracking
     let mut stmt_fetch_nullifiers = match query {
         NullifierQuery::Unspent => conn.prepare(
-            "SELECT rn.id, rn.account_id, rn.nf
+            "SELECT rn.account_id, rn.nf
              FROM orchard_received_notes rn
              LEFT OUTER JOIN transactions tx
              ON tx.id_tx = rn.spent
@@ -171,19 +310,16 @@ pub(crate) fn get_orchard_nullifiers(
              AND nf IS NOT NULL",
         )?,
         NullifierQuery::All => conn.prepare(
-            "SELECT rn.id, rn.account_id, rn.nf
+            "SELECT rn.account_id, rn.nf
              FROM orchard_received_notes rn
              WHERE nf IS NOT NULL",
         )?,
     };
 
     let nullifiers = stmt_fetch_nullifiers.query_and_then([], |row| {
-        let account = AccountId(row.get(1)?);
-        let nf_bytes: [u8; 32] = row.get(2)?;
-        Ok::<_, rusqlite::Error>((
-            account,
-            orchard::note::Nullifier::from_bytes(&nf_bytes).unwrap(),
-        ))
+        let account = AccountId(row.get(0)?);
+        let nf_bytes: [u8; 32] = row.get(1)?;
+        Ok::<_, rusqlite::Error>((account, Nullifier::from_bytes(&nf_bytes).unwrap()))
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
@@ -198,7 +334,7 @@ pub(crate) fn get_orchard_nullifiers(
 pub(crate) fn mark_orchard_note_spent(
     conn: &Connection,
     tx_ref: i64,
-    nf: &orchard::note::Nullifier,
+    nf: &Nullifier,
 ) -> Result<bool, SqliteClientError> {
     let mut stmt_mark_orchard_note_spent =
         conn.prepare_cached("UPDATE orchard_received_notes SET spent = ? WHERE nf = ?")?;
@@ -233,6 +369,7 @@ pub(crate) mod tests {
     use zcash_primitives::transaction::Transaction;
     use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, ShieldedProtocol};
 
+    use super::select_spendable_orchard_notes;
     use crate::{
         error::SqliteClientError,
         testing::{
@@ -321,7 +458,14 @@ pub(crate) mod tests {
             anchor_height: BlockHeight,
             exclude: &[crate::ReceivedNoteId],
         ) -> Result<Vec<ReceivedNote<crate::ReceivedNoteId, Note>>, SqliteClientError> {
-            todo!()
+            select_spendable_orchard_notes(
+                &st.wallet().conn,
+                &st.wallet().params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )
         }
 
         fn decrypted_pool_outputs_count(

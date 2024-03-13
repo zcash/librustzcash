@@ -129,6 +129,7 @@ use {
 };
 
 pub mod commitment_tree;
+pub(crate) mod common;
 pub mod init;
 #[cfg(feature = "orchard")]
 pub(crate) mod orchard;
@@ -221,7 +222,7 @@ impl Account {
     /// Returns the default Unified Address for the account,
     /// along with the diversifier index that generated it.
     ///
-    /// The diversifier index may be non-zero if the Unified Address includes a Sapling  
+    /// The diversifier index may be non-zero if the Unified Address includes a Sapling
     /// receiver, and there was no valid Sapling receiver at diversifier index zero.
     pub fn default_address(
         &self,
@@ -294,11 +295,11 @@ struct AccountSqlValues<'a> {
     account_type: u32,
     hd_seed_fingerprint: Option<&'a [u8]>,
     hd_account_index: Option<u32>,
-    ufvk: Option<String>,
+    ufvk: Option<&'a UnifiedFullViewingKey>,
     uivk: String,
 }
 
-/// Returns (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk) for a given account.  
+/// Returns (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk) for a given account.
 fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
     account: &'a Account,
     params: &P,
@@ -308,14 +309,14 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
             account_type: AccountType::Zip32.into(),
             hd_seed_fingerprint: Some(hdaccount.hd_seed_fingerprint().as_bytes()),
             hd_account_index: Some(hdaccount.account_index().into()),
-            ufvk: Some(hdaccount.ufvk().encode(params)),
+            ufvk: Some(hdaccount.ufvk()),
             uivk: ufvk_to_uivk(hdaccount.ufvk(), params)?,
         },
         Account::Imported(ImportedAccount::Full(ufvk)) => AccountSqlValues {
             account_type: AccountType::Imported.into(),
             hd_seed_fingerprint: None,
             hd_account_index: None,
-            ufvk: Some(ufvk.encode(params)),
+            ufvk: Some(ufvk),
             uivk: ufvk_to_uivk(ufvk, params)?,
         },
         Account::Imported(ImportedAccount::Incoming(uivk)) => AccountSqlValues {
@@ -360,21 +361,49 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     birthday: AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
     let args = get_sql_values_for_account_parameters(&account, params)?;
-    let account_id: AccountId = conn.query_row(r#"
-        INSERT INTO accounts (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk, birthday_height, recover_until_height)
-        VALUES (:account_type, :hd_seed_fingerprint, :hd_account_index, :ufvk, :uivk, :birthday_height, :recover_until_height)
+
+    let orchard_item = args
+        .ufvk
+        .and_then(|ufvk| ufvk.orchard().map(|k| k.to_bytes()));
+    let sapling_item = args
+        .ufvk
+        .and_then(|ufvk| ufvk.sapling().map(|k| k.to_bytes()));
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_item = args
+        .ufvk
+        .and_then(|ufvk| ufvk.transparent().map(|k| k.serialize()));
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_item: Option<Vec<u8>> = None;
+
+    let account_id: AccountId = conn.query_row(
+        r#"
+        INSERT INTO accounts (
+            account_type, hd_seed_fingerprint, hd_account_index,
+            ufvk, uivk,
+            orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
+            birthday_height, recover_until_height
+        )
+        VALUES (
+            :account_type, :hd_seed_fingerprint, :hd_account_index,
+            :ufvk, :uivk,
+            :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
+            :birthday_height, :recover_until_height
+        )
         RETURNING id;
         "#,
         named_params![
             ":account_type": args.account_type,
             ":hd_seed_fingerprint": args.hd_seed_fingerprint,
             ":hd_account_index": args.hd_account_index,
-            ":ufvk": args.ufvk,
+            ":ufvk": args.ufvk.map(|ufvk| ufvk.encode(params)),
             ":uivk": args.uivk,
+            ":orchard_fvk_item_cache": orchard_item,
+            ":sapling_fvk_item_cache": sapling_item,
+            ":p2pkh_fvk_item_cache": transparent_item,
             ":birthday_height": u32::from(birthday.height()),
             ":recover_until_height": birthday.recover_until().map(u32::from)
         ],
-        |row| Ok(AccountId(row.get(0)?))
+        |row| Ok(AccountId(row.get(0)?)),
     )?;
 
     // If a birthday frontier is available, insert it into the note commitment tree. If the
@@ -702,21 +731,105 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     ufvk: &UnifiedFullViewingKey,
-) -> Result<Option<AccountId>, SqliteClientError> {
-    conn.query_row(
-        "SELECT id FROM accounts WHERE ufvk = ?",
-        [&ufvk.encode(params)],
+) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
+    #[cfg(feature = "transparent-inputs")]
+    let transparent_item = ufvk.transparent().map(|k| k.serialize());
+    #[cfg(not(feature = "transparent-inputs"))]
+    let transparent_item: Option<Vec<u8>> = None;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, ufvk
+        FROM accounts
+        WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
+           OR sapling_fvk_item_cache = :sapling_fvk_item_cache
+           OR p2pkh_fvk_item_cache = :p2pkh_fvk_item_cache",
+    )?;
+
+    let accounts = stmt
+        .query_and_then::<_, SqliteClientError, _, _>(
+            named_params![
+                ":orchard_fvk_item_cache": ufvk.orchard().map(|k| k.to_bytes()),
+                ":sapling_fvk_item_cache": ufvk.sapling().map(|k| k.to_bytes()),
+                ":p2pkh_fvk_item_cache": transparent_item,
+            ],
+            |row| {
+                let account_id = row.get::<_, u32>(0).map(AccountId)?;
+                Ok((
+                    account_id,
+                    row.get::<_, Option<String>>(1)?
+                        .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
+                        .transpose()
+                        .map_err(|e| {
+                            SqliteClientError::CorruptedData(format!(
+                                "Could not decode unified full viewing key for account {:?}: {}",
+                                account_id, e
+                            ))
+                        })?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if accounts.len() > 1 {
+        Err(SqliteClientError::CorruptedData(
+            "Mutiple account records matched the provided UFVK".to_owned(),
+        ))
+    } else {
+        Ok(accounts.into_iter().next())
+    }
+}
+
+/// Returns the account id corresponding to a given [`HdSeedFingerprint`]
+/// and [`zip32::AccountId`], if any.
+pub(crate) fn get_seed_account<P: consensus::Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
+    seed: &HdSeedFingerprint,
+    account_id: zip32::AccountId,
+) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, ufvk
+        FROM accounts
+        WHERE hd_seed_fingerprint = :hd_seed_fingerprint
+          AND hd_account_index = :account_id",
+    )?;
+
+    let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
+        named_params![
+            ":hd_seed_fingerprint": seed.as_bytes(),
+            ":hd_account_index": u32::from(account_id),
+        ],
         |row| {
-            let acct = row.get(0)?;
-            Ok(AccountId(acct))
+            let account_id = row.get::<_, u32>(0).map(AccountId)?;
+            Ok((
+                account_id,
+                row.get::<_, Option<String>>(1)?
+                    .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
+                    .transpose()
+                    .map_err(|e| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Could not decode unified full viewing key for account {:?}: {}",
+                            account_id, e
+                        ))
+                    })?,
+            ))
         },
-    )
-    .optional()
-    .map_err(SqliteClientError::from)
+    )?;
+
+    accounts.next().transpose()
 }
 
 pub(crate) trait ScanProgress {
     fn sapling_scan_progress(
+        &self,
+        conn: &rusqlite::Connection,
+        birthday_height: BlockHeight,
+        fully_scanned_height: BlockHeight,
+        chain_tip_height: BlockHeight,
+    ) -> Result<Option<Ratio<u64>>, SqliteClientError>;
+
+    #[cfg(feature = "orchard")]
+    fn orchard_scan_progress(
         &self,
         conn: &rusqlite::Connection,
         birthday_height: BlockHeight,
@@ -804,6 +917,83 @@ impl ScanProgress for SubtreeScanProgress {
                 .flatten())
         }
     }
+
+    #[cfg(feature = "orchard")]
+    #[tracing::instrument(skip(conn))]
+    fn orchard_scan_progress(
+        &self,
+        conn: &rusqlite::Connection,
+        birthday_height: BlockHeight,
+        fully_scanned_height: BlockHeight,
+        chain_tip_height: BlockHeight,
+    ) -> Result<Option<Ratio<u64>>, SqliteClientError> {
+        if fully_scanned_height == chain_tip_height {
+            // Compute the total blocks scanned since the wallet birthday
+            conn.query_row(
+                "SELECT SUM(orchard_action_count)
+                 FROM blocks
+                 WHERE height >= :birthday_height",
+                named_params![":birthday_height": u32::from(birthday_height)],
+                |row| {
+                    let scanned = row.get::<_, Option<u64>>(0)?;
+                    Ok(scanned.map(|n| Ratio::new(n, n)))
+                },
+            )
+            .map_err(SqliteClientError::from)
+        } else {
+            let start_height = birthday_height;
+            // Compute the starting number of notes directly from the blocks table
+            let start_size = conn.query_row(
+                "SELECT MAX(orchard_commitment_tree_size)
+                 FROM blocks
+                 WHERE height <= :start_height",
+                named_params![":start_height": u32::from(start_height)],
+                |row| row.get::<_, Option<u64>>(0),
+            )?;
+
+            // Compute the total blocks scanned so far above the starting height
+            let scanned_count = conn.query_row(
+                "SELECT SUM(orchard_action_count)
+                 FROM blocks
+                 WHERE height > :start_height",
+                named_params![":start_height": u32::from(start_height)],
+                |row| row.get::<_, Option<u64>>(0),
+            )?;
+
+            // We don't have complete information on how many actions will exist in the shard at
+            // the chain tip without having scanned the chain tip block, so we overestimate by
+            // computing the maximum possible number of notes directly from the shard indices.
+            //
+            // TODO: it would be nice to be able to reliably have the size of the commitment tree
+            // at the chain tip without having to have scanned that block.
+            Ok(conn
+                .query_row(
+                    "SELECT MIN(shard_index), MAX(shard_index)
+                     FROM orchard_tree_shards
+                     WHERE subtree_end_height > :start_height
+                     OR subtree_end_height IS NULL",
+                    named_params![":start_height": u32::from(start_height)],
+                    |row| {
+                        let min_tree_size = row
+                            .get::<_, Option<u64>>(0)?
+                            .map(|min| min << ORCHARD_SHARD_HEIGHT);
+                        let max_idx = row.get::<_, Option<u64>>(1)?;
+                        Ok(start_size
+                            .or(min_tree_size)
+                            .zip(max_idx)
+                            .map(|(min_tree_size, max)| {
+                                let max_tree_size = (max + 1) << ORCHARD_SHARD_HEIGHT;
+                                Ratio::new(
+                                    scanned_count.unwrap_or(0),
+                                    max_tree_size - min_tree_size,
+                                )
+                            }))
+                    },
+                )
+                .optional()?
+                .flatten())
+        }
+    }
 }
 
 /// Returns the spendable balance for the account at the specified height.
@@ -841,27 +1031,27 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         chain_tip_height,
     )?;
 
-    // If the shard containing the summary height contains any unscanned ranges that start below or
-    // including that height, none of our balance is currently spendable.
-    #[tracing::instrument(skip_all)]
-    fn is_any_spendable(
-        conn: &rusqlite::Connection,
-        summary_height: BlockHeight,
-    ) -> Result<bool, SqliteClientError> {
-        conn.query_row(
-            "SELECT NOT EXISTS(
-                 SELECT 1 FROM v_sapling_shard_unscanned_ranges
-                 WHERE :summary_height
-                    BETWEEN subtree_start_height
-                    AND IFNULL(subtree_end_height, :summary_height)
-                 AND block_range_start <= :summary_height
-             )",
-            named_params![":summary_height": u32::from(summary_height)],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(|e| e.into())
-    }
-    let any_spendable = is_any_spendable(tx, summary_height)?;
+    #[cfg(feature = "orchard")]
+    let orchard_scan_progress = progress.orchard_scan_progress(
+        tx,
+        birthday_height,
+        fully_scanned_height,
+        chain_tip_height,
+    )?;
+    #[cfg(not(feature = "orchard"))]
+    let orchard_scan_progress: Option<Ratio<u64>> = None;
+
+    // Treat Sapling and Orchard outputs as having the same cost to scan.
+    let scan_progress = sapling_scan_progress
+        .zip(orchard_scan_progress)
+        .map(|(s, o)| {
+            Ratio::new(
+                s.numerator() + o.numerator(),
+                s.denominator() + o.denominator(),
+            )
+        })
+        .or(sapling_scan_progress)
+        .or(orchard_scan_progress);
 
     let mut stmt_accounts = tx.prepare_cached("SELECT id FROM accounts")?;
     let mut account_balances = stmt_accounts
@@ -871,78 +1061,159 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         })
         .collect::<Result<HashMap<AccountId, AccountBalance>, _>>()?;
 
-    let sapling_trace = tracing::info_span!("stmt_select_notes").entered();
-    let mut stmt_select_notes = tx.prepare_cached(
-        "SELECT n.account_id, n.value, n.is_change, scan_state.max_priority, t.block
-         FROM sapling_received_notes n
-         JOIN transactions t ON t.id_tx = n.tx
-         LEFT OUTER JOIN v_sapling_shards_scan_state scan_state
-            ON n.commitment_tree_position >= scan_state.start_position
-            AND n.commitment_tree_position < scan_state.end_position_exclusive
-         WHERE n.spent IS NULL
-         AND (
-             t.expiry_height IS NULL
-             OR t.block IS NOT NULL
-             OR t.expiry_height >= :summary_height
-         )",
-    )?;
+    fn count_notes<F>(
+        tx: &rusqlite::Transaction,
+        summary_height: BlockHeight,
+        account_balances: &mut HashMap<AccountId, AccountBalance>,
+        table_prefix: &'static str,
+        with_pool_balance: F,
+    ) -> Result<(), SqliteClientError>
+    where
+        F: Fn(
+            &mut AccountBalance,
+            NonNegativeAmount,
+            NonNegativeAmount,
+            NonNegativeAmount,
+        ) -> Result<(), SqliteClientError>,
+    {
+        // If the shard containing the summary height contains any unscanned ranges that start below or
+        // including that height, none of our balance is currently spendable.
+        #[tracing::instrument(skip_all)]
+        fn is_any_spendable(
+            conn: &rusqlite::Connection,
+            summary_height: BlockHeight,
+            table_prefix: &'static str,
+        ) -> Result<bool, SqliteClientError> {
+            conn.query_row(
+                &format!(
+                    "SELECT NOT EXISTS(
+                         SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges
+                         WHERE :summary_height
+                            BETWEEN subtree_start_height
+                            AND IFNULL(subtree_end_height, :summary_height)
+                         AND block_range_start <= :summary_height
+                     )"
+                ),
+                named_params![":summary_height": u32::from(summary_height)],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|e| e.into())
+        }
 
-    let mut rows =
-        stmt_select_notes.query(named_params![":summary_height": u32::from(summary_height)])?;
-    while let Some(row) = rows.next()? {
-        let account = AccountId(row.get::<_, u32>(0)?);
+        let any_spendable = is_any_spendable(tx, summary_height, table_prefix)?;
+        let mut stmt_select_notes = tx.prepare_cached(&format!(
+            "SELECT n.account_id, n.value, n.is_change, scan_state.max_priority, t.block
+             FROM {table_prefix}_received_notes n
+             JOIN transactions t ON t.id_tx = n.tx
+             LEFT OUTER JOIN v_{table_prefix}_shards_scan_state scan_state
+                ON n.commitment_tree_position >= scan_state.start_position
+                AND n.commitment_tree_position < scan_state.end_position_exclusive
+             WHERE n.spent IS NULL
+             AND (
+                 t.expiry_height IS NULL
+                 OR t.block IS NOT NULL
+                 OR t.expiry_height >= :summary_height
+             )",
+        ))?;
 
-        let value_raw = row.get::<_, i64>(1)?;
-        let value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|_| {
-            SqliteClientError::CorruptedData(format!("Negative received note value: {}", value_raw))
-        })?;
+        let mut rows =
+            stmt_select_notes.query(named_params![":summary_height": u32::from(summary_height)])?;
+        while let Some(row) = rows.next()? {
+            let account = AccountId(row.get::<_, u32>(0)?);
 
-        let is_change = row.get::<_, bool>(2)?;
+            let value_raw = row.get::<_, i64>(1)?;
+            let value = NonNegativeAmount::from_nonnegative_i64(value_raw).map_err(|_| {
+                SqliteClientError::CorruptedData(format!(
+                    "Negative received note value: {}",
+                    value_raw
+                ))
+            })?;
 
-        // If `max_priority` is null, this means that the note is not positioned; the note
-        // will not be spendable, so we assign the scan priority to `ChainTip` as a priority
-        // that is greater than `Scanned`
-        let max_priority_raw = row.get::<_, Option<i64>>(3)?;
-        let max_priority = max_priority_raw.map_or_else(
-            || Ok(ScanPriority::ChainTip),
-            |raw| {
-                parse_priority_code(raw).ok_or_else(|| {
-                    SqliteClientError::CorruptedData(format!(
-                        "Priority code {} not recognized.",
-                        raw
-                    ))
+            let is_change = row.get::<_, bool>(2)?;
+
+            // If `max_priority` is null, this means that the note is not positioned; the note
+            // will not be spendable, so we assign the scan priority to `ChainTip` as a priority
+            // that is greater than `Scanned`
+            let max_priority_raw = row.get::<_, Option<i64>>(3)?;
+            let max_priority = max_priority_raw.map_or_else(
+                || Ok(ScanPriority::ChainTip),
+                |raw| {
+                    parse_priority_code(raw).ok_or_else(|| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Priority code {} not recognized.",
+                            raw
+                        ))
+                    })
+                },
+            )?;
+
+            let received_height = row.get::<_, Option<u32>>(4)?.map(BlockHeight::from);
+
+            let is_spendable = any_spendable
+                && received_height.iter().any(|h| h <= &summary_height)
+                && max_priority <= ScanPriority::Scanned;
+
+            let is_pending_change =
+                is_change && received_height.iter().all(|h| h > &summary_height);
+
+            let (spendable_value, change_pending_confirmation, value_pending_spendability) = {
+                let zero = NonNegativeAmount::ZERO;
+                if is_spendable {
+                    (value, zero, zero)
+                } else if is_pending_change {
+                    (zero, value, zero)
+                } else {
+                    (zero, zero, value)
+                }
+            };
+
+            if let Some(balances) = account_balances.get_mut(&account) {
+                with_pool_balance(
+                    balances,
+                    spendable_value,
+                    change_pending_confirmation,
+                    value_pending_spendability,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "orchard")]
+    {
+        let orchard_trace = tracing::info_span!("orchard_balances").entered();
+        count_notes(
+            tx,
+            summary_height,
+            &mut account_balances,
+            ORCHARD_TABLES_PREFIX,
+            |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
+                balances.with_orchard_balance_mut::<_, SqliteClientError>(|bal| {
+                    bal.add_spendable_value(spendable_value)?;
+                    bal.add_pending_change_value(change_pending_confirmation)?;
+                    bal.add_pending_spendable_value(value_pending_spendability)?;
+                    Ok(())
                 })
             },
         )?;
+        drop(orchard_trace);
+    }
 
-        let received_height = row.get::<_, Option<u32>>(4)?.map(BlockHeight::from);
-
-        let is_spendable = any_spendable
-            && received_height.iter().any(|h| h <= &summary_height)
-            && max_priority <= ScanPriority::Scanned;
-
-        let is_pending_change = is_change && received_height.iter().all(|h| h > &summary_height);
-
-        let (spendable_value, change_pending_confirmation, value_pending_spendability) = {
-            let zero = NonNegativeAmount::ZERO;
-            if is_spendable {
-                (value, zero, zero)
-            } else if is_pending_change {
-                (zero, value, zero)
-            } else {
-                (zero, zero, value)
-            }
-        };
-
-        if let Some(balances) = account_balances.get_mut(&account) {
+    let sapling_trace = tracing::info_span!("sapling_balances").entered();
+    count_notes(
+        tx,
+        summary_height,
+        &mut account_balances,
+        SAPLING_TABLES_PREFIX,
+        |balances, spendable_value, change_pending_confirmation, value_pending_spendability| {
             balances.with_sapling_balance_mut::<_, SqliteClientError>(|bal| {
                 bal.add_spendable_value(spendable_value)?;
                 bal.add_pending_change_value(change_pending_confirmation)?;
                 bal.add_pending_spendable_value(value_pending_spendability)?;
                 Ok(())
-            })?;
-        }
-    }
+            })
+        },
+    )?;
     drop(sapling_trace);
 
     #[cfg(feature = "transparent-inputs")]
@@ -1025,7 +1296,7 @@ pub(crate) fn get_wallet_summary<P: consensus::Parameters>(
         account_balances,
         chain_tip_height,
         fully_scanned_height,
-        sapling_scan_progress,
+        scan_progress,
         next_sapling_subtree_index,
         #[cfg(feature = "orchard")]
         next_orchard_subtree_index,
@@ -1039,24 +1310,31 @@ pub(crate) fn get_received_memo(
     conn: &rusqlite::Connection,
     note_id: NoteId,
 ) -> Result<Option<Memo>, SqliteClientError> {
-    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
-        ShieldedProtocol::Sapling => conn
-            .query_row(
-                "SELECT memo FROM sapling_received_notes
-                JOIN transactions ON sapling_received_notes.tx = transactions.id_tx
+    let fetch_memo = |table_prefix: &'static str, output_col: &'static str| {
+        conn.query_row(
+            &format!(
+                "SELECT memo FROM {table_prefix}_received_notes
+                JOIN transactions ON {table_prefix}_received_notes.tx = transactions.id_tx
                 WHERE transactions.txid = :txid
-                AND sapling_received_notes.output_index = :output_index",
-                named_params![
-                    ":txid": note_id.txid().as_ref(),
-                    ":output_index": note_id.output_index()
-                ],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten(),
-        _ => {
+                AND {table_prefix}_received_notes.{output_col} = :output_index"
+            ),
+            named_params![
+                ":txid": note_id.txid().as_ref(),
+                ":output_index": note_id.output_index()
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+    };
+
+    let memo_bytes: Option<Vec<_>> = match note_id.protocol() {
+        ShieldedProtocol::Sapling => fetch_memo(SAPLING_TABLES_PREFIX, "output_index")?.flatten(),
+        #[cfg(feature = "orchard")]
+        ShieldedProtocol::Orchard => fetch_memo(ORCHARD_TABLES_PREFIX, "action_index")?.flatten(),
+        #[cfg(not(feature = "orchard"))]
+        ShieldedProtocol::Orchard => {
             return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
-                note_id.protocol(),
+                ShieldedProtocol::Orchard,
             )))
         }
     };
@@ -1321,7 +1599,24 @@ pub(crate) fn get_target_and_anchor_heights(
                 min_confirmations,
             )?;
 
-            Ok(sapling_anchor_height.map(|h| (chain_tip_height + 1, h)))
+            #[cfg(feature = "orchard")]
+            let orchard_anchor_height = get_max_checkpointed_height(
+                conn,
+                ORCHARD_TABLES_PREFIX,
+                chain_tip_height,
+                min_confirmations,
+            )?;
+
+            #[cfg(not(feature = "orchard"))]
+            let orchard_anchor_height: Option<BlockHeight> = None;
+
+            let anchor_height = sapling_anchor_height
+                .zip(orchard_anchor_height)
+                .map(|(s, o)| std::cmp::min(s, o))
+                .or(sapling_anchor_height)
+                .or(orchard_anchor_height);
+
+            Ok(anchor_height.map(|h| (chain_tip_height + 1, h)))
         }
         None => Ok(None),
     }
@@ -1541,7 +1836,7 @@ pub(crate) fn get_max_height_hash(
 pub(crate) fn get_min_unspent_height(
     conn: &rusqlite::Connection,
 ) -> Result<Option<BlockHeight>, SqliteClientError> {
-    conn.query_row(
+    let min_sapling: Option<BlockHeight> = conn.query_row(
         "SELECT MIN(tx.block)
          FROM sapling_received_notes n
          JOIN transactions tx ON tx.id_tx = n.tx
@@ -1551,8 +1846,27 @@ pub(crate) fn get_min_unspent_height(
             row.get(0)
                 .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
         },
-    )
-    .map_err(SqliteClientError::from)
+    )?;
+    #[cfg(feature = "orchard")]
+    let min_orchard: Option<BlockHeight> = conn.query_row(
+        "SELECT MIN(tx.block)
+         FROM orchard_received_notes n
+         JOIN transactions tx ON tx.id_tx = n.tx
+         WHERE n.spent IS NULL",
+        [],
+        |row| {
+            row.get(0)
+                .map(|maybe_height: Option<u32>| maybe_height.map(|height| height.into()))
+        },
+    )?;
+    #[cfg(not(feature = "orchard"))]
+    let min_orchard = None;
+
+    Ok(min_sapling
+        .zip(min_orchard)
+        .map(|(s, o)| s.min(o))
+        .or(min_sapling)
+        .or(min_orchard))
 }
 
 /// Truncates the database to the given height.
@@ -1594,6 +1908,10 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         wdb.with_sapling_tree_mut(|tree| {
             tree.truncate_removing_checkpoint(&block_height).map(|_| ())
         })?;
+        #[cfg(feature = "orchard")]
+        wdb.with_orchard_tree_mut(|tree| {
+            tree.truncate_removing_checkpoint(&block_height).map(|_| ())
+        })?;
 
         // Rewind received notes
         conn.execute(
@@ -1601,6 +1919,18 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             WHERE id IN (
                 SELECT rn.id
                 FROM sapling_received_notes rn
+                LEFT OUTER JOIN transactions tx
+                ON tx.id_tx = rn.tx
+                WHERE tx.block IS NOT NULL AND tx.block > ?
+            );",
+            [u32::from(block_height)],
+        )?;
+        #[cfg(feature = "orchard")]
+        conn.execute(
+            "DELETE FROM orchard_received_notes
+            WHERE id IN (
+                SELECT rn.id
+                FROM orchard_received_notes rn
                 LEFT OUTER JOIN transactions tx
                 ON tx.id_tx = rn.tx
                 WHERE tx.block IS NOT NULL AND tx.block > ?
@@ -2718,23 +3048,6 @@ mod tests {
         // Scan a block above the wallet's birthday height.
         let not_our_key = ExtendedSpendingKey::master(&[]).to_diversifiable_full_viewing_key();
         let not_our_value = NonNegativeAmount::const_from_u64(10000);
-        let end_height = st.sapling_activation_height() + 2;
-        let _ = st.generate_block_at(
-            end_height,
-            BlockHash([37; 32]),
-            &not_our_key,
-            AddressType::DefaultExternal,
-            not_our_value,
-            17,
-            17,
-        );
-        st.scan_cached_blocks(end_height, 1);
-
-        // The wallet should still have no fully-scanned block, as no scanned block range
-        // overlaps the wallet's birthday.
-        assert_eq!(block_fully_scanned(&st), None);
-
-        // Scan the block at the wallet's birthday height.
         let start_height = st.sapling_activation_height();
         let _ = st.generate_block_at(
             start_height,
@@ -2745,15 +3058,26 @@ mod tests {
             0,
             0,
         );
+        let (mid_height, _, _) =
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+        let (end_height, _, _) =
+            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
+
+        // Scan the last block first
+        st.scan_cached_blocks(end_height, 1);
+
+        // The wallet should still have no fully-scanned block, as no scanned block range
+        // overlaps the wallet's birthday.
+        assert_eq!(block_fully_scanned(&st), None);
+
+        // Scan the block at the wallet's birthday height.
         st.scan_cached_blocks(start_height, 1);
 
         // The fully-scanned height should now be that of the scanned block.
         assert_eq!(block_fully_scanned(&st), Some(start_height));
 
         // Scan the block in between the two previous blocks.
-        let (h, _, _) =
-            st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
-        st.scan_cached_blocks(h, 1);
+        st.scan_cached_blocks(mid_height, 1);
 
         // The fully-scanned height should now be the latest block, as the two disjoint
         // ranges have been connected.

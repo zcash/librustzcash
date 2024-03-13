@@ -1,10 +1,11 @@
-use std::convert::Infallible;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::{collections::BTreeMap, convert::Infallible};
 
 #[cfg(feature = "unstable")]
 use std::fs::File;
 
+use group::ff::Field;
 use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
@@ -45,6 +46,7 @@ use zcash_client_backend::{
     zip321,
 };
 use zcash_client_backend::{
+    data_api::chain::ChainState,
     fees::{standard, DustOutputPolicy},
     ShieldedProtocol,
 };
@@ -76,9 +78,7 @@ use super::BlockDb;
 
 #[cfg(feature = "orchard")]
 use {
-    group::ff::{Field, PrimeField},
-    orchard::note_encryption::{OrchardDomain, OrchardNoteEncryption},
-    pasta_curves::pallas,
+    group::ff::PrimeField, orchard::tree::MerkleHashOrchard, pasta_curves::pallas,
     zcash_client_backend::proto::compact_formats::CompactOrchardAction,
 };
 
@@ -177,7 +177,8 @@ impl<Cache> TestBuilder<Cache> {
 
         TestState {
             cache: self.cache,
-            latest_cached_block: None,
+            cached_blocks: BTreeMap::new(),
+            latest_block_height: None,
             _data_file: data_file,
             db_data,
             test_account,
@@ -186,9 +187,10 @@ impl<Cache> TestBuilder<Cache> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct CachedBlock {
-    height: BlockHeight,
     hash: BlockHash,
+    chain_state: ChainState,
     sapling_end_size: u32,
     orchard_end_size: u32,
 }
@@ -196,44 +198,87 @@ pub(crate) struct CachedBlock {
 impl CachedBlock {
     fn none(sapling_activation_height: BlockHeight) -> Self {
         Self {
-            height: sapling_activation_height,
             hash: BlockHash([0; 32]),
+            chain_state: ChainState::empty(sapling_activation_height),
             sapling_end_size: 0,
             orchard_end_size: 0,
         }
     }
 
     fn at(
-        height: BlockHeight,
         hash: BlockHash,
-        sapling_tree_size: u32,
-        orchard_tree_size: u32,
+        chain_state: ChainState,
+        sapling_end_size: u32,
+        orchard_end_size: u32,
     ) -> Self {
+        assert_eq!(
+            chain_state.final_sapling_tree().tree_size() as u32,
+            sapling_end_size
+        );
+        #[cfg(feature = "orchard")]
+        assert_eq!(
+            chain_state.final_orchard_tree().tree_size() as u32,
+            orchard_end_size
+        );
+
         Self {
-            height,
             hash,
-            sapling_end_size: sapling_tree_size,
-            orchard_end_size: orchard_tree_size,
+            chain_state,
+            sapling_end_size,
+            orchard_end_size,
         }
     }
 
-    fn roll_forward(self, cb: &CompactBlock) -> Self {
-        assert_eq!(self.height + 1, cb.height());
+    fn roll_forward(&self, cb: &CompactBlock) -> Self {
+        assert_eq!(self.chain_state.block_height() + 1, cb.height());
+
+        let sapling_final_tree = cb.vtx.iter().flat_map(|tx| tx.outputs.iter()).fold(
+            self.chain_state.final_sapling_tree().clone(),
+            |mut acc, c_out| {
+                acc.append(sapling::Node::from_cmu(&c_out.cmu().unwrap()));
+                acc
+            },
+        );
+        let sapling_end_size = sapling_final_tree.tree_size() as u32;
+
+        #[cfg(feature = "orchard")]
+        let orchard_final_tree = cb.vtx.iter().flat_map(|tx| tx.actions.iter()).fold(
+            self.chain_state.final_orchard_tree().clone(),
+            |mut acc, c_act| {
+                acc.append(MerkleHashOrchard::from_cmx(&c_act.cmx().unwrap()));
+                acc
+            },
+        );
+        #[cfg(feature = "orchard")]
+        let orchard_end_size = orchard_final_tree.tree_size() as u32;
+        #[cfg(not(feature = "orchard"))]
+        let orchard_end_size = cb.vtx.iter().fold(self.orchard_end_size, |sz, tx| {
+            sz + (tx.actions.len() as u32)
+        });
+
         Self {
-            height: cb.height(),
             hash: cb.hash(),
-            sapling_end_size: self.sapling_end_size
-                + cb.vtx.iter().map(|tx| tx.outputs.len() as u32).sum::<u32>(),
-            orchard_end_size: self.orchard_end_size
-                + cb.vtx.iter().map(|tx| tx.actions.len() as u32).sum::<u32>(),
+            chain_state: ChainState::new(
+                cb.height(),
+                sapling_final_tree,
+                #[cfg(feature = "orchard")]
+                orchard_final_tree,
+            ),
+            sapling_end_size,
+            orchard_end_size,
         }
+    }
+
+    fn height(&self) -> BlockHeight {
+        self.chain_state.block_height()
     }
 }
 
 /// The state for a `zcash_client_sqlite` test.
 pub(crate) struct TestState<Cache> {
     cache: Cache,
-    latest_cached_block: Option<CachedBlock>,
+    cached_blocks: BTreeMap<BlockHeight, CachedBlock>,
+    latest_block_height: Option<BlockHeight>,
     _data_file: NamedTempFile,
     db_data: WalletDb<Connection, LocalNetwork>,
     test_account: Option<(
@@ -256,7 +301,25 @@ where
     }
 
     pub(crate) fn latest_cached_block(&self) -> Option<&CachedBlock> {
-        self.latest_cached_block.as_ref()
+        self.latest_block_height
+            .as_ref()
+            .and_then(|h| self.cached_blocks.get(h))
+    }
+
+    fn latest_cached_block_below_height(&self, height: BlockHeight) -> Option<&CachedBlock> {
+        self.cached_blocks.range(..height).last().map(|(_, b)| b)
+    }
+
+    fn cache_block(
+        &mut self,
+        prev_block: &CachedBlock,
+        compact_block: CompactBlock,
+    ) -> Cache::InsertResult {
+        self.cached_blocks.insert(
+            compact_block.height(),
+            prev_block.roll_forward(&compact_block),
+        );
+        self.cache.insert(&compact_block)
     }
 
     /// Creates a fake block at the expected next height containing a single output of the
@@ -267,22 +330,19 @@ where
         req: AddressType,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult, Fvk::Nullifier) {
-        let cached_block = self
-            .latest_cached_block
-            .take()
-            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
-        let height = cached_block.height + 1;
+        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
+        let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
+        let height = prior_cached_block.height() + 1;
 
         let (res, nf) = self.generate_block_at(
             height,
-            cached_block.hash,
+            prior_cached_block.hash,
             fvk,
             req,
             value,
-            cached_block.sapling_end_size,
-            cached_block.orchard_end_size,
+            prior_cached_block.sapling_end_size,
+            prior_cached_block.orchard_end_size,
         );
-        assert!(self.latest_cached_block.is_some());
 
         (height, res, nf)
     }
@@ -303,6 +363,57 @@ where
         initial_sapling_tree_size: u32,
         initial_orchard_tree_size: u32,
     ) -> (Cache::InsertResult, Fvk::Nullifier) {
+        let mut prior_cached_block = self
+            .latest_cached_block_below_height(height)
+            .cloned()
+            .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
+        assert!(prior_cached_block.chain_state.block_height() < height);
+        assert!(prior_cached_block.sapling_end_size <= initial_sapling_tree_size);
+        assert!(prior_cached_block.orchard_end_size <= initial_orchard_tree_size);
+
+        // If the block height has increased or the Sapling and/or Orchard tree sizes have changed,
+        // we need to generate a new prior cached block that the block to be generated can
+        // successfully chain from, with the provided tree sizes.
+        if prior_cached_block.chain_state.block_height() == height - 1 {
+            assert_eq!(prev_hash, prior_cached_block.hash);
+        } else {
+            let final_sapling_tree =
+                (prior_cached_block.sapling_end_size..initial_sapling_tree_size).fold(
+                    prior_cached_block.chain_state.final_sapling_tree().clone(),
+                    |mut acc, _| {
+                        acc.append(sapling::Node::from_scalar(bls12_381::Scalar::random(
+                            &mut self.rng,
+                        )));
+                        acc
+                    },
+                );
+
+            #[cfg(feature = "orchard")]
+            let final_orchard_tree =
+                (prior_cached_block.orchard_end_size..initial_orchard_tree_size).fold(
+                    prior_cached_block.chain_state.final_orchard_tree().clone(),
+                    |mut acc, _| {
+                        acc.append(MerkleHashOrchard::random(&mut self.rng));
+                        acc
+                    },
+                );
+
+            prior_cached_block = CachedBlock::at(
+                prev_hash,
+                ChainState::new(
+                    height - 1,
+                    final_sapling_tree,
+                    #[cfg(feature = "orchard")]
+                    final_orchard_tree,
+                ),
+                initial_sapling_tree_size,
+                initial_orchard_tree_size,
+            );
+
+            self.cached_blocks
+                .insert(height - 1, prior_cached_block.clone());
+        }
+
         let (cb, nf) = fake_compact_block(
             &self.network(),
             height,
@@ -314,17 +425,10 @@ where
             initial_orchard_tree_size,
             &mut self.rng,
         );
-        let res = self.cache.insert(&cb);
+        assert_eq!(cb.height(), height);
 
-        self.latest_cached_block = Some(
-            CachedBlock::at(
-                height - 1,
-                cb.hash(),
-                initial_sapling_tree_size,
-                initial_orchard_tree_size,
-            )
-            .roll_forward(&cb),
-        );
+        let res = self.cache_block(&prior_cached_block, cb);
+        self.latest_block_height = Some(height);
 
         (res, nf)
     }
@@ -338,27 +442,28 @@ where
         to: impl Into<Address>,
         value: NonNegativeAmount,
     ) -> (BlockHeight, Cache::InsertResult) {
-        let cached_block = self
-            .latest_cached_block
-            .take()
+        let prior_cached_block = self
+            .latest_cached_block()
+            .cloned()
             .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
-        let height = cached_block.height + 1;
+        let height = prior_cached_block.height() + 1;
 
         let cb = fake_compact_block_spending(
             &self.network(),
             height,
-            cached_block.hash,
+            prior_cached_block.hash,
             note,
             fvk,
             to.into(),
             value,
-            cached_block.sapling_end_size,
-            cached_block.orchard_end_size,
+            prior_cached_block.sapling_end_size,
+            prior_cached_block.orchard_end_size,
             &mut self.rng,
         );
-        let res = self.cache.insert(&cb);
+        assert_eq!(cb.height(), height);
 
-        self.latest_cached_block = Some(cached_block.roll_forward(&cb));
+        let res = self.cache_block(&prior_cached_block, cb);
+        self.latest_block_height = Some(height);
 
         (height, res)
     }
@@ -393,24 +498,25 @@ where
         tx_index: usize,
         tx: &Transaction,
     ) -> (BlockHeight, Cache::InsertResult) {
-        let cached_block = self
-            .latest_cached_block
-            .take()
+        let prior_cached_block = self
+            .latest_cached_block()
+            .cloned()
             .unwrap_or_else(|| CachedBlock::none(self.sapling_activation_height() - 1));
-        let height = cached_block.height + 1;
+        let height = prior_cached_block.height() + 1;
 
         let cb = fake_compact_block_from_tx(
             height,
-            cached_block.hash,
+            prior_cached_block.hash,
             tx_index,
             tx,
-            cached_block.sapling_end_size,
-            cached_block.orchard_end_size,
+            prior_cached_block.sapling_end_size,
+            prior_cached_block.orchard_end_size,
             &mut self.rng,
         );
-        let res = self.cache.insert(&cb);
+        assert_eq!(cb.height(), height);
 
-        self.latest_cached_block = Some(cached_block.roll_forward(&cb));
+        let res = self.cache_block(&prior_cached_block, cb);
+        self.latest_block_height = Some(height);
 
         (height, res)
     }
@@ -438,13 +544,20 @@ where
             <Cache::BlockSource as BlockSource>::Error,
         >,
     > {
-        scan_cached_blocks(
+        let prior_cached_block = self
+            .latest_cached_block_below_height(from_height)
+            .cloned()
+            .unwrap_or_else(|| CachedBlock::none(from_height - 1));
+
+        let result = scan_cached_blocks(
             &self.network(),
             self.cache.block_source(),
             &mut self.db_data,
             from_height,
+            &prior_cached_block.chain_state,
             limit,
-        )
+        );
+        result
     }
 
     /// Resets the wallet using a new wallet database but with the same cache of blocks,
@@ -455,7 +568,7 @@ where
     /// Before using any `generate_*` method on the reset state, call `reset_latest_cached_block()`.
     pub(crate) fn reset(&mut self) -> NamedTempFile {
         let network = self.network();
-        self.latest_cached_block = None;
+        self.latest_block_height = None;
         let tf = std::mem::replace(&mut self._data_file, NamedTempFile::new().unwrap());
         self.db_data = WalletDb::for_path(self._data_file.path(), network).unwrap();
         self.test_account = None;
@@ -463,23 +576,23 @@ where
         tf
     }
 
-    /// Reset the latest cached block to the most recent one in the cache database.
-    #[allow(dead_code)]
-    pub(crate) fn reset_latest_cached_block(&mut self) {
-        self.cache
-            .block_source()
-            .with_blocks::<_, Infallible>(None, None, |block: CompactBlock| {
-                let chain_metadata = block.chain_metadata.unwrap();
-                self.latest_cached_block = Some(CachedBlock::at(
-                    BlockHeight::from_u32(block.height.try_into().unwrap()),
-                    BlockHash::from_slice(block.hash.as_slice()),
-                    chain_metadata.sapling_commitment_tree_size,
-                    chain_metadata.orchard_commitment_tree_size,
-                ));
-                Ok(())
-            })
-            .unwrap();
-    }
+    //    /// Reset the latest cached block to the most recent one in the cache database.
+    //    #[allow(dead_code)]
+    //    pub(crate) fn reset_latest_cached_block(&mut self) {
+    //        self.cache
+    //            .block_source()
+    //            .with_blocks::<_, Infallible>(None, None, |block: CompactBlock| {
+    //                let chain_metadata = block.chain_metadata.unwrap();
+    //                self.latest_cached_block = Some(CachedBlock::at(
+    //                    BlockHash::from_slice(block.hash.as_slice()),
+    //                    BlockHeight::from_u32(block.height.try_into().unwrap()),
+    //                    chain_metadata.sapling_commitment_tree_size,
+    //                    chain_metadata.orchard_commitment_tree_size,
+    //                ));
+    //                Ok(())
+    //            })
+    //            .unwrap();
+    //    }
 }
 
 impl<Cache> TestState<Cache> {
@@ -1095,40 +1208,28 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
 /// Returns the `CompactOrchardAction` and the new note.
 #[cfg(feature = "orchard")]
 fn compact_orchard_action<R: RngCore + CryptoRng>(
-    nullifier: orchard::note::Nullifier,
+    nf_old: orchard::note::Nullifier,
     recipient: orchard::Address,
     value: NonNegativeAmount,
     ovk: Option<orchard::keys::OutgoingViewingKey>,
     rng: &mut R,
 ) -> (CompactOrchardAction, orchard::Note) {
-    let rseed = {
-        loop {
-            let mut bytes = [0; 32];
-            rng.fill_bytes(&mut bytes);
-            let rseed = orchard::note::RandomSeed::from_bytes(bytes, &nullifier);
-            if rseed.is_some().into() {
-                break rseed.unwrap();
-            }
-        }
-    };
-    let note = orchard::Note::from_parts(
+    use zcash_note_encryption::ShieldedOutput;
+
+    let (compact_action, note) = orchard::note_encryption::testing::fake_compact_action(
+        rng,
+        nf_old,
         recipient,
         orchard::value::NoteValue::from_raw(value.into_u64()),
-        nullifier,
-        rseed,
-    )
-    .unwrap();
-    let encryptor = OrchardNoteEncryption::new(ovk, note, *MemoBytes::empty().as_array());
-    let cmx = orchard::note::ExtractedNoteCommitment::from(note.commitment());
-    let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0.to_vec();
-    let enc_ciphertext = encryptor.encrypt_note_plaintext();
+        ovk,
+    );
 
     (
         CompactOrchardAction {
-            nullifier: nullifier.to_bytes().to_vec(),
-            cmx: cmx.to_bytes().to_vec(),
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            nullifier: compact_action.nullifier().to_bytes().to_vec(),
+            cmx: compact_action.cmx().to_bytes().to_vec(),
+            ephemeral_key: compact_action.ephemeral_key().0.to_vec(),
+            ciphertext: compact_action.enc_ciphertext().as_ref()[..52].to_vec(),
         },
         note,
     )

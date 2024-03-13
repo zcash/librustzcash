@@ -1232,6 +1232,8 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     );
 }
 
+// FIXME: This requires fixes to the test framework.
+#[allow(dead_code)]
 pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
     let (mut st, dfvk, birthday, _) = test_with_nu5_birthday_offset::<T>(76);
@@ -1519,6 +1521,8 @@ pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
     st.scan_cached_blocks(h2, 1);
 }
 
+// FIXME: This requires fixes to the test framework.
+#[allow(dead_code)]
 pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()

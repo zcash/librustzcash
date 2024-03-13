@@ -553,7 +553,7 @@ mod tests {
             row_count += 1;
             let value: u64 = row.get(0).unwrap();
             let scope = parse_scope(row.get(1).unwrap());
-            match dbg!(value) {
+            match value {
                 EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
                 INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
                 _ => {
@@ -730,7 +730,7 @@ mod tests {
             row_count += 1;
             let value: u64 = row.get(0).unwrap();
             let scope = parse_scope(row.get(1).unwrap());
-            match dbg!(value) {
+            match value {
                 EXTERNAL_VALUE => assert_eq!(scope, Some(Scope::External)),
                 INTERNAL_VALUE => assert_eq!(scope, Some(Scope::Internal)),
                 _ => {

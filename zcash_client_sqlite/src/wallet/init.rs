@@ -229,6 +229,9 @@ mod tests {
                 hd_account_index INTEGER,
                 ufvk TEXT,
                 uivk TEXT NOT NULL,
+                orchard_fvk_item_cache BLOB,
+                sapling_fvk_item_cache BLOB,
+                p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
                 CHECK ( (account_type = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_type = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
@@ -429,6 +432,54 @@ mod tests {
             assert_eq!(
                 re.replace_all(&sql, " "),
                 re.replace_all(expected_tables[expected_idx], " ")
+            );
+            expected_idx += 1;
+        }
+
+        let expected_indices = vec![
+            r#"CREATE UNIQUE INDEX accounts_ufvk ON "accounts" (ufvk)"#,
+            r#"CREATE UNIQUE INDEX accounts_uivk ON "accounts" (uivk)"#,
+            r#"CREATE UNIQUE INDEX hd_account ON "accounts" (hd_seed_fingerprint, hd_account_index)"#,
+            r#"CREATE INDEX "addresses_accounts" ON "addresses" (
+                "account_id" ASC
+            )"#,
+            r#"CREATE INDEX nf_map_locator_idx ON nullifier_map(block_height, tx_index)"#,
+            r#"CREATE INDEX orchard_received_notes_account ON orchard_received_notes (
+                account_id ASC
+            )"#,
+            r#"CREATE INDEX orchard_received_notes_spent ON orchard_received_notes (
+                spent ASC
+            )"#,
+            r#"CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
+                tx ASC
+            )"#,
+            r#"CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes" (
+                "account_id" ASC
+            )"#,
+            r#"CREATE INDEX "sapling_received_notes_spent" ON "sapling_received_notes" (
+                "spent" ASC
+            )"#,
+            r#"CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes" (
+                "tx" ASC
+            )"#,
+            r#"CREATE INDEX sent_notes_from_account ON "sent_notes" (from_account_id)"#,
+            r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#,
+            r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#,
+            r#"CREATE INDEX utxos_received_by_account ON "utxos" (received_by_account_id)"#,
+            r#"CREATE INDEX utxos_spent_in_tx ON "utxos" (spent_in_tx)"#,
+        ];
+        let mut indices_query = st
+            .wallet()
+            .conn
+            .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND sql != '' ORDER BY tbl_name, name")
+            .unwrap();
+        let mut rows = indices_query.query([]).unwrap();
+        let mut expected_idx = 0;
+        while let Some(row) = rows.next().unwrap() {
+            let sql: String = row.get(0).unwrap();
+            assert_eq!(
+                re.replace_all(&sql, " "),
+                re.replace_all(expected_indices[expected_idx], " ")
             );
             expected_idx += 1;
         }

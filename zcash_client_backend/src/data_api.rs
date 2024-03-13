@@ -66,8 +66,12 @@ use std::{
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zcash_keys::keys::HdSeedFingerprint;
 
-use self::{chain::CommitmentTreeRoot, scanning::ScanRange};
+use self::{
+    chain::{ChainState, CommitmentTreeRoot},
+    scanning::ScanRange,
+};
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
@@ -311,6 +315,35 @@ impl AccountBalance {
     }
 }
 
+/// A set of capabilities that a client account must provide.
+pub trait Account<AccountId: Copy> {
+    /// Returns the unique identifier for the account.
+    fn id(&self) -> AccountId;
+
+    /// Returns the UFVK that the wallet backend has stored for the account, if any.
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+}
+
+impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
+    fn id(&self) -> A {
+        self.0
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        Some(&self.1)
+    }
+}
+
+impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
+    fn id(&self) -> A {
+        self.0
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        self.1.as_ref()
+    }
+}
+
 /// A polymorphic ratio type, usually used for rational numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ratio<T> {
@@ -507,6 +540,9 @@ pub trait WalletRead {
     /// will be interpreted as belonging to that account.
     type AccountId: Copy + Debug + Eq + Hash;
 
+    /// The concrete account type used by this wallet backend.
+    type Account: Account<Self::AccountId>;
+
     /// Verifies that the given seed corresponds to the viewing key for the specified account.
     ///
     /// Returns:
@@ -617,11 +653,19 @@ pub trait WalletRead {
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
 
-    /// Returns the account id corresponding to a given [`UnifiedFullViewingKey`], if any.
+    /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<Self::AccountId>, Self::Error>;
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
+    /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
+    /// [`zip32::AccountId`], if any.
+    fn get_seed_account(
+        &self,
+        seed: &HdSeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error>;
 
     /// Returns the wallet balances and sync status for an account given the specified minimum
     /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
@@ -1259,9 +1303,15 @@ pub trait WalletWrite: WalletRead {
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
     ///
-    /// `blocks` must be sequential, in order of increasing block height
-    fn put_blocks(&mut self, blocks: Vec<ScannedBlock<Self::AccountId>>)
-        -> Result<(), Self::Error>;
+    /// ### Arguments
+    /// - `from_state` must be the chain state for the block height prior to the first
+    ///   block in `blocks`.
+    /// - `blocks` must be sequential, in order of increasing block height.
+    fn put_blocks(
+        &mut self,
+        from_state: &ChainState,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
+    ) -> Result<(), Self::Error>;
 
     /// Updates the wallet's view of the blockchain.
     ///
@@ -1384,6 +1434,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
+    use zcash_keys::keys::HdSeedFingerprint;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1400,9 +1451,11 @@ pub mod testing {
     };
 
     use super::{
-        chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
-        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
-        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        chain::{ChainState, CommitmentTreeRoot},
+        scanning::ScanRange,
+        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
+        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1466,6 +1519,7 @@ pub mod testing {
     impl WalletRead for MockWalletDb {
         type Error = ();
         type AccountId = u32;
+        type Account = (Self::AccountId, UnifiedFullViewingKey);
 
         fn validate_seed(
             &self,
@@ -1551,7 +1605,15 @@ pub mod testing {
         fn get_account_for_ufvk(
             &self,
             _ufvk: &UnifiedFullViewingKey,
-        ) -> Result<Option<Self::AccountId>, Self::Error> {
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_seed_account(
+            &self,
+            _seed: &HdSeedFingerprint,
+            _account_id: zip32::AccountId,
+        ) -> Result<Option<Self::Account>, Self::Error> {
             Ok(None)
         }
 
@@ -1633,6 +1695,7 @@ pub mod testing {
         #[allow(clippy::type_complexity)]
         fn put_blocks(
             &mut self,
+            _from_state: &ChainState,
             _blocks: Vec<ScannedBlock<Self::AccountId>>,
         ) -> Result<(), Self::Error> {
             Ok(())
