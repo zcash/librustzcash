@@ -54,9 +54,9 @@ and this library adheres to Rust's notion of
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `Account` associated type.
+    - Added `get_derived_account` method.
     - `get_account_for_ufvk` now returns `Self::Account` instead of a bare
       `AccountId`.
-    - Added `get_seed_account` method.
     - Added `get_orchard_nullifiers` method.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a

@@ -576,7 +576,7 @@ pub trait WalletRead {
 
     /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
     /// [`zip32::AccountId`], if any.
-    fn get_seed_account(
+    fn get_derived_account(
         &self,
         seed: &HdSeedFingerprint,
         account_id: zip32::AccountId,
@@ -1553,7 +1553,7 @@ pub mod testing {
             Ok(Vec::new())
         }
 
-        fn get_seed_account(
+        fn get_derived_account(
             &self,
             _seed: &HdSeedFingerprint,
             _account_id: zip32::AccountId,

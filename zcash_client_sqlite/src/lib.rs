@@ -293,12 +293,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_account_ids(self.conn.borrow())
     }
 
-    fn get_seed_account(
+    fn get_derived_account(
         &self,
         seed: &HdSeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_seed_account(self.conn.borrow(), &self.params, seed, account_id)
+        wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
     }
 
     fn validate_seed(

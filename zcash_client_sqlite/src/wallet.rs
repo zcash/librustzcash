@@ -767,7 +767,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
 
 /// Returns the account id corresponding to a given [`HdSeedFingerprint`]
 /// and [`zip32::AccountId`], if any.
-pub(crate) fn get_seed_account<P: consensus::Parameters>(
+pub(crate) fn get_derived_account<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     seed: &HdSeedFingerprint,
