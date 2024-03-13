@@ -139,11 +139,11 @@ pub(crate) mod scanning;
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
 fn parse_account_kind(
-    account_type: u32,
+    account_kind: u32,
     hd_seed_fingerprint: Option<[u8; 32]>,
     hd_account_index: Option<u32>,
 ) -> Result<AccountKind, SqliteClientError> {
-    match (account_type, hd_seed_fingerprint, hd_account_index) {
+    match (account_kind, hd_seed_fingerprint, hd_account_index) {
         (0, Some(seed_fp), Some(account_index)) => Ok(AccountKind::Derived {
             seed_fingerprint: HdSeedFingerprint::from_bytes(seed_fp),
             account_index: zip32::AccountId::try_from(account_index).map_err(|_| {
@@ -154,10 +154,10 @@ fn parse_account_kind(
         }),
         (1, None, None) => Ok(AccountKind::Imported),
         (0, None, None) | (1, Some(_), Some(_)) => Err(SqliteClientError::CorruptedData(
-            "Wallet DB account_type constraint violated".to_string(),
+            "Wallet DB account_kind constraint violated".to_string(),
         )),
         (_, _, _) => Err(SqliteClientError::CorruptedData(
-            "Unrecognized account_type".to_string(),
+            "Unrecognized account_kind".to_string(),
         )),
     }
 }
@@ -351,13 +351,13 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     let account_id: AccountId = conn.query_row(
         r#"
         INSERT INTO accounts (
-            account_type, hd_seed_fingerprint, hd_account_index,
+            account_kind, hd_seed_fingerprint, hd_account_index,
             ufvk, uivk,
             orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
             birthday_height, recover_until_height
         )
         VALUES (
-            :account_type, :hd_seed_fingerprint, :hd_account_index,
+            :account_kind, :hd_seed_fingerprint, :hd_account_index,
             :ufvk, :uivk,
             :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
             :birthday_height, :recover_until_height
@@ -365,7 +365,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         RETURNING id;
         "#,
         named_params![
-            ":account_type": account_kind_code(kind),
+            ":account_kind": account_kind_code(kind),
             ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.as_bytes()),
             ":hd_account_index": hd_account_index.map(u32::from),
             ":ufvk": viewing_key.ufvk().map(|ufvk| ufvk.encode(params)),
@@ -717,7 +717,7 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT id, account_type, hd_seed_fingerprint, hd_account_index, ufvk
+        "SELECT id, account_kind, hd_seed_fingerprint, hd_account_index, ufvk
         FROM accounts
         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -1501,7 +1501,7 @@ pub(crate) fn get_account<P: Parameters>(
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut sql = conn.prepare_cached(
         r#"
-        SELECT account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk
+        SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk
         FROM accounts
         WHERE id = :account_id
     "#,
@@ -1512,7 +1512,7 @@ pub(crate) fn get_account<P: Parameters>(
     match row {
         Some(row) => {
             let kind = parse_account_kind(
-                row.get("account_type")?,
+                row.get("account_kind")?,
                 row.get("hd_seed_fingerprint")?,
                 row.get("hd_account_index")?,
             )?;
