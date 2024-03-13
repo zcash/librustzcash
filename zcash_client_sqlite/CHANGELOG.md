@@ -10,7 +10,8 @@ and this library adheres to Rust's notion of
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
-- `zcash_client_sqlite::AccountId` 
+- `zcash_client_sqlite::AccountId`
+- `zcash_client_sqlite::wallet::Account`
 - `impl From<zcash_keys::keys::AddressGenerationError> for SqliteClientError`
 
 ### Changed

@@ -187,7 +187,7 @@ pub(crate) enum ViewingKey {
 
 /// An account stored in a `zcash_client_sqlite` database.
 #[derive(Debug, Clone)]
-pub(crate) struct Account {
+pub struct Account {
     account_id: AccountId,
     kind: AccountKind,
     viewing_key: ViewingKey,
@@ -199,7 +199,7 @@ impl Account {
     ///
     /// The diversifier index may be non-zero if the Unified Address includes a Sapling
     /// receiver, and there was no valid Sapling receiver at diversifier index zero.
-    pub fn default_address(
+    pub(crate) fn default_address(
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
@@ -710,14 +710,14 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     ufvk: &UnifiedFullViewingKey,
-) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
+) -> Result<Option<Account>, SqliteClientError> {
     #[cfg(feature = "transparent-inputs")]
     let transparent_item = ufvk.transparent().map(|k| k.serialize());
     #[cfg(not(feature = "transparent-inputs"))]
     let transparent_item: Option<Vec<u8>> = None;
 
     let mut stmt = conn.prepare(
-        "SELECT id, ufvk
+        "SELECT id, account_type, hd_seed_fingerprint, hd_account_index, ufvk
         FROM accounts
         WHERE orchard_fvk_item_cache = :orchard_fvk_item_cache
            OR sapling_fvk_item_cache = :sapling_fvk_item_cache
@@ -733,18 +733,25 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
             ],
             |row| {
                 let account_id = row.get::<_, u32>(0).map(AccountId)?;
+                let kind = parse_account_kind(row.get(1)?, row.get(2)?, row.get(3)?)?;
 
                 // We looked up the account by FVK components, so the UFVK column must be
                 // non-null.
-                let ufvk_str: String = row.get(1)?;
-                let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
-                    SqliteClientError::CorruptedData(format!(
-                        "Could not decode unified full viewing key for account {:?}: {}",
-                        account_id, e
-                    ))
-                })?;
+                let ufvk_str: String = row.get(4)?;
+                let viewing_key = ViewingKey::Full(Box::new(
+                    UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
+                        SqliteClientError::CorruptedData(format!(
+                            "Could not decode unified full viewing key for account {:?}: {}",
+                            account_id, e
+                        ))
+                    })?,
+                ));
 
-                Ok((account_id, Some(ufvk)))
+                Ok(Account {
+                    account_id,
+                    kind,
+                    viewing_key,
+                })
             },
         )?
         .collect::<Result<Vec<_>, _>>()?;
@@ -765,7 +772,7 @@ pub(crate) fn get_seed_account<P: consensus::Parameters>(
     params: &P,
     seed: &HdSeedFingerprint,
     account_index: zip32::AccountId,
-) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
+) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
         "SELECT id, ufvk
         FROM accounts
@@ -792,7 +799,14 @@ pub(crate) fn get_seed_account<P: consensus::Parameters>(
                     ))
                 }),
             }?;
-            Ok((account_id, Some(ufvk)))
+            Ok(Account {
+                account_id,
+                kind: AccountKind::Derived {
+                    seed_fingerprint: *seed,
+                    account_index,
+                },
+                viewing_key: ViewingKey::Full(Box::new(ufvk)),
+            })
         },
     )?;
 

@@ -287,7 +287,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
     type AccountId = AccountId;
-    type Account = (AccountId, Option<UnifiedFullViewingKey>);
+    type Account = wallet::Account;
 
     fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
         wallet::get_account_ids(self.conn.borrow())
