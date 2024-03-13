@@ -607,9 +607,17 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn cross_pool_exchange() {
+    fn pool_crossing_required() {
         use crate::wallet::orchard::tests::OrchardPoolTester;
 
-        testing::pool::cross_pool_exchange::<SaplingPoolTester, OrchardPoolTester>()
+        testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn fully_funded_fully_private() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
     }
 }

@@ -394,6 +394,61 @@ where
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
         loop {
+            #[cfg(feature = "orchard")]
+            let (sapling_input_total, orchard_input_total) = (
+                shielded_inputs
+                    .iter()
+                    .filter(|i| matches!(i.note(), Note::Sapling(_)))
+                    .map(|i| i.note().value())
+                    .sum::<Option<NonNegativeAmount>>()
+                    .ok_or(BalanceError::Overflow)?,
+                shielded_inputs
+                    .iter()
+                    .filter(|i| matches!(i.note(), Note::Orchard(_)))
+                    .map(|i| i.note().value())
+                    .sum::<Option<NonNegativeAmount>>()
+                    .ok_or(BalanceError::Overflow)?,
+            );
+
+            #[cfg(not(feature = "orchard"))]
+            let orchard_input_total = NonNegativeAmount::ZERO;
+
+            let sapling_inputs =
+                if sapling_outputs.is_empty() && orchard_input_total >= amount_required {
+                    // Avoid selecting Sapling inputs if we don't have Sapling outputs and the value is
+                    // fully covered by Orchard inputs.
+                    #[cfg(feature = "orchard")]
+                    shielded_inputs.retain(|i| matches!(i.note(), Note::Orchard(_)));
+                    vec![]
+                } else {
+                    #[allow(clippy::unnecessary_filter_map)]
+                    shielded_inputs
+                        .iter()
+                        .filter_map(|i| match i.note() {
+                            Note::Sapling(n) => Some((*i.internal_note_id(), n.value())),
+                            #[cfg(feature = "orchard")]
+                            Note::Orchard(_) => None,
+                        })
+                        .collect::<Vec<_>>()
+                };
+
+            #[cfg(feature = "orchard")]
+            let orchard_inputs =
+                if orchard_outputs.is_empty() && sapling_input_total >= amount_required {
+                    // Avoid selecting Orchard inputs if we don't have Orchard outputs and the value is
+                    // fully covered by Sapling inputs.
+                    shielded_inputs.retain(|i| matches!(i.note(), Note::Sapling(_)));
+                    vec![]
+                } else {
+                    shielded_inputs
+                        .iter()
+                        .filter_map(|i| match i.note() {
+                            Note::Sapling(_) => None,
+                            Note::Orchard(n) => Some((*i.internal_note_id(), n.value())),
+                        })
+                        .collect::<Vec<_>>()
+                };
+
             let balance = self.change_strategy.compute_balance(
                 params,
                 target_height,
@@ -401,27 +456,13 @@ where
                 &transparent_outputs,
                 &(
                     ::sapling::builder::BundleType::DEFAULT,
-                    &shielded_inputs
-                        .iter()
-                        .cloned()
-                        .filter_map(|i| match i.note() {
-                            Note::Sapling(n) => Some((*i.internal_note_id(), n.value())),
-                            #[cfg(feature = "orchard")]
-                            Note::Orchard(_) => None,
-                        })
-                        .collect::<Vec<_>>()[..],
+                    &sapling_inputs[..],
                     &sapling_outputs[..],
                 ),
                 #[cfg(feature = "orchard")]
                 &(
                     ::orchard::builder::BundleType::DEFAULT,
-                    &shielded_inputs
-                        .iter()
-                        .filter_map(|i| match i.note() {
-                            Note::Sapling(_) => None,
-                            Note::Orchard(n) => Some((*i.internal_note_id(), n.value())),
-                        })
-                        .collect::<Vec<_>>()[..],
+                    &orchard_inputs[..],
                     &orchard_outputs[..],
                 ),
                 &self.dust_output_policy,

@@ -308,7 +308,6 @@ mod tests {
                 }][..],
                 &Vec::<Infallible>::new()[..],
             ),
-            #[cfg(feature = "orchard")]
             &(
                 orchard::builder::BundleType::DEFAULT,
                 &Vec::<Infallible>::new()[..],

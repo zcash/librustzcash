@@ -604,9 +604,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cross_pool_exchange() {
+    fn pool_crossing_required() {
         use crate::wallet::sapling::tests::SaplingPoolTester;
 
-        testing::pool::cross_pool_exchange::<OrchardPoolTester, SaplingPoolTester>()
+        testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn fully_funded_fully_private() {
+        use crate::wallet::sapling::tests::SaplingPoolTester;
+
+        testing::pool::fully_funded_fully_private::<OrchardPoolTester, SaplingPoolTester>()
     }
 }

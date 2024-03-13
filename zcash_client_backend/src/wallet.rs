@@ -432,7 +432,7 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
     }
 }
 
-impl<'a, NoteRef> sapling_fees::InputView<NoteRef> for (NoteRef, sapling::value::NoteValue) {
+impl<NoteRef> sapling_fees::InputView<NoteRef> for (NoteRef, sapling::value::NoteValue) {
     fn note_id(&self) -> &NoteRef {
         &self.0
     }
@@ -460,7 +460,7 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling
 }
 
 #[cfg(feature = "orchard")]
-impl<'a, NoteRef> orchard_fees::InputView<NoteRef> for (NoteRef, orchard::value::NoteValue) {
+impl<NoteRef> orchard_fees::InputView<NoteRef> for (NoteRef, orchard::value::NoteValue) {
     fn note_id(&self) -> &NoteRef {
         &self.0
     }
