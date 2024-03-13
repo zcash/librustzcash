@@ -1284,7 +1284,7 @@ mod tests {
     fn account_produces_expected_ua_sequence() {
         use zcash_client_backend::data_api::AccountBirthday;
 
-        use crate::wallet::{get_account, Account};
+        use crate::wallet::{get_account, AccountType};
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1301,7 +1301,10 @@ mod tests {
             .unwrap();
         assert_matches!(
             get_account(&db_data, account_id),
-            Ok(Some(Account::Zip32(hdaccount))) if hdaccount.account_index() == zip32::AccountId::ZERO
+            Ok(Some(account)) if matches!(
+                account.kind,
+                AccountType::Derived{account_index, ..} if account_index == zip32::AccountId::ZERO,
+            )
         );
 
         for tv in &test_vectors::UNIFIED[..3] {

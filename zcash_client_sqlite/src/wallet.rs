@@ -140,82 +140,71 @@ pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
 /// This tracks the allowed values of the `account_type` column of the `accounts` table
 /// and should not be made public.
-enum AccountType {
-    Zip32,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum AccountType {
+    /// An account derived from a known seed.
+    Derived {
+        seed_fingerprint: HdSeedFingerprint,
+        account_index: zip32::AccountId,
+    },
+
+    /// An account imported from a viewing key.
     Imported,
 }
 
-impl TryFrom<u32> for AccountType {
-    type Error = ();
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(AccountType::Zip32),
-            1 => Ok(AccountType::Imported),
-            _ => Err(()),
-        }
+fn parse_account_kind(
+    account_type: u32,
+    hd_seed_fingerprint: Option<[u8; 32]>,
+    hd_account_index: Option<u32>,
+) -> Result<AccountType, SqliteClientError> {
+    match (account_type, hd_seed_fingerprint, hd_account_index) {
+        (0, Some(seed_fp), Some(account_index)) => Ok(AccountType::Derived {
+            seed_fingerprint: HdSeedFingerprint::from_bytes(seed_fp),
+            account_index: zip32::AccountId::try_from(account_index).map_err(|_| {
+                SqliteClientError::CorruptedData(
+                    "ZIP-32 account ID from wallet DB is out of range.".to_string(),
+                )
+            })?,
+        }),
+        (1, None, None) => Ok(AccountType::Imported),
+        (0, None, None) | (1, Some(_), Some(_)) => Err(SqliteClientError::CorruptedData(
+            "Wallet DB account_type constraint violated".to_string(),
+        )),
+        (_, _, _) => Err(SqliteClientError::CorruptedData(
+            "Unrecognized account_type".to_string(),
+        )),
     }
 }
 
-impl From<AccountType> for u32 {
-    fn from(value: AccountType) -> Self {
-        match value {
-            AccountType::Zip32 => 0,
-            AccountType::Imported => 1,
-        }
+fn account_kind_code(value: AccountType) -> u32 {
+    match value {
+        AccountType::Derived { .. } => 0,
+        AccountType::Imported => 1,
     }
 }
 
-/// Describes the key inputs and UFVK for an account that was derived from a ZIP-32 HD seed and account index.
+/// The viewing key that an [`Account`] has available to it.
 #[derive(Debug, Clone)]
-pub(crate) struct HdSeedAccount(
-    HdSeedFingerprint,
-    zip32::AccountId,
-    Box<UnifiedFullViewingKey>,
-);
-
-impl HdSeedAccount {
-    pub fn new(
-        hd_seed_fingerprint: HdSeedFingerprint,
-        account_index: zip32::AccountId,
-        ufvk: UnifiedFullViewingKey,
-    ) -> Self {
-        Self(hd_seed_fingerprint, account_index, Box::new(ufvk))
-    }
-
-    /// Returns the HD seed fingerprint for this account.
-    pub fn hd_seed_fingerprint(&self) -> &HdSeedFingerprint {
-        &self.0
-    }
-
-    /// Returns the ZIP-32 account index for this account.
-    pub fn account_index(&self) -> zip32::AccountId {
-        self.1
-    }
-
-    /// Returns the Unified Full Viewing Key for this account.
-    pub fn ufvk(&self) -> &UnifiedFullViewingKey {
-        &self.2
-    }
-}
-
-/// Represents an arbitrary account for which the seed and ZIP-32 account ID are not known
-/// and may not have been involved in creating this account.
-#[derive(Debug, Clone)]
-pub(crate) enum ImportedAccount {
-    /// An account that was imported via its full viewing key.
+pub(crate) enum ViewingKey {
+    /// A full viewing key.
+    ///
+    /// This is available to derived accounts, as well as accounts directly imported as
+    /// full viewing keys.
     Full(Box<UnifiedFullViewingKey>),
-    /// An account that was imported via its incoming viewing key.
+
+    /// An incoming viewing key.
+    ///
+    /// Accounts that have this kind of viewing key cannot be used in wallet contexts,
+    /// because they are unable to maintain an accurate balance.
     Incoming(Uivk),
 }
 
-/// Describes an account in terms of its UVK or ZIP-32 origins.
+/// An account stored in a `zcash_client_sqlite` database.
 #[derive(Debug, Clone)]
-pub(crate) enum Account {
-    /// Inputs for a ZIP-32 HD account.
-    Zip32(HdSeedAccount),
-    /// Inputs for an imported account.
-    Imported(ImportedAccount),
+pub(crate) struct Account {
+    account_id: AccountId,
+    pub(crate) kind: AccountType,
+    viewing_key: ViewingKey,
 }
 
 impl Account {
@@ -228,10 +217,35 @@ impl Account {
         &self,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
+        match &self.viewing_key {
+            ViewingKey::Full(ufvk) => ufvk.default_address(request),
+            ViewingKey::Incoming(_uivk) => todo!(),
+        }
+    }
+}
+
+impl zcash_client_backend::data_api::Account<AccountId> for Account {
+    fn id(&self) -> AccountId {
+        self.account_id
+    }
+
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
+        self.viewing_key.ufvk()
+    }
+}
+
+impl ViewingKey {
+    fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         match self {
-            Account::Zip32(HdSeedAccount(_, _, ufvk)) => ufvk.default_address(request),
-            Account::Imported(ImportedAccount::Full(ufvk)) => ufvk.default_address(request),
-            Account::Imported(ImportedAccount::Incoming(_uivk)) => todo!(),
+            ViewingKey::Full(ufvk) => Some(ufvk),
+            ViewingKey::Incoming(_) => None,
+        }
+    }
+
+    fn uivk_str(&self, params: &impl Parameters) -> Result<String, SqliteClientError> {
+        match self {
+            ViewingKey::Full(ufvk) => ufvk_to_uivk(ufvk, params),
+            ViewingKey::Incoming(uivk) => Ok(uivk.encode(&params.network_type())),
         }
     }
 }
@@ -291,44 +305,6 @@ pub(crate) fn max_zip32_account_index(
     )
 }
 
-struct AccountSqlValues<'a> {
-    account_type: u32,
-    hd_seed_fingerprint: Option<&'a [u8]>,
-    hd_account_index: Option<u32>,
-    ufvk: Option<&'a UnifiedFullViewingKey>,
-    uivk: String,
-}
-
-/// Returns (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk) for a given account.
-fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
-    account: &'a Account,
-    params: &P,
-) -> Result<AccountSqlValues<'a>, SqliteClientError> {
-    Ok(match account {
-        Account::Zip32(hdaccount) => AccountSqlValues {
-            account_type: AccountType::Zip32.into(),
-            hd_seed_fingerprint: Some(hdaccount.hd_seed_fingerprint().as_bytes()),
-            hd_account_index: Some(hdaccount.account_index().into()),
-            ufvk: Some(hdaccount.ufvk()),
-            uivk: ufvk_to_uivk(hdaccount.ufvk(), params)?,
-        },
-        Account::Imported(ImportedAccount::Full(ufvk)) => AccountSqlValues {
-            account_type: AccountType::Imported.into(),
-            hd_seed_fingerprint: None,
-            hd_account_index: None,
-            ufvk: Some(ufvk),
-            uivk: ufvk_to_uivk(ufvk, params)?,
-        },
-        Account::Imported(ImportedAccount::Incoming(uivk)) => AccountSqlValues {
-            account_type: AccountType::Imported.into(),
-            hd_seed_fingerprint: None,
-            hd_account_index: None,
-            ufvk: None,
-            uivk: uivk.encode(&params.network_type()),
-        },
-    })
-}
-
 pub(crate) fn ufvk_to_uivk<P: consensus::Parameters>(
     ufvk: &UnifiedFullViewingKey,
     params: &P,
@@ -357,20 +333,27 @@ pub(crate) fn ufvk_to_uivk<P: consensus::Parameters>(
 pub(crate) fn add_account<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
-    account: Account,
+    kind: AccountType,
+    viewing_key: ViewingKey,
     birthday: AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
-    let args = get_sql_values_for_account_parameters(&account, params)?;
+    let (hd_seed_fingerprint, hd_account_index) = match kind {
+        AccountType::Derived {
+            seed_fingerprint,
+            account_index,
+        } => (Some(seed_fingerprint), Some(account_index)),
+        AccountType::Imported => (None, None),
+    };
 
-    let orchard_item = args
-        .ufvk
+    let orchard_item = viewing_key
+        .ufvk()
         .and_then(|ufvk| ufvk.orchard().map(|k| k.to_bytes()));
-    let sapling_item = args
-        .ufvk
+    let sapling_item = viewing_key
+        .ufvk()
         .and_then(|ufvk| ufvk.sapling().map(|k| k.to_bytes()));
     #[cfg(feature = "transparent-inputs")]
-    let transparent_item = args
-        .ufvk
+    let transparent_item = viewing_key
+        .ufvk()
         .and_then(|ufvk| ufvk.transparent().map(|k| k.serialize()));
     #[cfg(not(feature = "transparent-inputs"))]
     let transparent_item: Option<Vec<u8>> = None;
@@ -392,11 +375,11 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         RETURNING id;
         "#,
         named_params![
-            ":account_type": args.account_type,
-            ":hd_seed_fingerprint": args.hd_seed_fingerprint,
-            ":hd_account_index": args.hd_account_index,
-            ":ufvk": args.ufvk.map(|ufvk| ufvk.encode(params)),
-            ":uivk": args.uivk,
+            ":account_type": account_kind_code(kind),
+            ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.as_bytes()),
+            ":hd_account_index": hd_account_index.map(u32::from),
+            ":ufvk": viewing_key.ufvk().map(|ufvk| ufvk.encode(params)),
+            ":uivk": viewing_key.uivk_str(params)?,
             ":orchard_fvk_item_cache": orchard_item,
             ":sapling_fvk_item_cache": sapling_item,
             ":p2pkh_fvk_item_cache": transparent_item,
@@ -405,6 +388,12 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         ],
         |row| Ok(AccountId(row.get(0)?)),
     )?;
+
+    let account = Account {
+        account_id,
+        kind,
+        viewing_key,
+    };
 
     // If a birthday frontier is available, insert it into the note commitment tree. If the
     // birthday frontier is the empty frontier, we don't need to do anything.
@@ -754,18 +743,18 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
             ],
             |row| {
                 let account_id = row.get::<_, u32>(0).map(AccountId)?;
-                Ok((
-                    account_id,
-                    row.get::<_, Option<String>>(1)?
-                        .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
-                        .transpose()
-                        .map_err(|e| {
-                            SqliteClientError::CorruptedData(format!(
-                                "Could not decode unified full viewing key for account {:?}: {}",
-                                account_id, e
-                            ))
-                        })?,
-                ))
+
+                // We looked up the account by FVK components, so the UFVK column must be
+                // non-null.
+                let ufvk_str: String = row.get(1)?;
+                let ufvk = UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
+                    SqliteClientError::CorruptedData(format!(
+                        "Could not decode unified full viewing key for account {:?}: {}",
+                        account_id, e
+                    ))
+                })?;
+
+                Ok((account_id, Some(ufvk)))
             },
         )?
         .collect::<Result<Vec<_>, _>>()?;
@@ -785,7 +774,7 @@ pub(crate) fn get_seed_account<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     seed: &HdSeedFingerprint,
-    account_id: zip32::AccountId,
+    account_index: zip32::AccountId,
 ) -> Result<Option<(AccountId, Option<UnifiedFullViewingKey>)>, SqliteClientError> {
     let mut stmt = conn.prepare(
         "SELECT id, ufvk
@@ -797,22 +786,23 @@ pub(crate) fn get_seed_account<P: consensus::Parameters>(
     let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
         named_params![
             ":hd_seed_fingerprint": seed.as_bytes(),
-            ":hd_account_index": u32::from(account_id),
+            ":hd_account_index": u32::from(account_index),
         ],
         |row| {
             let account_id = row.get::<_, u32>(0).map(AccountId)?;
-            Ok((
-                account_id,
-                row.get::<_, Option<String>>(1)?
-                    .map(|ufvk_str| UnifiedFullViewingKey::decode(params, &ufvk_str))
-                    .transpose()
-                    .map_err(|e| {
-                        SqliteClientError::CorruptedData(format!(
-                            "Could not decode unified full viewing key for account {:?}: {}",
-                            account_id, e
-                        ))
-                    })?,
-            ))
+            let ufvk = match row.get::<_, Option<String>>(1)? {
+                None => Err(SqliteClientError::CorruptedData(format!(
+                    "Missing unified full viewing key for derived account {:?}",
+                    account_id,
+                ))),
+                Some(ufvk_str) => UnifiedFullViewingKey::decode(params, &ufvk_str).map_err(|e| {
+                    SqliteClientError::CorruptedData(format!(
+                        "Could not decode unified full viewing key for account {:?}: {}",
+                        account_id, e
+                    ))
+                }),
+            }?;
+            Ok((account_id, Some(ufvk)))
         },
     )?;
 
@@ -1506,7 +1496,7 @@ pub(crate) fn get_account<C: Borrow<rusqlite::Connection>, P: Parameters>(
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut sql = db.conn.borrow().prepare_cached(
         r#"
-        SELECT account_type, ufvk, uivk, hd_seed_fingerprint, hd_account_index
+        SELECT account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk
         FROM accounts
         WHERE id = :account_id
     "#,
@@ -1516,51 +1506,36 @@ pub(crate) fn get_account<C: Borrow<rusqlite::Connection>, P: Parameters>(
     let row = result.next()?;
     match row {
         Some(row) => {
-            let account_type: AccountType =
-                row.get::<_, u32>("account_type")?.try_into().map_err(|_| {
-                    SqliteClientError::CorruptedData("Unrecognized account_type".to_string())
-                })?;
+            let kind = parse_account_kind(
+                row.get("account_type")?,
+                row.get("hd_seed_fingerprint")?,
+                row.get("hd_account_index")?,
+            )?;
+
             let ufvk_str: Option<String> = row.get("ufvk")?;
-            let ufvk = if let Some(ufvk_str) = ufvk_str {
-                Some(
+            let viewing_key = if let Some(ufvk_str) = ufvk_str {
+                ViewingKey::Full(Box::new(
                     UnifiedFullViewingKey::decode(&db.params, &ufvk_str[..])
                         .map_err(SqliteClientError::BadAccountData)?,
-                )
+                ))
             } else {
-                None
+                let uivk_str: String = row.get("uivk")?;
+                let (network, uivk) = Uivk::decode(&uivk_str).map_err(|e| {
+                    SqliteClientError::CorruptedData(format!("Failure to decode UIVK: {e}"))
+                })?;
+                if network != db.params.network_type() {
+                    return Err(SqliteClientError::CorruptedData(
+                        "UIVK network type does not match wallet network type".to_string(),
+                    ));
+                }
+                ViewingKey::Incoming(uivk)
             };
-            let uivk_str: String = row.get("uivk")?;
-            let (network, uivk) = Uivk::decode(&uivk_str).map_err(|e| {
-                SqliteClientError::CorruptedData(format!("Failure to decode UIVK: {e}"))
-            })?;
-            if network != db.params.network_type() {
-                return Err(SqliteClientError::CorruptedData(
-                    "UIVK network type does not match wallet network type".to_string(),
-                ));
-            }
 
-            match account_type {
-                AccountType::Zip32 => Ok(Some(Account::Zip32(HdSeedAccount::new(
-                    HdSeedFingerprint::from_bytes(row.get("hd_seed_fingerprint")?),
-                    zip32::AccountId::try_from(row.get::<_, u32>("hd_account_index")?).map_err(
-                        |_| {
-                            SqliteClientError::CorruptedData(
-                                "ZIP-32 account ID from db is out of range.".to_string(),
-                            )
-                        },
-                    )?,
-                    ufvk.ok_or_else(|| {
-                        SqliteClientError::CorruptedData(
-                            "ZIP-32 account is missing a full viewing key".to_string(),
-                        )
-                    })?,
-                )))),
-                AccountType::Imported => Ok(Some(Account::Imported(if let Some(ufvk) = ufvk {
-                    ImportedAccount::Full(Box::new(ufvk))
-                } else {
-                    ImportedAccount::Incoming(uivk)
-                }))),
-            }
+            Ok(Some(Account {
+                account_id,
+                kind,
+                viewing_key,
+            }))
         }
         None => Ok(None),
     }
@@ -2725,7 +2700,7 @@ mod tests {
 
     use crate::{
         testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::{get_account, Account},
+        wallet::{get_account, AccountType},
         AccountId,
     };
 
@@ -2877,8 +2852,8 @@ mod tests {
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(
-            account_parameters,
-            Account::Zip32(hdaccount) if hdaccount.account_index() == expected_account_index
+            account_parameters.kind,
+            AccountType::Derived{account_index, ..} if account_index == expected_account_index
         );
     }
 

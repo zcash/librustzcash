@@ -100,7 +100,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    Account, HdSeedAccount, SubtreeScanProgress,
+    AccountType, SubtreeScanProgress,
 };
 
 #[cfg(test)]
@@ -307,16 +307,19 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = wallet::get_account(self, account_id)? {
-            if let Account::Zip32(hdaccount) = account {
-                let seed_fingerprint_match =
-                    HdSeedFingerprint::from_seed(seed) == *hdaccount.hd_seed_fingerprint();
+            if let AccountType::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.kind
+            {
+                let seed_fingerprint_match = HdSeedFingerprint::from_seed(seed) == seed_fingerprint;
 
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
                     &seed.expose_secret()[..],
-                    hdaccount.account_index(),
+                    account_index,
                 )
-                .map_err(|_| SqliteClientError::KeyDerivationError(hdaccount.account_index()))?;
+                .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
 
                 // Keys are not comparable with `Eq`, but addresses are, so we derive what should
                 // be equivalent addresses for each key and use those to check for key equality.
@@ -326,7 +329,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                         Ok(usk
                             .to_unified_full_viewing_key()
                             .default_address(ua_request)?
-                            == hdaccount.ufvk().default_address(ua_request)?)
+                            == account.default_address(ua_request)?)
                     },
                 )?;
 
@@ -490,8 +493,8 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let seed_id = HdSeedFingerprint::from_seed(seed);
-            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_id)?
+            let seed_fingerprint = HdSeedFingerprint::from_seed(seed);
+            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
                 .unwrap_or(zip32::AccountId::ZERO);
@@ -501,8 +504,16 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let account = Account::Zip32(HdSeedAccount::new(seed_id, account_index, ufvk));
-            let account_id = wallet::add_account(wdb.conn.0, &wdb.params, account, birthday)?;
+            let account_id = wallet::add_account(
+                wdb.conn.0,
+                &wdb.params,
+                AccountType::Derived {
+                    seed_fingerprint,
+                    account_index,
+                },
+                wallet::ViewingKey::Full(Box::new(ufvk)),
+                birthday,
+            )?;
 
             Ok((account_id, usk))
         })

@@ -1,6 +1,6 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{init::WalletMigrationError, ufvk_to_uivk, AccountType};
+use crate::wallet::{account_kind_code, init::WalletMigrationError, ufvk_to_uivk, AccountType};
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
@@ -44,8 +44,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        let account_type_zip32 = u32::from(AccountType::Zip32);
-        let account_type_imported = u32::from(AccountType::Imported);
+        let account_type_derived = account_kind_code(AccountType::Derived {
+            seed_fingerprint: HdSeedFingerprint::from_bytes([0; 32]),
+            account_index: zip32::AccountId::ZERO,
+        });
+        let account_type_imported = account_kind_code(AccountType::Imported);
         transaction.execute_batch(
             &format!(r#"
             PRAGMA foreign_keys = OFF;
@@ -53,7 +56,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             CREATE TABLE accounts_new (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_type INTEGER NOT NULL DEFAULT {account_type_zip32},
+                account_type INTEGER NOT NULL DEFAULT {account_type_derived},
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
                 ufvk TEXT,
@@ -64,7 +67,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
                 CHECK (
-                    (account_type = {account_type_zip32} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
+                    (account_type = {account_type_derived} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
                     OR
                     (account_type = {account_type_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
                 )
@@ -85,7 +88,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let mut rows = q.query([])?;
                 while let Some(row) = rows.next()? {
                     let account_index: u32 = row.get("account")?;
-                    let account_type = u32::from(AccountType::Zip32);
                     let birthday_height: u32 = row.get("birthday_height")?;
                     let recover_until_height: Option<u32> = row.get("recover_until_height")?;
 
@@ -142,7 +144,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         "#,
                         named_params![
                             ":account_id": account_id,
-                            ":account_type": account_type,
+                            ":account_type": account_type_derived,
                             ":seed_id": seed_id.as_bytes(),
                             ":account_index": account_index,
                             ":ufvk": ufvk,
