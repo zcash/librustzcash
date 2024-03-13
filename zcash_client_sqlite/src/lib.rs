@@ -289,6 +289,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     type AccountId = AccountId;
     type Account = (AccountId, Option<UnifiedFullViewingKey>);
 
+    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
+        wallet::get_account_ids(self.conn.borrow())
+    }
+
+    fn get_seed_account(
+        &self,
+        seed: &HdSeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_seed_account(self.conn.borrow(), &self.params, seed, account_id)
+    }
+
     fn validate_seed(
         &self,
         account_id: Self::AccountId,
@@ -333,10 +345,51 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+    }
+
+    fn get_current_address(
+        &self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        wallet::get_current_address(self.conn.borrow(), &self.params, account)
+            .map(|res| res.map(|(addr, _)| addr))
+    }
+
+    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error> {
+        wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
+    }
+
+    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::wallet_birthday(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn get_wallet_summary(
+        &self,
+        min_confirmations: u32,
+    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+        // This will return a runtime error if we call `get_wallet_summary` from two
+        // threads at the same time, as transactions cannot nest.
+        wallet::get_wallet_summary(
+            &self.conn.borrow().unchecked_transaction()?,
+            &self.params,
+            min_confirmations,
+            &SubtreeScanProgress,
+        )
+    }
+
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
             .map(|h| h.map(|range| *range.end()))
             .map_err(SqliteClientError::from)
+    }
+
+    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        wallet::get_block_hash(self.conn.borrow(), block_height).map_err(SqliteClientError::from)
     }
 
     fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
@@ -345,6 +398,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
         wallet::block_fully_scanned(self.conn.borrow(), &self.params)
+    }
+
+    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
+        wallet::get_max_height_hash(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
@@ -368,67 +425,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_min_unspent_height(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
-    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        wallet::get_block_hash(self.conn.borrow(), block_height).map_err(SqliteClientError::from)
-    }
-
-    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-        wallet::get_max_height_hash(self.conn.borrow()).map_err(SqliteClientError::from)
-    }
-
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
-    }
-
-    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::wallet_birthday(self.conn.borrow()).map_err(SqliteClientError::from)
-    }
-
-    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error> {
-        wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
-    }
-
-    fn get_current_address(
-        &self,
-        account: AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_current_address(self.conn.borrow(), &self.params, account)
-            .map(|res| res.map(|(addr, _)| addr))
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
         wallet::get_unified_full_viewing_keys(self.conn.borrow(), &self.params)
-    }
-
-    fn get_account_for_ufvk(
-        &self,
-        ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
-    }
-
-    fn get_seed_account(
-        &self,
-        seed: &HdSeedFingerprint,
-        account_id: zip32::AccountId,
-    ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_seed_account(self.conn.borrow(), &self.params, seed, account_id)
-    }
-
-    fn get_wallet_summary(
-        &self,
-        min_confirmations: u32,
-    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
-        // This will return a runtime error if we call `get_wallet_summary` from two
-        // threads at the same time, as transactions cannot nest.
-        wallet::get_wallet_summary(
-            &self.conn.borrow().unchecked_transaction()?,
-            &self.params,
-            min_confirmations,
-            &SubtreeScanProgress,
-        )
     }
 
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
@@ -474,10 +478,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         max_height: BlockHeight,
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         wallet::get_transparent_balances(self.conn.borrow(), &self.params, account, max_height)
-    }
-
-    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
-        wallet::get_account_ids(self.conn.borrow())
     }
 }
 
@@ -542,6 +542,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 None => Ok(None),
             },
         )
+    }
+
+    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+        let tx = self.conn.transaction()?;
+        wallet::scanning::update_chain_tip(&tx, &self.params, tip_height)?;
+        tx.commit()?;
+        Ok(())
     }
 
     #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height()))))]
@@ -900,11 +907,17 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         })
     }
 
-    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
-        let tx = self.conn.transaction()?;
-        wallet::scanning::update_chain_tip(&tx, &self.params, tip_height)?;
-        tx.commit()?;
-        Ok(())
+    fn put_received_transparent_utxo(
+        &mut self,
+        _output: &WalletTransparentOutput,
+    ) -> Result<Self::UtxoRef, Self::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::put_received_transparent_utxo(&self.conn, &self.params, _output);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 
     fn store_decrypted_tx(
@@ -1161,19 +1174,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         self.transactionally(|wdb| {
             wallet::truncate_to_height(wdb.conn.0, &wdb.params, block_height)
         })
-    }
-
-    fn put_received_transparent_utxo(
-        &mut self,
-        _output: &WalletTransparentOutput,
-    ) -> Result<Self::UtxoRef, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::put_received_transparent_utxo(&self.conn, &self.params, _output);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
     }
 }
 
