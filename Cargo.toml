@@ -120,3 +120,6 @@ zip32 = "0.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+orchard = { git = "https://github.com/zcash/orchard", rev = "e74879dd0ad0918f4ffe0826e03905cd819981bd" }

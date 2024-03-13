@@ -77,7 +77,6 @@ use super::BlockDb;
 #[cfg(feature = "orchard")]
 use {
     group::ff::{Field, PrimeField},
-    orchard::note_encryption::{OrchardDomain, OrchardNoteEncryption},
     pasta_curves::pallas,
     zcash_client_backend::proto::compact_formats::CompactOrchardAction,
 };
@@ -1095,40 +1094,28 @@ fn compact_sapling_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
 /// Returns the `CompactOrchardAction` and the new note.
 #[cfg(feature = "orchard")]
 fn compact_orchard_action<R: RngCore + CryptoRng>(
-    nullifier: orchard::note::Nullifier,
+    nf_old: orchard::note::Nullifier,
     recipient: orchard::Address,
     value: NonNegativeAmount,
     ovk: Option<orchard::keys::OutgoingViewingKey>,
     rng: &mut R,
 ) -> (CompactOrchardAction, orchard::Note) {
-    let rseed = {
-        loop {
-            let mut bytes = [0; 32];
-            rng.fill_bytes(&mut bytes);
-            let rseed = orchard::note::RandomSeed::from_bytes(bytes, &nullifier);
-            if rseed.is_some().into() {
-                break rseed.unwrap();
-            }
-        }
-    };
-    let note = orchard::Note::from_parts(
+    use zcash_note_encryption::ShieldedOutput;
+
+    let (compact_action, note) = orchard::note_encryption::testing::fake_compact_action(
+        rng,
+        nf_old,
         recipient,
         orchard::value::NoteValue::from_raw(value.into_u64()),
-        nullifier,
-        rseed,
-    )
-    .unwrap();
-    let encryptor = OrchardNoteEncryption::new(ovk, note, *MemoBytes::empty().as_array());
-    let cmx = orchard::note::ExtractedNoteCommitment::from(note.commitment());
-    let ephemeral_key = OrchardDomain::epk_bytes(encryptor.epk()).0.to_vec();
-    let enc_ciphertext = encryptor.encrypt_note_plaintext();
+        ovk,
+    );
 
     (
         CompactOrchardAction {
-            nullifier: nullifier.to_bytes().to_vec(),
-            cmx: cmx.to_bytes().to_vec(),
-            ephemeral_key,
-            ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+            nullifier: compact_action.nullifier().to_bytes().to_vec(),
+            cmx: compact_action.cmx().to_bytes().to_vec(),
+            ephemeral_key: compact_action.ephemeral_key().0.to_vec(),
+            ciphertext: compact_action.enc_ciphertext().as_ref()[..52].to_vec(),
         },
         note,
     )

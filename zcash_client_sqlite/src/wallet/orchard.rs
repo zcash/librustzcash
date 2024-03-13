@@ -1,7 +1,7 @@
 use incrementalmerkletree::Position;
 use orchard::{
     keys::Diversifier,
-    note::{Note, Nullifier, RandomSeed},
+    note::{Note, Nullifier, RandomSeed, Rho},
 };
 use rusqlite::{named_params, params, Connection, Row};
 
@@ -121,7 +121,7 @@ fn to_spendable_note<P: consensus::Parameters>(
 
     let rho = {
         let rho_bytes: [u8; 32] = row.get(5)?;
-        Option::from(Nullifier::from_bytes(&rho_bytes))
+        Option::from(Rho::from_bytes(&rho_bytes))
             .ok_or_else(|| SqliteClientError::CorruptedData("Invalid rho.".to_string()))
     }?;
 
