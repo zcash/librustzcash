@@ -1427,7 +1427,10 @@ impl BlockCache for FsBlockDb {
     }
 
     /// Returns the height of highest block known to the block cache.
-    fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+    fn get_tip_height(
+        &self,
+        range: Option<&ScanRange>,
+    ) -> Result<Option<BlockHeight>, Self::Error> {
         // TODO: Implement cache tip for a specified range.
         if range.is_some() {
             panic!("Cache tip for a specified range not currently implemented.")
@@ -1678,7 +1681,7 @@ mod tests {
             .build();
 
         // The BlockMeta DB starts off empty.
-        assert_eq!(st.cache().cache_tip(None).unwrap(), None);
+        assert_eq!(st.cache().get_tip_height(None).unwrap(), None);
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
@@ -1697,7 +1700,7 @@ mod tests {
         );
 
         // The BlockMeta DB now sees blocks up to height 2.
-        assert_eq!(st.cache().cache_tip(None).unwrap(), Some(h2),);
+        assert_eq!(st.cache().get_tip_height(None).unwrap(), Some(h2),);
         assert_eq!(
             st.cache().find_block(h1).unwrap().map(|meta| meta.height),
             Some(h1)
@@ -1710,7 +1713,7 @@ mod tests {
 
         // Rewinding to height 1 should cause the metadata for height 2 to be deleted.
         st.cache().truncate(h1).unwrap();
-        assert_eq!(st.cache().cache_tip(None).unwrap(), Some(h1),);
+        assert_eq!(st.cache().get_tip_height(None).unwrap(), Some(h1),);
         assert_eq!(
             st.cache().find_block(h1).unwrap().map(|meta| meta.height),
             Some(h1)

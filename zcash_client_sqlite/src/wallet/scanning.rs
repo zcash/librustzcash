@@ -600,7 +600,7 @@ pub(crate) mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::{pool::ShieldedPoolTester, AddressType, BlockCache, TestBuilder, TestState},
+        testing::{pool::ShieldedPoolTester, AddressType, TestBlockCache, TestBuilder, TestState},
         wallet::{
             sapling::tests::SaplingPoolTester,
             scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
@@ -756,7 +756,7 @@ pub(crate) mod tests {
 
     pub(crate) fn test_with_nu5_birthday_offset<T: ShieldedPoolTester>(
         offset: u32,
-    ) -> (TestState<BlockCache>, T::Fvk, AccountBirthday, u32) {
+    ) -> (TestState<TestBlockCache>, T::Fvk, AccountBirthday, u32) {
         let st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(|network| {

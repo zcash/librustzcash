@@ -2394,7 +2394,7 @@ mod tests {
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
-        testing::{AddressType, BlockCache, TestBuilder, TestState},
+        testing::{AddressType, TestBlockCache, TestBuilder, TestState},
         wallet::{get_account, Account},
         AccountId,
     };

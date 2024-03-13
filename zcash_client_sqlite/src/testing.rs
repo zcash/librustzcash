@@ -59,7 +59,7 @@ use zcash_primitives::{
 use zcash_protocol::local_consensus::LocalNetwork;
 
 use crate::{
-    chain::{self, init::init_cache_database},
+    chain::init::init_cache_database,
     error::SqliteClientError,
     wallet::{
         commitment_tree, get_wallet_summary, init::init_wallet_db, sapling::tests::test_prover,
@@ -464,8 +464,7 @@ where
     #[allow(dead_code)]
     pub(crate) fn reset_latest_cached_block(&mut self) {
         self.cache
-            .block_source()
-            .with_blocks::<_, Infallible>(None, None, |block: CompactBlock| {
+            .with_blocks(None, None, |block: CompactBlock| {
                 let chain_metadata = block.chain_metadata.unwrap();
                 self.latest_cached_block = Some(CachedBlock::at(
                     BlockHeight::from_u32(block.height.try_into().unwrap()),
@@ -1399,14 +1398,19 @@ impl BlockCache for TestBlockCache {
     }
 
     /// Returns the height of highest block known to the block cache.
-    fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+    fn get_tip_height(
+        &self,
+        range: Option<&ScanRange>,
+    ) -> Result<Option<BlockHeight>, Self::Error> {
         // TODO: Implement cache tip for a specified range.
         if range.is_some() {
             panic!("Cache tip for a specified range not currently implemented.")
         }
 
-        chain::blockmetadb_get_max_cached_height(&self.db_cache.0.lock().unwrap())
-            .map_err(SqliteClientError::DbError)
+        // TODO: implement get_tip_height for TestBlockCache
+        // chain::blockmetadb_get_max_cached_height(&self.db_cache.0.lock().unwrap())
+        //     .map_err(SqliteClientError::DbError)
+        todo!()
     }
 
     /// Inserts a compact block into the block cache.

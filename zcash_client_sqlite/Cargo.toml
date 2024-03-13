@@ -57,6 +57,9 @@ subtle.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Sync engine
+tokio = { version = "1.21.0", optional = true, features = ["fs", "macros"] }
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree = { workspace = true, features = ["legacy-api"] }
@@ -70,9 +73,6 @@ schemer = "0.2"
 schemer-rusqlite = "0.2.2"
 time = "0.3.22"
 uuid = "1.1"
-
-# - Sync engine
-tokio.workspace = true
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -126,7 +126,7 @@ transparent-inputs = [
 #! ### Experimental features
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
-unstable = ["zcash_client_backend/unstable"]
+unstable = ["zcash_client_backend/unstable", "dep:tokio"]
 
 [lib]
 bench = false

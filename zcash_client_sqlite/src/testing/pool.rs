@@ -45,7 +45,7 @@ use zcash_protocol::consensus::BlockHeight;
 use super::TestFvk;
 use crate::{
     error::SqliteClientError,
-    testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
+    testing::{input_selector, AddressType, TestBlockCache, TestBuilder, TestState},
     wallet::{
         block_max_scanned, commitment_tree, parse_scope,
         scanning::tests::test_with_nu5_birthday_offset, truncate_to_height,
@@ -139,7 +139,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance
@@ -286,7 +286,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(65000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance
@@ -490,7 +490,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(50000);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h1, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -512,7 +512,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     );
 
     // Add more funds to the wallet in a second note
-    let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h2, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h2, 1);
 
     // Verified balance does not include the second note
@@ -581,7 +581,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     );
 
     // Mine block 11 so that the second note becomes verified
-    let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h11, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h11, 1);
 
     // Total balance is value * number of blocks scanned (11).
@@ -614,7 +614,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
         .create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
         .unwrap()[0];
 
-    let (h, _) = st.generate_next_block_including(txid);
+    let h = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
 
     // TODO: send to an account so that we can check its balance.
@@ -642,7 +642,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(50000);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h1, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -722,7 +722,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     );
 
     // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
-    let (h43, _, _) = st.generate_next_block(
+    let (h43, _) = st.generate_next_block(
         &T::sk_to_fvk(&T::sk(&[42; 32])),
         AddressType::DefaultExternal,
         value,
@@ -753,7 +753,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
         .create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal)
         .unwrap()[0];
 
-    let (h, _) = st.generate_next_block_including(txid2);
+    let h = st.generate_next_block_including(txid2);
     st.scan_cached_blocks(h, 1);
 
     // TODO: send to an account so that we can check its balance.
@@ -774,7 +774,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(50000);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h1, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -790,7 +790,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     let fee_rule = StandardFeeRule::PreZip313;
 
     #[allow(clippy::type_complexity)]
-    let send_and_recover_with_policy = |st: &mut TestState<BlockCache>,
+    let send_and_recover_with_policy = |st: &mut TestState<TestBlockCache>,
                                         ovk_policy|
      -> Result<
         Option<(Note, Address, MemoBytes)>,
@@ -869,7 +869,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -915,7 +915,7 @@ pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note owned by the internal spending key
     let value = NonNegativeAmount::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
+    let (h, _) = st.generate_next_block(&dfvk, AddressType::Internal, value);
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -991,7 +991,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::from_u64(100000).unwrap();
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance
@@ -1050,7 +1050,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     // We spent the only note so we only have pending change.
     assert_eq!(st.get_total_balance(account), pending_change);
 
-    let (h, _) = st.generate_next_block_including(txid);
+    let h = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(st.get_total_balance(account2), amount_sent,);
@@ -1090,7 +1090,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let dfvk = T::test_account_fvk(&st);
 
     // Add funds to the wallet
-    let (h1, _, _) = st.generate_next_block(
+    let (h1, _) = st.generate_next_block(
         &dfvk,
         AddressType::Internal,
         NonNegativeAmount::const_from_u64(50000),
@@ -1160,7 +1160,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
         )
         .unwrap()[0];
 
-    let (h, _) = st.generate_next_block_including(txid);
+    let h = st.generate_next_block_including(txid);
     st.scan_cached_blocks(h, 1);
 
     // TODO: send to an account so that we can check its balance.
@@ -1190,7 +1190,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     let taddr = uaddr.transparent().unwrap();
 
     // Ensure that the wallet has at least one block
-    let (h, _, _) = st.generate_next_block(
+    let (h, _) = st.generate_next_block(
         &dfvk,
         AddressType::Internal,
         NonNegativeAmount::const_from_u64(50000),
@@ -1474,7 +1474,7 @@ pub(crate) fn cross_pool_exchange<P0: ShieldedPoolTester, P1: ShieldedPoolTester
         st.create_proposed_transactions::<Infallible, _>(&usk, OvkPolicy::Sender, &proposal0);
     assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
 
-    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    let h = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
     st.scan_cached_blocks(h, 1);
 
     assert_eq!(
@@ -1499,7 +1499,7 @@ pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
     assert_matches!(st.wallet().chain_height(), Ok(None));
 
     // Create a fake CompactBlock sending value to the address
-    let (h1, _, _) = st.generate_next_block(
+    let (h1, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
         NonNegativeAmount::const_from_u64(5),
@@ -1509,7 +1509,7 @@ pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
     st.scan_cached_blocks(h1, 1);
 
     // Create a second fake CompactBlock sending more value to the address
-    let (h2, _, _) = st.generate_next_block(
+    let (h2, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
         NonNegativeAmount::const_from_u64(7),
@@ -1528,12 +1528,12 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     let dfvk = T::test_account_fvk(&st);
 
     // Create some fake CompactBlocks
-    let (h, _, _) = st.generate_next_block(
+    let (h, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
         NonNegativeAmount::const_from_u64(5),
     );
-    let (last_contiguous_height, _, _) = st.generate_next_block(
+    let (last_contiguous_height, _) = st.generate_next_block(
         &dfvk,
         AddressType::DefaultExternal,
         NonNegativeAmount::const_from_u64(7),
@@ -1585,7 +1585,7 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     // Create fake CompactBlocks sending value to the address
     let value = NonNegativeAmount::const_from_u64(5);
     let value2 = NonNegativeAmount::const_from_u64(7);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
     // Scan the cache
@@ -1628,13 +1628,13 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
     let dfvk = T::test_account_fvk(&st);
 
     let value = NonNegativeAmount::const_from_u64(50000);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h1, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
     st.scan_cached_blocks(h1, 1);
     assert_eq!(st.get_total_balance(account.0), value);
 
     // Create blocks to reach height + 2
-    let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
-    let (h3, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h2, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h3, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Scan the later block first
     st.scan_cached_blocks(h3, 1);
@@ -1692,7 +1692,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
 
     // Create a fake CompactBlock sending value to the address
     let value = NonNegativeAmount::const_from_u64(5);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h1, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Scan the cache
     let summary = st.scan_cached_blocks(h1, 1);
@@ -1705,7 +1705,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
 
     // Create a second fake CompactBlock sending more value to the address
     let value2 = NonNegativeAmount::const_from_u64(7);
-    let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
+    let (h2, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
     // Scan the cache again
     let summary = st.scan_cached_blocks(h2, 1);
@@ -1732,8 +1732,7 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
 
     // Create a fake CompactBlock sending value to the address
     let value = NonNegativeAmount::const_from_u64(5);
-    let (received_height, _, nf) =
-        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (received_height, nf) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Scan the cache
     st.scan_cached_blocks(received_height, 1);
@@ -1745,7 +1744,7 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let to2 = T::fvk_default_address(&not_our_key);
     let value2 = NonNegativeAmount::const_from_u64(2);
-    let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+    let spent_height = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
     // Scan the cache again
     st.scan_cached_blocks(spent_height, 1);
@@ -1768,14 +1767,13 @@ pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTest
 
     // Create a fake CompactBlock sending value to the address
     let value = NonNegativeAmount::const_from_u64(5);
-    let (received_height, _, nf) =
-        st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (received_height, nf) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Create a second fake CompactBlock spending value from the address
     let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let to2 = T::fvk_default_address(&not_our_key);
     let value2 = NonNegativeAmount::const_from_u64(2);
-    let (spent_height, _) = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
+    let spent_height = st.generate_next_block_spending(&dfvk, (nf, value), to2, value2);
 
     // Scan the spending block first.
     st.scan_cached_blocks(spent_height, 1);
