@@ -293,6 +293,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_account_ids(self.conn.borrow())
     }
 
+    fn get_account(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_account(self.conn.borrow(), &self.params, account_id)
+    }
+
     fn get_derived_account(
         &self,
         seed: &HdSeedFingerprint,
@@ -306,7 +313,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         account_id: Self::AccountId,
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
-        if let Some(account) = wallet::get_account(self, account_id)? {
+        if let Some(account) = self.get_account(account_id)? {
             if let AccountKind::Derived {
                 seed_fingerprint,
                 account_index,

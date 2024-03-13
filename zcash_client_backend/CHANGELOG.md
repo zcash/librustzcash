@@ -54,6 +54,7 @@ and this library adheres to Rust's notion of
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `Account` associated type.
+    - Added `get_account` method.
     - Added `get_derived_account` method.
     - `get_account_for_ufvk` now returns `Self::Account` instead of a bare
       `AccountId`.

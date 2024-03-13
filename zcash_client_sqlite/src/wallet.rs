@@ -67,7 +67,7 @@
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, params, OptionalExtension};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use std::borrow::Borrow;
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
@@ -1494,11 +1494,12 @@ pub(crate) fn block_height_extrema(
     })
 }
 
-pub(crate) fn get_account<C: Borrow<rusqlite::Connection>, P: Parameters>(
-    db: &WalletDb<C, P>,
+pub(crate) fn get_account<P: Parameters>(
+    conn: &rusqlite::Connection,
+    params: &P,
     account_id: AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
-    let mut sql = db.conn.borrow().prepare_cached(
+    let mut sql = conn.prepare_cached(
         r#"
         SELECT account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk
         FROM accounts
@@ -1519,7 +1520,7 @@ pub(crate) fn get_account<C: Borrow<rusqlite::Connection>, P: Parameters>(
             let ufvk_str: Option<String> = row.get("ufvk")?;
             let viewing_key = if let Some(ufvk_str) = ufvk_str {
                 ViewingKey::Full(Box::new(
-                    UnifiedFullViewingKey::decode(&db.params, &ufvk_str[..])
+                    UnifiedFullViewingKey::decode(params, &ufvk_str[..])
                         .map_err(SqliteClientError::BadAccountData)?,
                 ))
             } else {
@@ -1527,7 +1528,7 @@ pub(crate) fn get_account<C: Borrow<rusqlite::Connection>, P: Parameters>(
                 let (network, uivk) = Uivk::decode(&uivk_str).map_err(|e| {
                     SqliteClientError::CorruptedData(format!("Failure to decode UIVK: {e}"))
                 })?;
-                if network != db.params.network_type() {
+                if network != params.network_type() {
                     return Err(SqliteClientError::CorruptedData(
                         "UIVK network type does not match wallet network type".to_string(),
                     ));
@@ -2704,7 +2705,6 @@ mod tests {
 
     use crate::{
         testing::{AddressType, BlockCache, TestBuilder, TestState},
-        wallet::get_account,
         AccountId,
     };
 
@@ -2852,7 +2852,7 @@ mod tests {
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
         let account_id = st.test_account().unwrap().0;
-        let account_parameters = get_account(st.wallet(), account_id).unwrap().unwrap();
+        let account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
         assert_matches!(

@@ -574,6 +574,12 @@ pub trait WalletRead {
     /// Returns a vector with the IDs of all accounts known to this wallet.
     fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error>;
 
+    /// Returns the account corresponding to the given ID, if any.
+    fn get_account(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
     /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
     /// [`zip32::AccountId`], if any.
     fn get_derived_account(
@@ -1551,6 +1557,13 @@ pub mod testing {
 
         fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
             Ok(Vec::new())
+        }
+
+        fn get_account(
+            &self,
+            _account_id: Self::AccountId,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
         }
 
         fn get_derived_account(
