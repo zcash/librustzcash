@@ -786,7 +786,7 @@ impl service::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transpo
     pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
     where
         D: TryInto<tonic::transport::Endpoint>,
-        D::Error: Into<StdError>,
+        D::Error: Into<tonic::codegen::StdError>,
     {
         let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
         Ok(Self::new(conn))
