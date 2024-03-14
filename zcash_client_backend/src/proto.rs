@@ -20,7 +20,7 @@ use zcash_primitives::{
 };
 
 use crate::{
-    data_api::InputSource,
+    data_api::{chain::ChainState, InputSource},
     fees::{ChangeValue, TransactionBalance},
     proposal::{Proposal, ProposalError, ShieldedInputs, Step, StepOutput, StepOutputIndex},
     zip321::{TransactionRequest, Zip321Error},
@@ -289,6 +289,20 @@ impl service::TreeState {
         read_commitment_tree::<MerkleHashOrchard, _, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>(
             &orchard_tree_bytes[..],
         )
+    }
+
+    /// Parses this tree state into a [`ChainState`] for use with [`scan_cached_blocks`].
+    ///
+    /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
+    pub fn to_chain_state(&self) -> io::Result<ChainState> {
+        Ok(ChainState::new(
+            self.height
+                .try_into()
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid block height"))?,
+            self.sapling_tree()?.to_frontier(),
+            #[cfg(feature = "orchard")]
+            self.orchard_tree()?.to_frontier(),
+        ))
     }
 }
 

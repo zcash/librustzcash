@@ -514,7 +514,6 @@ pub enum AddressGenerationError {
     /// A Unified address cannot be generated without at least one shielded receiver being
     /// included.
     ShieldedReceiverRequired,
-
     // An error occurred while deriving a key or address from an HD wallet.
     Derivation(DerivationError),
 }
@@ -739,7 +738,7 @@ impl UnifiedFullViewingKey {
                     })
                     .transpose(),
                 #[cfg(not(feature = "orchard"))]
-                unified::Fvk::Orchard(data) => Some(Ok::<_, UnifiedError>((
+                unified::Fvk::Orchard(data) => Some(Ok::<_, DerivationError>((
                     u32::from(unified::Typecode::Orchard),
                     data.to_vec(),
                 ))),
@@ -756,7 +755,7 @@ impl UnifiedFullViewingKey {
                         .transpose()
                 }
                 #[cfg(not(feature = "sapling"))]
-                unified::Fvk::Sapling(data) => Some(Ok::<_, UnifiedError>((
+                unified::Fvk::Sapling(data) => Some(Ok::<_, DerivationError>((
                     u32::from(unified::Typecode::Sapling),
                     data.to_vec(),
                 ))),
@@ -769,7 +768,7 @@ impl UnifiedFullViewingKey {
                     })
                     .transpose(),
                 #[cfg(not(feature = "transparent-inputs"))]
-                unified::Fvk::P2pkh(data) => Some(Ok::<_, UnifiedError>((
+                unified::Fvk::P2pkh(data) => Some(Ok::<_, DerivationError>((
                     u32::from(unified::Typecode::P2pkh),
                     data.to_vec(),
                 ))),

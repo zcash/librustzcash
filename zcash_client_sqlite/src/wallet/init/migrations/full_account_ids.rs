@@ -1,12 +1,12 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{init::WalletMigrationError, AccountType};
+use crate::wallet::{account_kind_code, init::WalletMigrationError};
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 use zcash_address::unified::Encoding;
-use zcash_client_backend::keys::UnifiedSpendingKey;
+use zcash_client_backend::{data_api::AccountKind, keys::UnifiedSpendingKey};
 use zcash_keys::keys::{HdSeedFingerprint, UnifiedFullViewingKey};
 use zcash_primitives::consensus;
 
@@ -45,8 +45,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        let account_type_zip32 = u32::from(AccountType::Zip32);
-        let account_type_imported = u32::from(AccountType::Imported);
+        let account_kind_derived = account_kind_code(AccountKind::Derived {
+            seed_fingerprint: HdSeedFingerprint::from_bytes([0; 32]),
+            account_index: zip32::AccountId::ZERO,
+        });
+        let account_kind_imported = account_kind_code(AccountKind::Imported);
         transaction.execute_batch(
             &format!(r#"
             PRAGMA foreign_keys = OFF;
@@ -54,7 +57,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             CREATE TABLE accounts_new (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_type INTEGER NOT NULL DEFAULT {account_type_zip32},
+                account_kind INTEGER NOT NULL DEFAULT {account_kind_derived},
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
                 ufvk TEXT,
@@ -65,9 +68,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
                 CHECK (
-                    (account_type = {account_type_zip32} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
+                    (account_kind = {account_kind_derived} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
                     OR
-                    (account_type = {account_type_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
+                    (account_kind = {account_kind_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
                 )
             );
             CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
@@ -86,7 +89,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 let mut rows = q.query([])?;
                 while let Some(row) = rows.next()? {
                     let account_index: u32 = row.get("account")?;
-                    let account_type = u32::from(AccountType::Zip32);
                     let birthday_height: u32 = row.get("birthday_height")?;
                     let recover_until_height: Option<u32> = row.get("recover_until_height")?;
 
@@ -132,13 +134,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     transaction.execute(
                         r#"
                         INSERT INTO accounts_new (
-                            id, account_type, hd_seed_fingerprint, hd_account_index,
+                            id, account_kind, hd_seed_fingerprint, hd_account_index,
                             ufvk, uivk,
                             orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
                             birthday_height, recover_until_height
                         )
                         VALUES (
-                            :account_id, :account_type, :seed_id, :account_index,
+                            :account_id, :account_kind, :seed_id, :account_index,
                             :ufvk, :uivk,
                             :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
                             :birthday_height, :recover_until_height
@@ -146,7 +148,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         "#,
                         named_params![
                             ":account_id": account_id,
-                            ":account_type": account_type,
+                            ":account_kind": account_kind_derived,
                             ":seed_id": seed_id.as_bytes(),
                             ":account_index": account_index,
                             ":ufvk": ufvk,
