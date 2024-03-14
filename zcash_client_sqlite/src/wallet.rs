@@ -67,6 +67,7 @@
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, params, OptionalExtension};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
+use zip32::fingerprint::SeedFingerprint;
 
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -75,7 +76,7 @@ use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
 use zcash_address::unified::{Encoding, Ivk, Uivk};
-use zcash_keys::keys::{AddressGenerationError, HdSeedFingerprint, UnifiedAddressRequest};
+use zcash_keys::keys::{AddressGenerationError, UnifiedAddressRequest};
 
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
@@ -145,7 +146,7 @@ fn parse_account_kind(
 ) -> Result<AccountKind, SqliteClientError> {
     match (account_kind, hd_seed_fingerprint, hd_account_index) {
         (0, Some(seed_fp), Some(account_index)) => Ok(AccountKind::Derived {
-            seed_fingerprint: HdSeedFingerprint::from_bytes(seed_fp),
+            seed_fingerprint: SeedFingerprint::from_bytes(seed_fp),
             account_index: zip32::AccountId::try_from(account_index).map_err(|_| {
                 SqliteClientError::CorruptedData(
                     "ZIP-32 account ID from wallet DB is out of range.".to_string(),
@@ -280,11 +281,11 @@ pub(crate) fn memo_repr(memo: Option<&MemoBytes>) -> Option<&[u8]> {
 // Returns the highest used account index for a given seed.
 pub(crate) fn max_zip32_account_index(
     conn: &rusqlite::Connection,
-    seed_id: &HdSeedFingerprint,
+    seed_id: &SeedFingerprint,
 ) -> Result<Option<zip32::AccountId>, SqliteClientError> {
     conn.query_row_and_then(
         "SELECT MAX(hd_account_index) FROM accounts WHERE hd_seed_fingerprint = :hd_seed",
-        [seed_id.as_bytes()],
+        [seed_id.to_bytes()],
         |row| {
             let account_id: Option<u32> = row.get(0)?;
             account_id
@@ -366,7 +367,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
         "#,
         named_params![
             ":account_kind": account_kind_code(kind),
-            ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.as_bytes()),
+            ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
             ":hd_account_index": hd_account_index.map(u32::from),
             ":ufvk": viewing_key.ufvk().map(|ufvk| ufvk.encode(params)),
             ":uivk": viewing_key.uivk_str(params)?,
@@ -765,12 +766,12 @@ pub(crate) fn get_account_for_ufvk<P: consensus::Parameters>(
     }
 }
 
-/// Returns the account id corresponding to a given [`HdSeedFingerprint`]
+/// Returns the account id corresponding to a given [`SeedFingerprint`]
 /// and [`zip32::AccountId`], if any.
 pub(crate) fn get_derived_account<P: consensus::Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
-    seed: &HdSeedFingerprint,
+    seed: &SeedFingerprint,
     account_index: zip32::AccountId,
 ) -> Result<Option<Account>, SqliteClientError> {
     let mut stmt = conn.prepare(
@@ -782,7 +783,7 @@ pub(crate) fn get_derived_account<P: consensus::Parameters>(
 
     let mut accounts = stmt.query_and_then::<_, SqliteClientError, _, _>(
         named_params![
-            ":hd_seed_fingerprint": seed.as_bytes(),
+            ":hd_seed_fingerprint": seed.to_bytes(),
             ":hd_account_index": u32::from(account_index),
         ],
         |row| {

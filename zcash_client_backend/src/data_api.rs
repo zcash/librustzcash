@@ -66,7 +66,7 @@ use std::{
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_keys::keys::HdSeedFingerprint;
+use zip32::fingerprint::SeedFingerprint;
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -320,7 +320,7 @@ impl AccountBalance {
 pub enum AccountKind {
     /// An account derived from a known seed.
     Derived {
-        seed_fingerprint: HdSeedFingerprint,
+        seed_fingerprint: SeedFingerprint,
         account_index: zip32::AccountId,
     },
 
@@ -698,11 +698,11 @@ pub trait WalletRead {
         account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
-    /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
+    /// Returns the account corresponding to a given [`SeedFingerprint`] and
     /// [`zip32::AccountId`], if any.
     fn get_derived_account(
         &self,
-        seed: &HdSeedFingerprint,
+        seed: &SeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
@@ -1586,7 +1586,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
-    use zcash_keys::keys::HdSeedFingerprint;
+    use zip32::fingerprint::SeedFingerprint;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1686,7 +1686,7 @@ pub mod testing {
 
         fn get_derived_account(
             &self,
-            _seed: &HdSeedFingerprint,
+            _seed: &SeedFingerprint,
             _account_id: zip32::AccountId,
         ) -> Result<Option<Self::Account>, Self::Error> {
             Ok(None)
