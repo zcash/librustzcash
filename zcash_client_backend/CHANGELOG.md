@@ -49,6 +49,8 @@ and this library adheres to Rust's notion of
   - `WalletOrchardOutput`
   - `WalletTx::{orchard_spends, orchard_outputs}`
   - `ReceivedNote::map_note`
+  - `ReceivedNote<_, sapling::Note>::note_value`
+  - `ReceivedNote<_, orchard::note::Note>::note_value`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -64,8 +66,8 @@ and this library adheres to Rust's notion of
     - Added `get_orchard_nullifiers` method.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a
-      `NonNegativeAmount`. Also, the values of the returned map are also
-      `NonNegativeAmount`s instead of `Amount`s.
+      `NonNegativeAmount`. Also, it now returns a `SpendableNotes` data 
+      structure instead of a vector.
   - Fields of `DecryptedTransaction` are now private. Use `DecryptedTransaction::new`
     and the newly provided accessors instead.
   - Fields of `SentTransaction` are now private. Use `SentTransaction::new`

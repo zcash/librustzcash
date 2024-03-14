@@ -494,6 +494,23 @@ pub trait NoteRetention<NoteRef> {
     fn should_retain_orchard(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
 }
 
+pub(crate) struct SimpleNoteRetention {
+    pub(crate) sapling: bool,
+    #[cfg(feature = "orchard")]
+    pub(crate) orchard: bool,
+}
+
+impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
+    fn should_retain_sapling(&self, _: &ReceivedNote<NoteRef, sapling::Note>) -> bool {
+        self.sapling
+    }
+
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
+        self.orchard
+    }
+}
+
 /// Spendable shielded outputs controlled by the wallet.
 pub struct SpendableNotes<NoteRef> {
     sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
@@ -502,6 +519,15 @@ pub struct SpendableNotes<NoteRef> {
 }
 
 impl<NoteRef> SpendableNotes<NoteRef> {
+    /// Construct a new empty [`SpendableNotes`].
+    pub fn empty() -> Self {
+        Self::new(
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        )
+    }
+
     /// Construct a new [`SpendableNotes`] from its constituent parts.
     pub fn new(
         sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
@@ -523,6 +549,34 @@ impl<NoteRef> SpendableNotes<NoteRef> {
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
         self.orchard.as_ref()
+    }
+
+    /// Computes the total value of Sapling notes.
+    pub fn sapling_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.sapling
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of Sapling notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.orchard
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of spendable inputs
+    pub fn total_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        #[cfg(not(feature = "orchard"))]
+        return self.sapling_value();
+
+        #[cfg(feature = "orchard")]
+        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
     }
 
     /// Consumes this [`SpendableNotes`] value and produces a vector of
@@ -589,7 +643,7 @@ pub trait InputSource {
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
     /// Fetches a spendable transparent output.
     ///
@@ -1552,8 +1606,8 @@ pub mod testing {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1609,8 +1663,8 @@ pub mod testing {
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-            Ok(Vec::new())
+        ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+            Ok(SpendableNotes::empty())
         }
     }
 

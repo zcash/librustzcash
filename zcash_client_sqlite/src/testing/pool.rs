@@ -83,6 +83,7 @@ pub(crate) trait ShieldedPoolTester {
     type Sk;
     type Fvk: TestFvk;
     type MerkleTreeHash;
+    type Note;
 
     fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk;
     fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk;
@@ -109,7 +110,7 @@ pub(crate) trait ShieldedPoolTester {
         target_value: NonNegativeAmount,
         anchor_height: BlockHeight,
         exclude: &[ReceivedNoteId],
-    ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError>;
+    ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Self::Note>>, SqliteClientError>;
 
     fn decrypted_pool_outputs_count(d_tx: &DecryptedTransaction<'_, AccountId>) -> usize;
 

@@ -61,8 +61,8 @@ use zcash_client_backend::{
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountKind, BlockMetadata, DecryptedTransaction, InputSource,
-        NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        NullifierQuery, ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -212,7 +212,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                 &self.params,
                 txid,
                 index,
-            ),
+            )
+            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
             ShieldedProtocol::Orchard => {
                 #[cfg(feature = "orchard")]
                 return wallet::orchard::get_spendable_orchard_note(
@@ -220,7 +221,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                     &self.params,
                     txid,
                     index,
-                );
+                )
+                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
@@ -237,26 +239,26 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        let received_iter = std::iter::empty();
-        let received_iter = received_iter.chain(wallet::sapling::select_spendable_sapling_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        #[cfg(feature = "orchard")]
-        let received_iter = received_iter.chain(wallet::orchard::select_spendable_orchard_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        Ok(received_iter.collect())
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+        Ok(SpendableNotes::new(
+            wallet::sapling::select_spendable_sapling_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+            #[cfg(feature = "orchard")]
+            wallet::orchard::select_spendable_orchard_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+        ))
     }
 
     #[cfg(feature = "transparent-inputs")]
