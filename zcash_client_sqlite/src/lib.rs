@@ -45,7 +45,6 @@ use std::{
     path::Path,
 };
 use subtle::ConditionallySelectable;
-use zcash_keys::keys::HdSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -53,6 +52,7 @@ use zcash_primitives::{
     transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     zip32::{self, DiversifierIndex, Scope},
 };
+use zip32::fingerprint::SeedFingerprint;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
@@ -304,7 +304,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn get_derived_account(
         &self,
-        seed: &HdSeedFingerprint,
+        seed: &SeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
@@ -321,7 +321,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 account_index,
             } = account.kind()
             {
-                let seed_fingerprint_match = HdSeedFingerprint::from_seed(seed) == seed_fingerprint;
+                let seed_fingerprint_match =
+                    SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                        SqliteClientError::BadAccountData(
+                            "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                        )
+                    })? == seed_fingerprint;
 
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
@@ -502,7 +507,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let seed_fingerprint = HdSeedFingerprint::from_seed(seed);
+            let seed_fingerprint =
+                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                    SqliteClientError::BadAccountData(
+                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                    )
+                })?;
             let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
