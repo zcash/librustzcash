@@ -123,6 +123,9 @@ time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 ## Enables the `tonic` gRPC client bindings for connecting to a `lightwalletd` server.
 lightwalletd-tonic = ["dep:tonic"]
 
+## Enables the `transport` feature of `tonic` producing a fully-featured client and server implementation
+lightwalletd-tonic-transport = ["lightwalletd-tonic", "tonic?/transport"]
+
 ## Enables receiving transparent funds and shielding them.
 transparent-inputs = [
     "dep:hdwallet",
