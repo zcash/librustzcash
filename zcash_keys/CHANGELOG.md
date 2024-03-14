@@ -11,21 +11,20 @@ and this library adheres to Rust's notion of
 - `zcash_keys::address::Address::has_receiver`
 - `impl Display for zcash_keys::keys::AddressGenerationError`
 - `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
+- `zcash_keys::keys::DecodingError`
 - `zcash_keys::keys::UnifiedFullViewingKey::from_ufvk`
 - `zcash_keys::keys::UnifiedFullViewingKey::to_ufvk`
 - `zcash_keys::keys::UnifiedFullViewingKey::to_unified_incoming_viewing_key`
 - `zcash_keys::keys::UnifiedIncomingViewingKey`
 
 ### Changed
-- `zcash_keys::keys::AddressGenerationError` has a new variant
-  `DiversifierSpaceExhausted`.
 - `zcash_keys::keys::UnifiedFullViewingKey::{find_address, default_address}` 
   now return `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`
   (instead of `Option<(UnifiedAddress, DiversifierIndex)>` for `find_address`).
 - `zcash_keys::keys::AddressGenerationError`
   - Dropped `Clone` trait
-- `zcash_keys::keys::DerivationError`
-  - Added `InvalidShieldedKey` variant.
+  - Added `KeyDecoding` variant.
+  - Added `DiversifierSpaceExhausted` variant.
 
 ### Fixed
 - `UnifiedFullViewingKey::find_address` can now find an address for a diversifier

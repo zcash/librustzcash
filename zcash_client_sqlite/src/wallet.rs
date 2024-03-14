@@ -74,7 +74,7 @@ use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_address::unified::{Encoding, Ivk, Uivk};
+use zcash_address::unified::{Encoding, Uivk};
 use zcash_keys::keys::{
     AddressGenerationError, HdSeedFingerprint, UnifiedAddressRequest, UnifiedIncomingViewingKey,
 };
@@ -120,6 +120,7 @@ use {
     crate::UtxoId,
     rusqlite::Row,
     std::collections::BTreeSet,
+    zcash_address::unified::Ivk,
     zcash_client_backend::wallet::{TransparentAddressMetadata, WalletTransparentOutput},
     zcash_primitives::{
         legacy::{

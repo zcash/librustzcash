@@ -7,7 +7,7 @@ use std::{
 };
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
-use zcash_protocol::{consensus, ShieldedProtocol};
+use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::address::UnifiedAddress;
@@ -139,9 +139,7 @@ fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildInd
 }
 
 #[derive(Debug)]
-#[doc(hidden)]
 pub enum DerivationError {
-    InvalidShieldedKey(ShieldedProtocol),
     #[cfg(feature = "orchard")]
     Orchard(orchard::zip32::Error),
     #[cfg(feature = "transparent-inputs")]
@@ -151,9 +149,6 @@ pub enum DerivationError {
 impl Display for DerivationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DerivationError::InvalidShieldedKey(protocol) => {
-                write!(f, "Invalid shielded key for protocol {:?}", protocol)
-            }
             #[cfg(feature = "orchard")]
             DerivationError::Orchard(e) => write!(f, "Orchard error: {}", e),
             #[cfg(feature = "transparent-inputs")]
@@ -177,28 +172,40 @@ pub enum Era {
 }
 
 /// A type for errors that can occur when decoding keys from their serialized representations.
-#[cfg(feature = "unstable")]
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodingError {
+    #[cfg(feature = "unstable")]
     ReadError(&'static str),
+    #[cfg(feature = "unstable")]
     EraInvalid,
+    #[cfg(feature = "unstable")]
     EraMismatch(Era),
+    #[cfg(feature = "unstable")]
     TypecodeInvalid,
+    #[cfg(feature = "unstable")]
     LengthInvalid,
+    #[cfg(feature = "unstable")]
     LengthMismatch(Typecode, u32),
+    #[cfg(feature = "unstable")]
     InsufficientData(Typecode),
+    /// The key data could not be decoded from its string representation to a valid key.
     KeyDataInvalid(Typecode),
 }
 
-#[cfg(feature = "unstable")]
 impl std::fmt::Display for DecodingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "unstable")]
             DecodingError::ReadError(s) => write!(f, "Read error: {}", s),
+            #[cfg(feature = "unstable")]
             DecodingError::EraInvalid => write!(f, "Invalid era"),
+            #[cfg(feature = "unstable")]
             DecodingError::EraMismatch(e) => write!(f, "Era mismatch: actual {:?}", e),
+            #[cfg(feature = "unstable")]
             DecodingError::TypecodeInvalid => write!(f, "Invalid typecode"),
+            #[cfg(feature = "unstable")]
             DecodingError::LengthInvalid => write!(f, "Invalid length"),
+            #[cfg(feature = "unstable")]
             DecodingError::LengthMismatch(t, l) => {
                 write!(
                     f,
@@ -206,10 +213,11 @@ impl std::fmt::Display for DecodingError {
                     l, t
                 )
             }
+            #[cfg(feature = "unstable")]
             DecodingError::InsufficientData(t) => {
                 write!(f, "Insufficient data for typecode {:?}", t)
             }
-            DecodingError::KeyDataInvalid(t) => write!(f, "Invalid key data for typecode {:?}", t),
+            DecodingError::KeyDataInvalid(t) => write!(f, "Invalid key data for key type {:?}", t),
         }
     }
 }
@@ -514,8 +522,10 @@ pub enum AddressGenerationError {
     /// A Unified address cannot be generated without at least one shielded receiver being
     /// included.
     ShieldedReceiverRequired,
-    // An error occurred while deriving a key or address from an HD wallet.
+    /// An error occurred while deriving a key or address from an HD wallet.
     Derivation(DerivationError),
+    /// An error occurred while decoding a key from its encoded representation.
+    KeyDecoding(DecodingError),
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -528,6 +538,12 @@ impl From<hdwallet::error::Error> for AddressGenerationError {
 impl From<DerivationError> for AddressGenerationError {
     fn from(e: DerivationError) -> Self {
         AddressGenerationError::Derivation(e)
+    }
+}
+
+impl From<DecodingError> for AddressGenerationError {
+    fn from(e: DecodingError) -> Self {
+        AddressGenerationError::KeyDecoding(e)
     }
 }
 
@@ -574,6 +590,11 @@ impl fmt::Display for AddressGenerationError {
                 write!(f, "A Unified Address requires at least one shielded (Sapling or Orchard) receiver.")
             }
             AddressGenerationError::Derivation(e) => write!(f, "Error deriving address: {}", e),
+            AddressGenerationError::KeyDecoding(e) => write!(
+                f,
+                "Error decoding key from its serialized representation: {}.",
+                e
+            ),
         }
     }
 }
@@ -713,7 +734,7 @@ impl UnifiedFullViewingKey {
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn from_ufvk(ufvk: &Ufvk) -> Result<Self, DerivationError> {
+    pub fn from_ufvk(ufvk: &Ufvk) -> Result<Self, DecodingError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -729,25 +750,21 @@ impl UnifiedFullViewingKey {
             .filter_map(|receiver| match receiver {
                 #[cfg(feature = "orchard")]
                 unified::Fvk::Orchard(data) => orchard::keys::FullViewingKey::from_bytes(data)
-                    .ok_or(DerivationError::InvalidShieldedKey(
-                        ShieldedProtocol::Orchard,
-                    ))
+                    .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))
                     .map(|addr| {
                         orchard = Some(addr);
                         None
                     })
                     .transpose(),
                 #[cfg(not(feature = "orchard"))]
-                unified::Fvk::Orchard(data) => Some(Ok::<_, DerivationError>((
+                unified::Fvk::Orchard(data) => Some(Ok::<_, DecodingError>((
                     u32::from(unified::Typecode::Orchard),
                     data.to_vec(),
                 ))),
                 #[cfg(feature = "sapling")]
                 unified::Fvk::Sapling(data) => {
                     sapling::DiversifiableFullViewingKey::from_bytes(data)
-                        .ok_or(DerivationError::InvalidShieldedKey(
-                            ShieldedProtocol::Sapling,
-                        ))
+                        .ok_or(DecodingError::KeyDataInvalid(Typecode::Sapling))
                         .map(|pa| {
                             sapling = Some(pa);
                             None
@@ -755,20 +772,20 @@ impl UnifiedFullViewingKey {
                         .transpose()
                 }
                 #[cfg(not(feature = "sapling"))]
-                unified::Fvk::Sapling(data) => Some(Ok::<_, DerivationError>((
+                unified::Fvk::Sapling(data) => Some(Ok::<_, DecodingError>((
                     u32::from(unified::Typecode::Sapling),
                     data.to_vec(),
                 ))),
                 #[cfg(feature = "transparent-inputs")]
                 unified::Fvk::P2pkh(data) => legacy::AccountPubKey::deserialize(data)
-                    .map_err(DerivationError::Transparent)
+                    .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
                     .map(|tfvk| {
                         transparent = Some(tfvk);
                         None
                     })
                     .transpose(),
                 #[cfg(not(feature = "transparent-inputs"))]
-                unified::Fvk::P2pkh(data) => Some(Ok::<_, DerivationError>((
+                unified::Fvk::P2pkh(data) => Some(Ok::<_, DecodingError>((
                     u32::from(unified::Typecode::P2pkh),
                     data.to_vec(),
                 ))),
@@ -955,7 +972,7 @@ impl UnifiedIncomingViewingKey {
     }
 
     /// Constructs a unified incoming viewing key from a parsed unified encoding.
-    pub fn from_uivk(uivk: &Uivk) -> Result<Self, DerivationError> {
+    pub fn from_uivk(uivk: &Uivk) -> Result<Self, DecodingError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -974,9 +991,7 @@ impl UnifiedIncomingViewingKey {
                     {
                         orchard = Some(
                             Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DerivationError::InvalidShieldedKey(
-                                    ShieldedProtocol::Orchard,
-                                ))?,
+                                .ok_or(DecodingError::KeyDataInvalid(Typecode::Orchard))?,
                         );
                     }
 
@@ -988,9 +1003,7 @@ impl UnifiedIncomingViewingKey {
                     {
                         sapling = Some(
                             Option::from(::sapling::zip32::IncomingViewingKey::from_bytes(data))
-                                .ok_or(DerivationError::InvalidShieldedKey(
-                                    ShieldedProtocol::Sapling,
-                                ))?,
+                                .ok_or(DecodingError::KeyDataInvalid(Typecode::Sapling))?,
                         );
                     }
 
@@ -1000,7 +1013,10 @@ impl UnifiedIncomingViewingKey {
                 unified::Ivk::P2pkh(data) => {
                     #[cfg(feature = "transparent-inputs")]
                     {
-                        transparent = Some(legacy::ExternalIvk::deserialize(data)?);
+                        transparent = Some(
+                            legacy::ExternalIvk::deserialize(data)
+                                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))?,
+                        );
                     }
 
                     #[cfg(not(feature = "transparent-inputs"))]
@@ -1271,10 +1287,7 @@ mod tests {
     };
 
     #[cfg(feature = "unstable")]
-    use {
-        super::{testing::arb_unified_spending_key, Era, UnifiedSpendingKey},
-        zcash_primitives::consensus::Network,
-    };
+    use super::{testing::arb_unified_spending_key, Era, UnifiedSpendingKey};
 
     #[cfg(all(feature = "orchard", feature = "unstable"))]
     use subtle::ConstantTimeEq;
@@ -1551,7 +1564,7 @@ mod tests {
 
             let decoded =
                 UnifiedIncomingViewingKey::from_uivk(&Uivk::decode(&encoded).unwrap().1).unwrap();
-            let reencoded = decoded.to_uivk().encode(&Network::Main);
+            let reencoded = decoded.to_uivk().encode(&NetworkType::Main);
             assert_eq!(encoded, reencoded);
 
             #[cfg(feature = "transparent-inputs")]
