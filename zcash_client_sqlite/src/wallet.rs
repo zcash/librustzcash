@@ -208,7 +208,7 @@ impl Account {
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         match &self.viewing_key {
             ViewingKey::Full(ufvk) => ufvk.default_address(request),
-            ViewingKey::Incoming(_uivk) => todo!(),
+            ViewingKey::Incoming(uivk) => uivk.default_address(request),
         }
     }
 }
