@@ -96,10 +96,7 @@ impl ReceivedOrchardOutput for DecryptedOutput<Note, AccountId> {
 fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
-) -> Result<
-    Option<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>,
-    SqliteClientError,
-> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     let note_id = ReceivedNoteId(ShieldedProtocol::Orchard, row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let action_index = row.get(2)?;
@@ -175,7 +172,7 @@ fn to_spendable_note<P: consensus::Parameters>(
                 note_id,
                 txid,
                 action_index,
-                zcash_client_backend::wallet::Note::Orchard(note),
+                note,
                 spending_key_scope,
                 note_commitment_tree_position,
             ))
@@ -188,10 +185,7 @@ pub(crate) fn get_spendable_orchard_note<P: consensus::Parameters>(
     params: &P,
     txid: &TxId,
     index: u32,
-) -> Result<
-    Option<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>,
-    SqliteClientError,
-> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
         params,
@@ -209,8 +203,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
     target_value: Zatoshis,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
-) -> Result<Vec<ReceivedNote<ReceivedNoteId, zcash_client_backend::wallet::Note>>, SqliteClientError>
-{
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
         params,
@@ -389,6 +382,7 @@ pub(crate) mod tests {
         type Sk = SpendingKey;
         type Fvk = FullViewingKey;
         type MerkleTreeHash = MerkleHashOrchard;
+        type Note = orchard::note::Note;
 
         fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
             st.test_account_orchard().unwrap()
@@ -457,7 +451,8 @@ pub(crate) mod tests {
             target_value: zcash_protocol::value::Zatoshis,
             anchor_height: BlockHeight,
             exclude: &[crate::ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<crate::ReceivedNoteId, Note>>, SqliteClientError> {
+        ) -> Result<Vec<ReceivedNote<crate::ReceivedNoteId, orchard::note::Note>>, SqliteClientError>
+        {
             select_spendable_orchard_notes(
                 &st.wallet().conn,
                 &st.wallet().params,

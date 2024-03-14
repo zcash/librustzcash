@@ -16,6 +16,7 @@ use zcash_primitives::{
     },
     zip32::Scope,
 };
+use zcash_protocol::value::BalanceError;
 
 use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
 
@@ -429,6 +430,34 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
     }
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
+    }
+
+    /// Map over the `note` field of this data structure.
+    ///
+    /// Consume this value, applying the provided function to the value of its `note` field and
+    /// returning a new `ReceivedNote` with the result as its `note` field value.
+    pub fn map_note<N, F: Fn(NoteT) -> N>(self, f: F) -> ReceivedNote<NoteRef, N> {
+        ReceivedNote {
+            note_id: self.note_id,
+            txid: self.txid,
+            output_index: self.output_index,
+            note: f(self.note),
+            spending_key_scope: self.spending_key_scope,
+            note_commitment_tree_position: self.note_commitment_tree_position,
+        }
+    }
+}
+
+impl<NoteRef> ReceivedNote<NoteRef, sapling::Note> {
+    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.note.value().inner().try_into()
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<NoteRef> ReceivedNote<NoteRef, orchard::note::Note> {
+    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.note.value().inner().try_into()
     }
 }
 
