@@ -430,26 +430,18 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
     }
+}
 
-    /// Applies the given function to the `note` field of this ReceivedNote and returns
-    /// `None` if that function returns `None`, or otherwise a `Some` containing
-    /// a `ReceivedNote` with its `note` field swapped out for the result of the function.
-    ///
-    /// The name `traverse` refers to the general operation that has the Haskell type
-    /// `Applicative f => (a -> f b) -> t a -> f (t b)`, that this method specializes
-    /// with `ReceivedNote<NoteRef, _>` for `t` and `Option<_>` for `f`.
-    pub fn traverse_opt<B>(
-        self,
-        f: impl FnOnce(NoteT) -> Option<B>,
-    ) -> Option<ReceivedNote<NoteRef, B>> {
-        f(self.note).map(|n0| ReceivedNote {
-            note_id: self.note_id,
-            txid: self.txid,
-            output_index: self.output_index,
-            note: n0,
-            spending_key_scope: self.spending_key_scope,
-            note_commitment_tree_position: self.note_commitment_tree_position,
-        })
+impl<NoteRef> sapling_fees::InputView<NoteRef> for (NoteRef, sapling::value::NoteValue) {
+    fn note_id(&self) -> &NoteRef {
+        &self.0
+    }
+
+    fn value(&self) -> NonNegativeAmount {
+        self.1
+            .inner()
+            .try_into()
+            .expect("Sapling note values are indirectly checked by consensus.")
     }
 }
 
@@ -464,6 +456,20 @@ impl<NoteRef> sapling_fees::InputView<NoteRef> for ReceivedNote<NoteRef, sapling
             .inner()
             .try_into()
             .expect("Sapling note values are indirectly checked by consensus.")
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<NoteRef> orchard_fees::InputView<NoteRef> for (NoteRef, orchard::value::NoteValue) {
+    fn note_id(&self) -> &NoteRef {
+        &self.0
+    }
+
+    fn value(&self) -> NonNegativeAmount {
+        self.1
+            .inner()
+            .try_into()
+            .expect("Orchard note values are indirectly checked by consensus.")
     }
 }
 
