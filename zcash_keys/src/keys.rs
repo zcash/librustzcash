@@ -7,10 +7,13 @@ use std::{
 };
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
-use zcash_protocol::consensus::{self, NetworkConstants};
+use zcash_protocol::consensus;
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::address::UnifiedAddress;
+
+#[cfg(any(feature = "sapling", feature = "orchard"))]
+use zcash_protocol::consensus::NetworkConstants;
 
 #[cfg(feature = "transparent-inputs")]
 use {
@@ -143,12 +146,16 @@ pub enum DerivationError {
 }
 
 impl Display for DerivationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             #[cfg(feature = "orchard")]
-            DerivationError::Orchard(e) => write!(f, "Orchard error: {}", e),
+            DerivationError::Orchard(e) => write!(_f, "Orchard error: {}", e),
             #[cfg(feature = "transparent-inputs")]
-            DerivationError::Transparent(e) => write!(f, "Transparent error: {}", e),
+            DerivationError::Transparent(e) => write!(_f, "Transparent error: {}", e),
+            #[cfg(not(any(feature = "orchard", feature = "transparent-inputs")))]
+            other => {
+                unreachable!("Unhandled DerivationError variant {:?}", other)
+            }
         }
     }
 }
@@ -1252,20 +1259,19 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use crate::keys::UnifiedIncomingViewingKey;
 
-    use super::UnifiedFullViewingKey;
     use proptest::prelude::proptest;
-    use zcash_address::unified::{Encoding, Uivk};
+
+    use {zcash_primitives::consensus::MAIN_NETWORK, zip32::AccountId};
+
+    #[cfg(any(feature = "sapling", feature = "orchard"))]
+    use {
+        super::{UnifiedFullViewingKey, UnifiedIncomingViewingKey},
+        zcash_address::unified::{Encoding, Uivk},
+    };
+
     #[cfg(feature = "orchard")]
     use zip32::Scope;
-
-    #[cfg(any(
-        feature = "orchard",
-        feature = "sapling",
-        feature = "transparent-inputs"
-    ))]
-    use {zcash_primitives::consensus::MAIN_NETWORK, zip32::AccountId};
 
     #[cfg(feature = "sapling")]
     use super::sapling;
@@ -1274,10 +1280,7 @@ mod tests {
     use {
         crate::{address::Address, encoding::AddressCodec},
         zcash_address::test_vectors,
-        zcash_primitives::legacy::{
-            self,
-            keys::{AccountPrivKey, IncomingViewingKey},
-        },
+        zcash_primitives::legacy::keys::{AccountPrivKey, IncomingViewingKey},
         zip32::DiversifierIndex,
     };
 
@@ -1305,19 +1308,19 @@ mod tests {
     fn pk_to_taddr() {
         use zcash_primitives::legacy::keys::NonHardenedChildIndex;
 
-        let taddr =
-            legacy::keys::AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
-                .unwrap()
-                .to_account_pubkey()
-                .derive_external_ivk()
-                .unwrap()
-                .derive_address(NonHardenedChildIndex::ZERO)
-                .unwrap()
-                .encode(&MAIN_NETWORK);
+        let taddr = AccountPrivKey::from_seed(&MAIN_NETWORK, &seed(), AccountId::ZERO)
+            .unwrap()
+            .to_account_pubkey()
+            .derive_external_ivk()
+            .unwrap()
+            .derive_address(NonHardenedChildIndex::ZERO)
+            .unwrap()
+            .encode(&MAIN_NETWORK);
         assert_eq!(taddr, "t1PKtYdJJHhc3Pxowmznkg7vdTwnhEsCvR4".to_string());
     }
 
     #[test]
+    #[cfg(any(feature = "orchard", feature = "sapling"))]
     fn ufvk_round_trip() {
         #[cfg(feature = "orchard")]
         let orchard = {
@@ -1348,100 +1351,93 @@ mod tests {
             orchard,
         );
 
-        #[cfg(not(any(feature = "orchard", feature = "sapling")))]
-        assert!(ufvk.is_none());
+        let ufvk = ufvk.expect("Orchard or Sapling fvk is present.");
+        let encoded = ufvk.encode(&MAIN_NETWORK);
 
-        #[cfg(any(feature = "orchard", feature = "sapling"))]
+        // Test encoded form against known values; these test vectors contain Orchard receivers
+        // that will be treated as unknown if the `orchard` feature is not enabled.
+        let encoded_with_t = "uview1tg6rpjgju2s2j37gkgjq79qrh5lvzr6e0ed3n4sf4hu5qd35vmsh7avl80xa6mx7ryqce9hztwaqwrdthetpy4pc0kce25x453hwcmax02p80pg5savlg865sft9reat07c5vlactr6l2pxtlqtqunt2j9gmvr8spcuzf07af80h5qmut38h0gvcfa9k4rwujacwwca9vu8jev7wq6c725huv8qjmhss3hdj2vh8cfxhpqcm2qzc34msyrfxk5u6dqttt4vv2mr0aajreww5yufpk0gn4xkfm888467k7v6fmw7syqq6cceu078yw8xja502jxr0jgum43lhvpzmf7eu5dmnn6cr6f7p43yw8znzgxg598mllewnx076hljlvynhzwn5es94yrv65tdg3utuz2u3sras0wfcq4adxwdvlk387d22g3q98t5z74quw2fa4wed32escx8dwh4mw35t4jwf35xyfxnu83mk5s4kw2glkgsshmxk";
+        let _encoded_no_t = "uview12z384wdq76ceewlsu0esk7d97qnd23v2qnvhujxtcf2lsq8g4hwzpx44fwxssnm5tg8skyh4tnc8gydwxefnnm0hd0a6c6etmj0pp9jqkdsllkr70u8gpf7ndsfqcjlqn6dec3faumzqlqcmtjf8vp92h7kj38ph2786zx30hq2wru8ae3excdwc8w0z3t9fuw7mt7xy5sn6s4e45kwm0cjp70wytnensgdnev286t3vew3yuwt2hcz865y037k30e428dvgne37xvyeal2vu8yjnznphf9t2rw3gdp0hk5zwq00ws8f3l3j5n3qkqgsyzrwx4qzmgq0xwwk4vz2r6vtsykgz089jncvycmem3535zjwvvtvjw8v98y0d5ydwte575gjm7a7k";
+
+        // We test the full roundtrip only with the `sapling` and `orchard` features enabled,
+        // because we will not generate these parts of the encoding if the UFVK does not have an
+        // these parts.
+        #[cfg(all(feature = "sapling", feature = "orchard"))]
         {
-            let ufvk = ufvk.expect("Orchard or Sapling fvk is present.");
-            let encoded = ufvk.encode(&MAIN_NETWORK);
-
-            // Test encoded form against known values; these test vectors contain Orchard receivers
-            // that will be treated as unknown if the `orchard` feature is not enabled.
-            let encoded_with_t = "uview1tg6rpjgju2s2j37gkgjq79qrh5lvzr6e0ed3n4sf4hu5qd35vmsh7avl80xa6mx7ryqce9hztwaqwrdthetpy4pc0kce25x453hwcmax02p80pg5savlg865sft9reat07c5vlactr6l2pxtlqtqunt2j9gmvr8spcuzf07af80h5qmut38h0gvcfa9k4rwujacwwca9vu8jev7wq6c725huv8qjmhss3hdj2vh8cfxhpqcm2qzc34msyrfxk5u6dqttt4vv2mr0aajreww5yufpk0gn4xkfm888467k7v6fmw7syqq6cceu078yw8xja502jxr0jgum43lhvpzmf7eu5dmnn6cr6f7p43yw8znzgxg598mllewnx076hljlvynhzwn5es94yrv65tdg3utuz2u3sras0wfcq4adxwdvlk387d22g3q98t5z74quw2fa4wed32escx8dwh4mw35t4jwf35xyfxnu83mk5s4kw2glkgsshmxk";
-            let _encoded_no_t = "uview12z384wdq76ceewlsu0esk7d97qnd23v2qnvhujxtcf2lsq8g4hwzpx44fwxssnm5tg8skyh4tnc8gydwxefnnm0hd0a6c6etmj0pp9jqkdsllkr70u8gpf7ndsfqcjlqn6dec3faumzqlqcmtjf8vp92h7kj38ph2786zx30hq2wru8ae3excdwc8w0z3t9fuw7mt7xy5sn6s4e45kwm0cjp70wytnensgdnev286t3vew3yuwt2hcz865y037k30e428dvgne37xvyeal2vu8yjnznphf9t2rw3gdp0hk5zwq00ws8f3l3j5n3qkqgsyzrwx4qzmgq0xwwk4vz2r6vtsykgz089jncvycmem3535zjwvvtvjw8v98y0d5ydwte575gjm7a7k";
-
-            // We test the full roundtrip only with the `sapling` and `orchard` features enabled,
-            // because we will not generate these parts of the encoding if the UFVK does not have an
-            // these parts.
-            #[cfg(all(feature = "sapling", feature = "orchard"))]
-            {
-                #[cfg(feature = "transparent-inputs")]
-                assert_eq!(encoded, encoded_with_t);
-                #[cfg(not(feature = "transparent-inputs"))]
-                assert_eq!(encoded, _encoded_no_t);
-            }
-
-            let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoded).unwrap();
-            let reencoded = decoded.encode(&MAIN_NETWORK);
-            assert_eq!(encoded, reencoded);
-
             #[cfg(feature = "transparent-inputs")]
-            assert_eq!(
-                decoded.transparent.map(|t| t.serialize()),
-                ufvk.transparent.as_ref().map(|t| t.serialize()),
-            );
-            #[cfg(feature = "sapling")]
-            assert_eq!(
-                decoded.sapling.map(|s| s.to_bytes()),
-                ufvk.sapling.map(|s| s.to_bytes()),
-            );
-            #[cfg(feature = "orchard")]
-            assert_eq!(
-                decoded.orchard.map(|o| o.to_bytes()),
-                ufvk.orchard.map(|o| o.to_bytes()),
-            );
-
-            let decoded_with_t =
-                UnifiedFullViewingKey::decode(&MAIN_NETWORK, encoded_with_t).unwrap();
-            #[cfg(feature = "transparent-inputs")]
-            assert_eq!(
-                decoded_with_t.transparent.map(|t| t.serialize()),
-                ufvk.transparent.as_ref().map(|t| t.serialize()),
-            );
-
-            // Both Orchard and Sapling enabled
-            #[cfg(all(
-                feature = "orchard",
-                feature = "sapling",
-                feature = "transparent-inputs"
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 0);
-            #[cfg(all(
-                feature = "orchard",
-                feature = "sapling",
-                not(feature = "transparent-inputs")
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 1);
-
-            // Orchard enabled
-            #[cfg(all(
-                feature = "orchard",
-                not(feature = "sapling"),
-                feature = "transparent-inputs"
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 1);
-            #[cfg(all(
-                feature = "orchard",
-                not(feature = "sapling"),
-                not(feature = "transparent-inputs")
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 2);
-
-            // Sapling enabled
-            #[cfg(all(
-                not(feature = "orchard"),
-                feature = "sapling",
-                feature = "transparent-inputs"
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 1);
-            #[cfg(all(
-                not(feature = "orchard"),
-                feature = "sapling",
-                not(feature = "transparent-inputs")
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 2);
+            assert_eq!(encoded, encoded_with_t);
+            #[cfg(not(feature = "transparent-inputs"))]
+            assert_eq!(encoded, _encoded_no_t);
         }
+
+        let decoded = UnifiedFullViewingKey::decode(&MAIN_NETWORK, &encoded).unwrap();
+        let reencoded = decoded.encode(&MAIN_NETWORK);
+        assert_eq!(encoded, reencoded);
+
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(
+            decoded.transparent.map(|t| t.serialize()),
+            ufvk.transparent.as_ref().map(|t| t.serialize()),
+        );
+        #[cfg(feature = "sapling")]
+        assert_eq!(
+            decoded.sapling.map(|s| s.to_bytes()),
+            ufvk.sapling.map(|s| s.to_bytes()),
+        );
+        #[cfg(feature = "orchard")]
+        assert_eq!(
+            decoded.orchard.map(|o| o.to_bytes()),
+            ufvk.orchard.map(|o| o.to_bytes()),
+        );
+
+        let decoded_with_t = UnifiedFullViewingKey::decode(&MAIN_NETWORK, encoded_with_t).unwrap();
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(
+            decoded_with_t.transparent.map(|t| t.serialize()),
+            ufvk.transparent.as_ref().map(|t| t.serialize()),
+        );
+
+        // Both Orchard and Sapling enabled
+        #[cfg(all(
+            feature = "orchard",
+            feature = "sapling",
+            feature = "transparent-inputs"
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 0);
+        #[cfg(all(
+            feature = "orchard",
+            feature = "sapling",
+            not(feature = "transparent-inputs")
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 1);
+
+        // Orchard enabled
+        #[cfg(all(
+            feature = "orchard",
+            not(feature = "sapling"),
+            feature = "transparent-inputs"
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 1);
+        #[cfg(all(
+            feature = "orchard",
+            not(feature = "sapling"),
+            not(feature = "transparent-inputs")
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 2);
+
+        // Sapling enabled
+        #[cfg(all(
+            not(feature = "orchard"),
+            feature = "sapling",
+            feature = "transparent-inputs"
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 1);
+        #[cfg(all(
+            not(feature = "orchard"),
+            feature = "sapling",
+            not(feature = "transparent-inputs")
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 2);
     }
 
     #[test]
@@ -1501,6 +1497,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(feature = "orchard", feature = "sapling"))]
     fn uivk_round_trip() {
         use zcash_primitives::consensus::NetworkType;
 
@@ -1533,101 +1530,94 @@ mod tests {
             orchard,
         );
 
-        #[cfg(not(any(feature = "orchard", feature = "sapling")))]
-        assert!(uivk.is_none());
+        let encoded = uivk.to_uivk().encode(&NetworkType::Main);
 
-        #[cfg(any(feature = "orchard", feature = "sapling"))]
+        // Test encoded form against known values; these test vectors contain Orchard receivers
+        // that will be treated as unknown if the `orchard` feature is not enabled.
+        let encoded_with_t = "uivk1z28yg638vjwusmf0zc9ad2j0mpv6s42wc5kqt004aaqfu5xxxgu7mdcydn9qf723fnryt34s6jyxyw0jt7spq04c3v9ze6qe9gjjc5aglz8zv5pqtw58czd0actynww5n85z3052kzgy6cu0fyjafyp4sr4kppyrrwhwev2rr0awq6m8d66esvk6fgacggqnswg5g9gkv6t6fj9ajhyd0gmel4yzscprpzduncc0e2lywufup6fvzf6y8cefez2r99pgge5yyfuus0r60khgu895pln5e7nn77q6s9kh2uwf6lrfu06ma2kd7r05jjvl4hn6nupge8fajh0cazd7mkmz23t79w";
+        let _encoded_no_t = "uivk1020vq9j5zeqxh303sxa0zv2hn9wm9fev8x0p8yqxdwyzde9r4c90fcglc63usj0ycl2scy8zxuhtser0qrq356xfy8x3vyuxu7f6gas75svl9v9m3ctuazsu0ar8e8crtx7x6zgh4kw8xm3q4rlkpm9er2wefxhhf9pn547gpuz9vw27gsdp6c03nwlrxgzhr2g6xek0x8l5avrx9ue9lf032tr7kmhqf3nfdxg7ldfgx6yf09g";
+
+        // We test the full roundtrip only with the `sapling` and `orchard` features enabled,
+        // because we will not generate these parts of the encoding if the UIVK does not have an
+        // these parts.
+        #[cfg(all(feature = "sapling", feature = "orchard"))]
         {
-            let encoded = uivk.to_uivk().encode(&NetworkType::Main);
-
-            // Test encoded form against known values; these test vectors contain Orchard receivers
-            // that will be treated as unknown if the `orchard` feature is not enabled.
-            let encoded_with_t = "uivk1z28yg638vjwusmf0zc9ad2j0mpv6s42wc5kqt004aaqfu5xxxgu7mdcydn9qf723fnryt34s6jyxyw0jt7spq04c3v9ze6qe9gjjc5aglz8zv5pqtw58czd0actynww5n85z3052kzgy6cu0fyjafyp4sr4kppyrrwhwev2rr0awq6m8d66esvk6fgacggqnswg5g9gkv6t6fj9ajhyd0gmel4yzscprpzduncc0e2lywufup6fvzf6y8cefez2r99pgge5yyfuus0r60khgu895pln5e7nn77q6s9kh2uwf6lrfu06ma2kd7r05jjvl4hn6nupge8fajh0cazd7mkmz23t79w";
-            let _encoded_no_t = "uivk1020vq9j5zeqxh303sxa0zv2hn9wm9fev8x0p8yqxdwyzde9r4c90fcglc63usj0ycl2scy8zxuhtser0qrq356xfy8x3vyuxu7f6gas75svl9v9m3ctuazsu0ar8e8crtx7x6zgh4kw8xm3q4rlkpm9er2wefxhhf9pn547gpuz9vw27gsdp6c03nwlrxgzhr2g6xek0x8l5avrx9ue9lf032tr7kmhqf3nfdxg7ldfgx6yf09g";
-
-            // We test the full roundtrip only with the `sapling` and `orchard` features enabled,
-            // because we will not generate these parts of the encoding if the UIVK does not have an
-            // these parts.
-            #[cfg(all(feature = "sapling", feature = "orchard"))]
-            {
-                #[cfg(feature = "transparent-inputs")]
-                assert_eq!(encoded, encoded_with_t);
-                #[cfg(not(feature = "transparent-inputs"))]
-                assert_eq!(encoded, _encoded_no_t);
-            }
-
-            let decoded =
-                UnifiedIncomingViewingKey::from_uivk(&Uivk::decode(&encoded).unwrap().1).unwrap();
-            let reencoded = decoded.to_uivk().encode(&NetworkType::Main);
-            assert_eq!(encoded, reencoded);
-
             #[cfg(feature = "transparent-inputs")]
-            assert_eq!(
-                decoded.transparent.map(|t| t.serialize()),
-                uivk.transparent.as_ref().map(|t| t.serialize()),
-            );
-            #[cfg(feature = "sapling")]
-            assert_eq!(
-                decoded.sapling.map(|s| s.to_bytes()),
-                uivk.sapling.map(|s| s.to_bytes()),
-            );
-            #[cfg(feature = "orchard")]
-            assert_eq!(
-                decoded.orchard.map(|o| o.to_bytes()),
-                uivk.orchard.map(|o| o.to_bytes()),
-            );
-
-            let decoded_with_t =
-                UnifiedIncomingViewingKey::from_uivk(&Uivk::decode(encoded_with_t).unwrap().1)
-                    .unwrap();
-            #[cfg(feature = "transparent-inputs")]
-            assert_eq!(
-                decoded_with_t.transparent.map(|t| t.serialize()),
-                uivk.transparent.as_ref().map(|t| t.serialize()),
-            );
-
-            // Both Orchard and Sapling enabled
-            #[cfg(all(
-                feature = "orchard",
-                feature = "sapling",
-                feature = "transparent-inputs"
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 0);
-            #[cfg(all(
-                feature = "orchard",
-                feature = "sapling",
-                not(feature = "transparent-inputs")
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 1);
-
-            // Orchard enabled
-            #[cfg(all(
-                feature = "orchard",
-                not(feature = "sapling"),
-                feature = "transparent-inputs"
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 1);
-            #[cfg(all(
-                feature = "orchard",
-                not(feature = "sapling"),
-                not(feature = "transparent-inputs")
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 2);
-
-            // Sapling enabled
-            #[cfg(all(
-                not(feature = "orchard"),
-                feature = "sapling",
-                feature = "transparent-inputs"
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 1);
-            #[cfg(all(
-                not(feature = "orchard"),
-                feature = "sapling",
-                not(feature = "transparent-inputs")
-            ))]
-            assert_eq!(decoded_with_t.unknown.len(), 2);
+            assert_eq!(encoded, encoded_with_t);
+            #[cfg(not(feature = "transparent-inputs"))]
+            assert_eq!(encoded, _encoded_no_t);
         }
+
+        let decoded =
+            UnifiedIncomingViewingKey::from_uivk(&Uivk::decode(&encoded).unwrap().1).unwrap();
+        let reencoded = decoded.to_uivk().encode(&NetworkType::Main);
+        assert_eq!(encoded, reencoded);
+
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(
+            decoded.transparent.map(|t| t.serialize()),
+            uivk.transparent.as_ref().map(|t| t.serialize()),
+        );
+        #[cfg(feature = "sapling")]
+        assert_eq!(
+            decoded.sapling.map(|s| s.to_bytes()),
+            uivk.sapling.map(|s| s.to_bytes()),
+        );
+        #[cfg(feature = "orchard")]
+        assert_eq!(
+            decoded.orchard.map(|o| o.to_bytes()),
+            uivk.orchard.map(|o| o.to_bytes()),
+        );
+
+        let decoded_with_t =
+            UnifiedIncomingViewingKey::from_uivk(&Uivk::decode(encoded_with_t).unwrap().1).unwrap();
+        #[cfg(feature = "transparent-inputs")]
+        assert_eq!(
+            decoded_with_t.transparent.map(|t| t.serialize()),
+            uivk.transparent.as_ref().map(|t| t.serialize()),
+        );
+
+        // Both Orchard and Sapling enabled
+        #[cfg(all(
+            feature = "orchard",
+            feature = "sapling",
+            feature = "transparent-inputs"
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 0);
+        #[cfg(all(
+            feature = "orchard",
+            feature = "sapling",
+            not(feature = "transparent-inputs")
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 1);
+
+        // Orchard enabled
+        #[cfg(all(
+            feature = "orchard",
+            not(feature = "sapling"),
+            feature = "transparent-inputs"
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 1);
+        #[cfg(all(
+            feature = "orchard",
+            not(feature = "sapling"),
+            not(feature = "transparent-inputs")
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 2);
+
+        // Sapling enabled
+        #[cfg(all(
+            not(feature = "orchard"),
+            feature = "sapling",
+            feature = "transparent-inputs"
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 1);
+        #[cfg(all(
+            not(feature = "orchard"),
+            feature = "sapling",
+            not(feature = "transparent-inputs")
+        ))]
+        assert_eq!(decoded_with_t.unknown.len(), 2);
     }
 
     #[test]

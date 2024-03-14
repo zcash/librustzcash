@@ -23,6 +23,8 @@ and this library adheres to Rust's notion of
   (instead of `Option<(UnifiedAddress, DiversifierIndex)>` for `find_address`).
 - `zcash_keys::keys::AddressGenerationError`
   - Added `DiversifierSpaceExhausted` variant.
+- At least one of the `orchard`, `sapling`, or `transparent-inputs` features
+  must be enabled for the `keys` module to be accessible.
 
 ### Removed
 - `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
