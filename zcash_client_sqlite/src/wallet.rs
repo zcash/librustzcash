@@ -235,12 +235,10 @@ impl ViewingKey {
         }
     }
 
-    fn uivk(&self) -> Result<UnifiedIncomingViewingKey, SqliteClientError> {
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
         match self {
-            ViewingKey::Full(ufvk) => Ok(ufvk
-                .to_unified_incoming_viewing_key()
-                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?),
-            ViewingKey::Incoming(uivk) => Ok((**uivk).to_owned()),
+            ViewingKey::Full(ufvk) => ufvk.as_ref().to_unified_incoming_viewing_key(),
+            ViewingKey::Incoming(uivk) => uivk.as_ref().clone(),
         }
     }
 }
@@ -349,7 +347,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.as_bytes()),
             ":hd_account_index": hd_account_index.map(u32::from),
             ":ufvk": viewing_key.ufvk().map(|ufvk| ufvk.encode(params)),
-            ":uivk": viewing_key.uivk()?.to_uivk().encode(&params.network_type()),
+            ":uivk": viewing_key.uivk().to_uivk().encode(&params.network_type()),
             ":orchard_fvk_item_cache": orchard_item,
             ":sapling_fvk_item_cache": sapling_item,
             ":p2pkh_fvk_item_cache": transparent_item,

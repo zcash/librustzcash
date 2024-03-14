@@ -18,13 +18,16 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys::UnifiedIncomingViewingKey`
 
 ### Changed
-- `zcash_keys::keys::UnifiedFullViewingKey::{find_address, default_address}` 
+- `zcash_keys::keys::UnifiedFullViewingKey::{find_address, default_address}`
   now return `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`
   (instead of `Option<(UnifiedAddress, DiversifierIndex)>` for `find_address`).
 - `zcash_keys::keys::AddressGenerationError`
-  - Dropped `Clone` trait
-  - Added `KeyDecoding` variant.
   - Added `DiversifierSpaceExhausted` variant.
+
+### Removed
+- `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
+  feature flag. UFVKs should only be produced by derivation from the USK, or
+  parsed from their string representation.
 
 ### Fixed
 - `UnifiedFullViewingKey::find_address` can now find an address for a diversifier
@@ -37,7 +40,7 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys::UnifiedAddressRequest::all`
 
 ### Fixed
-- A missing application of the `sapling` feature flag was remedied; 
+- A missing application of the `sapling` feature flag was remedied;
   prior to this fix it was not possible to use this crate without the
   `sapling` feature enabled.
 

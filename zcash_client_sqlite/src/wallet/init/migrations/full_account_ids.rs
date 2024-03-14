@@ -122,7 +122,6 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                     let uivk = ufvk_parsed
                         .to_unified_incoming_viewing_key()
-                        .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?
                         .to_uivk()
                         .encode(&self.params.network_type());
 

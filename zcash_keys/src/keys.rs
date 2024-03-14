@@ -7,7 +7,7 @@ use std::{
 };
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
-use zcash_protocol::consensus;
+use zcash_protocol::consensus::{self, NetworkConstants};
 use zip32::{AccountId, DiversifierIndex};
 
 use crate::address::UnifiedAddress;
@@ -17,10 +17,6 @@ use {
     std::convert::TryInto,
     zcash_primitives::legacy::keys::{self as legacy, IncomingViewingKey, NonHardenedChildIndex},
 };
-
-#[cfg(any(feature = "sapling", feature = "orchard"))]
-// Your code here
-use zcash_protocol::consensus::NetworkConstants;
 
 #[cfg(all(
     feature = "transparent-inputs",
@@ -264,19 +260,37 @@ impl UnifiedSpendingKey {
             panic!("ZIP 32 seeds MUST be at least 32 bytes");
         }
 
-        Ok(UnifiedSpendingKey {
+        UnifiedSpendingKey::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
-            transparent: legacy::AccountPrivKey::from_seed(_params, seed, _account)
+            legacy::AccountPrivKey::from_seed(_params, seed, _account)
                 .map_err(DerivationError::Transparent)?,
             #[cfg(feature = "sapling")]
-            sapling: sapling::spending_key(seed, _params.coin_type(), _account),
+            sapling::spending_key(seed, _params.coin_type(), _account),
             #[cfg(feature = "orchard")]
-            orchard: orchard::keys::SpendingKey::from_zip32_seed(
-                seed,
-                _params.coin_type(),
-                _account,
-            )
-            .map_err(DerivationError::Orchard)?,
+            orchard::keys::SpendingKey::from_zip32_seed(seed, _params.coin_type(), _account)
+                .map_err(DerivationError::Orchard)?,
+        )
+    }
+
+    /// Construct a USK from its constituent parts, after verifying that UIVK derivation can
+    /// succeed.
+    fn from_checked_parts(
+        #[cfg(feature = "transparent-inputs")] transparent: legacy::AccountPrivKey,
+        #[cfg(feature = "sapling")] sapling: sapling::ExtendedSpendingKey,
+        #[cfg(feature = "orchard")] orchard: orchard::keys::SpendingKey,
+    ) -> Result<UnifiedSpendingKey, DerivationError> {
+        // Verify that FVK and IVK derivation succeed; we don't want to construct a USK
+        // that can't derive transparent addresses.
+        #[cfg(feature = "transparent-inputs")]
+        let _ = transparent.to_account_pubkey().derive_external_ivk()?;
+
+        Ok(UnifiedSpendingKey {
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            #[cfg(feature = "sapling")]
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
         })
     }
 
@@ -466,14 +480,15 @@ impl UnifiedSpendingKey {
             let has_transparent = true;
 
             if has_orchard && has_sapling && has_transparent {
-                return Ok(UnifiedSpendingKey {
-                    #[cfg(feature = "orchard")]
-                    orchard: orchard.unwrap(),
-                    #[cfg(feature = "sapling")]
-                    sapling: sapling.unwrap(),
+                return UnifiedSpendingKey::from_checked_parts(
                     #[cfg(feature = "transparent-inputs")]
-                    transparent: transparent.unwrap(),
-                });
+                    transparent.unwrap(),
+                    #[cfg(feature = "sapling")]
+                    sapling.unwrap(),
+                    #[cfg(feature = "orchard")]
+                    orchard.unwrap(),
+                )
+                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh));
             }
         }
     }
@@ -502,7 +517,7 @@ impl UnifiedSpendingKey {
 }
 
 /// Errors that can occur in the generation of unified addresses.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum AddressGenerationError {
     /// The requested diversifier index was outside the range of valid transparent
     /// child address indices.
@@ -522,29 +537,6 @@ pub enum AddressGenerationError {
     /// A Unified address cannot be generated without at least one shielded receiver being
     /// included.
     ShieldedReceiverRequired,
-    /// An error occurred while deriving a key or address from an HD wallet.
-    Derivation(DerivationError),
-    /// An error occurred while decoding a key from its encoded representation.
-    KeyDecoding(DecodingError),
-}
-
-#[cfg(feature = "transparent-inputs")]
-impl From<hdwallet::error::Error> for AddressGenerationError {
-    fn from(e: hdwallet::error::Error) -> Self {
-        AddressGenerationError::Derivation(DerivationError::Transparent(e))
-    }
-}
-
-impl From<DerivationError> for AddressGenerationError {
-    fn from(e: DerivationError) -> Self {
-        AddressGenerationError::Derivation(e)
-    }
-}
-
-impl From<DecodingError> for AddressGenerationError {
-    fn from(e: DecodingError) -> Self {
-        AddressGenerationError::KeyDecoding(e)
-    }
 }
 
 impl fmt::Display for AddressGenerationError {
@@ -589,12 +581,6 @@ impl fmt::Display for AddressGenerationError {
             AddressGenerationError::ShieldedReceiverRequired => {
                 write!(f, "A Unified Address requires at least one shielded (Sapling or Orchard) receiver.")
             }
-            AddressGenerationError::Derivation(e) => write!(f, "Error deriving address: {}", e),
-            AddressGenerationError::KeyDecoding(e) => write!(
-                f,
-                "Error decoding key from its serialized representation: {}.",
-                e
-            ),
         }
     }
 }
@@ -682,37 +668,56 @@ pub struct UnifiedFullViewingKey {
 
 #[doc(hidden)]
 impl UnifiedFullViewingKey {
-    /// Construct a new unified full viewing key, if the required components are present.
+    /// Construct a new unified full viewing key.
+    ///
+    /// This method is only available when the `test-dependencies` feature is enabled,
+    /// as derivation from the USK or deserialization from the serialized form should
+    /// be used instead.
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
         #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
         // TODO: Implement construction of UFVKs with metadata items.
-    ) -> Option<UnifiedFullViewingKey> {
-        #[cfg(feature = "orchard")]
-        let has_orchard = orchard.is_some();
-        #[cfg(not(feature = "orchard"))]
-        let has_orchard = false;
-        #[cfg(feature = "sapling")]
-        let has_sapling = sapling.is_some();
-        #[cfg(not(feature = "sapling"))]
-        let has_sapling = false;
+    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+        Self::from_checked_parts(
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            #[cfg(feature = "sapling")]
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            // We don't currently allow constructing new UFVKs with unknown items, but we store
+            // this to allow parsing such UFVKs.
+            vec![],
+        )
+    }
 
-        if has_orchard || has_sapling {
-            Some(UnifiedFullViewingKey {
-                #[cfg(feature = "transparent-inputs")]
-                transparent,
-                #[cfg(feature = "sapling")]
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-                // We don't allow constructing new UFVKs with unknown items, but we store
-                // this to allow parsing such UFVKs.
-                unknown: vec![],
-            })
-        } else {
-            None
-        }
+    /// Construct a UFVK from its constituent parts, after verifying that UIVK derivation can
+    /// succeed.
+    fn from_checked_parts(
+        #[cfg(feature = "transparent-inputs")] transparent: Option<legacy::AccountPubKey>,
+        #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
+        #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
+        unknown: Vec<(u32, Vec<u8>)>,
+    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+        // Verify that IVK derivation succeeds; we don't want to construct a UFVK
+        // that can't derive transparent addresses.
+        #[cfg(feature = "transparent-inputs")]
+        let _ = transparent
+            .as_ref()
+            .map(|t| t.derive_external_ivk())
+            .transpose()?;
+
+        Ok(UnifiedFullViewingKey {
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            #[cfg(feature = "sapling")]
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            unknown,
+        })
     }
 
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
@@ -793,7 +798,7 @@ impl UnifiedFullViewingKey {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(Self {
+        Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             transparent,
             #[cfg(feature = "sapling")]
@@ -801,7 +806,8 @@ impl UnifiedFullViewingKey {
             #[cfg(feature = "orchard")]
             orchard,
             unknown,
-        })
+        )
+        .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2pkh))
     }
 
     /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
@@ -844,22 +850,19 @@ impl UnifiedFullViewingKey {
     }
 
     /// Derives a Unified Incoming Viewing Key from this Unified Full Viewing Key.
-    pub fn to_unified_incoming_viewing_key(
-        &self,
-    ) -> Result<UnifiedIncomingViewingKey, DerivationError> {
-        Ok(UnifiedIncomingViewingKey {
+    pub fn to_unified_incoming_viewing_key(&self) -> UnifiedIncomingViewingKey {
+        UnifiedIncomingViewingKey {
             #[cfg(feature = "transparent-inputs")]
-            transparent: self
-                .transparent
-                .as_ref()
-                .map(|t| t.derive_external_ivk())
-                .transpose()?,
+            transparent: self.transparent.as_ref().map(|t| {
+                t.derive_external_ivk()
+                    .expect("Transparent IVK derivation was checked at construction.")
+            }),
             #[cfg(feature = "sapling")]
             sapling: self.sapling.as_ref().map(|s| s.to_external_ivk()),
             #[cfg(feature = "orchard")]
             orchard: self.orchard.as_ref().map(|o| o.to_ivk(Scope::External)),
             unknown: Vec::new(),
-        })
+        }
     }
 
     /// Returns the transparent component of the unified key at the
@@ -890,7 +893,7 @@ impl UnifiedFullViewingKey {
         j: DiversifierIndex,
         request: UnifiedAddressRequest,
     ) -> Result<UnifiedAddress, AddressGenerationError> {
-        self.to_unified_incoming_viewing_key()?.address(j, request)
+        self.to_unified_incoming_viewing_key().address(j, request)
     }
 
     /// Searches the diversifier space starting at diversifier index `j` for one which will
@@ -905,7 +908,7 @@ impl UnifiedFullViewingKey {
         mut j: DiversifierIndex,
         request: UnifiedAddressRequest,
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
-        self.to_unified_incoming_viewing_key()?
+        self.to_unified_incoming_viewing_key()
             .find_address(j, request)
     }
 
@@ -936,7 +939,12 @@ pub struct UnifiedIncomingViewingKey {
 }
 
 impl UnifiedIncomingViewingKey {
-    /// Construct a new unified incoming viewing key, if the required components are present.
+    /// Construct a new unified incoming viewing key.
+    ///
+    /// This method is only available when the `test-dependencies` feature is enabled,
+    /// as derivation from the UFVK or deserialization from the serialized form should
+    /// be used instead.
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn new(
         #[cfg(feature = "transparent-inputs")] transparent: Option<
             zcash_primitives::legacy::keys::ExternalIvk,
@@ -944,30 +952,17 @@ impl UnifiedIncomingViewingKey {
         #[cfg(feature = "sapling")] sapling: Option<::sapling::zip32::IncomingViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::IncomingViewingKey>,
         // TODO: Implement construction of UIVKs with metadata items.
-    ) -> Option<UnifiedIncomingViewingKey> {
-        #[cfg(feature = "orchard")]
-        let has_orchard = orchard.is_some();
-        #[cfg(not(feature = "orchard"))]
-        let has_orchard = false;
-        #[cfg(feature = "sapling")]
-        let has_sapling = sapling.is_some();
-        #[cfg(not(feature = "sapling"))]
-        let has_sapling = false;
-
-        if has_orchard || has_sapling {
-            Some(UnifiedIncomingViewingKey {
-                #[cfg(feature = "transparent-inputs")]
-                transparent,
-                #[cfg(feature = "sapling")]
-                sapling,
-                #[cfg(feature = "orchard")]
-                orchard,
-                // We don't allow constructing new UFVKs with unknown items, but we store
-                // this to allow parsing such UFVKs.
-                unknown: vec![],
-            })
-        } else {
-            None
+    ) -> UnifiedIncomingViewingKey {
+        UnifiedIncomingViewingKey {
+            #[cfg(feature = "transparent-inputs")]
+            transparent,
+            #[cfg(feature = "sapling")]
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+            // We don't allow constructing new UFVKs with unknown items, but we store
+            // this to allow parsing such UFVKs.
+            unknown: vec![],
         }
     }
 
@@ -1543,7 +1538,6 @@ mod tests {
 
         #[cfg(any(feature = "orchard", feature = "sapling"))]
         {
-            let uivk = uivk.expect("Orchard or Sapling ivk is present.");
             let encoded = uivk.to_uivk().encode(&NetworkType::Main);
 
             // Test encoded form against known values; these test vectors contain Orchard receivers
@@ -1654,8 +1648,7 @@ mod tests {
             let d_idx = DiversifierIndex::from(tv.diversifier_index);
             let uivk = usk
                 .to_unified_full_viewing_key()
-                .to_unified_incoming_viewing_key()
-                .unwrap();
+                .to_unified_incoming_viewing_key();
 
             // The test vectors contain some diversifier indices that do not generate
             // valid Sapling addresses, so skip those.
