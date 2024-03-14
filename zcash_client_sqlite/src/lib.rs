@@ -60,7 +60,7 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountKind, BlockMetadata, DecryptedTransaction, InputSource,
+        Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
         NullifierQuery, ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees,
         WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
@@ -316,10 +316,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = self.get_account(account_id)? {
-            if let AccountKind::Derived {
+            if let AccountSource::Derived {
                 seed_fingerprint,
                 account_index,
-            } = account.kind()
+            } = account.source()
             {
                 let seed_fingerprint_match =
                     SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
@@ -527,7 +527,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let account_id = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountKind::Derived {
+                AccountSource::Derived {
                     seed_fingerprint,
                     account_index,
                 },

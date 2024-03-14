@@ -5,7 +5,7 @@ use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_client_backend::{data_api::AccountKind, keys::UnifiedSpendingKey};
+use zcash_client_backend::{data_api::AccountSource, keys::UnifiedSpendingKey};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
 use zip32::fingerprint::SeedFingerprint;
@@ -45,11 +45,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        let account_kind_derived = account_kind_code(AccountKind::Derived {
+        let account_kind_derived = account_kind_code(AccountSource::Derived {
             seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
             account_index: zip32::AccountId::ZERO,
         });
-        let account_kind_imported = account_kind_code(AccountKind::Imported);
+        let account_kind_imported = account_kind_code(AccountSource::Imported);
         transaction.execute_batch(
             &format!(r#"
             PRAGMA foreign_keys = OFF;
