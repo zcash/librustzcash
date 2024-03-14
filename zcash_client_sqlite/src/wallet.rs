@@ -74,7 +74,6 @@ use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_address::unified::{Encoding, Uivk};
 use zcash_keys::keys::{
     AddressGenerationError, HdSeedFingerprint, UnifiedAddressRequest, UnifiedIncomingViewingKey,
 };
@@ -120,7 +119,7 @@ use {
     crate::UtxoId,
     rusqlite::Row,
     std::collections::BTreeSet,
-    zcash_address::unified::Ivk,
+    zcash_address::unified::{Encoding, Ivk, Uivk},
     zcash_client_backend::wallet::{TransparentAddressMetadata, WalletTransparentOutput},
     zcash_primitives::{
         legacy::{
@@ -347,7 +346,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.as_bytes()),
             ":hd_account_index": hd_account_index.map(u32::from),
             ":ufvk": viewing_key.ufvk().map(|ufvk| ufvk.encode(params)),
-            ":uivk": viewing_key.uivk().to_uivk().encode(&params.network_type()),
+            ":uivk": viewing_key.uivk().encode(params),
             ":orchard_fvk_item_cache": orchard_item,
             ":sapling_fvk_item_cache": sapling_item,
             ":p2pkh_fvk_item_cache": transparent_item,
@@ -1503,18 +1502,9 @@ pub(crate) fn get_account<P: Parameters>(
                 ))
             } else {
                 let uivk_str: String = row.get("uivk")?;
-                let (network, uivk) = Uivk::decode(&uivk_str).map_err(|e| {
-                    SqliteClientError::CorruptedData(format!("Failure to decode UIVK: {e}"))
-                })?;
-                if network != params.network_type() {
-                    return Err(SqliteClientError::CorruptedData(
-                        "UIVK network type does not match wallet network type".to_string(),
-                    ));
-                }
                 ViewingKey::Incoming(Box::new(
-                    UnifiedIncomingViewingKey::from_uivk(&uivk).map_err(|e| {
-                        SqliteClientError::CorruptedData(format!("Failure to decode UIVK: {e}"))
-                    })?,
+                    UnifiedIncomingViewingKey::decode(params, &uivk_str[..])
+                        .map_err(SqliteClientError::BadAccountData)?,
                 ))
             };
 

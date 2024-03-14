@@ -5,7 +5,6 @@ use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_address::unified::Encoding;
 use zcash_client_backend::{data_api::AccountKind, keys::UnifiedSpendingKey};
 use zcash_keys::keys::{HdSeedFingerprint, UnifiedFullViewingKey};
 use zcash_primitives::consensus;
@@ -122,8 +121,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
                     let uivk = ufvk_parsed
                         .to_unified_incoming_viewing_key()
-                        .to_uivk()
-                        .encode(&self.params.network_type());
+                        .encode(&self.params);
 
                     #[cfg(feature = "transparent-inputs")]
                     let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());

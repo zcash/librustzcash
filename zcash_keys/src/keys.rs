@@ -740,13 +740,13 @@ impl UnifiedFullViewingKey {
             ));
         }
 
-        Self::from_ufvk(&ufvk).map_err(|e| e.to_string())
+        Self::parse(&ufvk).map_err(|e| e.to_string())
     }
 
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn from_ufvk(ufvk: &Ufvk) -> Result<Self, DecodingError> {
+    pub fn parse(ufvk: &Ufvk) -> Result<Self, DecodingError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -823,7 +823,7 @@ impl UnifiedFullViewingKey {
     }
 
     /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
-    pub fn to_ufvk(&self) -> Ufvk {
+    fn to_ufvk(&self) -> Ufvk {
         let items = std::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Fvk::Unknown {
                 typecode: *typecode,
@@ -973,8 +973,24 @@ impl UnifiedIncomingViewingKey {
         }
     }
 
+    /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
+    pub fn decode<P: consensus::Parameters>(params: &P, encoding: &str) -> Result<Self, String> {
+        let (net, ufvk) = unified::Uivk::decode(encoding).map_err(|e| e.to_string())?;
+        let expected_net = params.network_type();
+        if net != expected_net {
+            return Err(format!(
+                "UIVK is for network {:?} but we expected {:?}",
+                net, expected_net,
+            ));
+        }
+
+        Self::parse(&ufvk).map_err(|e| e.to_string())
+    }
+
     /// Constructs a unified incoming viewing key from a parsed unified encoding.
-    pub fn from_uivk(uivk: &Uivk) -> Result<Self, DecodingError> {
+    fn parse(uivk: &Uivk) -> Result<Self, DecodingError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -1041,8 +1057,13 @@ impl UnifiedIncomingViewingKey {
         })
     }
 
+    /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
+    pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
+        self.render().encode(&params.network_type())
+    }
+
     /// Converts this unified incoming viewing key to a unified encoding.
-    pub fn to_uivk(&self) -> Uivk {
+    fn render(&self) -> Uivk {
         let items = std::iter::empty().chain(self.unknown.iter().map(|(typecode, data)| {
             unified::Ivk::Unknown {
                 typecode: *typecode,
@@ -1530,7 +1551,7 @@ mod tests {
             orchard,
         );
 
-        let encoded = uivk.to_uivk().encode(&NetworkType::Main);
+        let encoded = uivk.render().encode(&NetworkType::Main);
 
         // Test encoded form against known values; these test vectors contain Orchard receivers
         // that will be treated as unknown if the `orchard` feature is not enabled.
@@ -1548,9 +1569,8 @@ mod tests {
             assert_eq!(encoded, _encoded_no_t);
         }
 
-        let decoded =
-            UnifiedIncomingViewingKey::from_uivk(&Uivk::decode(&encoded).unwrap().1).unwrap();
-        let reencoded = decoded.to_uivk().encode(&NetworkType::Main);
+        let decoded = UnifiedIncomingViewingKey::parse(&Uivk::decode(&encoded).unwrap().1).unwrap();
+        let reencoded = decoded.render().encode(&NetworkType::Main);
         assert_eq!(encoded, reencoded);
 
         #[cfg(feature = "transparent-inputs")]
@@ -1570,7 +1590,7 @@ mod tests {
         );
 
         let decoded_with_t =
-            UnifiedIncomingViewingKey::from_uivk(&Uivk::decode(encoded_with_t).unwrap().1).unwrap();
+            UnifiedIncomingViewingKey::parse(&Uivk::decode(encoded_with_t).unwrap().1).unwrap();
         #[cfg(feature = "transparent-inputs")]
         assert_eq!(
             decoded_with_t.transparent.map(|t| t.serialize()),

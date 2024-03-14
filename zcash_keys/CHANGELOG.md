@@ -12,8 +12,6 @@ and this library adheres to Rust's notion of
 - `impl Display for zcash_keys::keys::AddressGenerationError`
 - `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
 - `zcash_keys::keys::DecodingError`
-- `zcash_keys::keys::UnifiedFullViewingKey::from_ufvk`
-- `zcash_keys::keys::UnifiedFullViewingKey::to_ufvk`
 - `zcash_keys::keys::UnifiedFullViewingKey::to_unified_incoming_viewing_key`
 - `zcash_keys::keys::UnifiedIncomingViewingKey`
 
