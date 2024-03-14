@@ -1,7 +1,10 @@
 //! Helper functions for managing light client key material.
 use blake2b_simd::Params as blake2bParams;
 use secrecy::{ExposeSecret, SecretVec};
-use std::{error, fmt};
+use std::{
+    error,
+    fmt::{self, Display},
+};
 
 use zcash_address::unified::{self, Container, Encoding, Typecode, Ufvk, Uivk};
 use zcash_protocol::{consensus, ShieldedProtocol};
@@ -138,10 +141,25 @@ fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildInd
 #[derive(Debug)]
 #[doc(hidden)]
 pub enum DerivationError {
+    InvalidShieldedKey(ShieldedProtocol),
     #[cfg(feature = "orchard")]
     Orchard(orchard::zip32::Error),
     #[cfg(feature = "transparent-inputs")]
     Transparent(hdwallet::error::Error),
+}
+
+impl Display for DerivationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DerivationError::InvalidShieldedKey(protocol) => {
+                write!(f, "Invalid shielded key for protocol {:?}", protocol)
+            }
+            #[cfg(feature = "orchard")]
+            DerivationError::Orchard(e) => write!(f, "Orchard error: {}", e),
+            #[cfg(feature = "transparent-inputs")]
+            DerivationError::Transparent(e) => write!(f, "Transparent error: {}", e),
+        }
+    }
 }
 
 /// A version identifier for the encoding of unified spending keys.
@@ -498,23 +516,19 @@ pub enum AddressGenerationError {
     ShieldedReceiverRequired,
 
     // An error occurred while deriving a key or address from an HD wallet.
-    UnifiedError(UnifiedError),
-
-    // An error occurred while deriving a transparent key or address from an HD wallet.
-    #[cfg(feature = "transparent-inputs")]
-    HDWalletError(hdwallet::error::Error),
-}
-
-impl From<UnifiedError> for AddressGenerationError {
-    fn from(e: UnifiedError) -> Self {
-        AddressGenerationError::UnifiedError(e)
-    }
+    Derivation(DerivationError),
 }
 
 #[cfg(feature = "transparent-inputs")]
 impl From<hdwallet::error::Error> for AddressGenerationError {
     fn from(e: hdwallet::error::Error) -> Self {
-        AddressGenerationError::HDWalletError(e)
+        AddressGenerationError::Derivation(DerivationError::Transparent(e))
+    }
+}
+
+impl From<DerivationError> for AddressGenerationError {
+    fn from(e: DerivationError) -> Self {
+        AddressGenerationError::Derivation(e)
     }
 }
 
@@ -560,13 +574,7 @@ impl fmt::Display for AddressGenerationError {
             AddressGenerationError::ShieldedReceiverRequired => {
                 write!(f, "A Unified Address requires at least one shielded (Sapling or Orchard) receiver.")
             }
-            AddressGenerationError::UnifiedError(e) => {
-                write!(f, "UnifiedError: {}", e)
-            }
-            #[cfg(feature = "transparent-inputs")]
-            AddressGenerationError::HDWalletError(e) => {
-                write!(f, "HDWalletError: {}", e)
-            }
+            AddressGenerationError::Derivation(e) => write!(f, "Error deriving address: {}", e),
         }
     }
 }
@@ -633,38 +641,10 @@ impl UnifiedAddressRequest {
     }
 }
 
-/// Errors that may be returned from the [UnifiedFullViewingKey] and [UnifiedIncomingViewingKey] types.
-#[derive(Debug)]
-pub enum UnifiedError {
-    InvalidShieldedKey(ShieldedProtocol),
-    #[cfg(feature = "transparent-inputs")]
-    InvalidTransparentKey(hdwallet::error::Error),
-    #[cfg(feature = "transparent-inputs")]
-    HDWallet(hdwallet::error::Error),
-}
-
 #[cfg(feature = "transparent-inputs")]
-impl From<hdwallet::error::Error> for UnifiedError {
+impl From<hdwallet::error::Error> for DerivationError {
     fn from(e: hdwallet::error::Error) -> Self {
-        UnifiedError::HDWallet(e)
-    }
-}
-
-impl fmt::Display for UnifiedError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self {
-            UnifiedError::InvalidShieldedKey(p) => {
-                write!(f, "Invalid key for shielded protocol: {:?}", p)
-            }
-            #[cfg(feature = "transparent-inputs")]
-            UnifiedError::InvalidTransparentKey(e) => {
-                write!(f, "Invalid key for transparent protocol: {:?}", e)
-            }
-            #[cfg(feature = "transparent-inputs")]
-            UnifiedError::HDWallet(e) => {
-                write!(f, "HDWallet error: {}", e)
-            }
-        }
+        DerivationError::Transparent(e)
     }
 }
 
@@ -734,7 +714,7 @@ impl UnifiedFullViewingKey {
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
-    pub fn from_ufvk(ufvk: &Ufvk) -> Result<Self, UnifiedError> {
+    pub fn from_ufvk(ufvk: &Ufvk) -> Result<Self, DerivationError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -750,7 +730,9 @@ impl UnifiedFullViewingKey {
             .filter_map(|receiver| match receiver {
                 #[cfg(feature = "orchard")]
                 unified::Fvk::Orchard(data) => orchard::keys::FullViewingKey::from_bytes(data)
-                    .ok_or(UnifiedError::InvalidShieldedKey(ShieldedProtocol::Orchard))
+                    .ok_or(DerivationError::InvalidShieldedKey(
+                        ShieldedProtocol::Orchard,
+                    ))
                     .map(|addr| {
                         orchard = Some(addr);
                         None
@@ -764,7 +746,9 @@ impl UnifiedFullViewingKey {
                 #[cfg(feature = "sapling")]
                 unified::Fvk::Sapling(data) => {
                     sapling::DiversifiableFullViewingKey::from_bytes(data)
-                        .ok_or(UnifiedError::InvalidShieldedKey(ShieldedProtocol::Sapling))
+                        .ok_or(DerivationError::InvalidShieldedKey(
+                            ShieldedProtocol::Sapling,
+                        ))
                         .map(|pa| {
                             sapling = Some(pa);
                             None
@@ -778,7 +762,7 @@ impl UnifiedFullViewingKey {
                 ))),
                 #[cfg(feature = "transparent-inputs")]
                 unified::Fvk::P2pkh(data) => legacy::AccountPubKey::deserialize(data)
-                    .map_err(UnifiedError::InvalidTransparentKey)
+                    .map_err(DerivationError::Transparent)
                     .map(|tfvk| {
                         transparent = Some(tfvk);
                         None
@@ -846,7 +830,7 @@ impl UnifiedFullViewingKey {
     /// Derives a Unified Incoming Viewing Key from this Unified Full Viewing Key.
     pub fn to_unified_incoming_viewing_key(
         &self,
-    ) -> Result<UnifiedIncomingViewingKey, UnifiedError> {
+    ) -> Result<UnifiedIncomingViewingKey, DerivationError> {
         Ok(UnifiedIncomingViewingKey {
             #[cfg(feature = "transparent-inputs")]
             transparent: self
@@ -972,7 +956,7 @@ impl UnifiedIncomingViewingKey {
     }
 
     /// Constructs a unified incoming viewing key from a parsed unified encoding.
-    pub fn from_uivk(uivk: &Uivk) -> Result<Self, UnifiedError> {
+    pub fn from_uivk(uivk: &Uivk) -> Result<Self, DerivationError> {
         #[cfg(feature = "orchard")]
         let mut orchard = None;
         #[cfg(feature = "sapling")]
@@ -991,7 +975,7 @@ impl UnifiedIncomingViewingKey {
                     {
                         orchard = Some(
                             Option::from(orchard::keys::IncomingViewingKey::from_bytes(data))
-                                .ok_or(UnifiedError::InvalidShieldedKey(
+                                .ok_or(DerivationError::InvalidShieldedKey(
                                     ShieldedProtocol::Orchard,
                                 ))?,
                         );
@@ -1005,7 +989,7 @@ impl UnifiedIncomingViewingKey {
                     {
                         sapling = Some(
                             Option::from(::sapling::zip32::IncomingViewingKey::from_bytes(data))
-                                .ok_or(UnifiedError::InvalidShieldedKey(
+                                .ok_or(DerivationError::InvalidShieldedKey(
                                     ShieldedProtocol::Sapling,
                                 ))?,
                         );
@@ -1017,10 +1001,7 @@ impl UnifiedIncomingViewingKey {
                 unified::Ivk::P2pkh(data) => {
                     #[cfg(feature = "transparent-inputs")]
                     {
-                        transparent = Some(
-                            legacy::ExternalIvk::deserialize(data)
-                                .map_err(UnifiedError::InvalidTransparentKey)?,
-                        );
+                        transparent = Some(legacy::ExternalIvk::deserialize(data)?);
                     }
 
                     #[cfg(not(feature = "transparent-inputs"))]

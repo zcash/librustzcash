@@ -298,14 +298,13 @@ struct AccountSqlValues<'a> {
     hd_seed_fingerprint: Option<&'a [u8]>,
     hd_account_index: Option<u32>,
     ufvk: Option<&'a UnifiedFullViewingKey>,
-    uivk: String,
+    uivk: UnifiedIncomingViewingKey,
 }
 
 /// Returns (account_type, hd_seed_fingerprint, hd_account_index, ufvk, uivk) for a given account.
-fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
-    account: &'a Account,
-    params: &P,
-) -> Result<AccountSqlValues<'a>, SqliteClientError> {
+fn get_sql_values_for_account_parameters(
+    account: &Account,
+) -> Result<AccountSqlValues, SqliteClientError> {
     Ok(match account {
         Account::Zip32(hdaccount) => AccountSqlValues {
             account_type: AccountType::Zip32.into(),
@@ -315,9 +314,7 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
             uivk: hdaccount
                 .ufvk()
                 .to_unified_incoming_viewing_key()
-                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?
-                .to_uivk()
-                .encode(&params.network_type()),
+                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?,
         },
         Account::Imported(ImportedAccount::Full(ufvk)) => AccountSqlValues {
             account_type: AccountType::Imported.into(),
@@ -326,16 +323,14 @@ fn get_sql_values_for_account_parameters<'a, P: consensus::Parameters>(
             ufvk: Some(ufvk),
             uivk: ufvk
                 .to_unified_incoming_viewing_key()
-                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?
-                .to_uivk()
-                .encode(&params.network_type()),
+                .map_err(|e| SqliteClientError::CorruptedData(e.to_string()))?,
         },
         Account::Imported(ImportedAccount::Incoming(uivk)) => AccountSqlValues {
             account_type: AccountType::Imported.into(),
             hd_seed_fingerprint: None,
             hd_account_index: None,
             ufvk: None,
-            uivk: uivk.to_uivk().encode(&params.network_type()),
+            uivk: (**uivk).clone(),
         },
     })
 }
@@ -346,7 +341,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     account: Account,
     birthday: AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
-    let args = get_sql_values_for_account_parameters(&account, params)?;
+    let args = get_sql_values_for_account_parameters(&account)?;
 
     let orchard_item = args
         .ufvk
@@ -382,7 +377,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             ":hd_seed_fingerprint": args.hd_seed_fingerprint,
             ":hd_account_index": args.hd_account_index,
             ":ufvk": args.ufvk.map(|ufvk| ufvk.encode(params)),
-            ":uivk": args.uivk,
+            ":uivk": args.uivk.to_uivk().encode(&params.network_type()),
             ":orchard_fvk_item_cache": orchard_item,
             ":sapling_fvk_item_cache": sapling_item,
             ":p2pkh_fvk_item_cache": transparent_item,
