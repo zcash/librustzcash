@@ -484,6 +484,70 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     }
 }
 
+/// A predicate that can be used to choose whether or not a particular note is retained in note
+/// selection.
+pub trait NoteRetention<NoteRef> {
+    /// Returns whether the specified Sapling note should be retained.
+    fn should_retain_sapling(&self, note: &ReceivedNote<NoteRef, sapling::Note>) -> bool;
+    /// Returns whether the specified Orchard note should be retained.
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
+}
+
+/// Spendable shielded outputs controlled by the wallet.
+pub struct SpendableNotes<NoteRef> {
+    sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+}
+
+impl<NoteRef> SpendableNotes<NoteRef> {
+    /// Construct a new [`SpendableNotes`] from its constituent parts.
+    pub fn new(
+        sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+        #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
+
+    /// Returns the set of spendable Sapling notes.
+    pub fn sapling(&self) -> &[ReceivedNote<NoteRef, sapling::Note>] {
+        self.sapling.as_ref()
+    }
+
+    /// Returns the set of spendable Orchard notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
+        self.orchard.as_ref()
+    }
+
+    /// Consumes this [`SpendableNotes`] value and produces a vector of
+    /// [`ReceivedNote<NoteRef, Note>`] values.
+    pub fn into_vec(
+        self,
+        retention: &impl NoteRetention<NoteRef>,
+    ) -> Vec<ReceivedNote<NoteRef, Note>> {
+        let iter = self.sapling.into_iter().filter_map(|n| {
+            retention
+                .should_retain_sapling(&n)
+                .then(|| n.map_note(Note::Sapling))
+        });
+
+        #[cfg(feature = "orchard")]
+        let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
+            retention
+                .should_retain_orchard(&n)
+                .then(|| n.map_note(Note::Orchard))
+        }));
+
+        iter.collect()
+    }
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a wallet.
 pub trait InputSource {

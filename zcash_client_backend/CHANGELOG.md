@@ -19,9 +19,11 @@ and this library adheres to Rust's notion of
   - `AccountKind`
   - `BlockMetadata::orchard_tree_size`
   - `DecryptedTransaction::{new, tx(), orchard_outputs()}`
+  - `NoteRetention`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
   - `SentTransaction::new`
+  - `SpendableNotes`
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
   - `WalletSummary::next_orchard_subtree_index`
@@ -46,6 +48,7 @@ and this library adheres to Rust's notion of
   - `WalletOrchardSpend`
   - `WalletOrchardOutput`
   - `WalletTx::{orchard_spends, orchard_outputs}`
+  - `ReceivedNote::map_note`
 
 ### Changed
 - `zcash_client_backend::data_api`:
