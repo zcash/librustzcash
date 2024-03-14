@@ -32,6 +32,7 @@ and this library adheres to Rust's notion of
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`
+  - `ChangeValue::transparent`
 - `zcash_client_backend::proto`:
   - `service::TreeState::orchard_tree`
   - `service::TreeState::to_chain_state`
@@ -96,6 +97,9 @@ and this library adheres to Rust's notion of
   - Arguments to `ChangeStrategy::compute_balance` have changed.
   - `ChangeError::DustInputs` now has an `orchard` field behind the `orchard`
     feature flag.
+  - The return type of `ChangeValue::output_pool`, and the type of the
+    `output_pool` argument to `ChangeValue::new`, have changed from
+    `ShieldedProtocol` to `zcash_protocol::PoolType`.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
 - `zcash_client_backend::zip321::render::amount_str` now takes a

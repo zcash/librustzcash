@@ -59,7 +59,7 @@ use zcash_primitives::consensus::NetworkUpgrade;
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::{
-        fees::TransactionBalance, proposal::Step, wallet::WalletTransparentOutput, PoolType,
+        fees::TransactionBalance, proposal::Step, wallet::WalletTransparentOutput,
     },
     zcash_primitives::{
         legacy::keys::IncomingViewingKey,
@@ -280,6 +280,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     use nonempty::NonEmpty;
     use zcash_client_backend::proposal::{Proposal, StepOutput, StepOutputIndex};
+    use zcash_protocol::PoolType;
 
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -1412,6 +1413,8 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
 
 #[cfg(feature = "orchard")]
 pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    use zcash_protocol::PoolType;
+
     let mut st = TestBuilder::new()
         .with_block_cache()
         .with_test_account(|params| AccountBirthday::from_activation(params, NetworkUpgrade::Nu5))
@@ -1472,7 +1475,10 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     // Since this is a cross-pool transfer, change will be sent to the preferred pool.
     assert_eq!(
         change_output.output_pool(),
-        std::cmp::max(ShieldedProtocol::Sapling, ShieldedProtocol::Orchard)
+        PoolType::Shielded(std::cmp::max(
+            ShieldedProtocol::Sapling,
+            ShieldedProtocol::Orchard
+        ))
     );
     assert_eq!(change_output.value(), expected_change);
 
@@ -1495,6 +1501,8 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 
 #[cfg(feature = "orchard")]
 pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    use zcash_protocol::PoolType;
+
     let mut st = TestBuilder::new()
         .with_block_cache()
         .with_test_account(|params| AccountBirthday::from_activation(params, NetworkUpgrade::Nu5))
@@ -1558,7 +1566,10 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     let change_output = proposed_change.get(0).unwrap();
     // Since there are sufficient funds in either pool, change is kept in the same pool as
     // the source note (the target pool), and does not necessarily follow preference order.
-    assert_eq!(change_output.output_pool(), P1::SHIELDED_PROTOCOL);
+    assert_eq!(
+        change_output.output_pool(),
+        PoolType::Shielded(P1::SHIELDED_PROTOCOL)
+    );
     assert_eq!(change_output.value(), expected_change);
 
     let create_proposed_result =

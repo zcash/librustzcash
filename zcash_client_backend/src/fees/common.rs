@@ -6,8 +6,7 @@ use zcash_primitives::{
         fees::{transparent, FeeRule},
     },
 };
-
-use crate::ShieldedProtocol;
+use zcash_protocol::{PoolType, ShieldedProtocol};
 
 use super::{
     sapling as sapling_fees, ChangeError, ChangeValue, DustAction, DustOutputPolicy,
@@ -220,7 +219,11 @@ where
                     })
                 }
                 DustAction::AllowDustChange => TransactionBalance::new(
-                    vec![ChangeValue::new(change_pool, proposed_change, change_memo)],
+                    vec![ChangeValue::new(
+                        PoolType::Shielded(change_pool),
+                        proposed_change,
+                        change_memo,
+                    )],
                     fee_amount,
                 )
                 .map_err(|_| overflow()),
@@ -232,7 +235,11 @@ where
             }
         } else {
             TransactionBalance::new(
-                vec![ChangeValue::new(change_pool, proposed_change, change_memo)],
+                vec![ChangeValue::new(
+                    PoolType::Shielded(change_pool),
+                    proposed_change,
+                    change_memo,
+                )],
                 fee_amount,
             )
             .map_err(|_| overflow())
