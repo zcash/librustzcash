@@ -100,6 +100,8 @@ and this library adheres to Rust's notion of
   - The return type of `ChangeValue::output_pool`, and the type of the
     `output_pool` argument to `ChangeValue::new`, have changed from
     `ShieldedProtocol` to `zcash_protocol::PoolType`.
+- `zcash_client_backend::input_selection::GreedyInputSelectorError` has a
+  new variant `UnsupportedTransparentSourceOnlyAddress`.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
 - `zcash_client_backend::zip321::render::amount_str` now takes a

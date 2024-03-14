@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- `zcash_address::Address` has a new variant `TransparentSourceOnly`.
 
 ## [0.3.2] - 2024-03-06
 ### Added

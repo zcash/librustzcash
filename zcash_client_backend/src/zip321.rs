@@ -551,7 +551,9 @@ mod parse {
                 Param::Amount(a) => payment.amount = a,
                 Param::Memo(m) => match payment.recipient_address {
                     Address::Sapling(_) | Address::Unified(_) => payment.memo = Some(m),
-                    Address::Transparent(_) => return Err(Zip321Error::TransparentMemo(i)),
+                    Address::Transparent(_) | Address::TransparentSourceOnly(_) => {
+                        return Err(Zip321Error::TransparentMemo(i))
+                    }
                 },
 
                 Param::Label(m) => payment.label = Some(m),
@@ -767,7 +769,7 @@ pub mod testing {
             other_params in btree_map(VALID_PARAMNAME, any::<String>(), 0..3),
         ) -> Payment {
             let is_shielded = match recipient_address {
-                Address::Transparent(_) => false,
+                Address::Transparent(_) | Address::TransparentSourceOnly(_) => false,
                 Address::Sapling(_) | Address::Unified(_) => true,
             };
 

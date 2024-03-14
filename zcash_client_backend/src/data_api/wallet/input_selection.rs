@@ -206,6 +206,8 @@ pub enum GreedyInputSelectorError<ChangeStrategyErrT, NoteRefT> {
     Balance(BalanceError),
     /// A unified address did not contain a supported receiver.
     UnsupportedAddress(Box<UnifiedAddress>),
+    /// Support for transparent-source-only addresses requires the transparent-inputs feature.
+    UnsupportedTransparentSourceOnlyAddress,
     /// An error was encountered in change selection.
     Change(ChangeError<ChangeStrategyErrT, NoteRefT>),
 }
@@ -222,6 +224,9 @@ impl<CE: fmt::Display, N: fmt::Display> fmt::Display for GreedyInputSelectorErro
                 // we can't encode the UA to its string representation because we
                 // don't have network parameters here
                 write!(f, "Unified address contains no supported receivers.")
+            }
+            GreedyInputSelectorError::UnsupportedTransparentSourceOnlyAddress => {
+                write!(f, "Support for transparent-source-only addresses requires the transparent-inputs feature.")
             }
             GreedyInputSelectorError::Change(err) => {
                 write!(f, "An error occurred computing change and fees: {}", err)
@@ -351,6 +356,11 @@ where
                         value: payment.amount,
                         script_pubkey: addr.script(),
                     });
+                }
+                Address::TransparentSourceOnly(_) => {
+                    return Err(InputSelectorError::Selection(
+                        GreedyInputSelectorError::UnsupportedTransparentSourceOnlyAddress,
+                    ));
                 }
                 Address::Sapling(_) => {
                     payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));

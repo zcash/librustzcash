@@ -1033,6 +1033,9 @@ where
                 }
                 transparent_output_meta.push((to, payment.amount));
             }
+            Address::TransparentSourceOnly(_) => {
+                panic!("Transparent-source-only addresses should not occur at this stage");
+            }
         }
     }
 
