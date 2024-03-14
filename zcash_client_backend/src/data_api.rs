@@ -837,7 +837,7 @@ pub trait WalletRead {
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error>;
 
     /// Returns a transaction.
-    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error>;
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error>;
 
     /// Returns the nullifiers for Sapling notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as spent (in
@@ -1791,8 +1791,8 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_transaction(&self, _txid: TxId) -> Result<Transaction, Self::Error> {
-            Err(())
+        fn get_transaction(&self, _txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+            Ok(None)
         }
 
         fn get_sapling_nullifiers(
