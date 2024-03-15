@@ -1221,7 +1221,7 @@ mod tests {
             )?;
 
             let ufvk_str = ufvk.encode(&wdb.params);
-            let address_str = Address::Unified(
+            let address_str = Address::from(
                 ufvk.default_address(DEFAULT_UA_REQUEST)
                     .expect("A valid default address exists for the UFVK")
                     .0,
@@ -1240,7 +1240,7 @@ mod tests {
             // add a transparent "sent note"
             #[cfg(feature = "transparent-inputs")]
             {
-                let taddr = Address::Transparent(
+                let taddr = Address::from(
                     *ufvk
                         .default_address(DEFAULT_UA_REQUEST)
                         .expect("A valid default address exists for the UFVK")

@@ -740,6 +740,7 @@ pub mod testing {
     use crate::address::Address;
 
     use super::{MemoBytes, Payment, TransactionRequest};
+
     pub const VALID_PARAMNAME: &str = "[a-zA-Z][a-zA-Z0-9+-]*";
 
     #[cfg(feature = "transparent-inputs")]
@@ -748,7 +749,7 @@ pub mod testing {
     const TRANSPARENT_INPUTS_ENABLED: bool = false;
 
     pub(crate) const UA_REQUEST: UnifiedAddressRequest =
-        UnifiedAddressRequest::unsafe_new(false, true, TRANSPARENT_INPUTS_ENABLED);
+        UnifiedAddressRequest::unsafe_new_without_expiry(false, true, TRANSPARENT_INPUTS_ENABLED);
 
     prop_compose! {
         pub fn arb_valid_memo()(bytes in vec(any::<u8>(), 0..512)) -> MemoBytes {
@@ -823,7 +824,7 @@ mod tests {
         memo::Memo,
         transaction::components::amount::{testing::arb_nonnegative_amount, NonNegativeAmount},
     };
-    use zcash_protocol::consensus::{NetworkConstants, NetworkType, TEST_NETWORK};
+    use zcash_protocol::consensus::{NetworkConstants, TEST_NETWORK};
 
     #[cfg(feature = "local-consensus")]
     use zcash_primitives::{local_consensus::LocalNetwork, BlockHeight};
@@ -871,7 +872,7 @@ mod tests {
         let expected = TransactionRequest::new(
             vec![
                 Payment {
-                    recipient_address: Address::Sapling(decode_payment_address(NetworkType::Test.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: Address::from(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::const_from_u64(376876902796286),
                     memo: None,
                     label: None,
@@ -892,7 +893,7 @@ mod tests {
         let expected = TransactionRequest::new(
             vec![
                 Payment {
-                    recipient_address: Address::Sapling(decode_payment_address(NetworkType::Test.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: Address::from(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::ZERO,
                     memo: None,
                     label: None,
@@ -910,7 +911,7 @@ mod tests {
         let req = TransactionRequest::new(
             vec![
                 Payment {
-                    recipient_address: Address::Sapling(decode_payment_address(NetworkType::Test.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
+                    recipient_address: Address::from(decode_payment_address(TEST_NETWORK.hrp_sapling_payment_address(), "ztestsapling1n65uaftvs2g7075q2x2a04shfk066u3lldzxsrprfrqtzxnhc9ps73v4lhx4l9yfxj46sl0q90k").unwrap()),
                     amount: NonNegativeAmount::ZERO,
                     memo: None,
                     label: None,
