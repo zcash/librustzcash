@@ -10,6 +10,12 @@ and this library adheres to Rust's notion of
 ### Added
 - `zcash_protocol::memo`:
   - `impl TryFrom<&MemoBytes> for Memo`
+- `zcash_protocol::local_consensus`:
+  - `new`, `all_upgrades_active` and `canopy_active` methods to `LocalNetwork`
+
+### Changed
+- `zcash_protocol::consensus`:
+  - Added `LocalNetwork` variant to `Network` enum behind "local-consensus" feature
 
 ### Removed
 - `unstable-nu6` and `zfuture` feature flags (use `--cfg zcash_unstable=\"nu6\"`
