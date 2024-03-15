@@ -552,14 +552,14 @@ mod tests {
             // v_received_notes
             "CREATE VIEW v_received_notes AS
                 SELECT
-                    id,
-                    tx,
+                    sapling_received_notes.id AS id_within_pool_table,
+                    sapling_received_notes.tx,
                     2 AS pool,
                     sapling_received_notes.output_index AS output_index,
                     account_id,
-                    value,
+                    sapling_received_notes.value,
                     is_change,
-                    memo,
+                    sapling_received_notes.memo,
                     spent,
                     sent_notes.id AS sent_note_id
                 FROM sapling_received_notes
@@ -568,14 +568,14 @@ mod tests {
                    (sapling_received_notes.tx, 2, sapling_received_notes.output_index)
             UNION
                 SELECT
-                    id,
-                    tx,
+                    orchard_received_notes.id AS id_within_pool_table,
+                    orchard_received_notes.tx,
                     3 AS pool,
                     orchard_received_notes.action_index AS output_index,
                     account_id,
-                    value,
+                    orchard_received_notes.value,
                     is_change,
-                    memo,
+                    orchard_received_notes.memo,
                     spent,
                     sent_notes.id AS sent_note_id
                 FROM orchard_received_notes
@@ -650,11 +650,12 @@ mod tests {
             "CREATE VIEW v_transactions AS
                 WITH
                 notes AS (
-                    SELECT v_received_notes.id             AS id,
-                           v_received_notes.account_id     AS account_id,
+                    -- Shielded notes received in this transaction
+                    SELECT v_received_notes.account_id     AS account_id,
                            transactions.block              AS block,
                            transactions.txid               AS txid,
                            v_received_notes.pool           AS pool,
+                           id_within_pool_table,
                            v_received_notes.value          AS value,
                            CASE
                                 WHEN v_received_notes.is_change THEN 1
@@ -673,22 +674,24 @@ mod tests {
                     JOIN transactions
                          ON transactions.id_tx = v_received_notes.tx
                     UNION
-                    SELECT utxos.id                     AS id,
-                           utxos.received_by_account_id AS account_id,
+                    -- Transparent TXOs received in this transaction
+                    SELECT utxos.received_by_account_id AS account_id,
                            utxos.height                 AS block,
                            utxos.prevout_txid           AS txid,
                            0                            AS pool,
+                           utxos.id                     AS id_within_pool_table,
                            utxos.value_zat              AS value,
                            0                            AS is_change,
                            1                            AS received_count,
                            0                            AS memo_present
                     FROM utxos
                     UNION
-                    SELECT v_received_notes.id          AS id,
-                           v_received_notes.account_id  AS account_id,
+                    -- Shielded notes spent in this transaction
+                    SELECT v_received_notes.account_id  AS account_id,
                            transactions.block           AS block,
                            transactions.txid            AS txid,
                            v_received_notes.pool        AS pool,
+                           id_within_pool_table,
                            -v_received_notes.value      AS value,
                            0                            AS is_change,
                            0                            AS received_count,
@@ -697,11 +700,12 @@ mod tests {
                     JOIN transactions
                          ON transactions.id_tx = v_received_notes.spent
                     UNION
-                    SELECT utxos.id                     AS id,
-                           utxos.received_by_account_id AS account_id,
+                    -- Transparent TXOs spent in this transaction
+                    SELECT utxos.received_by_account_id AS account_id,
                            transactions.block           AS block,
                            transactions.txid            AS txid,
                            0                            AS pool,
+                           utxos.id                     AS id_within_pool_table,
                            -utxos.value_zat             AS value,
                            0                            AS is_change,
                            0                            AS received_count,
@@ -710,6 +714,8 @@ mod tests {
                     JOIN transactions
                          ON transactions.id_tx = utxos.spent_in_tx
                 ),
+                -- Obtain a count of the notes that the wallet created in each transaction,
+                -- not counting change notes.
                 sent_note_counts AS (
                     SELECT sent_notes.from_account_id AS account_id,
                            transactions.txid       AS txid,
