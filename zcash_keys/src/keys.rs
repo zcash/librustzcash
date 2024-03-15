@@ -457,6 +457,7 @@ impl fmt::Display for AddressGenerationError {
                     i
                 )
             }
+            #[cfg(feature = "sapling")]
             AddressGenerationError::InvalidSaplingDiversifierIndex(i) => {
                 write!(
                     f,
