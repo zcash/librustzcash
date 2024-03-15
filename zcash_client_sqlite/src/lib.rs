@@ -45,7 +45,6 @@ use std::{
     path::Path,
 };
 use subtle::ConditionallySelectable;
-use zcash_keys::keys::HdSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -53,6 +52,7 @@ use zcash_primitives::{
     transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     zip32::{self, DiversifierIndex, Scope},
 };
+use zip32::fingerprint::SeedFingerprint;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
@@ -61,8 +61,8 @@ use zcash_client_backend::{
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountKind, BlockMetadata, DecryptedTransaction, InputSource,
-        NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        NullifierQuery, ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -212,7 +212,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                 &self.params,
                 txid,
                 index,
-            ),
+            )
+            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
             ShieldedProtocol::Orchard => {
                 #[cfg(feature = "orchard")]
                 return wallet::orchard::get_spendable_orchard_note(
@@ -220,7 +221,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                     &self.params,
                     txid,
                     index,
-                );
+                )
+                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
@@ -237,26 +239,26 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        let received_iter = std::iter::empty();
-        let received_iter = received_iter.chain(wallet::sapling::select_spendable_sapling_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        #[cfg(feature = "orchard")]
-        let received_iter = received_iter.chain(wallet::orchard::select_spendable_orchard_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        Ok(received_iter.collect())
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+        Ok(SpendableNotes::new(
+            wallet::sapling::select_spendable_sapling_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+            #[cfg(feature = "orchard")]
+            wallet::orchard::select_spendable_orchard_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+        ))
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -302,7 +304,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn get_derived_account(
         &self,
-        seed: &HdSeedFingerprint,
+        seed: &SeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
@@ -319,7 +321,12 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 account_index,
             } = account.kind()
             {
-                let seed_fingerprint_match = HdSeedFingerprint::from_seed(seed) == seed_fingerprint;
+                let seed_fingerprint_match =
+                    SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                        SqliteClientError::BadAccountData(
+                            "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                        )
+                    })? == seed_fingerprint;
 
                 let usk = UnifiedSpendingKey::from_seed(
                     &self.params,
@@ -454,8 +461,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
-    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self.conn.borrow(), &self.params, txid).map(|(_, tx)| tx)
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+        wallet::get_transaction(self.conn.borrow(), &self.params, txid)
+            .map(|res| res.map(|(_, tx)| tx))
     }
 
     fn get_sapling_nullifiers(
@@ -500,7 +508,12 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let seed_fingerprint = HdSeedFingerprint::from_seed(seed);
+            let seed_fingerprint =
+                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                    SqliteClientError::BadAccountData(
+                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                    )
+                })?;
             let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?

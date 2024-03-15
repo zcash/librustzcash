@@ -7,7 +7,7 @@ use rusqlite::{named_params, params, Connection, Row};
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
     data_api::NullifierQuery,
-    wallet::{Note, ReceivedNote, WalletSaplingOutput},
+    wallet::{ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, ShieldedProtocol, TransferType,
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
@@ -95,7 +95,7 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
 fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
-) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
@@ -169,11 +169,11 @@ fn to_spendable_note<P: consensus::Parameters>(
                 note_id,
                 txid,
                 output_index,
-                Note::Sapling(sapling::Note::from_parts(
+                sapling::Note::from_parts(
                     recipient,
                     sapling::value::NoteValue::from_raw(note_value),
                     rseed,
-                )),
+                ),
                 spending_key_scope,
                 note_commitment_tree_position,
             ))
@@ -190,7 +190,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     params: &P,
     txid: &TxId,
     index: u32,
-) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
         params,
@@ -213,7 +213,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_value: NonNegativeAmount,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
-) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
         params,
@@ -403,6 +403,7 @@ pub(crate) mod tests {
         type Sk = ExtendedSpendingKey;
         type Fvk = DiversifiableFullViewingKey;
         type MerkleTreeHash = sapling::Node;
+        type Note = sapling::Note;
 
         fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
             st.test_account_sapling().unwrap()
@@ -459,7 +460,7 @@ pub(crate) mod tests {
             target_value: NonNegativeAmount,
             anchor_height: BlockHeight,
             exclude: &[ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+        ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Self::Note>>, SqliteClientError> {
             select_spendable_sapling_notes(
                 &st.wallet().conn,
                 &st.wallet().params,
@@ -607,9 +608,17 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn cross_pool_exchange() {
+    fn pool_crossing_required() {
         use crate::wallet::orchard::tests::OrchardPoolTester;
 
-        testing::pool::cross_pool_exchange::<SaplingPoolTester, OrchardPoolTester>()
+        testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn fully_funded_fully_private() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
     }
 }

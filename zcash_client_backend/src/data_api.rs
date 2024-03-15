@@ -66,7 +66,7 @@ use std::{
 use incrementalmerkletree::{frontier::Frontier, Retention};
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_keys::keys::HdSeedFingerprint;
+use zip32::fingerprint::SeedFingerprint;
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -320,7 +320,7 @@ impl AccountBalance {
 pub enum AccountKind {
     /// An account derived from a known seed.
     Derived {
-        seed_fingerprint: HdSeedFingerprint,
+        seed_fingerprint: SeedFingerprint,
         account_index: zip32::AccountId,
     },
 
@@ -484,6 +484,124 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     }
 }
 
+/// A predicate that can be used to choose whether or not a particular note is retained in note
+/// selection.
+pub trait NoteRetention<NoteRef> {
+    /// Returns whether the specified Sapling note should be retained.
+    fn should_retain_sapling(&self, note: &ReceivedNote<NoteRef, sapling::Note>) -> bool;
+    /// Returns whether the specified Orchard note should be retained.
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
+}
+
+pub(crate) struct SimpleNoteRetention {
+    pub(crate) sapling: bool,
+    #[cfg(feature = "orchard")]
+    pub(crate) orchard: bool,
+}
+
+impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
+    fn should_retain_sapling(&self, _: &ReceivedNote<NoteRef, sapling::Note>) -> bool {
+        self.sapling
+    }
+
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
+        self.orchard
+    }
+}
+
+/// Spendable shielded outputs controlled by the wallet.
+pub struct SpendableNotes<NoteRef> {
+    sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+}
+
+impl<NoteRef> SpendableNotes<NoteRef> {
+    /// Construct a new empty [`SpendableNotes`].
+    pub fn empty() -> Self {
+        Self::new(
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        )
+    }
+
+    /// Construct a new [`SpendableNotes`] from its constituent parts.
+    pub fn new(
+        sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+        #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
+
+    /// Returns the set of spendable Sapling notes.
+    pub fn sapling(&self) -> &[ReceivedNote<NoteRef, sapling::Note>] {
+        self.sapling.as_ref()
+    }
+
+    /// Returns the set of spendable Orchard notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
+        self.orchard.as_ref()
+    }
+
+    /// Computes the total value of Sapling notes.
+    pub fn sapling_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.sapling
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of Sapling notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.orchard
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of spendable inputs
+    pub fn total_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        #[cfg(not(feature = "orchard"))]
+        return self.sapling_value();
+
+        #[cfg(feature = "orchard")]
+        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
+    }
+
+    /// Consumes this [`SpendableNotes`] value and produces a vector of
+    /// [`ReceivedNote<NoteRef, Note>`] values.
+    pub fn into_vec(
+        self,
+        retention: &impl NoteRetention<NoteRef>,
+    ) -> Vec<ReceivedNote<NoteRef, Note>> {
+        let iter = self.sapling.into_iter().filter_map(|n| {
+            retention
+                .should_retain_sapling(&n)
+                .then(|| n.map_note(Note::Sapling))
+        });
+
+        #[cfg(feature = "orchard")]
+        let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
+            retention
+                .should_retain_orchard(&n)
+                .then(|| n.map_note(Note::Orchard))
+        }));
+
+        iter.collect()
+    }
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a wallet.
 pub trait InputSource {
@@ -525,7 +643,7 @@ pub trait InputSource {
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
     /// Fetches a spendable transparent output.
     ///
@@ -580,11 +698,11 @@ pub trait WalletRead {
         account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
-    /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
+    /// Returns the account corresponding to a given [`SeedFingerprint`] and
     /// [`zip32::AccountId`], if any.
     fn get_derived_account(
         &self,
-        seed: &HdSeedFingerprint,
+        seed: &SeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
@@ -719,7 +837,7 @@ pub trait WalletRead {
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error>;
 
     /// Returns a transaction.
-    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error>;
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error>;
 
     /// Returns the nullifiers for Sapling notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as spent (in
@@ -1468,7 +1586,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
-    use zcash_keys::keys::HdSeedFingerprint;
+    use zip32::fingerprint::SeedFingerprint;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1488,8 +1606,8 @@ pub mod testing {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees, WalletRead,
+        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1545,8 +1663,8 @@ pub mod testing {
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-            Ok(Vec::new())
+        ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+            Ok(SpendableNotes::empty())
         }
     }
 
@@ -1568,7 +1686,7 @@ pub mod testing {
 
         fn get_derived_account(
             &self,
-            _seed: &HdSeedFingerprint,
+            _seed: &SeedFingerprint,
             _account_id: zip32::AccountId,
         ) -> Result<Option<Self::Account>, Self::Error> {
             Ok(None)
@@ -1673,8 +1791,8 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_transaction(&self, _txid: TxId) -> Result<Transaction, Self::Error> {
-            Err(())
+        fn get_transaction(&self, _txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+            Ok(None)
         }
 
         fn get_sapling_nullifiers(

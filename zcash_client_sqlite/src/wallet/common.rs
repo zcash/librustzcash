@@ -3,10 +3,7 @@
 use rusqlite::{named_params, types::Value, Connection, Row};
 use std::rc::Rc;
 
-use zcash_client_backend::{
-    wallet::{Note, ReceivedNote},
-    ShieldedProtocol,
-};
+use zcash_client_backend::{wallet::ReceivedNote, ShieldedProtocol};
 use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
 use zcash_protocol::consensus::{self, BlockHeight};
 
@@ -54,7 +51,7 @@ fn unscanned_tip_exists(
 // (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.
 #[allow(clippy::let_and_return)]
-pub(crate) fn get_spendable_note<P: consensus::Parameters, F>(
+pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     txid: &TxId,
@@ -99,7 +96,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn select_spendable_notes<P: consensus::Parameters, F>(
+pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountId,

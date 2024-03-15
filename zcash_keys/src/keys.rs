@@ -1,6 +1,4 @@
 //! Helper functions for managing light client key material.
-use blake2b_simd::Params as blake2bParams;
-use secrecy::{ExposeSecret, SecretVec};
 use std::{
     error,
     fmt::{self, Display},
@@ -76,53 +74,6 @@ pub mod sapling {
                 account.into(),
             ],
         )
-    }
-}
-
-/// A [ZIP 32 seed fingerprint] of a seed used for an HD account.
-///
-/// For wallets that use [BIP 39] mnemonic phrases, this is the fingerprint of the binary
-/// seed [produced from the mnemonic].
-///
-/// [ZIP 32 seed fingerprint]: https://zips.z.cash/zip-0032#seed-fingerprints
-/// [BIP 39]: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki
-/// [produced from the mnemonic]: https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#from-mnemonic-to-seed
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct HdSeedFingerprint([u8; 32]);
-
-impl HdSeedFingerprint {
-    /// Generates the fingerprint from a given seed.
-    ///
-    /// Panics if the length of the seed is not between 32 and 252 bytes inclusive.
-    pub fn from_seed(seed: &SecretVec<u8>) -> Self {
-        let len = seed.expose_secret().len();
-        let len = match len {
-            32..=252 => [u8::try_from(len).unwrap()],
-            _ => panic!("ZIP 32 seeds MUST be at least 32 bytes and at most 252 bytes"),
-        };
-        const PERSONALIZATION: &[u8] = b"Zcash_HD_Seed_FP";
-        let hash = blake2bParams::new()
-            .hash_length(32)
-            .personal(PERSONALIZATION)
-            .to_state()
-            .update(&len)
-            .update(seed.expose_secret())
-            .finalize();
-        Self(
-            hash.as_bytes()
-                .try_into()
-                .expect("BLAKE2b-256 hash length is 32 bytes"),
-        )
-    }
-
-    /// Instantiates the fingerprint from a buffer containing a previously computed fingerprint.
-    pub fn from_bytes(hash: [u8; 32]) -> Self {
-        Self(hash)
-    }
-
-    /// Returns the bytes of the fingerprint.
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
     }
 }
 

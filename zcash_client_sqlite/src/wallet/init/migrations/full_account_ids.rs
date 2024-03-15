@@ -6,8 +6,9 @@ use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
 use zcash_client_backend::{data_api::AccountKind, keys::UnifiedSpendingKey};
-use zcash_keys::keys::{HdSeedFingerprint, UnifiedFullViewingKey};
+use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
+use zip32::fingerprint::SeedFingerprint;
 
 use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness};
 
@@ -45,7 +46,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
         let account_kind_derived = account_kind_code(AccountKind::Derived {
-            seed_fingerprint: HdSeedFingerprint::from_bytes([0; 32]),
+            seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
             account_index: zip32::AccountId::ZERO,
         });
         let account_kind_imported = account_kind_code(AccountKind::Imported);
@@ -83,7 +84,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             Ok(row.get::<_, u32>(0)? > 0)
         })? {
             if let Some(seed) = &self.seed.as_ref() {
-                let seed_id = HdSeedFingerprint::from_seed(seed);
+                let seed_id = SeedFingerprint::from_seed(seed.expose_secret())
+                    .expect("Seed is between 32 and 252 bytes in length.");
                 let mut q = transaction.prepare("SELECT * FROM accounts")?;
                 let mut rows = q.query([])?;
                 while let Some(row) = rows.next()? {
@@ -146,7 +148,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         named_params![
                             ":account_id": account_id,
                             ":account_kind": account_kind_derived,
-                            ":seed_id": seed_id.as_bytes(),
+                            ":seed_id": seed_id.to_bytes(),
                             ":account_index": account_index,
                             ":ufvk": ufvk,
                             ":uivk": uivk,
