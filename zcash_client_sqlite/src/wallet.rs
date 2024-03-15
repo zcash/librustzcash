@@ -75,8 +75,7 @@ use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_address::unified::{Encoding, Ivk, Uivk};
-use zcash_keys::keys::{AddressGenerationError, UnifiedAddressRequest};
+use zcash_keys::keys::{AddressGenerationError, UnifiedAddressRequest, UnifiedIncomingViewingKey};
 
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
@@ -119,6 +118,7 @@ use {
     crate::UtxoId,
     rusqlite::Row,
     std::collections::BTreeSet,
+    zcash_address::unified::{Encoding, Ivk, Uivk},
     zcash_client_backend::wallet::{TransparentAddressMetadata, WalletTransparentOutput},
     zcash_primitives::{
         legacy::{
@@ -183,7 +183,7 @@ pub(crate) enum ViewingKey {
     ///
     /// Accounts that have this kind of viewing key cannot be used in wallet contexts,
     /// because they are unable to maintain an accurate balance.
-    Incoming(Uivk),
+    Incoming(Box<UnifiedIncomingViewingKey>),
 }
 
 /// An account stored in a `zcash_client_sqlite` database.
@@ -206,7 +206,7 @@ impl Account {
     ) -> Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError> {
         match &self.viewing_key {
             ViewingKey::Full(ufvk) => ufvk.default_address(request),
-            ViewingKey::Incoming(_uivk) => todo!(),
+            ViewingKey::Incoming(uivk) => uivk.default_address(request),
         }
     }
 }
@@ -233,10 +233,10 @@ impl ViewingKey {
         }
     }
 
-    fn uivk_str(&self, params: &impl Parameters) -> Result<String, SqliteClientError> {
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
         match self {
-            ViewingKey::Full(ufvk) => ufvk_to_uivk(ufvk, params),
-            ViewingKey::Incoming(uivk) => Ok(uivk.encode(&params.network_type())),
+            ViewingKey::Full(ufvk) => ufvk.as_ref().to_unified_incoming_viewing_key(),
+            ViewingKey::Incoming(uivk) => uivk.as_ref().clone(),
         }
     }
 }
@@ -296,31 +296,6 @@ pub(crate) fn max_zip32_account_index(
     )
 }
 
-pub(crate) fn ufvk_to_uivk<P: consensus::Parameters>(
-    ufvk: &UnifiedFullViewingKey,
-    params: &P,
-) -> Result<String, SqliteClientError> {
-    let mut ivks: Vec<Ivk> = Vec::new();
-    if let Some(orchard) = ufvk.orchard() {
-        ivks.push(Ivk::Orchard(orchard.to_ivk(Scope::External).to_bytes()));
-    }
-    if let Some(sapling) = ufvk.sapling() {
-        let ivk = sapling.to_external_ivk();
-        ivks.push(Ivk::Sapling(ivk.to_bytes()));
-    }
-    #[cfg(feature = "transparent-inputs")]
-    if let Some(tfvk) = ufvk.transparent() {
-        let tivk = tfvk.derive_external_ivk()?;
-        ivks.push(Ivk::P2pkh(tivk.serialize().try_into().map_err(|_| {
-            SqliteClientError::BadAccountData("Unable to serialize transparent IVK.".to_string())
-        })?));
-    }
-
-    let uivk = zcash_address::unified::Uivk::try_from_items(ivks)
-        .map_err(|e| SqliteClientError::BadAccountData(format!("Unable to derive UIVK: {}", e)))?;
-    Ok(uivk.encode(&params.network_type()))
-}
-
 pub(crate) fn add_account<P: consensus::Parameters>(
     conn: &rusqlite::Transaction,
     params: &P,
@@ -370,7 +345,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             ":hd_seed_fingerprint": hd_seed_fingerprint.as_ref().map(|fp| fp.to_bytes()),
             ":hd_account_index": hd_account_index.map(u32::from),
             ":ufvk": viewing_key.ufvk().map(|ufvk| ufvk.encode(params)),
-            ":uivk": viewing_key.uivk_str(params)?,
+            ":uivk": viewing_key.uivk().encode(params),
             ":orchard_fvk_item_cache": orchard_item,
             ":sapling_fvk_item_cache": sapling_item,
             ":p2pkh_fvk_item_cache": transparent_item,
@@ -1525,15 +1500,10 @@ pub(crate) fn get_account<P: Parameters>(
                 ))
             } else {
                 let uivk_str: String = row.get("uivk")?;
-                let (network, uivk) = Uivk::decode(&uivk_str).map_err(|e| {
-                    SqliteClientError::CorruptedData(format!("Failure to decode UIVK: {e}"))
-                })?;
-                if network != params.network_type() {
-                    return Err(SqliteClientError::CorruptedData(
-                        "UIVK network type does not match wallet network type".to_string(),
-                    ));
-                }
-                ViewingKey::Incoming(uivk)
+                ViewingKey::Incoming(Box::new(
+                    UnifiedIncomingViewingKey::decode(params, &uivk_str[..])
+                        .map_err(SqliteClientError::BadAccountData)?,
+                ))
             };
 
             Ok(Some(Account {

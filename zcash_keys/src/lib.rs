@@ -16,4 +16,10 @@
 
 pub mod address;
 pub mod encoding;
+
+#[cfg(any(
+    feature = "orchard",
+    feature = "sapling",
+    feature = "transparent-inputs"
+))]
 pub mod keys;
