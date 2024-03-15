@@ -43,6 +43,37 @@ pub struct LocalNetwork {
     pub z_future: Option<BlockHeight>,
 }
 
+impl LocalNetwork {
+    pub fn new(
+        overwinter: u64,
+        sapling: u64,
+        blossom: u64,
+        heartwood: u64,
+        canopy: u64,
+        nu5: u64,
+    ) -> Self {
+        LocalNetwork {
+            overwinter: Some(BlockHeight::from_u32(overwinter as u32)),
+            sapling: Some(BlockHeight::from_u32(sapling as u32)),
+            blossom: Some(BlockHeight::from_u32(blossom as u32)),
+            heartwood: Some(BlockHeight::from_u32(heartwood as u32)),
+            canopy: Some(BlockHeight::from_u32(canopy as u32)),
+            nu5: Some(BlockHeight::from_u32(nu5 as u32)),
+        }
+    }
+
+    /// Creates a `LocalNetwork` with all network upgrades initially active.
+    pub fn all_upgrades_active() -> Self {
+        Self::new(1, 1, 1, 1, 1, 1)
+    }
+
+    /// Creates a `LocalNetwork` with all network upgrades up to and including canopy
+    /// initally active.
+    pub fn canopy_active(nu5_activation_height: u64) -> Self {
+        Self::new(1, 1, 1, 1, 1, nu5_activation_height)
+    }
+}
+
 /// Parameters implementation for `LocalNetwork`
 impl Parameters for LocalNetwork {
     fn network_type(&self) -> NetworkType {
