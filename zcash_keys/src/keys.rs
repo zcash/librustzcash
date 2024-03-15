@@ -1,6 +1,5 @@
 //! Helper functions for managing light client key material.
 
-
 use std::{error, fmt};
 
 use zcash_address::unified::{self, Container, Encoding, Typecode};

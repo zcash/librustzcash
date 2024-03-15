@@ -1353,12 +1353,8 @@ pub(crate) fn get_transaction<P: Parameters>(
     conn: &rusqlite::Connection,
     params: &P,
     txid: TxId,
-) -> Result<(BlockHeight, Transaction), SqliteClientError> {
-    let (tx_bytes, block_height, expiry_height): (
-        Vec<_>,
-        Option<BlockHeight>,
-        Option<BlockHeight>,
-    ) = conn.query_row(
+) -> Result<Option<(BlockHeight, Transaction)>, SqliteClientError> {
+    conn.query_row(
         "SELECT raw, block, expiry_height FROM transactions
         WHERE txid = ?",
         [txid.as_ref()],
@@ -1366,55 +1362,58 @@ pub(crate) fn get_transaction<P: Parameters>(
             let h: Option<u32> = row.get(1)?;
             let expiry: Option<u32> = row.get(2)?;
             Ok((
-                row.get(0)?,
+                row.get::<_, Vec<u8>>(0)?,
                 h.map(BlockHeight::from),
                 expiry.map(BlockHeight::from),
             ))
         },
-    )?;
-
-    // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
-    // (which don't commit directly to one) can store it internally.
-    // - If the transaction is mined, we use the block height to get the correct one.
-    // - If the transaction is unmined and has a cached non-zero expiry height, we use
-    //   that (relying on the invariant that a transaction can't be mined across a network
-    //   upgrade boundary, so the expiry height must be in the same epoch).
-    // - Otherwise, we use a placeholder for the initial transaction parse (as the
-    //   consensus branch ID is not used there), and then either use its non-zero expiry
-    //   height or return an error.
-    if let Some(height) =
-        block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
-    {
-        Transaction::read(&tx_bytes[..], BranchId::for_height(params, height))
-            .map(|t| (height, t))
-            .map_err(SqliteClientError::from)
-    } else {
-        let tx_data = Transaction::read(&tx_bytes[..], BranchId::Sprout)
-            .map_err(SqliteClientError::from)?
-            .into_data();
-
-        let expiry_height = tx_data.expiry_height();
-        if expiry_height > BlockHeight::from(0) {
-            TransactionData::from_parts(
-                tx_data.version(),
-                BranchId::for_height(params, expiry_height),
-                tx_data.lock_time(),
-                expiry_height,
-                tx_data.transparent_bundle().cloned(),
-                tx_data.sprout_bundle().cloned(),
-                tx_data.sapling_bundle().cloned(),
-                tx_data.orchard_bundle().cloned(),
-            )
-            .freeze()
-            .map(|t| (expiry_height, t))
-            .map_err(SqliteClientError::from)
+    )
+    .optional()?
+    .map(|(tx_bytes, block_height, expiry_height)| {
+        // We need to provide a consensus branch ID so that pre-v5 `Transaction` structs
+        // (which don't commit directly to one) can store it internally.
+        // - If the transaction is mined, we use the block height to get the correct one.
+        // - If the transaction is unmined and has a cached non-zero expiry height, we use
+        //   that (relying on the invariant that a transaction can't be mined across a network
+        //   upgrade boundary, so the expiry height must be in the same epoch).
+        // - Otherwise, we use a placeholder for the initial transaction parse (as the
+        //   consensus branch ID is not used there), and then either use its non-zero expiry
+        //   height or return an error.
+        if let Some(height) =
+            block_height.or_else(|| expiry_height.filter(|h| h > &BlockHeight::from(0)))
+        {
+            Transaction::read(&tx_bytes[..], BranchId::for_height(params, height))
+                .map(|t| (height, t))
+                .map_err(SqliteClientError::from)
         } else {
-            Err(SqliteClientError::CorruptedData(
-                "Consensus branch ID not known, cannot parse this transaction until it is mined"
-                    .to_string(),
-            ))
+            let tx_data = Transaction::read(&tx_bytes[..], BranchId::Sprout)
+                .map_err(SqliteClientError::from)?
+                .into_data();
+
+            let expiry_height = tx_data.expiry_height();
+            if expiry_height > BlockHeight::from(0) {
+                TransactionData::from_parts(
+                    tx_data.version(),
+                    BranchId::for_height(params, expiry_height),
+                    tx_data.lock_time(),
+                    expiry_height,
+                    tx_data.transparent_bundle().cloned(),
+                    tx_data.sprout_bundle().cloned(),
+                    tx_data.sapling_bundle().cloned(),
+                    tx_data.orchard_bundle().cloned(),
+                )
+                .freeze()
+                .map(|t| (expiry_height, t))
+                .map_err(SqliteClientError::from)
+            } else {
+                Err(SqliteClientError::CorruptedData(
+                    "Consensus branch ID not known, cannot parse this transaction until it is mined"
+                        .to_string(),
+                ))
+            }
         }
-    }
+    })
+    .transpose()
 }
 
 /// Returns the memo for a sent note, if the sent note is known to the wallet.
@@ -2986,7 +2985,12 @@ mod tests {
         check_balance(&st, 2, NonNegativeAmount::ZERO);
 
         // Expire the shielding transaction.
-        let expiry_height = st.wallet().get_transaction(txid).unwrap().expiry_height();
+        let expiry_height = st
+            .wallet()
+            .get_transaction(txid)
+            .unwrap()
+            .expect("Transaction exists in the wallet.")
+            .expiry_height();
         st.wallet_mut().update_chain_tip(expiry_height).unwrap();
 
         // TODO: Making the transparent output spendable in this situation requires

@@ -199,6 +199,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let tx = st
         .wallet()
         .get_transaction(sent_tx_id)
+        .unwrap()
         .expect("Created transaction was stored.");
     let ufvks = [(account, usk.to_unified_full_viewing_key())]
         .into_iter()

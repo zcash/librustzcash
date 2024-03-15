@@ -480,6 +480,7 @@ where
         let tx = self
             .wallet()
             .get_transaction(txid)
+            .unwrap()
             .expect("TxId should exist in the wallet");
 
         // Index 0 is by definition a coinbase transaction, and the wallet doesn't
