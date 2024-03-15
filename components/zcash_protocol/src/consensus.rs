@@ -8,6 +8,9 @@ use std::ops::{Add, Bound, RangeBounds, Sub};
 
 use crate::constants::{mainnet, regtest, testnet};
 
+#[cfg(feature = "local-consensus")]
+use crate::local_consensus::LocalNetwork;
+
 /// A wrapper type representing blockchain heights.
 ///
 /// Safe conversion from various integer types, as well as addition and subtraction, are
@@ -399,6 +402,9 @@ pub enum Network {
     MainNetwork,
     /// Zcash Testnet.
     TestNetwork,
+    #[cfg(feature = "local-consensus")]
+    /// Zcash local network (regtest)
+    LocalNetwork(LocalNetwork),
 }
 
 memuse::impl_no_dynamic_usage!(Network);
@@ -408,6 +414,8 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => NetworkType::Main,
             Network::TestNetwork => NetworkType::Test,
+            #[cfg(feature = "local-consensus")]
+            Network::LocalNetwork(ln) => ln.network_type(),
         }
     }
 
@@ -415,6 +423,8 @@ impl Parameters for Network {
         match self {
             Network::MainNetwork => MAIN_NETWORK.activation_height(nu),
             Network::TestNetwork => TEST_NETWORK.activation_height(nu),
+            #[cfg(feature = "local-consensus")]
+            Network::LocalNetwork(ln) => ln.activation_height(nu),
         }
     }
 }
