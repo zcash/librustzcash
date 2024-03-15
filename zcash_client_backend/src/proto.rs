@@ -779,3 +779,16 @@ impl proposal::Proposal {
         }
     }
 }
+
+#[cfg(feature = "lightwalletd-tonic-transport")]
+impl service::compact_tx_streamer_client::CompactTxStreamerClient<tonic::transport::Channel> {
+    /// Attempt to create a new client by connecting to a given endpoint.
+    pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
+    where
+        D: TryInto<tonic::transport::Endpoint>,
+        D::Error: Into<tonic::codegen::StdError>,
+    {
+        let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
+        Ok(Self::new(conn))
+    }
+}
