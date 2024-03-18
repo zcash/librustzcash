@@ -30,6 +30,7 @@ and this library adheres to Rust's notion of
   - `WalletSummary::next_orchard_subtree_index`
   - `chain::ChainState`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
+  - `impl Debug for chain::CommitmentTreeRoot`
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`
