@@ -21,6 +21,17 @@ pub enum WalletMigrationError {
     /// The seed is required for the migration.
     SeedRequired,
 
+    /// A seed was provided that is not relevant to any of the accounts within the wallet.
+    ///
+    /// Specifically, it is not relevant to any account for which [`Account::source`] is
+    /// [`AccountSource::Derived`]. We do not check whether the seed is relevant to any
+    /// imported account, because that would require brute-forcing the ZIP 32 account
+    /// index space.
+    ///
+    /// [`Account::source`]: zcash_client_backend::data_api::Account::source
+    /// [`AccountSource::Derived`]: zcash_client_backend::data_api::AccountSource::Derived
+    SeedNotRelevant,
+
     /// Decoding of an existing value from its serialized form has failed.
     CorruptedData(String),
 
@@ -71,6 +82,12 @@ impl fmt::Display for WalletMigrationError {
                 write!(
                     f,
                     "The wallet seed is required in order to update the database."
+                )
+            }
+            WalletMigrationError::SeedNotRelevant => {
+                write!(
+                    f,
+                    "The provided seed is not relevant to any derived accounts in the database."
                 )
             }
             WalletMigrationError::CorruptedData(reason) => {
