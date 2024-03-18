@@ -317,7 +317,7 @@ impl AccountBalance {
 
 /// The kinds of accounts supported by `zcash_client_backend`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AccountKind {
+pub enum AccountSource {
     /// An account derived from a known seed.
     Derived {
         seed_fingerprint: SeedFingerprint,
@@ -335,7 +335,7 @@ pub trait Account<AccountId: Copy> {
 
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
-    fn kind(&self) -> AccountKind;
+    fn source(&self) -> AccountSource;
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     ///
@@ -349,8 +349,8 @@ impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
         self.0
     }
 
-    fn kind(&self) -> AccountKind {
-        AccountKind::Imported
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
@@ -363,8 +363,8 @@ impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
         self.0
     }
 
-    fn kind(&self) -> AccountKind {
-        AccountKind::Imported
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
