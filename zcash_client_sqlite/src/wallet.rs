@@ -262,18 +262,24 @@ pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
             )
         })? == seed_fingerprint;
 
-    let usk = UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index)
-        .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
-
     // Keys are not comparable with `Eq`, but addresses are, so we derive what should
     // be equivalent addresses for each key and use those to check for key equality.
     let uivk_match =
-        UnifiedAddressRequest::all().map_or(Ok::<_, SqliteClientError>(false), |ua_request| {
-            Ok(usk
-                .to_unified_full_viewing_key()
-                .default_address(ua_request)?
-                == uivk.default_address(ua_request)?)
-        })?;
+        match UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index) {
+            // If we can't derive a USK from the given seed with the account's ZIP 32
+            // account index, then we immediately know the UIVK won't match because wallet
+            // accounts are required to have a known UIVK.
+            Err(_) => false,
+            Ok(usk) => UnifiedAddressRequest::all().map_or(
+                Ok::<_, SqliteClientError>(false),
+                |ua_request| {
+                    Ok(usk
+                        .to_unified_full_viewing_key()
+                        .default_address(ua_request)?
+                        == uivk.default_address(ua_request)?)
+                },
+            )?,
+        };
 
     if seed_fingerprint_match != uivk_match {
         // If these mismatch, it suggests database corruption.
