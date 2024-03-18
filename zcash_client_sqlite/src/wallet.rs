@@ -66,6 +66,7 @@
 
 use incrementalmerkletree::Retention;
 use rusqlite::{self, named_params, params, OptionalExtension};
+use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zip32::fingerprint::SeedFingerprint;
 
@@ -75,7 +76,9 @@ use std::io::{self, Cursor};
 use std::num::NonZeroU32;
 use std::ops::RangeInclusive;
 use tracing::debug;
-use zcash_keys::keys::{AddressGenerationError, UnifiedAddressRequest, UnifiedIncomingViewingKey};
+use zcash_keys::keys::{
+    AddressGenerationError, UnifiedAddressRequest, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+};
 
 use zcash_client_backend::{
     address::{Address, UnifiedAddress},
@@ -242,6 +245,43 @@ impl ViewingKey {
             ViewingKey::Full(ufvk) => ufvk.as_ref().to_unified_incoming_viewing_key(),
             ViewingKey::Incoming(uivk) => uivk.as_ref().clone(),
         }
+    }
+}
+
+pub(crate) fn seed_matches_derived_account<P: consensus::Parameters>(
+    params: &P,
+    seed: &SecretVec<u8>,
+    seed_fingerprint: &SeedFingerprint,
+    account_index: zip32::AccountId,
+    uivk: &UnifiedIncomingViewingKey,
+) -> Result<bool, SqliteClientError> {
+    let seed_fingerprint_match =
+        &SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+            SqliteClientError::BadAccountData(
+                "Seed must be between 32 and 252 bytes in length.".to_owned(),
+            )
+        })? == seed_fingerprint;
+
+    let usk = UnifiedSpendingKey::from_seed(params, &seed.expose_secret()[..], account_index)
+        .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
+
+    // Keys are not comparable with `Eq`, but addresses are, so we derive what should
+    // be equivalent addresses for each key and use those to check for key equality.
+    let uivk_match =
+        UnifiedAddressRequest::all().map_or(Ok::<_, SqliteClientError>(false), |ua_request| {
+            Ok(usk
+                .to_unified_full_viewing_key()
+                .default_address(ua_request)?
+                == uivk.default_address(ua_request)?)
+        })?;
+
+    if seed_fingerprint_match != uivk_match {
+        // If these mismatch, it suggests database corruption.
+        Err(SqliteClientError::CorruptedData(format!(
+            "Seed fingerprint match: {seed_fingerprint_match}, uivk match: {uivk_match}"
+        )))
+    } else {
+        Ok(seed_fingerprint_match && uivk_match)
     }
 }
 

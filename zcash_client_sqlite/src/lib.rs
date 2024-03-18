@@ -321,38 +321,13 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 account_index,
             } = account.source()
             {
-                let seed_fingerprint_match =
-                    SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
-                        SqliteClientError::BadAccountData(
-                            "Seed must be between 32 and 252 bytes in length.".to_owned(),
-                        )
-                    })? == seed_fingerprint;
-
-                let usk = UnifiedSpendingKey::from_seed(
+                wallet::seed_matches_derived_account(
                     &self.params,
-                    &seed.expose_secret()[..],
+                    seed,
+                    &seed_fingerprint,
                     account_index,
+                    &account.uivk(),
                 )
-                .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
-
-                // Keys are not comparable with `Eq`, but addresses are, so we derive what should
-                // be equivalent addresses for each key and use those to check for key equality.
-                let ufvk_match = UnifiedAddressRequest::all().map_or(
-                    Ok::<_, Self::Error>(false),
-                    |ua_request| {
-                        Ok(usk
-                            .to_unified_full_viewing_key()
-                            .default_address(ua_request)?
-                            == account.default_address(ua_request)?)
-                    },
-                )?;
-
-                if seed_fingerprint_match != ufvk_match {
-                    // If these mismatch, it suggests database corruption.
-                    return Err(SqliteClientError::CorruptedData(format!("Seed fingerprint match: {seed_fingerprint_match}, ufvk match: {ufvk_match}")));
-                }
-
-                Ok(seed_fingerprint_match && ufvk_match)
             } else {
                 Err(SqliteClientError::UnknownZip32Derivation)
             }
