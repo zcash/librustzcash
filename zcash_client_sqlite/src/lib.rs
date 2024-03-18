@@ -337,6 +337,39 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
+    fn is_seed_relevant_to_any_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<bool, Self::Error> {
+        for account_id in self.get_account_ids()? {
+            let account = self.get_account(account_id)?.expect("account ID exists");
+
+            // If the account is imported, the seed _might_ be relevant, but the only
+            // way we could determine that is by brute-forcing the ZIP 32 account
+            // index space, which we're not going to do. The method name indicates to
+            // the caller that we only check derived accounts.
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                if wallet::seed_matches_derived_account(
+                    &self.params,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )? {
+                    // The seed is relevant to this account. No need to check any others.
+                    return Ok(true);
+                }
+            }
+        }
+
+        // The seed was not relevant to any of the accounts in the wallet.
+        Ok(false)
+    }
+
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,

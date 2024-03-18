@@ -740,6 +740,13 @@ pub trait WalletRead {
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error>;
 
+    /// Checks whether the given seed is relevant to any of the derived accounts (where
+    /// [`Account::source`] is [`AccountSource::Derived`]) in the wallet.
+    fn is_seed_relevant_to_any_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<bool, Self::Error>;
+
     /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
         &self,
@@ -1714,6 +1721,13 @@ pub mod testing {
         fn validate_seed(
             &self,
             _account_id: Self::AccountId,
+            _seed: &SecretVec<u8>,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+
+        fn is_seed_relevant_to_any_derived_accounts(
+            &self,
             _seed: &SecretVec<u8>,
         ) -> Result<bool, Self::Error> {
             Ok(false)
