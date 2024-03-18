@@ -75,7 +75,9 @@ use self::{
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+    },
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
     ShieldedProtocol,
@@ -342,8 +344,16 @@ pub trait Account<AccountId: Copy> {
     /// Accounts for which this returns `None` cannot be used in wallet contexts, because
     /// they are unable to maintain an accurate balance.
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+
+    /// Returns the UIVK that the wallet backend has stored for the account.
+    ///
+    /// All accounts are required to have at least an incoming viewing key. This gives no
+    /// indication about whether an account can be used in a wallet context; for that, use
+    /// [`Account::ufvk`].
+    fn uivk(&self) -> UnifiedIncomingViewingKey;
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
 impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     fn id(&self) -> A {
         self.0
@@ -356,9 +366,14 @@ impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         Some(&self.1)
     }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.to_unified_incoming_viewing_key()
+    }
 }
 
-impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
+#[cfg(any(test, feature = "test-dependencies"))]
+impl<A: Copy> Account<A> for (A, UnifiedIncomingViewingKey) {
     fn id(&self) -> A {
         self.0
     }
@@ -368,7 +383,11 @@ impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
-        self.1.as_ref()
+        None
+    }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.clone()
     }
 }
 

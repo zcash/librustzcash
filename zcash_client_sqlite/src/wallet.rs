@@ -223,6 +223,10 @@ impl zcash_client_backend::data_api::Account<AccountId> for Account {
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         self.viewing_key.ufvk()
     }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.viewing_key.uivk()
+    }
 }
 
 impl ViewingKey {
