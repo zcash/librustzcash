@@ -17,7 +17,7 @@ use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uni
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x1b104345_f27e_42da_a9e3_1de22694da43);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
-    pub(super) seed: Rc<Option<SecretVec<u8>>>,
+    pub(super) seed: Option<Rc<SecretVec<u8>>>,
     pub(super) params: P,
 }
 
@@ -83,7 +83,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         if transaction.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
             Ok(row.get::<_, u32>(0)? > 0)
         })? {
-            if let Some(seed) = &self.seed.as_ref() {
+            if let Some(seed) = &self.seed {
                 let seed_id = SeedFingerprint::from_seed(seed.expose_secret())
                     .expect("Seed is between 32 and 252 bytes in length.");
 
