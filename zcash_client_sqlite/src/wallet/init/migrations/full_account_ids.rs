@@ -1,6 +1,6 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{account_kind_code, init::WalletMigrationError, ufvk_to_uivk};
+use crate::wallet::{account_kind_code, init::WalletMigrationError};
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
@@ -121,8 +121,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         ));
                     }
 
-                    let uivk = ufvk_to_uivk(&ufvk_parsed, &self.params)
-                        .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
+                    let uivk = ufvk_parsed
+                        .to_unified_incoming_viewing_key()
+                        .encode(&self.params);
 
                     #[cfg(feature = "transparent-inputs")]
                     let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
