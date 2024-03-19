@@ -32,10 +32,12 @@ and this library adheres to Rust's notion of
   - Added `UnknownZip32Derivation`
   - Added `BadAccountData`
   - Removed `DiversifierIndexOutOfRange`
+  - Removed `InvalidNoteId`
 - `zcash_client_sqlite::wallet`:
   - `init::WalletMigrationError` has added variants:
     - `WalletMigrationError::AddressGeneration`
     - `WalletMigrationError::CannotRevert`
+    - `WalletMigrationError::SeedNotRelevant`
 - The `v_transactions` and `v_tx_outputs` views now include Orchard notes.
 
 ## [0.9.1] - 2024-03-09
