@@ -108,7 +108,6 @@ impl AddressTracker {
         mined_addresses: &[TransparentAddress],
     ) -> Result<(), AddressTrackingError> {
         // Find the position of the *last* element of `gap_set`, if any, that matches some element of `mined_addresses`.
-        // TODO: This is O(n²) and could be Õ(n) (e.g. by converting `mined_addresses` to a HashSet).
         if let Some(pos) = self
             .gap_set
             .iter()
