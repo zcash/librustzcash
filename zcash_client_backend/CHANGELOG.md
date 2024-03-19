@@ -22,6 +22,7 @@ and this library adheres to Rust's notion of
   - `NoteRetention`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
+  - `SeedRelevance`
   - `SentTransaction::new`
   - `SpendableNotes`
   - `ORCHARD_SHARD_HEIGHT`

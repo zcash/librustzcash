@@ -64,6 +64,7 @@ use std::{
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
+use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zip32::fingerprint::SeedFingerprint;
@@ -742,10 +743,13 @@ pub trait WalletRead {
 
     /// Checks whether the given seed is relevant to any of the derived accounts (where
     /// [`Account::source`] is [`AccountSource::Derived`]) in the wallet.
-    fn is_seed_relevant_to_any_derived_accounts(
+    ///
+    /// This API does not check whether the seed is relevant to any imported account,
+    /// because that would require brute-forcing the ZIP 32 account index space.
+    fn seed_relevance_to_derived_accounts(
         &self,
         seed: &SecretVec<u8>,
-    ) -> Result<bool, Self::Error>;
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error>;
 
     /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
@@ -905,6 +909,21 @@ pub trait WalletRead {
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
     }
+}
+
+/// The relevance of a seed to a given wallet.
+///
+/// This is the return type for [`WalletRead::seed_relevance_to_derived_accounts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SeedRelevance<A: Copy> {
+    /// The seed is relevant to at least one derived account within the wallet.
+    Relevant { account_ids: NonEmpty<A> },
+    /// The seed is not relevant to any of the derived accounts within the wallet.
+    NotRelevant,
+    /// The wallet contains no derived accounts.
+    NoDerivedAccounts,
+    /// The wallet contains no accounts.
+    NoAccounts,
 }
 
 /// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
@@ -1632,8 +1651,8 @@ pub mod testing {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1726,11 +1745,11 @@ pub mod testing {
             Ok(false)
         }
 
-        fn is_seed_relevant_to_any_derived_accounts(
+        fn seed_relevance_to_derived_accounts(
             &self,
             _seed: &SecretVec<u8>,
-        ) -> Result<bool, Self::Error> {
-            Ok(false)
+        ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+            Ok(SeedRelevance::NoAccounts)
         }
 
         fn get_account_for_ufvk(

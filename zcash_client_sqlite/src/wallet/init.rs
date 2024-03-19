@@ -9,7 +9,10 @@ use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
 
-use zcash_client_backend::{data_api::WalletRead, keys::AddressGenerationError};
+use zcash_client_backend::{
+    data_api::{SeedRelevance, WalletRead},
+    keys::AddressGenerationError,
+};
 use zcash_primitives::{consensus, transaction::components::amount::BalanceError};
 
 use super::commitment_tree;
@@ -289,11 +292,18 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 
     // Now that the migration succeeded, check whether the seed is relevant to the wallet.
     if let Some(seed) = seed {
-        if !wdb
-            .is_seed_relevant_to_any_derived_accounts(&seed)
+        match wdb
+            .seed_relevance_to_derived_accounts(&seed)
             .map_err(sqlite_client_error_to_wallet_migration_error)?
         {
-            return Err(WalletMigrationError::SeedNotRelevant.into());
+            SeedRelevance::Relevant { .. } => (),
+            // Every seed is relevant to a wallet with no accounts; this is most likely a
+            // new wallet database being initialized for the first time.
+            SeedRelevance::NoAccounts => (),
+            // No seed is relevant to a wallet that only has imported accounts.
+            SeedRelevance::NotRelevant | SeedRelevance::NoDerivedAccounts => {
+                return Err(WalletMigrationError::SeedNotRelevant.into())
+            }
         }
     }
 
@@ -1419,12 +1429,16 @@ mod tests {
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
         assert_matches!(init_wallet_db(&mut db_data, None), Ok(_));
 
+        // Prior to adding any accounts, every seed phrase is relevant to the wallet.
         let seed = test_vectors::UNIFIED[0].root_seed;
+        let other_seed = [7; 32];
         assert_matches!(
             init_wallet_db(&mut db_data, Some(Secret::new(seed.to_vec()))),
-            Err(schemer::MigratorError::Adapter(
-                WalletMigrationError::SeedNotRelevant
-            ))
+            Ok(())
+        );
+        assert_matches!(
+            init_wallet_db(&mut db_data, Some(Secret::new(other_seed.to_vec()))),
+            Ok(())
         );
 
         let birthday = AccountBirthday::from_sapling_activation(&network);
@@ -1437,6 +1451,18 @@ mod tests {
                 account.kind,
                 AccountSource::Derived{account_index, ..} if account_index == zip32::AccountId::ZERO,
             )
+        );
+
+        // After adding an account, only the real seed phrase is relevant to the wallet.
+        assert_matches!(
+            init_wallet_db(&mut db_data, Some(Secret::new(seed.to_vec()))),
+            Ok(())
+        );
+        assert_matches!(
+            init_wallet_db(&mut db_data, Some(Secret::new(other_seed.to_vec()))),
+            Err(schemer::MigratorError::Adapter(
+                WalletMigrationError::SeedNotRelevant
+            ))
         );
 
         for tv in &test_vectors::UNIFIED[..3] {
