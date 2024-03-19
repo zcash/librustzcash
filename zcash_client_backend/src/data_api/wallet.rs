@@ -697,6 +697,10 @@ where
         .map_err(Error::DataSource)?
         .ok_or(Error::KeyNotRecognized)?;
     let account_id = account.id();
+    let zip32_account = match account.source() {
+        AccountSource::Derived { account_index, .. } => Some(account_index),
+        _ => None,
+    };
 
     let (sapling_anchor, sapling_inputs) =
         if proposal_step.involves(PoolType::Shielded(ShieldedProtocol::Sapling)) {
@@ -1087,15 +1091,13 @@ where
                 PoolType::Transparent => {
                     // TODO: make sure that this is supposed to be an ephemeral output (by checking
                     // for backlinks) rather than a non-ephemeral transparent change output.
-                    let account_index: zip32::AccountId = match account.source() {
-                        AccountSource::Derived { account_index, .. } => Ok(account_index),
-                        _ => Err(InputSelectorError::AddressTracking(
-                            AddressTrackingError::UnsupportedAccountType,
-                        )),
-                    }?;
-                    let ephemeral_addr = wallet_db
-                        .reserve_next_address(account_index)
+                    let ephemeral_addr = zip32_account
+                        .map_or_else(
+                            || Err(AddressTrackingError::UnsupportedAccountType),
+                            |account_id| wallet_db.reserve_next_address(account_id),
+                        )
                         .map_err(InputSelectorError::from)?;
+
                     ephemeral_addrs.push(ephemeral_addr);
                     builder.add_transparent_output(&ephemeral_addr, change_value.value())?;
                     transparent_output_meta.push((ephemeral_addr, change_value.value()))
@@ -1219,11 +1221,14 @@ where
     };
     let res = finish();
 
-    match res {
-        Ok(_) => wallet_db.mark_addresses_as_used(&ephemeral_addrs),
-        Err(_) => wallet_db.unreserve_addresses(&ephemeral_addrs),
+    if !ephemeral_addrs.is_empty() {
+        let account_index = zip32_account.expect("already checked");
+        match res {
+            Ok(_) => wallet_db.mark_addresses_as_used(account_index, &ephemeral_addrs),
+            Err(_) => wallet_db.unreserve_addresses(account_index, &ephemeral_addrs),
+        }
+        .map_err(InputSelectorError::from)?;
     }
-    .map_err(InputSelectorError::from)?;
 
     res
 }

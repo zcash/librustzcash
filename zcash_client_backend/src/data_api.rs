@@ -1673,12 +1673,14 @@ pub trait WalletAddressTracking {
     /// account.
     fn unreserve_addresses(
         &self,
+        account: zip32::AccountId,
         address: &[TransparentAddress],
     ) -> Result<(), AddressTrackingError>;
 
     /// Mark addresses as having been used.
     fn mark_addresses_as_used(
         &self,
+        account: zip32::AccountId,
         address: &[TransparentAddress],
     ) -> Result<(), AddressTrackingError>;
 
@@ -1687,6 +1689,7 @@ pub trait WalletAddressTracking {
     /// index if necessary.
     fn mark_addresses_as_mined(
         &self,
+        account: zip32::AccountId,
         addresses: &[TransparentAddress],
     ) -> Result<(), AddressTrackingError>;
 }
@@ -2020,6 +2023,7 @@ pub mod testing {
 
         fn unreserve_addresses(
             &self,
+            _account: zip32::AccountId,
             _addresses: &[TransparentAddress],
         ) -> Result<(), AddressTrackingError> {
             Ok(())
@@ -2027,6 +2031,7 @@ pub mod testing {
 
         fn mark_addresses_as_used(
             &self,
+            _account: zip32::AccountId,
             _addresses: &[TransparentAddress],
         ) -> Result<(), AddressTrackingError> {
             Ok(())
@@ -2034,6 +2039,7 @@ pub mod testing {
 
         fn mark_addresses_as_mined(
             &self,
+            _account: zip32::AccountId,
             _addresses: &[TransparentAddress],
         ) -> Result<(), AddressTrackingError> {
             Ok(())

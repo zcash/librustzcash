@@ -163,7 +163,7 @@ pub struct UtxoId(pub i64);
 pub struct WalletDb<C, P> {
     conn: C,
     params: P,
-    address_tracker: Rc<Mutex<AddressTracker>>,
+    address_trackers: Rc<Mutex<BTreeMap<zip32::AccountId, AddressTracker>>>,
 }
 
 /// A wrapper for a SQLite transaction affecting the wallet database.
@@ -180,11 +180,10 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).and_then(move |conn| {
             rusqlite::vtab::array::load_module(&conn)?;
-            let tracker = AddressTracker::new(&conn, &params);
             Ok(WalletDb {
                 conn,
                 params,
-                address_tracker: Rc::new(Mutex::new(tracker)),
+                address_trackers: Rc::new(Mutex::new(BTreeMap::new())),
             })
         })
     }
@@ -197,7 +196,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
             params: self.params.clone(),
-            address_tracker: self.address_tracker.clone(),
+            address_trackers: self.address_trackers.clone(),
         };
         let result = f(&mut wdb)?;
         tx.commit()?;
@@ -1122,7 +1121,9 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             )?;
                         }
                     }
-                    wdb.mark_addresses_as_mined(&output_addrs).map_err(SqliteClientError::from)?;
+                    if let AccountSource::Derived { account_index, .. } = wdb.get_account(account_id)?.expect("account ID exists").source() {
+                        wdb.mark_addresses_as_mined(account_index, &output_addrs).map_err(SqliteClientError::from)?;
+                    }
                 }
             }
 
@@ -1432,44 +1433,59 @@ where
         &self,
         account: zip32::AccountId,
     ) -> Result<TransparentAddress, AddressTrackingError> {
-        let mut tracker = self
-            .address_tracker
+        let mut trackers = self
+            .address_trackers
             .lock()
             .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
-        tracker.reserve_next_address(self, account)
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .reserve_next_address(self)
     }
 
     fn unreserve_addresses(
         &self,
+        account: zip32::AccountId,
         addresses: &[TransparentAddress],
     ) -> Result<(), AddressTrackingError> {
-        let mut tracker = self
-            .address_tracker
+        let mut trackers = self
+            .address_trackers
             .lock()
             .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
-        tracker.unreserve_addresses(self, addresses)
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .unreserve_addresses(self, addresses)
     }
 
     fn mark_addresses_as_used(
         &self,
+        account: zip32::AccountId,
         addresses: &[TransparentAddress],
     ) -> Result<(), AddressTrackingError> {
-        let mut tracker = self
-            .address_tracker
+        let mut trackers = self
+            .address_trackers
             .lock()
             .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
-        tracker.mark_addresses_as_used(self, addresses)
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .mark_addresses_as_used(self, addresses)
     }
 
     fn mark_addresses_as_mined(
         &self,
+        account: zip32::AccountId,
         addresses: &[TransparentAddress],
     ) -> Result<(), AddressTrackingError> {
-        let mut tracker = self
-            .address_tracker
+        let mut trackers = self
+            .address_trackers
             .lock()
             .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
-        tracker.mark_addresses_as_mined(self, addresses)
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .mark_addresses_as_mined(self, addresses)
     }
 }
 
