@@ -30,18 +30,19 @@
 //!
 //! ## Core Traits
 //!
-//! The utility functions described above depend upon four important traits defined in this
+//! The utility functions described above depend upon five important traits defined in this
 //! module, which between them encompass the data storage requirements of a light wallet.
-//! The relevant traits are [`InputSource`], [`WalletRead`], [`WalletWrite`], and
-//! [`WalletCommitmentTrees`]. A complete implementation of the data storage layer for a wallet
-//! will include an implementation of all four of these traits. See the [`zcash_client_sqlite`]
-//! crate for a complete example of the implementation of these traits.
+//! The relevant traits are [`InputSource`], [`WalletRead`], [`WalletWrite`],
+//! [`WalletCommitmentTrees`], and [`WalletAddressTracking`]. A complete implementation of the
+//! data storage layer for a wallet will include an implementation of all five of these traits.
+//! See the [`zcash_client_sqlite`] crate for a complete example of the implementation of these
+//! traits.
 //!
 //! ## Accounts
 //!
-//! The operation of the [`InputSource`], [`WalletRead`] and [`WalletWrite`] traits is built around
-//! the concept of a wallet having one or more accounts, with a unique `AccountId` for each
-//! account.
+//! The operation of the [`InputSource`], [`WalletRead`], [`WalletWrite`], and
+//! [`WalletAddressTracking`] traits is built around the concept of a wallet having one or more
+//! accounts, with a unique `AccountId` for each account.
 //!
 //! An account identifier corresponds to at most a single [`UnifiedSpendingKey`]'s worth of spend
 //! authority, with the received and spent notes of that account tracked via the corresponding
@@ -57,7 +58,7 @@
 
 use std::{
     collections::HashMap,
-    fmt::Debug,
+    fmt::{self, Debug, Display},
     hash::Hash,
     io,
     num::{NonZeroU32, TryFromIntError},
@@ -85,6 +86,7 @@ use crate::{
 use zcash_primitives::{
     block::BlockHash,
     consensus::BlockHeight,
+    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     transaction::{
         components::amount::{BalanceError, NonNegativeAmount},
@@ -94,8 +96,7 @@ use zcash_primitives::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    crate::wallet::TransparentAddressMetadata,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    crate::wallet::TransparentAddressMetadata, zcash_primitives::transaction::components::OutPoint,
 };
 
 #[cfg(feature = "test-dependencies")]
@@ -1512,8 +1513,11 @@ pub trait WalletWrite: WalletRead {
         received_tx: DecryptedTransaction<Self::AccountId>,
     ) -> Result<(), Self::Error>;
 
-    /// Saves information about a transaction that was constructed and sent by the wallet to the
-    /// persistent wallet store.
+    /// Saves information about a transaction constructed by the wallet to the persistent
+    /// wallet store.
+    ///
+    /// The name `store_sent_tx` is somewhat misleading; this must be called *before* the
+    /// transaction is sent to the network.
     fn store_sent_tx(
         &mut self,
         sent_tx: &SentTransaction<Self::AccountId>,
@@ -1606,6 +1610,90 @@ pub trait WalletCommitmentTrees {
     ) -> Result<(), ShardTreeError<Self::Error>>;
 }
 
+/// An error related to tracking of ephemeral transparent addresses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddressTrackingError {
+    /// Only ZIP 32 accounts are supported for ZIP 320 (TEX Addresses).
+    UnsupportedAccountType,
+
+    /// The proposal cannot be constructed until transactions with previously reserved
+    /// ephemeral address outputs have been mined.
+    ReachedGapLimit,
+
+    /// Internal error.
+    Internal(String),
+}
+
+impl Display for AddressTrackingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AddressTrackingError::UnsupportedAccountType => write!(
+                f,
+                "Only ZIP 32 accounts are supported for ZIP 320 (TEX Addresses)."
+            ),
+            AddressTrackingError::ReachedGapLimit => write!(
+                f,
+                "The proposal cannot be constructed until transactions with previously reserved ephemeral address outputs have been mined."
+            ),
+            AddressTrackingError::Internal(e) => write!(
+                f,
+                "Internal address tracking error: {}", e
+            ),
+        }
+    }
+}
+
+pub trait WalletAddressTracking {
+    /// Reserves the next available address.
+    ///
+    /// To ensure that sufficient information is stored on-chain to allow recovering
+    /// funds sent back to any of the used addresses, a "gap limit" of 20 addresses
+    /// should be observed as described in [BIP 44]. An implementation should record
+    /// the index of the first unmined address, and update it for addresses that have
+    /// been observed as outputs in mined transactions when `addresses_are_mined` is
+    /// called.
+    ///
+    /// Returns an error if all addresses within the gap limit have already been
+    /// reserved.
+    ///
+    /// [BIP 44]: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki#user-content-Address_gap_limit
+    fn reserve_next_address(
+        &self,
+        account: zip32::AccountId,
+    ) -> Result<TransparentAddress, AddressTrackingError>;
+
+    /// Frees previously reserved ephemeral transparent addresses.
+    ///
+    /// This should only be used in the case that an error occurs in transaction
+    /// construction after the address was reserved. It is sufficient for an
+    /// implementation to only be able to unreserve the last reserved address from
+    /// the given account.
+    ///
+    /// Returns an error if the account identifier does not correspond to a known
+    /// account.
+    fn unreserve_addresses(
+        &self,
+        account: zip32::AccountId,
+        address: &[TransparentAddress],
+    ) -> Result<(), AddressTrackingError>;
+
+    /// Mark addresses as having been used.
+    fn mark_addresses_as_used(
+        &self,
+        account: zip32::AccountId,
+        address: &[TransparentAddress],
+    ) -> Result<(), AddressTrackingError>;
+
+    /// Checks the set of ephemeral transparent addresses within the gap limit for the
+    /// given mined t-addresses, in order to update the first unmined ephemeral t-address
+    /// index if necessary.
+    fn mark_addresses_as_mined(
+        &self,
+        account: zip32::AccountId,
+        addresses: &[TransparentAddress],
+    ) -> Result<(), AddressTrackingError>;
+}
+
 #[cfg(feature = "test-dependencies")]
 pub mod testing {
     use incrementalmerkletree::Address;
@@ -1617,6 +1705,7 @@ pub mod testing {
     use zcash_primitives::{
         block::BlockHash,
         consensus::{BlockHeight, Network},
+        legacy::TransparentAddress,
         memo::Memo,
         transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     };
@@ -1631,13 +1720,13 @@ pub mod testing {
     use super::{
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
-        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        AccountBirthday, AddressTrackingError, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SentTransaction, SpendableNotes, WalletAddressTracking,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use {crate::wallet::TransparentAddressMetadata, zcash_primitives::legacy::TransparentAddress};
+    use crate::wallet::TransparentAddressMetadata;
 
     #[cfg(feature = "orchard")]
     use super::ORCHARD_SHARD_HEIGHT;
@@ -1921,6 +2010,39 @@ pub mod testing {
             _output: &WalletTransparentOutput,
         ) -> Result<Self::UtxoRef, Self::Error> {
             Ok(0)
+        }
+    }
+
+    impl WalletAddressTracking for MockWalletDb {
+        fn reserve_next_address(
+            &self,
+            _account: zip32::AccountId,
+        ) -> Result<TransparentAddress, AddressTrackingError> {
+            Err(AddressTrackingError::ReachedGapLimit)
+        }
+
+        fn unreserve_addresses(
+            &self,
+            _account: zip32::AccountId,
+            _addresses: &[TransparentAddress],
+        ) -> Result<(), AddressTrackingError> {
+            Ok(())
+        }
+
+        fn mark_addresses_as_used(
+            &self,
+            _account: zip32::AccountId,
+            _addresses: &[TransparentAddress],
+        ) -> Result<(), AddressTrackingError> {
+            Ok(())
+        }
+
+        fn mark_addresses_as_mined(
+            &self,
+            _account: zip32::AccountId,
+            _addresses: &[TransparentAddress],
+        ) -> Result<(), AddressTrackingError> {
+            Ok(())
         }
     }
 

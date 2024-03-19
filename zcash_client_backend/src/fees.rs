@@ -11,8 +11,7 @@ use zcash_primitives::{
         fees::{transparent, FeeRule},
     },
 };
-
-use crate::ShieldedProtocol;
+use zcash_protocol::{PoolType, ShieldedProtocol};
 
 pub(crate) mod common;
 pub mod fixed;
@@ -25,18 +24,14 @@ pub mod zip317;
 /// A proposed change amount and output pool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeValue {
-    output_pool: ShieldedProtocol,
+    output_pool: PoolType,
     value: NonNegativeAmount,
     memo: Option<MemoBytes>,
 }
 
 impl ChangeValue {
     /// Constructs a new change value from its constituent parts.
-    pub fn new(
-        output_pool: ShieldedProtocol,
-        value: NonNegativeAmount,
-        memo: Option<MemoBytes>,
-    ) -> Self {
+    pub fn new(output_pool: PoolType, value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
         Self {
             output_pool,
             value,
@@ -44,10 +39,19 @@ impl ChangeValue {
         }
     }
 
+    /// Constructs a new change value that will be created as a transparent output.
+    pub fn transparent(value: NonNegativeAmount) -> Self {
+        Self {
+            output_pool: PoolType::Transparent,
+            value,
+            memo: None,
+        }
+    }
+
     /// Constructs a new change value that will be created as a Sapling output.
     pub fn sapling(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
         Self {
-            output_pool: ShieldedProtocol::Sapling,
+            output_pool: PoolType::Shielded(ShieldedProtocol::Sapling),
             value,
             memo,
         }
@@ -57,14 +61,14 @@ impl ChangeValue {
     #[cfg(feature = "orchard")]
     pub fn orchard(value: NonNegativeAmount, memo: Option<MemoBytes>) -> Self {
         Self {
-            output_pool: ShieldedProtocol::Orchard,
+            output_pool: PoolType::Shielded(ShieldedProtocol::Orchard),
             value,
             memo,
         }
     }
 
     /// Returns the pool to which the change output should be sent.
-    pub fn output_pool(&self) -> ShieldedProtocol {
+    pub fn output_pool(&self) -> PoolType {
         self.output_pool
     }
 

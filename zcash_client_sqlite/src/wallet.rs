@@ -132,6 +132,7 @@ use {
     },
 };
 
+pub(crate) mod address_tracker;
 pub mod commitment_tree;
 pub(crate) mod common;
 pub mod init;
@@ -1876,22 +1877,25 @@ pub(crate) fn get_min_unspent_height(
 ///
 /// This should only be executed inside a transactional context.
 pub(crate) fn truncate_to_height<P: consensus::Parameters>(
-    conn: &rusqlite::Transaction,
-    params: &P,
+    wdb: &mut WalletDb<SqlTransaction<'_>, P>,
     block_height: BlockHeight,
 ) -> Result<(), SqliteClientError> {
-    let sapling_activation_height = params
+    let sapling_activation_height = wdb
+        .params
         .activation_height(NetworkUpgrade::Sapling)
         .expect("Sapling activation height must be available.");
 
     // Recall where we synced up to previously.
-    let last_scanned_height = conn.query_row("SELECT MAX(height) FROM blocks", [], |row| {
-        row.get::<_, Option<u32>>(0)
-            .map(|opt| opt.map_or_else(|| sapling_activation_height - 1, BlockHeight::from))
-    })?;
+    let last_scanned_height =
+        wdb.conn
+            .0
+            .query_row("SELECT MAX(height) FROM blocks", [], |row| {
+                row.get::<_, Option<u32>>(0)
+                    .map(|opt| opt.map_or_else(|| sapling_activation_height - 1, BlockHeight::from))
+            })?;
 
     if block_height < last_scanned_height - PRUNING_DEPTH {
-        if let Some(h) = get_min_unspent_height(conn)? {
+        if let Some(h) = get_min_unspent_height(wdb.conn.0)? {
             if block_height > h {
                 return Err(SqliteClientError::RequestedRewindInvalid(h, block_height));
             }
@@ -1901,10 +1905,6 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
     // nothing to do if we're deleting back down to the max height
     if block_height < last_scanned_height {
         // Truncate the note commitment trees
-        let mut wdb = WalletDb {
-            conn: SqlTransaction(conn),
-            params: params.clone(),
-        };
         wdb.with_sapling_tree_mut(|tree| {
             tree.truncate_removing_checkpoint(&block_height).map(|_| ())
         })?;
@@ -1914,7 +1914,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         })?;
 
         // Rewind received notes
-        conn.execute(
+        wdb.conn.0.execute(
             "DELETE FROM sapling_received_notes
             WHERE id IN (
                 SELECT rn.id
@@ -1926,7 +1926,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
             [u32::from(block_height)],
         )?;
         #[cfg(feature = "orchard")]
-        conn.execute(
+        wdb.conn.0.execute(
             "DELETE FROM orchard_received_notes
             WHERE id IN (
                 SELECT rn.id
@@ -1943,27 +1943,27 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         // presence of stale sent notes that link to unmined transactions.
 
         // Rewind utxos
-        conn.execute(
+        wdb.conn.0.execute(
             "DELETE FROM utxos WHERE height > ?",
             [u32::from(block_height)],
         )?;
 
         // Un-mine transactions.
-        conn.execute(
+        wdb.conn.0.execute(
             "UPDATE transactions SET block = NULL, tx_index = NULL
             WHERE block IS NOT NULL AND block > ?",
             [u32::from(block_height)],
         )?;
 
         // Now that they aren't depended on, delete scanned blocks.
-        conn.execute(
+        wdb.conn.0.execute(
             "DELETE FROM blocks WHERE height > ?",
             [u32::from(block_height)],
         )?;
 
         // Delete from the nullifier map any entries with a locator referencing a block
         // height greater than the truncation height.
-        conn.execute(
+        wdb.conn.0.execute(
             "DELETE FROM tx_locator_map
             WHERE block_height > :block_height",
             named_params![":block_height": u32::from(block_height)],
@@ -1972,13 +1972,13 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         // Delete from the scanning queue any range with a start height greater than the
         // truncation height, and then truncate any remaining range by setting the end
         // equal to the truncation height + 1.
-        conn.execute(
+        wdb.conn.0.execute(
             "DELETE FROM scan_queue
             WHERE block_range_start > :block_height",
             named_params![":block_height": u32::from(block_height)],
         )?;
 
-        conn.execute(
+        wdb.conn.0.execute(
             "UPDATE scan_queue
             SET block_range_end = :end_height
             WHERE block_range_end > :end_height",
@@ -1989,7 +1989,7 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
         let query_range = block_height..(block_height + 1);
         let scan_range = ScanRange::from_parts(query_range.clone(), ScanPriority::Verify);
         replace_queue_entries::<SqliteClientError>(
-            conn,
+            wdb.conn.0,
             &query_range,
             Some(scan_range).into_iter(),
             false,

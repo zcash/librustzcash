@@ -4,6 +4,7 @@ use std::error;
 use std::fmt;
 
 use shardtree::error::ShardTreeError;
+use zcash_client_backend::data_api::AddressTrackingError;
 use zcash_client_backend::{
     encoding::{Bech32DecodeError, TransparentCodecError},
     PoolType,
@@ -110,6 +111,9 @@ pub enum SqliteClientError {
 
     /// An error occurred in computing wallet balance
     BalanceError(BalanceError),
+
+    /// Address tracking error
+    AddressTracking(AddressTrackingError),
 }
 
 impl error::Error for SqliteClientError {
@@ -160,6 +164,7 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::ChainHeightUnknown => write!(f, "Chain height unknown; please call `update_chain_tip`"),
             SqliteClientError::UnsupportedPoolType(t) => write!(f, "Pool type is not currently supported: {}", t),
             SqliteClientError::BalanceError(e) => write!(f, "Balance error: {}", e),
+            SqliteClientError::AddressTracking(e) => write!(f, "Error related to tracking of ephemeral transparent addresses: {}", e),
         }
     }
 }
@@ -222,5 +227,11 @@ impl From<BalanceError> for SqliteClientError {
 impl From<AddressGenerationError> for SqliteClientError {
     fn from(e: AddressGenerationError) -> Self {
         SqliteClientError::AddressGeneration(e)
+    }
+}
+
+impl From<AddressTrackingError> for SqliteClientError {
+    fn from(e: AddressTrackingError) -> Self {
+        SqliteClientError::AddressTracking(e)
     }
 }

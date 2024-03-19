@@ -41,13 +41,14 @@ use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
 use std::{
-    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range,
-    path::Path,
+    borrow::Borrow, collections::HashMap, convert::AsRef, fmt, num::NonZeroU32, ops::Range, panic,
+    path::Path, rc::Rc, sync::Mutex,
 };
 use subtle::ConditionallySelectable;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
+    legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     zip32::{self, DiversifierIndex, Scope},
@@ -60,9 +61,10 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
-        NullifierQuery, ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountSource, AddressTrackingError, BlockMetadata,
+        DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SentTransaction,
+        SpendableNotes, WalletAddressTracking, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -85,7 +87,7 @@ use {
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::wallet::TransparentAddressMetadata,
-    zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
+    zcash_primitives::transaction::components::OutPoint,
 };
 
 #[cfg(feature = "unstable")]
@@ -99,6 +101,7 @@ pub mod chain;
 pub mod error;
 pub mod wallet;
 use wallet::{
+    address_tracker::AddressTracker,
     commitment_tree::{self, put_shard_roots},
     SubtreeScanProgress,
 };
@@ -160,6 +163,7 @@ pub struct UtxoId(pub i64);
 pub struct WalletDb<C, P> {
     conn: C,
     params: P,
+    address_trackers: Rc<Mutex<BTreeMap<zip32::AccountId, AddressTracker>>>,
 }
 
 /// A wrapper for a SQLite transaction affecting the wallet database.
@@ -176,7 +180,11 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
     pub fn for_path<F: AsRef<Path>>(path: F, params: P) -> Result<Self, rusqlite::Error> {
         Connection::open(path).and_then(move |conn| {
             rusqlite::vtab::array::load_module(&conn)?;
-            Ok(WalletDb { conn, params })
+            Ok(WalletDb {
+                conn,
+                params,
+                address_trackers: Rc::new(Mutex::new(BTreeMap::new())),
+            })
         })
     }
 
@@ -188,6 +196,7 @@ impl<P: consensus::Parameters + Clone> WalletDb<Connection, P> {
         let mut wdb = WalletDb {
             conn: SqlTransaction(&tx),
             params: self.params.clone(),
+            address_trackers: self.address_trackers.clone(),
         };
         let result = f(&mut wdb)?;
         tx.commit()?;
@@ -741,7 +750,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             }
 
             // Prune the nullifier map of entries we no longer need.
-            if let Some(meta) = wdb.block_fully_scanned()? {
+            if let Some(meta) = wallet::block_fully_scanned(wdb.conn.0, &wdb.params)? {
                 wallet::prune_nullifier_map(
                     wdb.conn.0,
                     meta.block_height().saturating_sub(PRUNING_DEPTH),
@@ -1076,7 +1085,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 // If the transaction contains spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address.
-                let sapling_from_account = wdb.get_sapling_nullifiers(NullifierQuery::All)?.into_iter().find(
+                let sapling_from_account = wallet::sapling::get_sapling_nullifiers(wdb.conn.0, NullifierQuery::All)?.into_iter().find(
                     |(_, nf)|
                         d_tx.tx().sapling_bundle().into_iter().flat_map(|b| b.shielded_spends().iter())
                         .any(|input| nf == input.nullifier())
@@ -1092,8 +1101,14 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 let orchard_from_account = None;
 
                 if let Some(account_id) = orchard_from_account.or(sapling_from_account) {
+                    let mut output_addrs = vec![];
                     for (output_index, txout) in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
                         if let Some(address) = txout.recipient_address() {
+                            // Mark this output address as mined.
+                            // TODO: we really want to only mark outputs when a transaction has been
+                            // *reliably* mined, e.g. it has 10 confirmations.
+                            output_addrs.push(address);
+
                             wallet::put_sent_output(
                                 wdb.conn.0,
                                 &wdb.params,
@@ -1105,6 +1120,9 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 None
                             )?;
                         }
+                    }
+                    if let AccountSource::Derived { account_index, .. } = wdb.get_account(account_id)?.expect("account ID exists").source() {
+                        wdb.mark_addresses_as_mined(account_index, &output_addrs).map_err(SqliteClientError::from)?;
                     }
                 }
             }
@@ -1210,9 +1228,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     }
 
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        self.transactionally(|wdb| {
-            wallet::truncate_to_height(wdb.conn.0, &wdb.params, block_height)
-        })
+        self.transactionally(|wdb| wallet::truncate_to_height(wdb, block_height))
     }
 }
 
@@ -1405,6 +1421,71 @@ impl<'conn, P: consensus::Parameters> WalletCommitmentTrees for WalletDb<SqlTran
             start_index,
             roots,
         )
+    }
+}
+
+impl<C, P> WalletAddressTracking for WalletDb<C, P>
+where
+    C: Borrow<rusqlite::Connection>,
+    P: consensus::Parameters,
+{
+    fn reserve_next_address(
+        &self,
+        account: zip32::AccountId,
+    ) -> Result<TransparentAddress, AddressTrackingError> {
+        let mut trackers = self
+            .address_trackers
+            .lock()
+            .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .reserve_next_address(self)
+    }
+
+    fn unreserve_addresses(
+        &self,
+        account: zip32::AccountId,
+        addresses: &[TransparentAddress],
+    ) -> Result<(), AddressTrackingError> {
+        let mut trackers = self
+            .address_trackers
+            .lock()
+            .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .unreserve_addresses(self, addresses)
+    }
+
+    fn mark_addresses_as_used(
+        &self,
+        account: zip32::AccountId,
+        addresses: &[TransparentAddress],
+    ) -> Result<(), AddressTrackingError> {
+        let mut trackers = self
+            .address_trackers
+            .lock()
+            .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .mark_addresses_as_used(self, addresses)
+    }
+
+    fn mark_addresses_as_mined(
+        &self,
+        account: zip32::AccountId,
+        addresses: &[TransparentAddress],
+    ) -> Result<(), AddressTrackingError> {
+        let mut trackers = self
+            .address_trackers
+            .lock()
+            .map_err(|e| AddressTrackingError::Internal(format!("{:?}", e)))?;
+        trackers
+            .entry(account)
+            .or_insert_with(|| AddressTracker::new(self, account))
+            .mark_addresses_as_mined(self, addresses)
     }
 }
 

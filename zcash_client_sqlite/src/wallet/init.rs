@@ -168,6 +168,9 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::ChainHeightUnknown => {
             unreachable!("we don't call methods that require a known chain height")
         }
+        SqliteClientError::AddressTracking(_) => {
+            unreachable!("we don't call address tracking methods")
+        }
     }
 }
 
@@ -358,6 +361,8 @@ mod tests {
                 p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
+                first_unmined_ephemeral_taddr_index INTEGER NOT NULL DEFAULT 0,
+                first_unused_ephemeral_taddr_index INTEGER NOT NULL DEFAULT 0 CONSTRAINT unused_gte_unmined CHECK (first_unused_ephemeral_taddr_index >= first_unmined_ephemeral_taddr_index),
                 CHECK ( (account_kind = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_kind = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
             )"#,
             r#"CREATE TABLE "addresses" (

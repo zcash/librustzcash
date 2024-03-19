@@ -236,10 +236,22 @@ impl UnifiedAddress {
 /// An address that funds can be sent to.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Address {
+    /// A Sapling payment address.
     #[cfg(feature = "sapling")]
     Sapling(PaymentAddress),
+
+    /// A transparent address corresponding to either a public key or a `Script`.
     Transparent(TransparentAddress),
+
+    /// A [ZIP 316] Unified Address.
+    ///
+    /// [ZIP 316]: https://zips.z.cash/zip-0316
     Unified(UnifiedAddress),
+
+    /// A [ZIP 320] transparent-source-only P2PKH address, or "TEX address".
+    ///
+    /// [ZIP 320]: https://zips.z.cash/zip-0320
+    TransparentSourceOnly([u8; 20]),
 }
 
 #[cfg(feature = "sapling")]
@@ -287,6 +299,10 @@ impl TryFromRawAddress for Address {
     fn try_from_raw_transparent_p2sh(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
         Ok(TransparentAddress::ScriptHash(data).into())
     }
+
+    fn try_from_raw_tex(data: [u8; 20]) -> Result<Self, ConversionError<Self::Error>> {
+        Ok(Address::TransparentSourceOnly(data))
+    }
 }
 
 impl Address {
@@ -310,6 +326,7 @@ impl Address {
                 }
             },
             Address::Unified(ua) => ua.to_address(net),
+            Address::TransparentSourceOnly(data) => ZcashAddress::from_tex(net, *data),
         }
         .to_string()
     }
@@ -320,7 +337,9 @@ impl Address {
             Address::Sapling(_) => {
                 matches!(pool_type, PoolType::Shielded(ShieldedProtocol::Sapling))
             }
-            Address::Transparent(_) => matches!(pool_type, PoolType::Transparent),
+            Address::Transparent(_) | Address::TransparentSourceOnly(_) => {
+                matches!(pool_type, PoolType::Transparent)
+            }
             Address::Unified(ua) => match pool_type {
                 PoolType::Transparent => ua.transparent().is_some(),
                 PoolType::Shielded(ShieldedProtocol::Sapling) => {
@@ -375,6 +394,7 @@ pub mod testing {
             arb_payment_address().prop_map(Address::Sapling),
             arb_transparent_addr().prop_map(Address::Transparent),
             arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            proptest::array::uniform20(any::<u8>()).prop_map(Address::TransparentSourceOnly),
         ]
     }
 
@@ -383,6 +403,7 @@ pub mod testing {
         return prop_oneof![
             arb_transparent_addr().prop_map(Address::Transparent),
             arb_unified_addr(Network::TestNetwork, request).prop_map(Address::Unified),
+            proptest::array::uniform20(any::<u8>()).prop_map(Address::TransparentSourceOnly),
         ];
     }
 }

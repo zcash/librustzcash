@@ -20,6 +20,8 @@ use zcash_primitives::legacy::TransparentAddress;
 
 use crate::wallet::NoteId;
 
+use super::AddressTrackingError;
+
 /// Errors that can occur as a consequence of wallet operations.
 #[derive(Debug)]
 pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
@@ -83,6 +85,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
 
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
+
+    /// An error related to tracking of ephemeral transparent addresses.
+    AddressTracking(AddressTrackingError),
 }
 
 impl<DE, CE, SE, FE> fmt::Display for Error<DE, CE, SE, FE>
@@ -149,6 +154,9 @@ where
             Error::AddressNotRecognized(_) => {
                 write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
             }
+            Error::AddressTracking(e) => {
+                write!(f, "Error related to tracking of ephemeral transparent addresses: {}", e)
+            }
         }
     }
 }
@@ -198,6 +206,7 @@ impl<DE, CE, SE, FE> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE> 
                 required,
             },
             InputSelectorError::SyncRequired => Error::ScanRequired,
+            InputSelectorError::AddressTracking(e) => Error::AddressTracking(e),
         }
     }
 }
