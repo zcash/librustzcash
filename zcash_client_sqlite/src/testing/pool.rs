@@ -1700,7 +1700,7 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
 
     // "Rewind" to height of last scanned block
     st.wallet_mut()
-        .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
+        .transactionally(|wdb| truncate_to_height(wdb, h + 1))
         .unwrap();
 
     // Account balance should be unaltered
@@ -1708,7 +1708,7 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
 
     // Rewind so that one block is dropped
     st.wallet_mut()
-        .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
+        .transactionally(|wdb| truncate_to_height(wdb, h))
         .unwrap();
 
     // Account balance should only contain the first received note

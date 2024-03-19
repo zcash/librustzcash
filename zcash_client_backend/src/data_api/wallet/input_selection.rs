@@ -21,7 +21,7 @@ use zcash_primitives::{
 
 use crate::{
     address::{Address, UnifiedAddress},
-    data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
+    data_api::{AddressTrackingError, InputSource, SimpleNoteRetention, SpendableNotes},
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
     wallet::WalletTransparentOutput,
@@ -31,9 +31,16 @@ use crate::{
 
 #[cfg(feature = "transparent-inputs")]
 use {
-    std::collections::BTreeSet, std::convert::Infallible,
-    zcash_primitives::legacy::TransparentAddress,
-    zcash_primitives::transaction::components::OutPoint,
+    crate::{
+        fees::{ChangeValue, TransactionBalance},
+        proposal::{Step, StepOutput, StepOutputIndex},
+        zip321::Payment,
+    },
+    std::collections::BTreeSet,
+    std::convert::Infallible,
+    zcash_primitives::{
+        legacy::TransparentAddress, transaction::components::OutPoint, transaction::fees::zip317,
+    },
 };
 
 #[cfg(feature = "orchard")]
@@ -57,6 +64,8 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     /// The data source does not have enough information to choose an expiry height
     /// for the transaction.
     SyncRequired,
+    /// An error related to tracking of ephemeral transparent addresses.
+    AddressTracking(AddressTrackingError),
 }
 
 impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE, SE> {
@@ -91,7 +100,20 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
             InputSelectorError::SyncRequired => {
                 write!(f, "Insufficient chain data is available, sync required.")
             }
+            InputSelectorError::AddressTracking(e) => {
+                write!(
+                    f,
+                    "Error related to tracking of ephemeral transparent addresses: {}",
+                    e
+                )
+            }
         }
+    }
+}
+
+impl<DE, SE> From<AddressTrackingError> for InputSelectorError<DE, SE> {
+    fn from(e: AddressTrackingError) -> Self {
+        InputSelectorError::AddressTracking(e)
     }
 }
 
@@ -348,6 +370,16 @@ where
         #[cfg(feature = "orchard")]
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
+
+        #[cfg(feature = "transparent-inputs")]
+        let mut tr2_transparent_outputs = vec![];
+        #[cfg(feature = "transparent-inputs")]
+        let mut tr2_payments = vec![];
+        #[cfg(feature = "transparent-inputs")]
+        let mut tr2_payment_pools = BTreeMap::new();
+        #[cfg(feature = "transparent-inputs")]
+        let mut total_ephemeral_plus_fee = Some(NonNegativeAmount::ZERO); // None means overflow
+
         for (idx, payment) in transaction_request.payments() {
             match &payment.recipient_address {
                 Address::Transparent(addr) => {
@@ -357,6 +389,26 @@ where
                         script_pubkey: addr.script(),
                     });
                 }
+                #[cfg(feature = "transparent-inputs")]
+                Address::TransparentSourceOnly(data) => {
+                    let p2pkh_addr = TransparentAddress::PublicKeyHash(*data);
+                    tr2_payment_pools.insert(*idx, PoolType::Transparent);
+                    tr2_transparent_outputs.push(TxOut {
+                        value: payment.amount,
+                        script_pubkey: p2pkh_addr.script(),
+                    });
+                    tr2_payments.push(Payment {
+                        recipient_address: Address::Transparent(p2pkh_addr),
+                        amount: payment.amount,
+                        memo: None,
+                        label: payment.label.clone(),
+                        message: payment.message.clone(),
+                        other_params: payment.other_params.clone(),
+                    });
+                    total_ephemeral_plus_fee =
+                        total_ephemeral_plus_fee + payment.amount + zip317::MARGINAL_FEE;
+                }
+                #[cfg(not(feature = "transparent-inputs"))]
                 Address::TransparentSourceOnly(_) => {
                     return Err(InputSelectorError::Selection(
                         GreedyInputSelectorError::UnsupportedTransparentSourceOnlyAddress,
@@ -396,10 +448,30 @@ where
             }
         }
 
+        #[cfg(feature = "transparent-inputs")]
+        let total_ephemeral_plus_fee =
+            total_ephemeral_plus_fee.ok_or(InputSelectorError::Selection(
+                GreedyInputSelectorError::Balance(BalanceError::Overflow),
+            ))?;
+
+        #[cfg(feature = "transparent-inputs")]
+        if !tr2_transparent_outputs.is_empty() {
+            // Push a fake output of total_ephemeral_plus_fee to an arbitrary t-address.
+            // This is *only* used to compute the balance and will not appear in any
+            // `TransactionRequest`, so it is fine to use a burn address. This assumes
+            // that the fake output will have the same effect on the fee for the first
+            // transaction as the real ephemeral output.
+            transparent_outputs.push(TxOut {
+                value: total_ephemeral_plus_fee,
+                script_pubkey: TransparentAddress::PublicKeyHash([0u8; 20]).script(),
+            });
+        }
+
         let mut shielded_inputs = SpendableNotes::empty();
         let mut prior_available = NonNegativeAmount::ZERO;
         let mut amount_required = NonNegativeAmount::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
+
         // This loop is guaranteed to terminate because on each iteration we check that the amount
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
@@ -461,18 +533,93 @@ where
 
             match balance {
                 Ok(balance) => {
-                    return Proposal::single_step(
-                        transaction_request,
-                        payment_pools,
-                        vec![],
+                    let fee_rule = (*self.change_strategy.fee_rule()).clone();
+                    let shielded_inputs =
                         NonEmpty::from_vec(shielded_inputs.into_vec(&SimpleNoteRetention {
                             sapling: use_sapling,
                             #[cfg(feature = "orchard")]
                             orchard: use_orchard,
                         }))
-                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes)),
+                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes));
+
+                    #[cfg(feature = "transparent-inputs")]
+                    if !tr2_transparent_outputs.is_empty() {
+                        // Construct two new `TransactionRequest`s:
+                        // * `tr1` excludes the TEX outputs, and in their place includes
+                        //   a single additional "change" output to the transparent pool.
+                        // * `tr2` spends from that change output to each of the P2PKH
+                        //   addresses that were wrapped as TEX addresses.
+
+                        let tr1 = TransactionRequest::from_indexed(
+                            transaction_request
+                                .payments()
+                                .iter()
+                                .filter_map(|(idx, payment)| {
+                                    if tr2_payment_pools.contains_key(idx) {
+                                        None
+                                    } else {
+                                        Some((*idx, payment.clone()))
+                                    }
+                                })
+                                .collect(),
+                        )
+                        .expect(
+                            "removing payments from a TransactionRequest preserves correctness",
+                        );
+
+                        // Create a TransactionBalance for `tr1` that adds the ephemeral output
+                        // as an extra change output.
+                        let mut tr1_change: Vec<_> = balance.proposed_change().into();
+                        let ephemeral_output =
+                            StepOutput::new(0, StepOutputIndex::Change(tr1_change.len()));
+                        tr1_change.push(ChangeValue::transparent(total_ephemeral_plus_fee));
+                        let tr1_balance =
+                            TransactionBalance::new(tr1_change, balance.fee_required()).map_err(
+                                |_| InputSelectorError::Proposal(ProposalError::Overflow),
+                            )?;
+
+                        let tr2 =
+                            TransactionRequest::new(tr2_payments).expect("correct by construction");
+
+                        let step1 = Step::from_parts(
+                            &[],
+                            tr1,
+                            payment_pools,
+                            vec![],
+                            shielded_inputs,
+                            vec![],
+                            tr1_balance,
+                            false,
+                        )
+                        .map_err(InputSelectorError::Proposal)?;
+
+                        let step2 = Step::from_parts(
+                            &[step1.clone()],
+                            tr2,
+                            tr2_payment_pools,
+                            vec![],
+                            None,
+                            vec![ephemeral_output],
+                            balance,
+                            false,
+                        )
+                        .map_err(InputSelectorError::Proposal)?;
+
+                        return Proposal::multi_step(
+                            fee_rule,
+                            target_height,
+                            NonEmpty::from((step1, vec![step2])),
+                        )
+                        .map_err(InputSelectorError::Proposal);
+                    }
+
+                    return Proposal::single_step(
+                        transaction_request,
+                        payment_pools,
+                        vec![],
+                        shielded_inputs,
                         balance,
-                        (*self.change_strategy.fee_rule()).clone(),
+                        fee_rule,
                         target_height,
                         false,
                     )

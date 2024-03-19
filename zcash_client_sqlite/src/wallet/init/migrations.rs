@@ -1,6 +1,7 @@
 mod add_account_birthdays;
 mod add_transaction_views;
 mod add_utxo_account;
+mod address_tracking;
 mod addresses_table;
 mod full_account_ids;
 mod initial_setup;
@@ -60,8 +61,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //                                               \       |       v_transactions_note_uniqueness
     //                                                \      |        /
     //                                                full_account_ids
-    //                                                       |
-    //                                             orchard_received_notes
+    //                                               /                \
+    //                              orchard_received_notes        address_tracking
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -108,5 +109,6 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(orchard_received_notes::Migration),
+        Box::new(address_tracking::Migration),
     ]
 }
