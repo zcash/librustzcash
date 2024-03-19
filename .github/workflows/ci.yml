@@ -34,7 +34,6 @@ jobs:
 
           - state: Orchard
             extra_flags: orchard
-            rustflags: '--cfg zcash_unstable="orchard"'
           - state: NU6
             rustflags: '--cfg zcash_unstable="nu6"'
 
