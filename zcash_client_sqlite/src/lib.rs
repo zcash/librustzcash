@@ -37,6 +37,7 @@ use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
+use nonempty::NonEmpty;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -61,8 +62,8 @@ use zcash_client_backend::{
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
-        NullifierQuery, ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -337,11 +338,16 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
-    fn is_seed_relevant_to_any_derived_accounts(
+    fn seed_relevance_to_derived_accounts(
         &self,
         seed: &SecretVec<u8>,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+        let mut has_accounts = false;
+        let mut has_derived = false;
+        let mut relevant_account_ids = vec![];
+
         for account_id in self.get_account_ids()? {
+            has_accounts = true;
             let account = self.get_account(account_id)?.expect("account ID exists");
 
             // If the account is imported, the seed _might_ be relevant, but the only
@@ -353,6 +359,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                 account_index,
             } = account.source()
             {
+                has_derived = true;
+
                 if wallet::seed_matches_derived_account(
                     &self.params,
                     seed,
@@ -360,14 +368,23 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
                     account_index,
                     &account.uivk(),
                 )? {
-                    // The seed is relevant to this account. No need to check any others.
-                    return Ok(true);
+                    // The seed is relevant to this account.
+                    relevant_account_ids.push(account_id);
                 }
             }
         }
 
-        // The seed was not relevant to any of the accounts in the wallet.
-        Ok(false)
+        Ok(
+            if let Some(account_ids) = NonEmpty::from_vec(relevant_account_ids) {
+                SeedRelevance::Relevant { account_ids }
+            } else if has_derived {
+                SeedRelevance::NotRelevant
+            } else if has_accounts {
+                SeedRelevance::NoDerivedAccounts
+            } else {
+                SeedRelevance::NoAccounts
+            },
+        )
     }
 
     fn get_account_for_ufvk(
