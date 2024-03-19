@@ -530,7 +530,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
-        birthday: AccountBirthday,
+        birthday: &AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let seed_fingerprint =
@@ -1690,7 +1690,8 @@ extern crate assert_matches;
 #[cfg(test)]
 mod tests {
     use secrecy::SecretVec;
-    use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
+    use zcash_client_backend::data_api::{WalletRead, WalletWrite};
+    use zcash_primitives::block::BlockHash;
 
     use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
 
@@ -1703,7 +1704,7 @@ mod tests {
     #[test]
     fn validate_seed() {
         let st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
 
@@ -1732,7 +1733,7 @@ mod tests {
     #[test]
     pub(crate) fn get_next_available_address() {
         let mut st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().cloned().unwrap();
 
@@ -1763,7 +1764,7 @@ mod tests {
         // Add an account to the wallet.
         let st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
         let ufvk = account.usk().to_unified_full_viewing_key();

@@ -351,7 +351,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     params: &P,
     kind: AccountSource,
     viewing_key: ViewingKey,
-    birthday: AccountBirthday,
+    birthday: &AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
     let (hd_seed_fingerprint, hd_account_index) = match kind {
         AccountSource::Derived {
@@ -2720,7 +2720,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use sapling::zip32::ExtendedSpendingKey;
-    use zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead};
+    use zcash_client_backend::data_api::{AccountSource, WalletRead};
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
@@ -2749,7 +2749,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
 
@@ -2784,7 +2784,7 @@ mod tests {
         use crate::testing::TestBuilder;
 
         let mut st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
         let account_id = st.test_account().unwrap().account_id();
@@ -2873,7 +2873,7 @@ mod tests {
         use crate::testing::TestBuilder;
 
         let st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account_id = st.test_account().unwrap().account_id();
         let account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
@@ -2892,10 +2892,10 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
-        let account = st.test_account().unwrap().clone();
+        let account = st.test_account().cloned().unwrap();
         let uaddr = st
             .wallet()
             .get_current_address(account.account_id())
@@ -3043,7 +3043,7 @@ mod tests {
     fn block_fully_scanned() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
         let block_fully_scanned = |st: &TestState<BlockCache>| {

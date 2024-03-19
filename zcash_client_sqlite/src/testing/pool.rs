@@ -53,9 +53,6 @@ use crate::{
     AccountId, NoteId, ReceivedNoteId,
 };
 
-#[cfg(feature = "orchard")]
-use zcash_primitives::consensus::NetworkUpgrade;
-
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::{
@@ -129,7 +126,7 @@ pub(crate) trait ShieldedPoolTester {
 pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -287,7 +284,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -439,7 +436,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 #[allow(deprecated)]
 pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
     let dfvk = T::test_account_fvk(&st);
     let to = T::fvk_default_address(&dfvk);
@@ -467,7 +464,7 @@ pub(crate) fn create_to_address_fails_on_incorrect_usk<T: ShieldedPoolTester>() 
 #[allow(deprecated)]
 pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account_id = st.test_account().unwrap().account_id();
@@ -496,7 +493,7 @@ pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
 pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -647,7 +644,7 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
 pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -785,7 +782,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
 pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -881,7 +878,7 @@ pub(crate) fn ovk_policy_prevents_recovery_from_chain<T: ShieldedPoolTester>() {
 pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -928,7 +925,7 @@ pub(crate) fn spend_succeeds_to_t_addr_zero_change<T: ShieldedPoolTester>() {
 pub(crate) fn change_note_spends_succeed<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -998,17 +995,11 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 
     // Add two accounts to the wallet.
     let seed = Secret::new([0u8; 32].to_vec());
-    let birthday = AccountBirthday::from_sapling_activation(&st.network());
-    let (account_id, usk) = st
-        .wallet_mut()
-        .create_account(&seed, birthday.clone())
-        .unwrap();
+    let birthday = AccountBirthday::from_sapling_activation(&st.network(), BlockHash([0; 32]));
+    let (account_id, usk) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
     let dfvk = T::sk_to_fvk(T::usk_to_sk(&usk));
 
-    let (account2, usk2) = st
-        .wallet_mut()
-        .create_account(&seed, birthday.clone())
-        .unwrap();
+    let (account2, usk2) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
     let dfvk2 = T::sk_to_fvk(T::usk_to_sk(&usk2));
 
     // Add funds to the wallet in a single note
@@ -1081,16 +1072,13 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     st.reset();
 
     // Account creation and DFVK derivation should be deterministic.
-    let (_, restored_usk) = st
-        .wallet_mut()
-        .create_account(&seed, birthday.clone())
-        .unwrap();
+    let (_, restored_usk) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
     assert!(T::fvks_equal(
         &T::sk_to_fvk(T::usk_to_sk(&restored_usk)),
         &dfvk,
     ));
 
-    let (_, restored_usk2) = st.wallet_mut().create_account(&seed, birthday).unwrap();
+    let (_, restored_usk2) = st.wallet_mut().create_account(&seed, &birthday).unwrap();
     assert!(T::fvks_equal(
         &T::sk_to_fvk(T::usk_to_sk(&restored_usk2)),
         &dfvk2,
@@ -1105,7 +1093,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
 pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1199,7 +1187,7 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
 pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1259,7 +1247,7 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
 #[allow(dead_code)]
 pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-    let (mut st, dfvk, birthday, _) = test_with_nu5_birthday_offset::<T>(76);
+    let (mut st, dfvk, birthday, _) = test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
 
     // Set up the following situation:
     //
@@ -1364,7 +1352,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1433,7 +1421,8 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
 pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(|params| AccountBirthday::from_activation(params, NetworkUpgrade::Nu5))
+        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
+        // activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1522,7 +1511,8 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(|params| AccountBirthday::from_activation(params, NetworkUpgrade::Nu5))
+        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
+        // activation after Sapling
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1612,7 +1602,7 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
 pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let dfvk = T::test_account_fvk(&st);
@@ -1646,7 +1636,7 @@ pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
 pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let dfvk = T::test_account_fvk(&st);
@@ -1697,7 +1687,7 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
 pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1753,7 +1743,7 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
 pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1813,7 +1803,7 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
 pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1856,7 +1846,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
 pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();
@@ -1895,7 +1885,7 @@ pub(crate) fn scan_cached_blocks_finds_change_notes<T: ShieldedPoolTester>() {
 pub(crate) fn scan_cached_blocks_detects_spends_out_of_order<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
-        .with_test_account(AccountBirthday::from_sapling_activation)
+        .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
     let account = st.test_account().cloned().unwrap();

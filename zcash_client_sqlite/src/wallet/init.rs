@@ -1427,6 +1427,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     fn account_produces_expected_ua_sequence() {
         use zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead};
+        use zcash_primitives::block::BlockHash;
 
         let network = Network::MainNetwork;
         let data_file = NamedTempFile::new().unwrap();
@@ -1445,9 +1446,9 @@ mod tests {
             Ok(())
         );
 
-        let birthday = AccountBirthday::from_sapling_activation(&network);
+        let birthday = AccountBirthday::from_sapling_activation(&network, BlockHash([0; 32]));
         let (account_id, _usk) = db_data
-            .create_account(&Secret::new(seed.to_vec()), birthday)
+            .create_account(&Secret::new(seed.to_vec()), &birthday)
             .unwrap();
         assert_matches!(
             db_data.get_account(account_id),
