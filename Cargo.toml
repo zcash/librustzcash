@@ -122,6 +122,7 @@ panic = 'abort'
 codegen-units = 1
 
 [patch.crates-io]
-orchard = { git = "https://github.com/zcash/orchard", rev = "e74879dd0ad0918f4ffe0826e03905cd819981bd" }
-incrementalmerkletree = { git = "https://github.com/nuttycom/incrementalmerkletree", rev = "fa147c89c6c98a03bba745538f4e68d4eaed5146" }
-shardtree = { git = "https://github.com/nuttycom/incrementalmerkletree", rev = "fa147c89c6c98a03bba745538f4e68d4eaed5146" }
+orchard = { git = "https://github.com/zcash/orchard", rev = "33474bdbfd7268e1f84718078d47f63d01a879d5" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "e1a7a80212c22e5a8912d05860f7eb6899c56a7c" }
+sapling = { git = "https://github.com/zcash/sapling-crypto", package = "sapling-crypto", rev = "22412ae07644813253feb064d1692b0823242853" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "e1a7a80212c22e5a8912d05860f7eb6899c56a7c" }

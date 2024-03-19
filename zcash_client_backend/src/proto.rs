@@ -295,10 +295,22 @@ impl service::TreeState {
     ///
     /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
     pub fn to_chain_state(&self) -> io::Result<ChainState> {
+        let mut hash_bytes = hex::decode(&self.hash).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Block hash is not valid hex: {:?}", e),
+            )
+        })?;
+        // Zcashd hex strings for block hashes are byte-reversed.
+        hash_bytes.reverse();
+
         Ok(ChainState::new(
             self.height
                 .try_into()
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid block height"))?,
+            BlockHash::try_from_slice(&hash_bytes).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "Invalid block hash length.")
+            })?,
             self.sapling_tree()?.to_frontier(),
             #[cfg(feature = "orchard")]
             self.orchard_tree()?.to_frontier(),
