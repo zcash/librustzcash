@@ -137,6 +137,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::Bech32DecodeError(e) => {
             WalletMigrationError::CorruptedData(e.to_string())
         }
+        #[cfg(feature = "transparent-inputs")]
         SqliteClientError::HdwalletError(e) => WalletMigrationError::CorruptedData(e.to_string()),
         SqliteClientError::TransparentAddress(e) => {
             WalletMigrationError::CorruptedData(e.to_string())
@@ -158,8 +159,11 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         | SqliteClientError::KeyDerivationError(_)
         | SqliteClientError::AccountIdDiscontinuity
         | SqliteClientError::AccountIdOutOfRange
-        | SqliteClientError::AddressNotRecognized(_)
         | SqliteClientError::CacheMiss(_) => {
+            unreachable!("we only call WalletRead methods; mutations can't occur")
+        }
+        #[cfg(feature = "transparent-inputs")]
+        SqliteClientError::AddressNotRecognized(_) => {
             unreachable!("we only call WalletRead methods; mutations can't occur")
         }
         SqliteClientError::AccountUnknown => {
