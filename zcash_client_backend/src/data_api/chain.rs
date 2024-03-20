@@ -292,7 +292,7 @@ pub trait BlockSource {
 ///            Ok(highest_block.map(|&block| BlockHeight::from_u32(block.height as u32)))
 ///        }
 ///
-///        async fn insert(&self, mut compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+///        fn insert(&self, mut compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
 ///            self.cached_blocks
 ///                .lock()
 ///                .unwrap()
@@ -347,13 +347,8 @@ pub trait BlockSource {
 /// #    );
 ///    let compact_blocks = vec![compact_block1, compact_block2];
 ///
-///    // Create a runtime
-///    let rt = tokio::runtime::Runtime::new().unwrap();
-///
 ///    // Insert blocks into the block cache
-///    rt.block_on(async {
-///        block_cache.insert(compact_blocks.clone()).await.unwrap();
-///    });
+///    block_cache.insert(compact_blocks.clone()).unwrap();
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
 ///
 ///    // Find highest block in the block cache
@@ -373,6 +368,7 @@ pub trait BlockSource {
 ///    );
 ///
 ///    // Delete blocks from the block cache
+///    let rt = tokio::runtime::Runtime::new().unwrap();
 ///    rt.block_on(async {
 ///        block_cache.delete(&range).await.unwrap();
 ///    });
@@ -405,7 +401,7 @@ pub trait BlockCache: BlockSource + Send + Sync {
     /// Inserts a vec of compact blocks into the block cache.
     ///
     /// Returns `Ok(())` on success, otherwise returns an error.
-    async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
+    fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
 
     /// Removes all cached blocks above a specified block height.
     ///
