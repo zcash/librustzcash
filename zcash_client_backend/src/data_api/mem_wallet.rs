@@ -6,7 +6,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
-    num::NonZeroU32,
+    num::NonZeroU32, hash::Hash,
 };
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -97,6 +97,24 @@ pub struct MemoryWalletDb {
         { ORCHARD_SHARD_HEIGHT * 2 },
         ORCHARD_SHARD_HEIGHT,
     >,
+}
+
+impl MemoryWalletDb {
+    pub fn new(
+        network: Network,
+        max_checkpoints: usize
+    ) -> Self {
+        Self {
+            network,
+            accounts: BTreeMap::new(),
+            blocks: BTreeMap::new(),
+            tx_idx: HashMap::new(),
+            sapling_spends: BTreeMap::new(),
+            orchard_spends: BTreeMap::new(),
+            sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
+            orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
+        }
+    }
 }
 
 #[derive(Debug)]
