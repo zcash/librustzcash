@@ -37,6 +37,7 @@ use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
+use nonempty::NonEmpty;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -45,7 +46,6 @@ use std::{
     path::Path,
 };
 use subtle::ConditionallySelectable;
-use zcash_keys::keys::HdSeedFingerprint;
 use zcash_primitives::{
     block::BlockHash,
     consensus::{self, BlockHeight},
@@ -53,6 +53,7 @@ use zcash_primitives::{
     transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
     zip32::{self, DiversifierIndex, Scope},
 };
+use zip32::fingerprint::SeedFingerprint;
 
 use zcash_client_backend::{
     address::UnifiedAddress,
@@ -60,9 +61,9 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -100,7 +101,7 @@ pub mod error;
 pub mod wallet;
 use wallet::{
     commitment_tree::{self, put_shard_roots},
-    Account, HdSeedAccount, SubtreeScanProgress,
+    SubtreeScanProgress,
 };
 
 #[cfg(test)]
@@ -212,7 +213,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                 &self.params,
                 txid,
                 index,
-            ),
+            )
+            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
             ShieldedProtocol::Orchard => {
                 #[cfg(feature = "orchard")]
                 return wallet::orchard::get_spendable_orchard_note(
@@ -220,7 +222,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                     &self.params,
                     txid,
                     index,
-                );
+                )
+                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
@@ -237,26 +240,26 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        let received_iter = std::iter::empty();
-        let received_iter = received_iter.chain(wallet::sapling::select_spendable_sapling_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        #[cfg(feature = "orchard")]
-        let received_iter = received_iter.chain(wallet::orchard::select_spendable_orchard_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        Ok(received_iter.collect())
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+        Ok(SpendableNotes::new(
+            wallet::sapling::select_spendable_sapling_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+            #[cfg(feature = "orchard")]
+            wallet::orchard::select_spendable_orchard_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+        ))
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -287,43 +290,45 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
 impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for WalletDb<C, P> {
     type Error = SqliteClientError;
     type AccountId = AccountId;
-    type Account = (AccountId, Option<UnifiedFullViewingKey>);
+    type Account = wallet::Account;
+
+    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
+        wallet::get_account_ids(self.conn.borrow())
+    }
+
+    fn get_account(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_account(self.conn.borrow(), &self.params, account_id)
+    }
+
+    fn get_derived_account(
+        &self,
+        seed: &SeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
+    }
 
     fn validate_seed(
         &self,
         account_id: Self::AccountId,
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
-        if let Some(account) = wallet::get_account(self, account_id)? {
-            if let Account::Zip32(hdaccount) = account {
-                let seed_fingerprint_match =
-                    HdSeedFingerprint::from_seed(seed) == *hdaccount.hd_seed_fingerprint();
-
-                let usk = UnifiedSpendingKey::from_seed(
+        if let Some(account) = self.get_account(account_id)? {
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                wallet::seed_matches_derived_account(
                     &self.params,
-                    &seed.expose_secret()[..],
-                    hdaccount.account_index(),
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
                 )
-                .map_err(|_| SqliteClientError::KeyDerivationError(hdaccount.account_index()))?;
-
-                // Keys are not comparable with `Eq`, but addresses are, so we derive what should
-                // be equivalent addresses for each key and use those to check for key equality.
-                let ufvk_match = UnifiedAddressRequest::all().map_or(
-                    Ok::<_, Self::Error>(false),
-                    |ua_request| {
-                        Ok(usk
-                            .to_unified_full_viewing_key()
-                            .default_address(ua_request)?
-                            == hdaccount.ufvk().default_address(ua_request)?)
-                    },
-                )?;
-
-                if seed_fingerprint_match != ufvk_match {
-                    // If these mismatch, it suggests database corruption.
-                    return Err(SqliteClientError::CorruptedData(format!("Seed fingerprint match: {seed_fingerprint_match}, ufvk match: {ufvk_match}")));
-                }
-
-                Ok(seed_fingerprint_match && ufvk_match)
             } else {
                 Err(SqliteClientError::UnknownZip32Derivation)
             }
@@ -333,10 +338,100 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+        let mut has_accounts = false;
+        let mut has_derived = false;
+        let mut relevant_account_ids = vec![];
+
+        for account_id in self.get_account_ids()? {
+            has_accounts = true;
+            let account = self.get_account(account_id)?.expect("account ID exists");
+
+            // If the account is imported, the seed _might_ be relevant, but the only
+            // way we could determine that is by brute-forcing the ZIP 32 account
+            // index space, which we're not going to do. The method name indicates to
+            // the caller that we only check derived accounts.
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                has_derived = true;
+
+                if wallet::seed_matches_derived_account(
+                    &self.params,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )? {
+                    // The seed is relevant to this account.
+                    relevant_account_ids.push(account_id);
+                }
+            }
+        }
+
+        Ok(
+            if let Some(account_ids) = NonEmpty::from_vec(relevant_account_ids) {
+                SeedRelevance::Relevant { account_ids }
+            } else if has_derived {
+                SeedRelevance::NotRelevant
+            } else if has_accounts {
+                SeedRelevance::NoDerivedAccounts
+            } else {
+                SeedRelevance::NoAccounts
+            },
+        )
+    }
+
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<Self::Account>, Self::Error> {
+        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
+    }
+
+    fn get_current_address(
+        &self,
+        account: AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error> {
+        wallet::get_current_address(self.conn.borrow(), &self.params, account)
+            .map(|res| res.map(|(addr, _)| addr))
+    }
+
+    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error> {
+        wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
+    }
+
+    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
+        wallet::wallet_birthday(self.conn.borrow()).map_err(SqliteClientError::from)
+    }
+
+    fn get_wallet_summary(
+        &self,
+        min_confirmations: u32,
+    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+        // This will return a runtime error if we call `get_wallet_summary` from two
+        // threads at the same time, as transactions cannot nest.
+        wallet::get_wallet_summary(
+            &self.conn.borrow().unchecked_transaction()?,
+            &self.params,
+            min_confirmations,
+            &SubtreeScanProgress,
+        )
+    }
+
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::scan_queue_extrema(self.conn.borrow())
             .map(|h| h.map(|range| *range.end()))
             .map_err(SqliteClientError::from)
+    }
+
+    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
+        wallet::get_block_hash(self.conn.borrow(), block_height).map_err(SqliteClientError::from)
     }
 
     fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error> {
@@ -345,6 +440,10 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
         wallet::block_fully_scanned(self.conn.borrow(), &self.params)
+    }
+
+    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
+        wallet::get_max_height_hash(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
     fn block_max_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
@@ -368,67 +467,14 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         wallet::get_min_unspent_height(self.conn.borrow()).map_err(SqliteClientError::from)
     }
 
-    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
-        wallet::get_block_hash(self.conn.borrow(), block_height).map_err(SqliteClientError::from)
-    }
-
-    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-        wallet::get_max_height_hash(self.conn.borrow()).map_err(SqliteClientError::from)
-    }
-
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
         wallet::get_tx_height(self.conn.borrow(), txid).map_err(SqliteClientError::from)
-    }
-
-    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        wallet::wallet_birthday(self.conn.borrow()).map_err(SqliteClientError::from)
-    }
-
-    fn get_account_birthday(&self, account: AccountId) -> Result<BlockHeight, Self::Error> {
-        wallet::account_birthday(self.conn.borrow(), account).map_err(SqliteClientError::from)
-    }
-
-    fn get_current_address(
-        &self,
-        account: AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error> {
-        wallet::get_current_address(self.conn.borrow(), &self.params, account)
-            .map(|res| res.map(|(addr, _)| addr))
     }
 
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<AccountId, UnifiedFullViewingKey>, Self::Error> {
         wallet::get_unified_full_viewing_keys(self.conn.borrow(), &self.params)
-    }
-
-    fn get_account_for_ufvk(
-        &self,
-        ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_account_for_ufvk(self.conn.borrow(), &self.params, ufvk)
-    }
-
-    fn get_seed_account(
-        &self,
-        seed: &HdSeedFingerprint,
-        account_id: zip32::AccountId,
-    ) -> Result<Option<Self::Account>, Self::Error> {
-        wallet::get_seed_account(self.conn.borrow(), &self.params, seed, account_id)
-    }
-
-    fn get_wallet_summary(
-        &self,
-        min_confirmations: u32,
-    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
-        // This will return a runtime error if we call `get_wallet_summary` from two
-        // threads at the same time, as transactions cannot nest.
-        wallet::get_wallet_summary(
-            &self.conn.borrow().unchecked_transaction()?,
-            &self.params,
-            min_confirmations,
-            &SubtreeScanProgress,
-        )
     }
 
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error> {
@@ -440,8 +486,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
-    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self.conn.borrow(), &self.params, txid).map(|(_, tx)| tx)
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+        wallet::get_transaction(self.conn.borrow(), &self.params, txid)
+            .map(|res| res.map(|(_, tx)| tx))
     }
 
     fn get_sapling_nullifiers(
@@ -475,10 +522,6 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         wallet::get_transparent_balances(self.conn.borrow(), &self.params, account, max_height)
     }
-
-    fn get_account_ids(&self) -> Result<Vec<AccountId>, Self::Error> {
-        wallet::get_account_ids(self.conn.borrow())
-    }
 }
 
 impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P> {
@@ -490,8 +533,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         birthday: AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let seed_id = HdSeedFingerprint::from_seed(seed);
-            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_id)?
+            let seed_fingerprint =
+                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                    SqliteClientError::BadAccountData(
+                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                    )
+                })?;
+            let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
                 .unwrap_or(zip32::AccountId::ZERO);
@@ -501,8 +549,16 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
             let ufvk = usk.to_unified_full_viewing_key();
 
-            let account = Account::Zip32(HdSeedAccount::new(seed_id, account_index, ufvk));
-            let account_id = wallet::add_account(wdb.conn.0, &wdb.params, account, birthday)?;
+            let account_id = wallet::add_account(
+                wdb.conn.0,
+                &wdb.params,
+                AccountSource::Derived {
+                    seed_fingerprint,
+                    account_index,
+                },
+                wallet::ViewingKey::Full(Box::new(ufvk)),
+                birthday,
+            )?;
 
             Ok((account_id, usk))
         })
@@ -542,6 +598,13 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 None => Ok(None),
             },
         )
+    }
+
+    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
+        let tx = self.conn.transaction()?;
+        wallet::scanning::update_chain_tip(&tx, &self.params, tip_height)?;
+        tx.commit()?;
+        Ok(())
     }
 
     #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height()))))]
@@ -900,11 +963,17 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         })
     }
 
-    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error> {
-        let tx = self.conn.transaction()?;
-        wallet::scanning::update_chain_tip(&tx, &self.params, tip_height)?;
-        tx.commit()?;
-        Ok(())
+    fn put_received_transparent_utxo(
+        &mut self,
+        _output: &WalletTransparentOutput,
+    ) -> Result<Self::UtxoRef, Self::Error> {
+        #[cfg(feature = "transparent-inputs")]
+        return wallet::put_received_transparent_utxo(&self.conn, &self.params, _output);
+
+        #[cfg(not(feature = "transparent-inputs"))]
+        panic!(
+            "The wallet must be compiled with the transparent-inputs feature to use this method."
+        );
     }
 
     fn store_decrypted_tx(
@@ -1161,19 +1230,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         self.transactionally(|wdb| {
             wallet::truncate_to_height(wdb.conn.0, &wdb.params, block_height)
         })
-    }
-
-    fn put_received_transparent_utxo(
-        &mut self,
-        _output: &WalletTransparentOutput,
-    ) -> Result<Self::UtxoRef, Self::Error> {
-        #[cfg(feature = "transparent-inputs")]
-        return wallet::put_received_transparent_utxo(&self.conn, &self.params, _output);
-
-        #[cfg(not(feature = "transparent-inputs"))]
-        panic!(
-            "The wallet must be compiled with the transparent-inputs feature to use this method."
-        );
     }
 }
 

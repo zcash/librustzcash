@@ -156,7 +156,10 @@ use std::ops::Range;
 use async_trait::async_trait;
 use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
-use zcash_primitives::consensus::{self, BlockHeight};
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight},
+};
 
 use crate::{
     data_api::{scanning::ScanRange, NullifierQuery, WalletWrite},
@@ -173,6 +176,7 @@ use super::WalletRead;
 ///
 /// This stores the block height at which the leaf that completed the subtree was
 /// added, and the root hash of the complete subtree.
+#[derive(Debug)]
 pub struct CommitmentTreeRoot<H> {
     subtree_end_height: BlockHeight,
     root_hash: H,
@@ -229,7 +233,6 @@ pub trait BlockSource {
 /// ```
 ///    use async_trait::async_trait;
 ///    use std::sync::{Arc, Mutex};
-///    use tokio::task::JoinHandle;
 ///    use zcash_client_backend::data_api::{
 ///        chain::{error, BlockCache, BlockSource},
 ///        scanning::{ScanPriority, ScanRange},
@@ -486,6 +489,7 @@ impl ScanSummary {
 #[derive(Debug, Clone)]
 pub struct ChainState {
     block_height: BlockHeight,
+    block_hash: BlockHash,
     final_sapling_tree: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
     #[cfg(feature = "orchard")]
     final_orchard_tree:
@@ -494,9 +498,10 @@ pub struct ChainState {
 
 impl ChainState {
     /// Construct a new empty chain state.
-    pub fn empty(block_height: BlockHeight) -> Self {
+    pub fn empty(block_height: BlockHeight, block_hash: BlockHash) -> Self {
         Self {
             block_height,
+            block_hash,
             final_sapling_tree: Frontier::empty(),
             #[cfg(feature = "orchard")]
             final_orchard_tree: Frontier::empty(),
@@ -506,6 +511,7 @@ impl ChainState {
     /// Construct a new [`ChainState`] from its constituent parts.
     pub fn new(
         block_height: BlockHeight,
+        block_hash: BlockHash,
         final_sapling_tree: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
         #[cfg(feature = "orchard")] final_orchard_tree: Frontier<
             orchard::tree::MerkleHashOrchard,
@@ -514,6 +520,7 @@ impl ChainState {
     ) -> Self {
         Self {
             block_height,
+            block_hash,
             final_sapling_tree,
             #[cfg(feature = "orchard")]
             final_orchard_tree,
@@ -523,6 +530,11 @@ impl ChainState {
     /// Returns the block height to which this chain state applies.
     pub fn block_height(&self) -> BlockHeight {
         self.block_height
+    }
+
+    /// Return the hash of the block.
+    pub fn block_hash(&self) -> BlockHash {
+        self.block_hash
     }
 
     /// Returns the frontier of the Sapling note commitment tree as of the end of the block at

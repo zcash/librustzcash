@@ -64,9 +64,10 @@ use std::{
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
+use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_keys::keys::HdSeedFingerprint;
+use zip32::fingerprint::SeedFingerprint;
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -75,7 +76,9 @@ use self::{
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+    },
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
     ShieldedProtocol,
@@ -315,32 +318,77 @@ impl AccountBalance {
     }
 }
 
+/// The kinds of accounts supported by `zcash_client_backend`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AccountSource {
+    /// An account derived from a known seed.
+    Derived {
+        seed_fingerprint: SeedFingerprint,
+        account_index: zip32::AccountId,
+    },
+
+    /// An account imported from a viewing key.
+    Imported,
+}
+
 /// A set of capabilities that a client account must provide.
 pub trait Account<AccountId: Copy> {
     /// Returns the unique identifier for the account.
     fn id(&self) -> AccountId;
 
+    /// Returns whether this account is derived or imported, and the derivation parameters
+    /// if applicable.
+    fn source(&self) -> AccountSource;
+
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
+    ///
+    /// Accounts for which this returns `None` cannot be used in wallet contexts, because
+    /// they are unable to maintain an accurate balance.
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+
+    /// Returns the UIVK that the wallet backend has stored for the account.
+    ///
+    /// All accounts are required to have at least an incoming viewing key. This gives no
+    /// indication about whether an account can be used in a wallet context; for that, use
+    /// [`Account::ufvk`].
+    fn uivk(&self) -> UnifiedIncomingViewingKey;
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
 impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     fn id(&self) -> A {
         self.0
     }
 
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
+    }
+
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         Some(&self.1)
     }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.to_unified_incoming_viewing_key()
+    }
 }
 
-impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
+#[cfg(any(test, feature = "test-dependencies"))]
+impl<A: Copy> Account<A> for (A, UnifiedIncomingViewingKey) {
     fn id(&self) -> A {
         self.0
     }
 
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
+    }
+
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
-        self.1.as_ref()
+        None
+    }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.clone()
     }
 }
 
@@ -456,6 +504,124 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     }
 }
 
+/// A predicate that can be used to choose whether or not a particular note is retained in note
+/// selection.
+pub trait NoteRetention<NoteRef> {
+    /// Returns whether the specified Sapling note should be retained.
+    fn should_retain_sapling(&self, note: &ReceivedNote<NoteRef, sapling::Note>) -> bool;
+    /// Returns whether the specified Orchard note should be retained.
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
+}
+
+pub(crate) struct SimpleNoteRetention {
+    pub(crate) sapling: bool,
+    #[cfg(feature = "orchard")]
+    pub(crate) orchard: bool,
+}
+
+impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
+    fn should_retain_sapling(&self, _: &ReceivedNote<NoteRef, sapling::Note>) -> bool {
+        self.sapling
+    }
+
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
+        self.orchard
+    }
+}
+
+/// Spendable shielded outputs controlled by the wallet.
+pub struct SpendableNotes<NoteRef> {
+    sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+}
+
+impl<NoteRef> SpendableNotes<NoteRef> {
+    /// Construct a new empty [`SpendableNotes`].
+    pub fn empty() -> Self {
+        Self::new(
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        )
+    }
+
+    /// Construct a new [`SpendableNotes`] from its constituent parts.
+    pub fn new(
+        sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+        #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
+
+    /// Returns the set of spendable Sapling notes.
+    pub fn sapling(&self) -> &[ReceivedNote<NoteRef, sapling::Note>] {
+        self.sapling.as_ref()
+    }
+
+    /// Returns the set of spendable Orchard notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
+        self.orchard.as_ref()
+    }
+
+    /// Computes the total value of Sapling notes.
+    pub fn sapling_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.sapling
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of Sapling notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.orchard
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of spendable inputs
+    pub fn total_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        #[cfg(not(feature = "orchard"))]
+        return self.sapling_value();
+
+        #[cfg(feature = "orchard")]
+        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
+    }
+
+    /// Consumes this [`SpendableNotes`] value and produces a vector of
+    /// [`ReceivedNote<NoteRef, Note>`] values.
+    pub fn into_vec(
+        self,
+        retention: &impl NoteRetention<NoteRef>,
+    ) -> Vec<ReceivedNote<NoteRef, Note>> {
+        let iter = self.sapling.into_iter().filter_map(|n| {
+            retention
+                .should_retain_sapling(&n)
+                .then(|| n.map_note(Note::Sapling))
+        });
+
+        #[cfg(feature = "orchard")]
+        let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
+            retention
+                .should_retain_orchard(&n)
+                .then(|| n.map_note(Note::Orchard))
+        }));
+
+        iter.collect()
+    }
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a wallet.
 pub trait InputSource {
@@ -497,7 +663,7 @@ pub trait InputSource {
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
     /// Fetches a spendable transparent output.
     ///
@@ -543,6 +709,23 @@ pub trait WalletRead {
     /// The concrete account type used by this wallet backend.
     type Account: Account<Self::AccountId>;
 
+    /// Returns a vector with the IDs of all accounts known to this wallet.
+    fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error>;
+
+    /// Returns the account corresponding to the given ID, if any.
+    fn get_account(
+        &self,
+        account_id: Self::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
+    /// Returns the account corresponding to a given [`SeedFingerprint`] and
+    /// [`zip32::AccountId`], if any.
+    fn get_derived_account(
+        &self,
+        seed: &SeedFingerprint,
+        account_id: zip32::AccountId,
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
     /// Verifies that the given seed corresponds to the viewing key for the specified account.
     ///
     /// Returns:
@@ -558,11 +741,59 @@ pub trait WalletRead {
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error>;
 
+    /// Checks whether the given seed is relevant to any of the derived accounts (where
+    /// [`Account::source`] is [`AccountSource::Derived`]) in the wallet.
+    ///
+    /// This API does not check whether the seed is relevant to any imported account,
+    /// because that would require brute-forcing the ZIP 32 account index space.
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error>;
+
+    /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
+    fn get_account_for_ufvk(
+        &self,
+        ufvk: &UnifiedFullViewingKey,
+    ) -> Result<Option<Self::Account>, Self::Error>;
+
+    /// Returns the most recently generated unified address for the specified account, if the
+    /// account identifier specified refers to a valid account for this wallet.
+    ///
+    /// This will return `Ok(None)` if the account identifier does not correspond to a known
+    /// account.
+    fn get_current_address(
+        &self,
+        account: Self::AccountId,
+    ) -> Result<Option<UnifiedAddress>, Self::Error>;
+
+    /// Returns the birthday height for the given account, or an error if the account is not known
+    /// to the wallet.
+    fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error>;
+
+    /// Returns the birthday height for the wallet.
+    ///
+    /// This returns the earliest birthday height among accounts maintained by this wallet,
+    /// or `Ok(None)` if the wallet has no initialized accounts.
+    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
+
+    /// Returns the wallet balances and sync status for an account given the specified minimum
+    /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
+    fn get_wallet_summary(
+        &self,
+        min_confirmations: u32,
+    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
+
     /// Returns the height of the chain as known to the wallet as of the most recent call to
     /// [`WalletWrite::update_chain_tip`].
     ///
     /// This will return `Ok(None)` if the height of the current consensus chain tip is unknown.
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
+
+    /// Returns the block hash for the block at the given height, if the
+    /// associated block data is available. Returns `Ok(None)` if the hash
+    /// is not found in the database.
+    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
 
     /// Returns the available block metadata for the block at the specified height, if any.
     fn block_metadata(&self, height: BlockHeight) -> Result<Option<BlockMetadata>, Self::Error>;
@@ -575,6 +806,11 @@ pub trait WalletRead {
     /// metadata describing the state of the wallet's note commitment trees as of the end of that
     /// block.
     fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error>;
+
+    /// Returns the block height and hash for the block at the maximum scanned block height.
+    ///
+    /// This will return `Ok(None)` if no blocks have been scanned.
+    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error>;
 
     /// Returns block metadata for the maximum height that the wallet has scanned.
     ///
@@ -614,65 +850,14 @@ pub trait WalletRead {
     /// Returns the minimum block height corresponding to an unspent note in the wallet.
     fn get_min_unspent_height(&self) -> Result<Option<BlockHeight>, Self::Error>;
 
-    /// Returns the block hash for the block at the given height, if the
-    /// associated block data is available. Returns `Ok(None)` if the hash
-    /// is not found in the database.
-    fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error>;
-
-    /// Returns the block height and hash for the block at the maximum scanned block height.
-    ///
-    /// This will return `Ok(None)` if no blocks have been scanned.
-    fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error>;
-
     /// Returns the block height in which the specified transaction was mined, or `Ok(None)` if the
     /// transaction is not in the main chain.
     fn get_tx_height(&self, txid: TxId) -> Result<Option<BlockHeight>, Self::Error>;
-
-    /// Returns the birthday height for the wallet.
-    ///
-    /// This returns the earliest birthday height among accounts maintained by this wallet,
-    /// or `Ok(None)` if the wallet has no initialized accounts.
-    fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error>;
-
-    /// Returns the birthday height for the given account, or an error if the account is not known
-    /// to the wallet.
-    fn get_account_birthday(&self, account: Self::AccountId) -> Result<BlockHeight, Self::Error>;
-
-    /// Returns the most recently generated unified address for the specified account, if the
-    /// account identifier specified refers to a valid account for this wallet.
-    ///
-    /// This will return `Ok(None)` if the account identifier does not correspond to a known
-    /// account.
-    fn get_current_address(
-        &self,
-        account: Self::AccountId,
-    ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
     /// Returns all unified full viewing keys known to this wallet.
     fn get_unified_full_viewing_keys(
         &self,
     ) -> Result<HashMap<Self::AccountId, UnifiedFullViewingKey>, Self::Error>;
-
-    /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
-    fn get_account_for_ufvk(
-        &self,
-        ufvk: &UnifiedFullViewingKey,
-    ) -> Result<Option<Self::Account>, Self::Error>;
-
-    /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
-    /// [`zip32::AccountId`], if any.
-    fn get_seed_account(
-        &self,
-        seed: &HdSeedFingerprint,
-        account_id: zip32::AccountId,
-    ) -> Result<Option<Self::Account>, Self::Error>;
-
-    /// Returns the wallet balances and sync status for an account given the specified minimum
-    /// number of confirmations, or `Ok(None)` if the wallet has no balance data available.
-    fn get_wallet_summary(
-        &self,
-        min_confirmations: u32,
-    ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error>;
 
     /// Returns the memo for a note.
     ///
@@ -682,7 +867,7 @@ pub trait WalletRead {
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error>;
 
     /// Returns a transaction.
-    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error>;
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error>;
 
     /// Returns the nullifiers for Sapling notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as spent (in
@@ -724,9 +909,21 @@ pub trait WalletRead {
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
     }
+}
 
-    /// Returns a vector with the IDs of all accounts known to this wallet.
-    fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error>;
+/// The relevance of a seed to a given wallet.
+///
+/// This is the return type for [`WalletRead::seed_relevance_to_derived_accounts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SeedRelevance<A: Copy> {
+    /// The seed is relevant to at least one derived account within the wallet.
+    Relevant { account_ids: NonEmpty<A> },
+    /// The seed is not relevant to any of the derived accounts within the wallet.
+    NotRelevant,
+    /// The wallet contains no derived accounts.
+    NoDerivedAccounts,
+    /// The wallet contains no accounts.
+    NoAccounts,
 }
 
 /// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
@@ -1299,6 +1496,15 @@ pub trait WalletWrite: WalletRead {
         request: UnifiedAddressRequest,
     ) -> Result<Option<UnifiedAddress>, Self::Error>;
 
+    /// Updates the wallet's view of the blockchain.
+    ///
+    /// This method is used to provide the wallet with information about the state of the
+    /// blockchain, and detect any previously scanned data that needs to be re-validated
+    /// before proceeding with scanning. It should be called at wallet startup prior to calling
+    /// [`WalletRead::suggest_scan_ranges`] in order to provide the wallet with the information it
+    /// needs to correctly prioritize scanning operations.
+    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error>;
+
     /// Updates the state of the wallet database by persisting the provided block information,
     /// along with the note commitments that were detected when scanning the block for transactions
     /// pertaining to this wallet.
@@ -1313,14 +1519,11 @@ pub trait WalletWrite: WalletRead {
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error>;
 
-    /// Updates the wallet's view of the blockchain.
-    ///
-    /// This method is used to provide the wallet with information about the state of the
-    /// blockchain, and detect any previously scanned data that needs to be re-validated
-    /// before proceeding with scanning. It should be called at wallet startup prior to calling
-    /// [`WalletRead::suggest_scan_ranges`] in order to provide the wallet with the information it
-    /// needs to correctly prioritize scanning operations.
-    fn update_chain_tip(&mut self, tip_height: BlockHeight) -> Result<(), Self::Error>;
+    /// Adds a transparent UTXO received by the wallet to the data store.
+    fn put_received_transparent_utxo(
+        &mut self,
+        output: &WalletTransparentOutput,
+    ) -> Result<Self::UtxoRef, Self::Error>;
 
     /// Caches a decrypted transaction in the persistent wallet store.
     fn store_decrypted_tx(
@@ -1349,12 +1552,6 @@ pub trait WalletWrite: WalletRead {
     ///
     /// There may be restrictions on heights to which it is possible to truncate.
     fn truncate_to_height(&mut self, block_height: BlockHeight) -> Result<(), Self::Error>;
-
-    /// Adds a transparent UTXO received by the wallet to the data store.
-    fn put_received_transparent_utxo(
-        &mut self,
-        output: &WalletTransparentOutput,
-    ) -> Result<Self::UtxoRef, Self::Error>;
 }
 
 /// This trait describes a capability for manipulating wallet note commitment trees.
@@ -1434,7 +1631,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
-    use zcash_keys::keys::HdSeedFingerprint;
+    use zip32::fingerprint::SeedFingerprint;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1454,8 +1651,8 @@ pub mod testing {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1511,8 +1708,8 @@ pub mod testing {
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-            Ok(Vec::new())
+        ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+            Ok(SpendableNotes::empty())
         }
     }
 
@@ -1520,6 +1717,25 @@ pub mod testing {
         type Error = ();
         type AccountId = u32;
         type Account = (Self::AccountId, UnifiedFullViewingKey);
+
+        fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        fn get_account(
+            &self,
+            _account_id: Self::AccountId,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_derived_account(
+            &self,
+            _seed: &SeedFingerprint,
+            _account_id: zip32::AccountId,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
 
         fn validate_seed(
             &self,
@@ -1529,7 +1745,53 @@ pub mod testing {
             Ok(false)
         }
 
+        fn seed_relevance_to_derived_accounts(
+            &self,
+            _seed: &SecretVec<u8>,
+        ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+            Ok(SeedRelevance::NoAccounts)
+        }
+
+        fn get_account_for_ufvk(
+            &self,
+            _ufvk: &UnifiedFullViewingKey,
+        ) -> Result<Option<Self::Account>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_current_address(
+            &self,
+            _account: Self::AccountId,
+        ) -> Result<Option<UnifiedAddress>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_account_birthday(
+            &self,
+            _account: Self::AccountId,
+        ) -> Result<BlockHeight, Self::Error> {
+            Err(())
+        }
+
+        fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_wallet_summary(
+            &self,
+            _min_confirmations: u32,
+        ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
+            Ok(None)
+        }
+
         fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_block_hash(
+            &self,
+            _block_height: BlockHeight,
+        ) -> Result<Option<BlockHash>, Self::Error> {
             Ok(None)
         }
 
@@ -1541,6 +1803,10 @@ pub mod testing {
         }
 
         fn block_fully_scanned(&self) -> Result<Option<BlockMetadata>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
             Ok(None)
         }
 
@@ -1563,36 +1829,7 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_block_hash(
-            &self,
-            _block_height: BlockHeight,
-        ) -> Result<Option<BlockHash>, Self::Error> {
-            Ok(None)
-        }
-
-        fn get_max_height_hash(&self) -> Result<Option<(BlockHeight, BlockHash)>, Self::Error> {
-            Ok(None)
-        }
-
         fn get_tx_height(&self, _txid: TxId) -> Result<Option<BlockHeight>, Self::Error> {
-            Ok(None)
-        }
-
-        fn get_wallet_birthday(&self) -> Result<Option<BlockHeight>, Self::Error> {
-            Ok(None)
-        }
-
-        fn get_account_birthday(
-            &self,
-            _account: Self::AccountId,
-        ) -> Result<BlockHeight, Self::Error> {
-            Err(())
-        }
-
-        fn get_current_address(
-            &self,
-            _account: Self::AccountId,
-        ) -> Result<Option<UnifiedAddress>, Self::Error> {
             Ok(None)
         }
 
@@ -1602,34 +1839,12 @@ pub mod testing {
             Ok(HashMap::new())
         }
 
-        fn get_account_for_ufvk(
-            &self,
-            _ufvk: &UnifiedFullViewingKey,
-        ) -> Result<Option<Self::Account>, Self::Error> {
-            Ok(None)
-        }
-
-        fn get_seed_account(
-            &self,
-            _seed: &HdSeedFingerprint,
-            _account_id: zip32::AccountId,
-        ) -> Result<Option<Self::Account>, Self::Error> {
-            Ok(None)
-        }
-
-        fn get_wallet_summary(
-            &self,
-            _min_confirmations: u32,
-        ) -> Result<Option<WalletSummary<Self::AccountId>>, Self::Error> {
-            Ok(None)
-        }
-
         fn get_memo(&self, _id_note: NoteId) -> Result<Option<Memo>, Self::Error> {
             Ok(None)
         }
 
-        fn get_transaction(&self, _txid: TxId) -> Result<Transaction, Self::Error> {
-            Err(())
+        fn get_transaction(&self, _txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+            Ok(None)
         }
 
         fn get_sapling_nullifiers(
@@ -1663,10 +1878,6 @@ pub mod testing {
             _max_height: BlockHeight,
         ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
             Ok(HashMap::new())
-        }
-
-        fn get_account_ids(&self) -> Result<Vec<Self::AccountId>, Self::Error> {
-            Ok(Vec::new())
         }
     }
 

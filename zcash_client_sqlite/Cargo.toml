@@ -45,6 +45,7 @@ tracing.workspace = true
 
 # - Serialization
 byteorder.workspace = true
+nonempty.workspace = true
 prost.workspace = true
 group.workspace = true
 jubjub.workspace = true
@@ -82,7 +83,6 @@ bls12_381.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 pasta_curves.workspace = true
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
-nonempty.workspace = true
 orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true

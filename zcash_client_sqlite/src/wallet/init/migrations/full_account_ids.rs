@@ -1,13 +1,14 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{init::WalletMigrationError, ufvk_to_uivk, AccountType};
+use crate::wallet::{account_kind_code, init::WalletMigrationError};
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_client_backend::keys::UnifiedSpendingKey;
-use zcash_keys::keys::{HdSeedFingerprint, UnifiedFullViewingKey};
+use zcash_client_backend::{data_api::AccountSource, keys::UnifiedSpendingKey};
+use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
+use zip32::fingerprint::SeedFingerprint;
 
 use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness};
 
@@ -16,7 +17,7 @@ use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uni
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x1b104345_f27e_42da_a9e3_1de22694da43);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
-    pub(super) seed: Rc<Option<SecretVec<u8>>>,
+    pub(super) seed: Option<Rc<SecretVec<u8>>>,
     pub(super) params: P,
 }
 
@@ -44,8 +45,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        let account_type_zip32 = u32::from(AccountType::Zip32);
-        let account_type_imported = u32::from(AccountType::Imported);
+        let account_kind_derived = account_kind_code(AccountSource::Derived {
+            seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
+            account_index: zip32::AccountId::ZERO,
+        });
+        let account_kind_imported = account_kind_code(AccountSource::Imported);
         transaction.execute_batch(
             &format!(r#"
             PRAGMA foreign_keys = OFF;
@@ -53,7 +57,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
 
             CREATE TABLE accounts_new (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                account_type INTEGER NOT NULL DEFAULT {account_type_zip32},
+                account_kind INTEGER NOT NULL DEFAULT {account_kind_derived},
                 hd_seed_fingerprint BLOB,
                 hd_account_index INTEGER,
                 ufvk TEXT,
@@ -64,9 +68,9 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 birthday_height INTEGER NOT NULL,
                 recover_until_height INTEGER,
                 CHECK (
-                    (account_type = {account_type_zip32} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
+                    (account_kind = {account_kind_derived} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
                     OR
-                    (account_type = {account_type_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
+                    (account_kind = {account_kind_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
                 )
             );
             CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
@@ -79,13 +83,30 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         if transaction.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
             Ok(row.get::<_, u32>(0)? > 0)
         })? {
-            if let Some(seed) = &self.seed.as_ref() {
-                let seed_id = HdSeedFingerprint::from_seed(seed);
+            if let Some(seed) = &self.seed {
+                let seed_id = SeedFingerprint::from_seed(seed.expose_secret())
+                    .expect("Seed is between 32 and 252 bytes in length.");
+
+                // We track whether we have determined seed relevance or not, in order to
+                // correctly report errors when checking the seed against an account:
+                //
+                // - If we encounter an error with the first account, we can assert that
+                //   the seed is not relevant to the wallet by assuming that:
+                //   - All accounts are from the same seed (which is historically the only
+                //     use case that this migration supported), and
+                //   - All accounts in the wallet must have been able to derive their USKs
+                //     (in order to derive UIVKs).
+                //
+                // - Once the seed has been determined to be relevant (because it matched
+                //   the first account), any subsequent account derivation failure is
+                //   proving wrong our second assumption above, and we report this as
+                //   corrupted data.
+                let mut seed_is_relevant = false;
+
                 let mut q = transaction.prepare("SELECT * FROM accounts")?;
                 let mut rows = q.query([])?;
                 while let Some(row) = rows.next()? {
                     let account_index: u32 = row.get("account")?;
-                    let account_type = u32::from(AccountType::Zip32);
                     let birthday_height: u32 = row.get("birthday_height")?;
                     let recover_until_height: Option<u32> = row.get("recover_until_height")?;
 
@@ -106,19 +127,31 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         })?,
                     )
                     .map_err(|_| {
-                        WalletMigrationError::CorruptedData(
-                            "Unable to derive spending key from seed.".to_string(),
-                        )
+                        if seed_is_relevant {
+                            WalletMigrationError::CorruptedData(
+                                "Unable to derive spending key from seed.".to_string(),
+                            )
+                        } else {
+                            WalletMigrationError::SeedNotRelevant
+                        }
                     })?;
                     let expected_ufvk = usk.to_unified_full_viewing_key();
                     if ufvk != expected_ufvk.encode(&self.params) {
-                        return Err(WalletMigrationError::CorruptedData(
-                            "UFVK does not match expected value.".to_string(),
-                        ));
+                        return Err(if seed_is_relevant {
+                            WalletMigrationError::CorruptedData(
+                                "UFVK does not match expected value.".to_string(),
+                            )
+                        } else {
+                            WalletMigrationError::SeedNotRelevant
+                        });
                     }
 
-                    let uivk = ufvk_to_uivk(&ufvk_parsed, &self.params)
-                        .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
+                    // We made it past one derived account, so the seed must be relevant.
+                    seed_is_relevant = true;
+
+                    let uivk = ufvk_parsed
+                        .to_unified_incoming_viewing_key()
+                        .encode(&self.params);
 
                     #[cfg(feature = "transparent-inputs")]
                     let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());
@@ -128,13 +161,13 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     transaction.execute(
                         r#"
                         INSERT INTO accounts_new (
-                            id, account_type, hd_seed_fingerprint, hd_account_index,
+                            id, account_kind, hd_seed_fingerprint, hd_account_index,
                             ufvk, uivk,
                             orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
                             birthday_height, recover_until_height
                         )
                         VALUES (
-                            :account_id, :account_type, :seed_id, :account_index,
+                            :account_id, :account_kind, :seed_id, :account_index,
                             :ufvk, :uivk,
                             :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
                             :birthday_height, :recover_until_height
@@ -142,8 +175,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         "#,
                         named_params![
                             ":account_id": account_id,
-                            ":account_type": account_type,
-                            ":seed_id": seed_id.as_bytes(),
+                            ":account_kind": account_kind_derived,
+                            ":seed_id": seed_id.to_bytes(),
                             ":account_index": account_index,
                             ":ufvk": ufvk,
                             ":uivk": uivk,

@@ -579,12 +579,14 @@ pub(crate) fn update_chain_tip<P: consensus::Parameters>(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use incrementalmerkletree::{frontier::Frontier, Hashable, Level, Position};
+    use std::num::NonZeroU8;
+
+    use incrementalmerkletree::{frontier::Frontier, Hashable, Position};
 
     use sapling::Node;
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
-        chain::CommitmentTreeRoot,
+        chain::{ChainState, CommitmentTreeRoot},
         scanning::{spanning_tree::testing::scan_range, ScanPriority},
         AccountBirthday, Ratio, WalletRead, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
@@ -611,9 +613,7 @@ pub(crate) mod tests {
         zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
     };
 
-    // FIXME: This requires fixes to the test framework.
     #[test]
-    #[cfg(feature = "orchard")]
     fn sapling_scan_complete() {
         scan_complete::<SaplingPoolTester>();
     }
@@ -624,55 +624,75 @@ pub(crate) mod tests {
         scan_complete::<OrchardPoolTester>();
     }
 
-    // FIXME: This requires fixes to the test framework.
-    #[allow(dead_code)]
     fn scan_complete<T: ShieldedPoolTester>() {
         use ScanPriority::*;
-
+        let initial_height_offset = 310;
         let mut st = TestBuilder::new()
             .with_block_cache()
             .with_test_account(AccountBirthday::from_sapling_activation)
             .build();
 
-        let dfvk = T::test_account_fvk(&st);
         let sapling_activation_height = st.sapling_activation_height();
-
-        assert_matches!(
-            // In the following, we don't care what the root hashes are, they just need to be
-            // distinct.
-            T::put_subtree_roots(
-                &mut st,
-                0,
-                &[
-                    CommitmentTreeRoot::from_parts(
-                        sapling_activation_height + 100,
-                        T::empty_tree_root(Level::from(0))
-                    ),
-                    CommitmentTreeRoot::from_parts(
-                        sapling_activation_height + 200,
-                        T::empty_tree_root(Level::from(1))
-                    ),
-                    CommitmentTreeRoot::from_parts(
-                        sapling_activation_height + 300,
-                        T::empty_tree_root(Level::from(2))
-                    ),
-                ]
-            ),
-            Ok(())
-        );
 
         // We'll start inserting leaf notes 5 notes after the end of the third subtree, with a gap
         // of 10 blocks. After `scan_cached_blocks`, the scan queue should have a requested scan
         // range of 300..310 with `FoundNote` priority, 310..320 with `Scanned` priority.
         // We set both Sapling and Orchard to the same initial tree size for simplicity.
-        let initial_sapling_tree_size = (0x1 << 16) * 3 + 5;
-        let initial_orchard_tree_size = (0x1 << 16) * 3 + 5;
-        let initial_height = sapling_activation_height + 310;
+        let initial_sapling_tree_size: u32 = (0x1 << 16) * 3 + 5;
+        let initial_orchard_tree_size: u32 = (0x1 << 16) * 3 + 5;
 
+        // Construct a fake chain state for the end of block 300
+        let (prior_sapling_frontiers, sapling_initial_tree) =
+            Frontier::random_with_prior_subtree_roots(
+                st.rng(),
+                initial_sapling_tree_size.into(),
+                NonZeroU8::new(16).unwrap(),
+            );
+        let sapling_subtree_roots = prior_sapling_frontiers
+            .into_iter()
+            .zip(0u32..)
+            .map(|(root, i)| {
+                CommitmentTreeRoot::from_parts(sapling_activation_height + (100 * (i + 1)), root)
+            })
+            .collect::<Vec<_>>();
+
+        #[cfg(feature = "orchard")]
+        let (prior_orchard_frontiers, orchard_initial_tree) =
+            Frontier::random_with_prior_subtree_roots(
+                st.rng(),
+                initial_orchard_tree_size.into(),
+                NonZeroU8::new(16).unwrap(),
+            );
+        #[cfg(feature = "orchard")]
+        let orchard_subtree_roots = prior_orchard_frontiers
+            .into_iter()
+            .zip(0u32..)
+            .map(|(root, i)| {
+                CommitmentTreeRoot::from_parts(sapling_activation_height + (100 * (i + 1)), root)
+            })
+            .collect::<Vec<_>>();
+
+        let prior_block_hash = BlockHash([0; 32]);
+        st.establish_chain_state(
+            ChainState::new(
+                sapling_activation_height + initial_height_offset - 1,
+                prior_block_hash,
+                sapling_initial_tree,
+                #[cfg(feature = "orchard")]
+                orchard_initial_tree,
+            ),
+            &sapling_subtree_roots,
+            #[cfg(feature = "orchard")]
+            &orchard_subtree_roots,
+        )
+        .unwrap();
+
+        let dfvk = T::test_account_fvk(&st);
         let value = NonNegativeAmount::const_from_u64(50000);
+        let initial_height = sapling_activation_height + initial_height_offset;
         st.generate_block_at(
             initial_height,
-            BlockHash([0; 32]),
+            prior_block_hash,
             &dfvk,
             AddressType::DefaultExternal,
             value,
