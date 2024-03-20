@@ -21,7 +21,7 @@ struct Node {
 }
 
 impl Params {
-    fn new(n: u32, k: u32) -> Result<Self, Error> {
+    pub(crate) fn new(n: u32, k: u32) -> Result<Self, Error> {
         // We place the following requirements on the parameters:
         // - n is a multiple of 8, so the hash output has an exact byte length.
         // - k >= 3 so the encoded solutions have an exact byte length.
@@ -36,7 +36,7 @@ impl Params {
     fn indices_per_hash_output(&self) -> u32 {
         512 / self.n
     }
-    fn hash_output(&self) -> u8 {
+    pub(crate) fn hash_output(&self) -> u8 {
         (self.indices_per_hash_output() * self.n / 8) as u8
     }
     fn collision_bit_length(&self) -> usize {
@@ -148,7 +148,7 @@ impl fmt::Display for Kind {
     }
 }
 
-fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2bState {
+pub(crate) fn initialise_state(n: u32, k: u32, digest_len: u8) -> Blake2bState {
     let mut personalization: Vec<u8> = Vec::from("ZcashPoW");
     personalization.write_u32::<LittleEndian>(n).unwrap();
     personalization.write_u32::<LittleEndian>(k).unwrap();
