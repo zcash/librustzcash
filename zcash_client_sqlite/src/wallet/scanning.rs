@@ -812,7 +812,7 @@ pub(crate) mod tests {
             })
             .build();
 
-        let (_, _, birthday) = st.test_account().unwrap();
+        let birthday = st.test_account().unwrap().birthday().clone();
         let dfvk = T::test_account_fvk(&st);
         let sap_active = st.sapling_activation_height();
 

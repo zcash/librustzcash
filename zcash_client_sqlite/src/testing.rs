@@ -173,8 +173,15 @@ impl<Cache> TestBuilder<Cache> {
 
         let test_account = if let Some(birthday) = self.test_account_birthday {
             let seed = Secret::new(vec![0u8; 32]);
-            let (account, usk) = db_data.create_account(&seed, birthday.clone()).unwrap();
-            Some((seed, account, usk, birthday))
+            let (account_id, usk) = db_data.create_account(&seed, birthday.clone()).unwrap();
+            Some((
+                seed,
+                TestAccount {
+                    account_id,
+                    usk,
+                    birthday,
+                },
+            ))
         } else {
             None
         };
@@ -270,6 +277,27 @@ impl CachedBlock {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct TestAccount {
+    account_id: AccountId,
+    usk: UnifiedSpendingKey,
+    birthday: AccountBirthday,
+}
+
+impl TestAccount {
+    pub(crate) fn account_id(&self) -> AccountId {
+        self.account_id
+    }
+
+    pub(crate) fn usk(&self) -> &UnifiedSpendingKey {
+        &self.usk
+    }
+
+    pub(crate) fn birthday(&self) -> &AccountBirthday {
+        &self.birthday
+    }
+}
+
 /// The state for a `zcash_client_sqlite` test.
 pub(crate) struct TestState<Cache> {
     cache: Cache,
@@ -277,12 +305,7 @@ pub(crate) struct TestState<Cache> {
     latest_block_height: Option<BlockHeight>,
     _data_file: NamedTempFile,
     db_data: WalletDb<Connection, LocalNetwork>,
-    test_account: Option<(
-        SecretVec<u8>,
-        AccountId,
-        UnifiedSpendingKey,
-        AccountBirthday,
-    )>,
+    test_account: Option<(SecretVec<u8>, TestAccount)>,
     rng: ChaChaRng,
 }
 
@@ -684,21 +707,19 @@ impl<Cache> TestState<Cache> {
 
     /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_seed(&self) -> Option<&SecretVec<u8>> {
-        self.test_account.as_ref().map(|(seed, _, _, _)| seed)
+        self.test_account.as_ref().map(|(seed, _)| seed)
     }
 
     /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
-    pub(crate) fn test_account(&self) -> Option<(AccountId, UnifiedSpendingKey, AccountBirthday)> {
-        self.test_account
-            .as_ref()
-            .map(|(_, a, k, b)| (*a, k.clone(), b.clone()))
+    pub(crate) fn test_account(&self) -> Option<&TestAccount> {
+        self.test_account.as_ref().map(|(_, acct)| acct)
     }
 
     /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_account_sapling(&self) -> Option<DiversifiableFullViewingKey> {
         self.test_account
             .as_ref()
-            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
+            .and_then(|(_, acct)| acct.usk.to_unified_full_viewing_key().sapling().cloned())
     }
 
     /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
@@ -706,7 +727,7 @@ impl<Cache> TestState<Cache> {
     pub(crate) fn test_account_orchard(&self) -> Option<orchard::keys::FullViewingKey> {
         self.test_account
             .as_ref()
-            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().orchard().cloned())
+            .and_then(|(_, acct)| acct.usk.to_unified_full_viewing_key().orchard().cloned())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.
