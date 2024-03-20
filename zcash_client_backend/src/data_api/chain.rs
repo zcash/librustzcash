@@ -153,12 +153,13 @@
 
 use std::ops::Range;
 
+use async_trait::async_trait;
 use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
 use zcash_primitives::consensus::{self, BlockHeight};
 
 use crate::{
-    data_api::{NullifierQuery, WalletWrite},
+    data_api::{scanning::ScanRange, NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
 };
@@ -167,9 +168,6 @@ pub mod error;
 use error::Error;
 
 use super::WalletRead;
-
-#[cfg(feature = "sync")]
-use {crate::data_api::scanning::ScanRange, tokio::task::JoinHandle};
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -229,6 +227,7 @@ pub trait BlockSource {
 /// # Examples
 ///
 /// ```
+///    use async_trait::async_trait;
 ///    use std::sync::{Arc, Mutex};
 ///    use tokio::task::JoinHandle;
 ///    use zcash_client_backend::data_api::{
@@ -258,6 +257,7 @@ pub trait BlockSource {
 /// #        }
 /// #    }
 /// #
+///    #[async_trait]
 ///    impl BlockCache for ExampleBlockCache {
 ///        fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
 ///            Ok(self
@@ -289,7 +289,7 @@ pub trait BlockSource {
 ///            Ok(highest_block.map(|&block| BlockHeight::from_u32(block.height as u32)))
 ///        }
 ///
-///        fn insert(&self, mut compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+///        async fn insert(&self, mut compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
 ///            self.cached_blocks
 ///                .lock()
 ///                .unwrap()
@@ -305,16 +305,12 @@ pub trait BlockSource {
 ///            Ok(())
 ///        }
 ///
-///        fn delete(&self, range: &ScanRange) -> JoinHandle<Result<(), Self::Error>> {
-///            let cached_blocks = Arc::clone(&self.cached_blocks);
-///            let range = range.block_range().clone();
-///            tokio::spawn(async move {
-///                cached_blocks
-///                    .lock()
-///                    .unwrap()
-///                    .retain(|block| !range.contains(&BlockHeight::from_u32(block.height as u32)));
-///                Ok(())
-///            })
+///        async fn delete(&self, range: &ScanRange) -> Result<(), Self::Error> {
+///            self.cached_blocks
+///                .lock()
+///                .unwrap()
+///                .retain(|block| !range.block_range().contains(&BlockHeight::from_u32(block.height as u32)));
+///            Ok(())
 ///        }
 ///    }
 ///
@@ -348,8 +344,13 @@ pub trait BlockSource {
 /// #    );
 ///    let compact_blocks = vec![compact_block1, compact_block2];
 ///
+///    // Create a runtime
+///    let rt = tokio::runtime::Runtime::new().unwrap();
+///
 ///    // Insert blocks into the block cache
-///    block_cache.insert(compact_blocks.clone()).unwrap();
+///    rt.block_on(async {
+///        block_cache.insert(compact_blocks.clone()).await.unwrap();
+///    });
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
 ///
 ///    // Find highest block in the block cache
@@ -369,14 +370,13 @@ pub trait BlockSource {
 ///    );
 ///
 ///    // Delete blocks from the block cache
-///    let rt = tokio::runtime::Runtime::new().unwrap();
 ///    rt.block_on(async {
 ///        block_cache.delete(&range).await.unwrap();
 ///    });
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
 ///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
-#[cfg(feature = "sync")]
+#[async_trait]
 pub trait BlockCache: BlockSource + Send + Sync {
     /// Retrieves contiguous compact blocks specified by the given `range` from the block cache.
     ///
@@ -402,7 +402,7 @@ pub trait BlockCache: BlockSource + Send + Sync {
     /// Inserts a vec of compact blocks into the block cache.
     ///
     /// Returns `Ok(())` on success, otherwise returns an error.
-    fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
+    async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
 
     /// Removes all cached blocks above a specified block height.
     ///
@@ -411,8 +411,8 @@ pub trait BlockCache: BlockSource + Send + Sync {
 
     /// Deletes a range of compact blocks from the block cache.
     ///
-    /// Returns a `JoinHandle` from a `tokio::spawn` task.
-    fn delete(&self, range: &ScanRange) -> JoinHandle<Result<(), Self::Error>>;
+    /// Returns `Ok(())` on success, otherwise returns an error.
+    async fn delete(&self, range: &ScanRange) -> Result<(), Self::Error>;
 }
 
 /// Metadata about modifications to the wallet state made in the course of scanning a set of

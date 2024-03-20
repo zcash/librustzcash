@@ -78,9 +78,6 @@ group.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
-# - Sync engine
-tokio = { version = "1.21.0", optional = true, features = ["fs", "macros"] }
-
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree.workspace = true
@@ -91,6 +88,9 @@ jubjub = { workspace = true, optional = true }
 
 # - ZIP 321
 nom = "7"
+
+# - Asychronous
+async-trait = "0.1.78"
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -137,9 +137,6 @@ transparent-inputs = [
 
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "zcash_keys/orchard"]
-
-## Exposes a wallet synchronization function that implements the necessary state machine.
-sync = ["dep:tokio"]
 
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [

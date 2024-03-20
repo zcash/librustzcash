@@ -40,7 +40,6 @@ and this library adheres to Rust's notion of
   - `TaggedOrchardBatch`
   - `TaggedOrchardBatchRunner`
   - `testing` module
-  - `testing::{'fake_compact_block`, `random_compact_tx`} (moved from `tests` module).
 - `zcash_client_backend::wallet`:
   - `Note::Orchard`
   - `WalletOrchardSpend`
@@ -84,8 +83,6 @@ and this library adheres to Rust's notion of
     constraint on its `<AccountId>` parameter has been strengthened to `Copy`.
 - `zcash_client_backend::fees`:
   - Arguments to `ChangeStrategy::compute_balance` have changed.
-- `zcash_client_backend::scanning`:
-  - `testing::fake_compact_block` is now public.
   - `ChangeError::DustInputs` now has an `orchard` field behind the `orchard`
     feature flag.
 - `zcash_client_backend::proto`:
