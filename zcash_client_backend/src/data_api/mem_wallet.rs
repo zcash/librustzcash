@@ -83,9 +83,9 @@ pub struct MemoryWalletDb {
     accounts: BTreeMap<u32, MemoryWalletAccount>,
     blocks: BTreeMap<BlockHeight, MemoryWalletBlock>,
     tx_idx: HashMap<TxId, BlockHeight>,
-    sapling_spends: HashMap<sapling::Nullifier, (TxId, bool)>,
+    sapling_spends: BTreeMap<sapling::Nullifier, (TxId, bool)>,
     #[cfg(feature = "orchard")]
-    orchard_spends: HashMap<orchard::note::Nullifier, (TxId, bool)>,
+    orchard_spends: BTreeMap<orchard::note::Nullifier, (TxId, bool)>,
     sapling_tree: ShardTree<
         MemoryShardStore<sapling::Node, BlockHeight>,
         { SAPLING_SHARD_HEIGHT * 2 },

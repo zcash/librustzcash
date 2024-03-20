@@ -2105,7 +2105,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.1.2"
-source = "git+https://github.com/zcash/sapling-crypto?rev=22412ae07644813253feb064d1692b0823242853#22412ae07644813253feb064d1692b0823242853"
+source = "git+https://github.com/nuttycom/sapling-crypto?rev=827534329f3ff61f9212f7933ed1688fa04e987c#827534329f3ff61f9212f7933ed1688fa04e987c"
 dependencies = [
  "aes",
  "bellman",
