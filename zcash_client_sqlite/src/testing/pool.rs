@@ -271,6 +271,9 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
             .get_memo(NoteId::new(sent_tx_id, T::SHIELDED_PROTOCOL, 12345)),
         Ok(None)
     );
+
+    let tx_history = st.get_tx_history().unwrap();
+    assert_eq!(tx_history.len(), 2);
 }
 
 #[cfg(feature = "transparent-inputs")]

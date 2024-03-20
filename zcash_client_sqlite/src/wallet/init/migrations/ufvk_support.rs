@@ -31,7 +31,7 @@ pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0xbe57ef3b_388e_42ea_97e2_
 
 pub(super) struct Migration<P> {
     pub(super) params: P,
-    pub(super) seed: Rc<Option<SecretVec<u8>>>,
+    pub(super) seed: Option<Rc<SecretVec<u8>>>,
 }
 
 impl<P> schemer::Migration for Migration<P> {
@@ -68,20 +68,43 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         let mut stmt_fetch_accounts =
             transaction.prepare("SELECT account, address FROM accounts")?;
 
+        // We track whether we have determined seed relevance or not, in order to
+        // correctly report errors when checking the seed against an account:
+        //
+        // - If we encounter an error with the first account, we can assert that the seed
+        //   is not relevant to the wallet by assuming that:
+        //   - All accounts are from the same seed (which is historically the only use
+        //     case that this migration supported), and
+        //   - All accounts in the wallet must have been able to derive their USKs (in
+        //     order to derive UIVKs).
+        //
+        // - Once the seed has been determined to be relevant (because it matched the
+        //   first account), any subsequent account derivation failure is proving wrong
+        //   our second assumption above, and we report this as corrupted data.
+        let mut seed_is_relevant = false;
+
         let ua_request = UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
         let mut rows = stmt_fetch_accounts.query([])?;
         while let Some(row) = rows.next()? {
             // We only need to check for the presence of the seed if we have keys that
             // need to be migrated; otherwise, it's fine to not supply the seed if this
             // migration is being used to initialize an empty database.
-            if let Some(seed) = &self.seed.as_ref() {
+            if let Some(seed) = &self.seed {
                 let account: u32 = row.get(0)?;
                 let account = AccountId::try_from(account).map_err(|_| {
                     WalletMigrationError::CorruptedData("Account ID is invalid".to_owned())
                 })?;
                 let usk =
                     UnifiedSpendingKey::from_seed(&self.params, seed.expose_secret(), account)
-                        .unwrap();
+                        .map_err(|_| {
+                            if seed_is_relevant {
+                                WalletMigrationError::CorruptedData(
+                                    "Unable to derive spending key from seed.".to_string(),
+                                )
+                            } else {
+                                WalletMigrationError::SeedNotRelevant
+                            }
+                        })?;
                 let ufvk = usk.to_unified_full_viewing_key();
 
                 let address: String = row.get(1)?;
@@ -97,11 +120,15 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             WalletMigrationError::CorruptedData("Derivation should have produced a UFVK containing a Sapling component.".to_owned()))?;
                         let (idx, expected_address) = dfvk.default_address();
                         if decoded_address != expected_address {
-                            return Err(WalletMigrationError::CorruptedData(
+                            return Err(if seed_is_relevant {
+                                WalletMigrationError::CorruptedData(
                                 format!("Decoded Sapling address {} does not match the ufvk's Sapling address {} at {:?}.",
                                     address,
                                     Address::Sapling(expected_address).encode(&self.params),
-                                    idx)));
+                                    idx))
+                            } else {
+                                WalletMigrationError::SeedNotRelevant
+                            });
                         }
                     }
                     Address::Transparent(_) => {
@@ -111,14 +138,21 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     Address::Unified(decoded_address) => {
                         let (expected_address, idx) = ufvk.default_address(ua_request)?;
                         if decoded_address != expected_address {
-                            return Err(WalletMigrationError::CorruptedData(
+                            return Err(if seed_is_relevant {
+                                WalletMigrationError::CorruptedData(
                                 format!("Decoded unified address {} does not match the ufvk's default address {} at {:?}.",
                                     address,
                                     Address::Unified(expected_address).encode(&self.params),
-                                    idx)));
+                                    idx))
+                            } else {
+                                WalletMigrationError::SeedNotRelevant
+                            });
                         }
                     }
                 }
+
+                // We made it past one derived account, so the seed must be relevant.
+                seed_is_relevant = true;
 
                 let ufvk_str: String = ufvk.encode(&self.params);
                 let address_str: String = ufvk.default_address(ua_request)?.0.encode(&self.params);

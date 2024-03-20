@@ -263,15 +263,19 @@ impl service::TreeState {
     pub fn sapling_tree(
         &self,
     ) -> io::Result<CommitmentTree<Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>> {
-        let sapling_tree_bytes = hex::decode(&self.sapling_tree).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Hex decoding of Sapling tree bytes failed: {:?}", e),
+        if self.sapling_tree.is_empty() {
+            Ok(CommitmentTree::empty())
+        } else {
+            let sapling_tree_bytes = hex::decode(&self.sapling_tree).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Hex decoding of Sapling tree bytes failed: {:?}", e),
+                )
+            })?;
+            read_commitment_tree::<Node, _, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(
+                &sapling_tree_bytes[..],
             )
-        })?;
-        read_commitment_tree::<Node, _, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>(
-            &sapling_tree_bytes[..],
-        )
+        }
     }
 
     /// Deserializes and returns the Sapling note commitment tree field of the tree state.
@@ -280,25 +284,43 @@ impl service::TreeState {
         &self,
     ) -> io::Result<CommitmentTree<MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>>
     {
-        let orchard_tree_bytes = hex::decode(&self.orchard_tree).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Hex decoding of Orchard tree bytes failed: {:?}", e),
-            )
-        })?;
-        read_commitment_tree::<MerkleHashOrchard, _, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>(
-            &orchard_tree_bytes[..],
-        )
+        if self.orchard_tree.is_empty() {
+            Ok(CommitmentTree::empty())
+        } else {
+            let orchard_tree_bytes = hex::decode(&self.orchard_tree).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Hex decoding of Orchard tree bytes failed: {:?}", e),
+                )
+            })?;
+            read_commitment_tree::<
+                MerkleHashOrchard,
+                _,
+                { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+            >(&orchard_tree_bytes[..])
+        }
     }
 
     /// Parses this tree state into a [`ChainState`] for use with [`scan_cached_blocks`].
     ///
     /// [`scan_cached_blocks`]: crate::data_api::chain::scan_cached_blocks
     pub fn to_chain_state(&self) -> io::Result<ChainState> {
+        let mut hash_bytes = hex::decode(&self.hash).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Block hash is not valid hex: {:?}", e),
+            )
+        })?;
+        // Zcashd hex strings for block hashes are byte-reversed.
+        hash_bytes.reverse();
+
         Ok(ChainState::new(
             self.height
                 .try_into()
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid block height"))?,
+            BlockHash::try_from_slice(&hash_bytes).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "Invalid block hash length.")
+            })?,
             self.sapling_tree()?.to_frontier(),
             #[cfg(feature = "orchard")]
             self.orchard_tree()?.to_frontier(),

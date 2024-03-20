@@ -16,12 +16,13 @@ and this library adheres to Rust's notion of
   - `Account`
   - `AccountBalance::with_orchard_balance_mut`
   - `AccountBirthday::orchard_frontier`
-  - `AccountKind`
+  - `AccountSource`
   - `BlockMetadata::orchard_tree_size`
   - `DecryptedTransaction::{new, tx(), orchard_outputs()}`
   - `NoteRetention`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
+  - `SeedRelevance`
   - `SentTransaction::new`
   - `SpendableNotes`
   - `ORCHARD_SHARD_HEIGHT`
@@ -29,6 +30,7 @@ and this library adheres to Rust's notion of
   - `WalletSummary::next_orchard_subtree_index`
   - `chain::ChainState`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
+  - `impl Debug for chain::CommitmentTreeRoot`
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`
@@ -59,6 +61,8 @@ and this library adheres to Rust's notion of
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `Account` associated type.
+    - Added `validate_seed` method.
+    - Added `is_seed_relevant_to_any_derived_accounts` method.
     - Added `get_account` method.
     - Added `get_derived_account` method.
     - `get_account_for_ufvk` now returns `Self::Account` instead of a bare
@@ -80,7 +84,6 @@ and this library adheres to Rust's notion of
     - `type OrchardShardStore`
     - `fn with_orchard_tree_mut`
     - `fn put_orchard_subtree_roots`
-  - Added method `WalletRead::validate_seed`
   - Removed `Error::AccountNotFound` variant.
   - `WalletSummary::new` now takes an additional `next_orchard_subtree_index`
     argument when the `orchard` feature flag is enabled.

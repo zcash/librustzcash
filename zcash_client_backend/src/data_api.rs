@@ -64,6 +64,7 @@ use std::{
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
+use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zip32::fingerprint::SeedFingerprint;
@@ -75,7 +76,9 @@ use self::{
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+    },
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
     ShieldedProtocol,
@@ -320,7 +323,7 @@ impl AccountBalance {
 
 /// The kinds of accounts supported by `zcash_client_backend`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AccountKind {
+pub enum AccountSource {
     /// An account derived from a known seed.
     Derived {
         seed_fingerprint: SeedFingerprint,
@@ -338,40 +341,57 @@ pub trait Account<AccountId: Copy> {
 
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
-    fn kind(&self) -> AccountKind;
+    fn source(&self) -> AccountSource;
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     ///
     /// Accounts for which this returns `None` cannot be used in wallet contexts, because
     /// they are unable to maintain an accurate balance.
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+
+    /// Returns the UIVK that the wallet backend has stored for the account.
+    ///
+    /// All accounts are required to have at least an incoming viewing key. This gives no
+    /// indication about whether an account can be used in a wallet context; for that, use
+    /// [`Account::ufvk`].
+    fn uivk(&self) -> UnifiedIncomingViewingKey;
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
 impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     fn id(&self) -> A {
         self.0
     }
 
-    fn kind(&self) -> AccountKind {
-        AccountKind::Imported
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         Some(&self.1)
     }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.to_unified_incoming_viewing_key()
+    }
 }
 
-impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
+#[cfg(any(test, feature = "test-dependencies"))]
+impl<A: Copy> Account<A> for (A, UnifiedIncomingViewingKey) {
     fn id(&self) -> A {
         self.0
     }
 
-    fn kind(&self) -> AccountKind {
-        AccountKind::Imported
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
-        self.1.as_ref()
+        None
+    }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.clone()
     }
 }
 
@@ -724,6 +744,16 @@ pub trait WalletRead {
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error>;
 
+    /// Checks whether the given seed is relevant to any of the derived accounts (where
+    /// [`Account::source`] is [`AccountSource::Derived`]) in the wallet.
+    ///
+    /// This API does not check whether the seed is relevant to any imported account,
+    /// because that would require brute-forcing the ZIP 32 account index space.
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error>;
+
     /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
         &self,
@@ -882,6 +912,21 @@ pub trait WalletRead {
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
     }
+}
+
+/// The relevance of a seed to a given wallet.
+///
+/// This is the return type for [`WalletRead::seed_relevance_to_derived_accounts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SeedRelevance<A: Copy> {
+    /// The seed is relevant to at least one derived account within the wallet.
+    Relevant { account_ids: NonEmpty<A> },
+    /// The seed is not relevant to any of the derived accounts within the wallet.
+    NotRelevant,
+    /// The wallet contains no derived accounts.
+    NoDerivedAccounts,
+    /// The wallet contains no accounts.
+    NoAccounts,
 }
 
 /// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
@@ -1609,8 +1654,8 @@ pub mod testing {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1701,6 +1746,13 @@ pub mod testing {
             _seed: &SecretVec<u8>,
         ) -> Result<bool, Self::Error> {
             Ok(false)
+        }
+
+        fn seed_relevance_to_derived_accounts(
+            &self,
+            _seed: &SecretVec<u8>,
+        ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+            Ok(SeedRelevance::NoAccounts)
         }
 
         fn get_account_for_ufvk(

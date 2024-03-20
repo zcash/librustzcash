@@ -30,10 +30,6 @@ pub enum SqliteClientError {
     /// The rcm value for a note cannot be decoded to a valid JubJub point.
     InvalidNote,
 
-    /// The note id associated with a witness being stored corresponds to a
-    /// sent note, not a received note.
-    InvalidNoteId,
-
     /// Illegal attempt to reinitialize an already-initialized wallet database.
     TableNotEmpty,
 
@@ -138,8 +134,6 @@ impl fmt::Display for SqliteClientError {
             }
             SqliteClientError::Protobuf(e) => write!(f, "Failed to parse protobuf-encoded record: {}", e),
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
-            SqliteClientError::InvalidNoteId =>
-                write!(f, "The note ID associated with an inserted witness must correspond to a received note."),
             SqliteClientError::RequestedRewindInvalid(h, r) =>
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
             SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),

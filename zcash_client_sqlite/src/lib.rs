@@ -37,6 +37,7 @@ use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
+use nonempty::NonEmpty;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -60,9 +61,9 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountKind, BlockMetadata, DecryptedTransaction, InputSource,
-        NullifierQuery, ScannedBlock, SentTransaction, SpendableNotes, WalletCommitmentTrees,
-        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -316,43 +317,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = self.get_account(account_id)? {
-            if let AccountKind::Derived {
+            if let AccountSource::Derived {
                 seed_fingerprint,
                 account_index,
-            } = account.kind()
+            } = account.source()
             {
-                let seed_fingerprint_match =
-                    SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
-                        SqliteClientError::BadAccountData(
-                            "Seed must be between 32 and 252 bytes in length.".to_owned(),
-                        )
-                    })? == seed_fingerprint;
-
-                let usk = UnifiedSpendingKey::from_seed(
+                wallet::seed_matches_derived_account(
                     &self.params,
-                    &seed.expose_secret()[..],
+                    seed,
+                    &seed_fingerprint,
                     account_index,
+                    &account.uivk(),
                 )
-                .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
-
-                // Keys are not comparable with `Eq`, but addresses are, so we derive what should
-                // be equivalent addresses for each key and use those to check for key equality.
-                let ufvk_match = UnifiedAddressRequest::all().map_or(
-                    Ok::<_, Self::Error>(false),
-                    |ua_request| {
-                        Ok(usk
-                            .to_unified_full_viewing_key()
-                            .default_address(ua_request)?
-                            == account.default_address(ua_request)?)
-                    },
-                )?;
-
-                if seed_fingerprint_match != ufvk_match {
-                    // If these mismatch, it suggests database corruption.
-                    return Err(SqliteClientError::CorruptedData(format!("Seed fingerprint match: {seed_fingerprint_match}, ufvk match: {ufvk_match}")));
-                }
-
-                Ok(seed_fingerprint_match && ufvk_match)
             } else {
                 Err(SqliteClientError::UnknownZip32Derivation)
             }
@@ -360,6 +336,55 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             // Missing account is documented to return false.
             Ok(false)
         }
+    }
+
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+        let mut has_accounts = false;
+        let mut has_derived = false;
+        let mut relevant_account_ids = vec![];
+
+        for account_id in self.get_account_ids()? {
+            has_accounts = true;
+            let account = self.get_account(account_id)?.expect("account ID exists");
+
+            // If the account is imported, the seed _might_ be relevant, but the only
+            // way we could determine that is by brute-forcing the ZIP 32 account
+            // index space, which we're not going to do. The method name indicates to
+            // the caller that we only check derived accounts.
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                has_derived = true;
+
+                if wallet::seed_matches_derived_account(
+                    &self.params,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )? {
+                    // The seed is relevant to this account.
+                    relevant_account_ids.push(account_id);
+                }
+            }
+        }
+
+        Ok(
+            if let Some(account_ids) = NonEmpty::from_vec(relevant_account_ids) {
+                SeedRelevance::Relevant { account_ids }
+            } else if has_derived {
+                SeedRelevance::NotRelevant
+            } else if has_accounts {
+                SeedRelevance::NoDerivedAccounts
+            } else {
+                SeedRelevance::NoAccounts
+            },
+        )
     }
 
     fn get_account_for_ufvk(
@@ -527,7 +552,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let account_id = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountKind::Derived {
+                AccountSource::Derived {
                     seed_fingerprint,
                     account_index,
                 },

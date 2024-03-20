@@ -83,8 +83,3 @@ pub use zcash_protocol::{PoolType, ShieldedProtocol};
 #[cfg(test)]
 #[macro_use]
 extern crate assert_matches;
-
-#[cfg(all(feature = "orchard", not(zcash_unstable = "orchard")))]
-core::compile_error!(
-    "The `orchard` feature flag requires the `zcash_unstable=\"orchard\"` RUSTFLAG."
-);

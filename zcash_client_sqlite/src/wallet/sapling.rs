@@ -399,6 +399,7 @@ pub(crate) mod tests {
     impl ShieldedPoolTester for SaplingPoolTester {
         const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;
         const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
+        // const MERKLE_TREE_DEPTH: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH;
 
         type Sk = ExtendedSpendingKey;
         type Fvk = DiversifiableFullViewingKey;

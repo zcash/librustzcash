@@ -342,7 +342,14 @@ impl Address {
     }
 }
 
-#[cfg(any(test, feature = "test-dependencies"))]
+#[cfg(all(
+    any(
+        feature = "orchard",
+        feature = "sapling",
+        feature = "transparent-inputs"
+    ),
+    any(test, feature = "test-dependencies")
+))]
 pub mod testing {
     use proptest::prelude::*;
     use zcash_primitives::consensus::Network;

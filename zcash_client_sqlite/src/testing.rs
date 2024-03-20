@@ -6,12 +6,14 @@ use std::{collections::BTreeMap, convert::Infallible};
 use std::fs::File;
 
 use group::ff::Field;
+use incrementalmerkletree::Retention;
 use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
 use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
+use shardtree::error::ShardTreeError;
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
@@ -28,13 +30,14 @@ use zcash_client_backend::{
     address::Address,
     data_api::{
         self,
-        chain::{scan_cached_blocks, BlockSource, ScanSummary},
+        chain::{scan_cached_blocks, BlockSource, CommitmentTreeRoot, ScanSummary},
         wallet::{
             create_proposed_transactions, create_spend_to_address,
             input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector},
             propose_standard_transfer_to_address, propose_transfer, spend,
         },
-        AccountBalance, AccountBirthday, WalletRead, WalletSummary, WalletWrite,
+        AccountBalance, AccountBirthday, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite,
     },
     keys::UnifiedSpendingKey,
     proposal::Proposal,
@@ -63,6 +66,7 @@ use zcash_primitives::{
     zip32::DiversifierIndex,
 };
 use zcash_protocol::local_consensus::LocalNetwork;
+use zcash_protocol::value::{ZatBalance, Zatoshis};
 
 use crate::{
     chain::init::init_cache_database,
@@ -189,7 +193,6 @@ impl<Cache> TestBuilder<Cache> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct CachedBlock {
-    hash: BlockHash,
     chain_state: ChainState,
     sapling_end_size: u32,
     orchard_end_size: u32,
@@ -198,19 +201,13 @@ pub(crate) struct CachedBlock {
 impl CachedBlock {
     fn none(sapling_activation_height: BlockHeight) -> Self {
         Self {
-            hash: BlockHash([0; 32]),
-            chain_state: ChainState::empty(sapling_activation_height),
+            chain_state: ChainState::empty(sapling_activation_height, BlockHash([0; 32])),
             sapling_end_size: 0,
             orchard_end_size: 0,
         }
     }
 
-    fn at(
-        hash: BlockHash,
-        chain_state: ChainState,
-        sapling_end_size: u32,
-        orchard_end_size: u32,
-    ) -> Self {
+    fn at(chain_state: ChainState, sapling_end_size: u32, orchard_end_size: u32) -> Self {
         assert_eq!(
             chain_state.final_sapling_tree().tree_size() as u32,
             sapling_end_size
@@ -222,7 +219,6 @@ impl CachedBlock {
         );
 
         Self {
-            hash,
             chain_state,
             sapling_end_size,
             orchard_end_size,
@@ -257,9 +253,9 @@ impl CachedBlock {
         });
 
         Self {
-            hash: cb.hash(),
             chain_state: ChainState::new(
                 cb.height(),
+                cb.hash(),
                 sapling_final_tree,
                 #[cfg(feature = "orchard")]
                 orchard_final_tree,
@@ -322,6 +318,67 @@ where
         self.cache.insert(&compact_block)
     }
 
+    /// Ensure that the provided chain state and subtree roots exist in the wallet's note
+    /// commitment tree(s). This may result in a conflict if either the provided subtree roots or
+    /// the chain state conflict with existing note commitment tree data.
+    pub(crate) fn establish_chain_state(
+        &mut self,
+        state: ChainState,
+        prior_sapling_roots: &[CommitmentTreeRoot<sapling::Node>],
+        #[cfg(feature = "orchard")] prior_orchard_roots: &[CommitmentTreeRoot<MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
+        self.wallet_mut()
+            .put_sapling_subtree_roots(0, prior_sapling_roots)?;
+        #[cfg(feature = "orchard")]
+        self.wallet_mut()
+            .put_orchard_subtree_roots(0, prior_orchard_roots)?;
+
+        self.wallet_mut().with_sapling_tree_mut(|t| {
+            t.insert_frontier(
+                state.final_sapling_tree().clone(),
+                Retention::Checkpoint {
+                    id: state.block_height(),
+                    is_marked: false,
+                },
+            )
+        })?;
+        let final_sapling_tree_size = state.final_sapling_tree().tree_size() as u32;
+
+        #[cfg(feature = "orchard")]
+        self.wallet_mut().with_orchard_tree_mut(|t| {
+            t.insert_frontier(
+                state.final_orchard_tree().clone(),
+                Retention::Checkpoint {
+                    id: state.block_height(),
+                    is_marked: false,
+                },
+            )
+        })?;
+
+        let _final_orchard_tree_size = 0;
+        #[cfg(feature = "orchard")]
+        let _final_orchard_tree_size = state.final_orchard_tree().tree_size() as u32;
+
+        self.insert_cached_block(state, final_sapling_tree_size, _final_orchard_tree_size);
+        Ok(())
+    }
+
+    fn insert_cached_block(
+        &mut self,
+        chain_state: ChainState,
+        sapling_end_size: u32,
+        orchard_end_size: u32,
+    ) {
+        self.cached_blocks.insert(
+            chain_state.block_height(),
+            CachedBlock {
+                chain_state,
+                sapling_end_size,
+                orchard_end_size,
+            },
+        );
+    }
+
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
     pub(crate) fn generate_next_block<Fvk: TestFvk>(
@@ -336,7 +393,7 @@ where
 
         let (res, nf) = self.generate_block_at(
             height,
-            prior_cached_block.hash,
+            prior_cached_block.chain_state.block_hash(),
             fvk,
             req,
             value,
@@ -375,7 +432,7 @@ where
         // we need to generate a new prior cached block that the block to be generated can
         // successfully chain from, with the provided tree sizes.
         if prior_cached_block.chain_state.block_height() == height - 1 {
-            assert_eq!(prev_hash, prior_cached_block.hash);
+            assert_eq!(prev_hash, prior_cached_block.chain_state.block_hash());
         } else {
             let final_sapling_tree =
                 (prior_cached_block.sapling_end_size..initial_sapling_tree_size).fold(
@@ -399,9 +456,9 @@ where
                 );
 
             prior_cached_block = CachedBlock::at(
-                prev_hash,
                 ChainState::new(
                     height - 1,
+                    prev_hash,
                     final_sapling_tree,
                     #[cfg(feature = "orchard")]
                     final_orchard_tree,
@@ -451,7 +508,7 @@ where
         let cb = fake_compact_block_spending(
             &self.network(),
             height,
-            prior_cached_block.hash,
+            prior_cached_block.chain_state.block_hash(),
             note,
             fvk,
             to.into(),
@@ -507,7 +564,7 @@ where
 
         let cb = fake_compact_block_from_tx(
             height,
-            prior_cached_block.hash,
+            prior_cached_block.chain_state.block_hash(),
             tx_index,
             tx,
             prior_cached_block.sapling_end_size,
@@ -610,6 +667,11 @@ impl<Cache> TestState<Cache> {
     /// Exposes the network in use.
     pub(crate) fn network(&self) -> LocalNetwork {
         self.db_data.params
+    }
+
+    /// Exposes the random number source for the test state
+    pub(crate) fn rng(&mut self) -> &mut ChaChaRng {
+        &mut self.rng
     }
 
     /// Convenience method for obtaining the Sapling activation height for the network under test.
@@ -957,6 +1019,105 @@ impl<Cache> TestState<Cache> {
             &SubtreeScanProgress,
         )
         .unwrap()
+    }
+
+    /// Returns a vector of transaction summaries
+    pub(crate) fn get_tx_history(
+        &self,
+    ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
+        let mut stmt = self.wallet().conn.prepare_cached(
+            "SELECT * 
+             FROM v_transactions 
+             ORDER BY mined_height DESC, tx_index DESC",
+        )?;
+
+        let results = stmt
+            .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
+                Ok(TransactionSummary {
+                    account_id: AccountId(row.get("account_id")?),
+                    txid: TxId::from_bytes(row.get("txid")?),
+                    expiry_height: row
+                        .get::<_, Option<u32>>("expiry_height")?
+                        .map(BlockHeight::from),
+                    mined_height: row
+                        .get::<_, Option<u32>>("mined_height")?
+                        .map(BlockHeight::from),
+                    account_value_delta: ZatBalance::from_i64(row.get("account_balance_delta")?)?,
+                    fee_paid: row
+                        .get::<_, Option<i64>>("fee_paid")?
+                        .map(Zatoshis::from_nonnegative_i64)
+                        .transpose()?,
+                    has_change: row.get("has_change")?,
+                    sent_note_count: row.get("sent_note_count")?,
+                    received_note_count: row.get("received_note_count")?,
+                    memo_count: row.get("memo_count")?,
+                    expired_unmined: row.get("expired_unmined")?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+}
+
+pub(crate) struct TransactionSummary<AccountId> {
+    account_id: AccountId,
+    txid: TxId,
+    expiry_height: Option<BlockHeight>,
+    mined_height: Option<BlockHeight>,
+    account_value_delta: ZatBalance,
+    fee_paid: Option<Zatoshis>,
+    has_change: bool,
+    sent_note_count: usize,
+    received_note_count: usize,
+    memo_count: usize,
+    expired_unmined: bool,
+}
+
+#[allow(dead_code)]
+impl<AccountId> TransactionSummary<AccountId> {
+    pub(crate) fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    pub(crate) fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    pub(crate) fn expiry_height(&self) -> Option<BlockHeight> {
+        self.expiry_height
+    }
+
+    pub(crate) fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
+
+    pub(crate) fn account_value_delta(&self) -> ZatBalance {
+        self.account_value_delta
+    }
+
+    pub(crate) fn fee_paid(&self) -> Option<Zatoshis> {
+        self.fee_paid
+    }
+
+    pub(crate) fn has_change(&self) -> bool {
+        self.has_change
+    }
+
+    pub(crate) fn sent_note_count(&self) -> usize {
+        self.sent_note_count
+    }
+
+    pub(crate) fn received_note_count(&self) -> usize {
+        self.received_note_count
+    }
+
+    pub(crate) fn expired_unmined(&self) -> bool {
+        self.expired_unmined
+    }
+
+    pub(crate) fn memo_count(&self) -> usize {
+        self.memo_count
     }
 }
 

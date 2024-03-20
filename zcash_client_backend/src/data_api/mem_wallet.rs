@@ -157,6 +157,13 @@ impl WalletRead for MemoryWalletDb {
         todo!()
     }
 
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<super::SeedRelevance<Self::AccountId>, Self::Error> {
+        todo!()
+    }
+
     fn get_account_for_ufvk(
         &self,
         ufvk: &UnifiedFullViewingKey,

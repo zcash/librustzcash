@@ -1,11 +1,11 @@
 use std::{collections::HashSet, rc::Rc};
 
-use crate::wallet::{account_kind_code, init::WalletMigrationError, ufvk_to_uivk};
+use crate::wallet::{account_kind_code, init::WalletMigrationError};
 use rusqlite::{named_params, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
-use zcash_client_backend::{data_api::AccountKind, keys::UnifiedSpendingKey};
+use zcash_client_backend::{data_api::AccountSource, keys::UnifiedSpendingKey};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
 use zip32::fingerprint::SeedFingerprint;
@@ -17,7 +17,7 @@ use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uni
 pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x1b104345_f27e_42da_a9e3_1de22694da43);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
-    pub(super) seed: Rc<Option<SecretVec<u8>>>,
+    pub(super) seed: Option<Rc<SecretVec<u8>>>,
     pub(super) params: P,
 }
 
@@ -45,11 +45,11 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
     type Error = WalletMigrationError;
 
     fn up(&self, transaction: &Transaction) -> Result<(), WalletMigrationError> {
-        let account_kind_derived = account_kind_code(AccountKind::Derived {
+        let account_kind_derived = account_kind_code(AccountSource::Derived {
             seed_fingerprint: SeedFingerprint::from_bytes([0; 32]),
             account_index: zip32::AccountId::ZERO,
         });
-        let account_kind_imported = account_kind_code(AccountKind::Imported);
+        let account_kind_imported = account_kind_code(AccountSource::Imported);
         transaction.execute_batch(
             &format!(r#"
             PRAGMA foreign_keys = OFF;
@@ -83,9 +83,26 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         if transaction.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
             Ok(row.get::<_, u32>(0)? > 0)
         })? {
-            if let Some(seed) = &self.seed.as_ref() {
+            if let Some(seed) = &self.seed {
                 let seed_id = SeedFingerprint::from_seed(seed.expose_secret())
                     .expect("Seed is between 32 and 252 bytes in length.");
+
+                // We track whether we have determined seed relevance or not, in order to
+                // correctly report errors when checking the seed against an account:
+                //
+                // - If we encounter an error with the first account, we can assert that
+                //   the seed is not relevant to the wallet by assuming that:
+                //   - All accounts are from the same seed (which is historically the only
+                //     use case that this migration supported), and
+                //   - All accounts in the wallet must have been able to derive their USKs
+                //     (in order to derive UIVKs).
+                //
+                // - Once the seed has been determined to be relevant (because it matched
+                //   the first account), any subsequent account derivation failure is
+                //   proving wrong our second assumption above, and we report this as
+                //   corrupted data.
+                let mut seed_is_relevant = false;
+
                 let mut q = transaction.prepare("SELECT * FROM accounts")?;
                 let mut rows = q.query([])?;
                 while let Some(row) = rows.next()? {
@@ -110,19 +127,31 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         })?,
                     )
                     .map_err(|_| {
-                        WalletMigrationError::CorruptedData(
-                            "Unable to derive spending key from seed.".to_string(),
-                        )
+                        if seed_is_relevant {
+                            WalletMigrationError::CorruptedData(
+                                "Unable to derive spending key from seed.".to_string(),
+                            )
+                        } else {
+                            WalletMigrationError::SeedNotRelevant
+                        }
                     })?;
                     let expected_ufvk = usk.to_unified_full_viewing_key();
                     if ufvk != expected_ufvk.encode(&self.params) {
-                        return Err(WalletMigrationError::CorruptedData(
-                            "UFVK does not match expected value.".to_string(),
-                        ));
+                        return Err(if seed_is_relevant {
+                            WalletMigrationError::CorruptedData(
+                                "UFVK does not match expected value.".to_string(),
+                            )
+                        } else {
+                            WalletMigrationError::SeedNotRelevant
+                        });
                     }
 
-                    let uivk = ufvk_to_uivk(&ufvk_parsed, &self.params)
-                        .map_err(|e| WalletMigrationError::CorruptedData(e.to_string()))?;
+                    // We made it past one derived account, so the seed must be relevant.
+                    seed_is_relevant = true;
+
+                    let uivk = ufvk_parsed
+                        .to_unified_incoming_viewing_key()
+                        .encode(&self.params);
 
                     #[cfg(feature = "transparent-inputs")]
                     let transparent_item = ufvk_parsed.transparent().map(|k| k.serialize());

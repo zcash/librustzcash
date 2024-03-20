@@ -1087,10 +1087,12 @@ dependencies = [
 [[package]]
 name = "incrementalmerkletree"
 version = "0.5.0"
-source = "git+https://github.com/nuttycom/incrementalmerkletree?rev=fa147c89c6c98a03bba745538f4e68d4eaed5146#fa147c89c6c98a03bba745538f4e68d4eaed5146"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=e1a7a80212c22e5a8912d05860f7eb6899c56a7c#e1a7a80212c22e5a8912d05860f7eb6899c56a7c"
 dependencies = [
  "either",
  "proptest",
+ "rand",
+ "rand_core",
 ]
 
 [[package]]
@@ -1475,7 +1477,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "orchard"
 version = "0.7.1"
-source = "git+https://github.com/zcash/orchard?rev=e74879dd0ad0918f4ffe0826e03905cd819981bd#e74879dd0ad0918f4ffe0826e03905cd819981bd"
+source = "git+https://github.com/zcash/orchard?rev=33474bdbfd7268e1f84718078d47f63d01a879d5#33474bdbfd7268e1f84718078d47f63d01a879d5"
 dependencies = [
  "aes",
  "bitvec",
@@ -2103,8 +2105,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0db258736b34dfc6bec50fab2afb94c1845d90370b38309ebf9bb166cc951251"
+source = "git+https://github.com/zcash/sapling-crypto?rev=22412ae07644813253feb064d1692b0823242853#22412ae07644813253feb064d1692b0823242853"
 dependencies = [
  "aes",
  "bellman",
@@ -2244,7 +2245,7 @@ dependencies = [
 [[package]]
 name = "shardtree"
 version = "0.2.0"
-source = "git+https://github.com/nuttycom/incrementalmerkletree?rev=fa147c89c6c98a03bba745538f4e68d4eaed5146#fa147c89c6c98a03bba745538f4e68d4eaed5146"
+source = "git+https://github.com/zcash/incrementalmerkletree?rev=e1a7a80212c22e5a8912d05860f7eb6899c56a7c#e1a7a80212c22e5a8912d05860f7eb6899c56a7c"
 dependencies = [
  "assert_matches",
  "bitflags 2.4.1",

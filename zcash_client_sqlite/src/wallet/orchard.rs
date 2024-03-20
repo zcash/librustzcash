@@ -378,6 +378,7 @@ pub(crate) mod tests {
     impl ShieldedPoolTester for OrchardPoolTester {
         const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
         const TABLES_PREFIX: &'static str = ORCHARD_TABLES_PREFIX;
+        // const MERKLE_TREE_DEPTH: u8 = {orchard::NOTE_COMMITMENT_TREE_DEPTH as u8};
 
         type Sk = SpendingKey;
         type Fvk = FullViewingKey;
