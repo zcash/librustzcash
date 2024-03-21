@@ -1015,9 +1015,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     })?;
                 }
 
-                // Update now-expired transactions that didn't get mined.
-                wallet::update_expired_notes(wdb.conn.0, last_scanned_height)?;
-
                 wallet::scanning::scan_complete(
                     wdb.conn.0,
                     &wdb.params,
