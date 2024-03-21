@@ -6,10 +6,11 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
-    num::NonZeroU32, hash::Hash,
+    hash::Hash,
+    num::NonZeroU32,
 };
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 
 use zcash_primitives::{
     block::BlockHash,
@@ -25,7 +26,7 @@ use zcash_protocol::{
 use crate::{
     address::UnifiedAddress,
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId, WalletTransparentOutput, WalletTx},
+    wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
 };
 
 use super::{
@@ -100,10 +101,7 @@ pub struct MemoryWalletDb {
 }
 
 impl MemoryWalletDb {
-    pub fn new(
-        network: Network,
-        max_checkpoints: usize
-    ) -> Self {
+    pub fn new(network: Network, max_checkpoints: usize) -> Self {
         Self {
             network,
             accounts: BTreeMap::new(),
@@ -122,6 +120,7 @@ impl MemoryWalletDb {
 #[derive(Debug)]
 pub enum Error {
     AccountUnknown(u32),
+    ViewingKeyNotFound(u32),
     MemoDecryption(memo::Error),
     KeyDerivation(DerivationError),
     AddressGeneration(AddressGenerationError),
@@ -236,7 +235,10 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        todo!()
+        match self.blocks.last_key_value() {
+            Some((last_key, _)) => Ok(Some(*last_key)),
+            None => Ok(None),
+        }
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
@@ -379,12 +381,62 @@ impl WalletWrite for MemoryWalletDb {
         todo!()
     }
 
+    /// Adds a sequence of blocks to the data store.
+    ///
+    /// Assumes blocks will be here in order.
     fn put_blocks(
         &mut self,
+        // TODO: Figure out what to do with this field.
         _from_state: &super::chain::ChainState,
-        _blocks: Vec<ScannedBlock<Self::AccountId>>,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        // TODO:
+        // - Make sure blocks are coming in order.
+        // - Make sure the first block in the sequence is tip + 1?
+        // - Add a check to make sure the blocks are not already in the data store.
+        for block in blocks.into_iter() {
+            let mut transactions = HashMap::new();
+            for transaction in block.transactions().into_iter().cloned() {
+                let txid = transaction.txid();
+                let account_id = 0; // TODO: Assuming the account is 0, handle this accordingly.
+                let ufvk = self
+                    .accounts
+                    .get(&account_id)
+                    .ok_or(Error::AccountUnknown(0))?
+                    .ufvk
+                    .sapling()
+                    .ok_or(Error::ViewingKeyNotFound(0))?;
+                let nk = ufvk.to_nk(Scope::External);
+
+                let spent_nullifiers = transaction
+                    .sapling_outputs()
+                    .iter()
+                    .map(|o| {
+                        let nullifier = o.note().nf(&nk, o.note_commitment_tree_position().into());
+                        // TODO: Populate the bool field properly.
+                        self.sapling_spends.entry(nullifier).or_insert((txid, true));
+                        nullifier
+                    })
+                    .count();
+
+                // Is `self.tx_idx` field filled with all the transaction ids from the scanned blocks ?
+                self.tx_idx.insert(txid, block.block_height);
+                transactions.insert(txid, transaction);
+            }
+
+            let memory_block = MemoryWalletBlock {
+                height: block.block_height,
+                hash: block.block_hash,
+                block_time: block.block_time,
+                transactions,
+                // TODO: Add memos
+                memos: HashMap::new(),
+            };
+
+            self.blocks.insert(block.block_height, memory_block);
+        }
+
+        Ok(())
     }
 
     /// Adds a transparent UTXO received by the wallet to the data store.
