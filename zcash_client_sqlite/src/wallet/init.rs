@@ -402,6 +402,17 @@ mod tests {
                     ON UPDATE RESTRICT,
                 CONSTRAINT nf_uniq UNIQUE (spend_pool, nf)
             )",
+            "CREATE TABLE orchard_received_note_spends (
+                orchard_received_note_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (orchard_received_note_id)
+                    REFERENCES orchard_received_notes(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (orchard_received_note_id, transaction_id)
+            )",
             "CREATE TABLE orchard_received_notes (
                 id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -414,12 +425,10 @@ mod tests {
                 nf BLOB UNIQUE,
                 is_change INTEGER NOT NULL,
                 memo BLOB,
-                spent INTEGER,
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, action_index)
             )",
             "CREATE TABLE orchard_tree_cap (
@@ -447,6 +456,17 @@ mod tests {
                 contains_marked INTEGER,
                 CONSTRAINT root_unique UNIQUE (root_hash)
             )",
+            "CREATE TABLE sapling_received_note_spends (
+                sapling_received_note_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (sapling_received_note_id)
+                    REFERENCES sapling_received_notes(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (sapling_received_note_id, transaction_id)
+            )",
             r#"CREATE TABLE "sapling_received_notes" (
                 id INTEGER PRIMARY KEY,
                 tx INTEGER NOT NULL,
@@ -458,12 +478,10 @@ mod tests {
                 nf BLOB UNIQUE,
                 is_change INTEGER NOT NULL,
                 memo BLOB,
-                spent INTEGER,
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
             )"#,
             "CREATE TABLE sapling_tree_cap (
@@ -535,6 +553,17 @@ mod tests {
                 fee INTEGER,
                 FOREIGN KEY (block) REFERENCES blocks(height)
             )",
+            "CREATE TABLE transparent_received_output_spends (
+                transparent_received_output_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (transparent_received_output_id)
+                    REFERENCES utxos(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (transparent_received_output_id, transaction_id)
+            )",
             "CREATE TABLE tx_locator_map (
                 block_height INTEGER NOT NULL,
                 tx_index INTEGER NOT NULL,
@@ -550,9 +579,7 @@ mod tests {
                 script BLOB NOT NULL,
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
-                spent_in_tx INTEGER,
                 FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
             )"#,
         ];
@@ -584,17 +611,11 @@ mod tests {
             r#"CREATE INDEX orchard_received_notes_account ON orchard_received_notes (
                 account_id ASC
             )"#,
-            r#"CREATE INDEX orchard_received_notes_spent ON orchard_received_notes (
-                spent ASC
-            )"#,
             r#"CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
                 tx ASC
             )"#,
             r#"CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes" (
                 "account_id" ASC
-            )"#,
-            r#"CREATE INDEX "sapling_received_notes_spent" ON "sapling_received_notes" (
-                "spent" ASC
             )"#,
             r#"CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes" (
                 "tx" ASC
@@ -603,7 +624,6 @@ mod tests {
             r#"CREATE INDEX sent_notes_to_account ON "sent_notes" (to_account_id)"#,
             r#"CREATE INDEX sent_notes_tx ON "sent_notes" (tx)"#,
             r#"CREATE INDEX utxos_received_by_account ON "utxos" (received_by_account_id)"#,
-            r#"CREATE INDEX utxos_spent_in_tx ON "utxos" (spent_in_tx)"#,
         ];
         let mut indices_query = st
             .wallet()
@@ -686,6 +706,19 @@ mod tests {
                 subtree_start_height,
                 subtree_end_height,
                 contains_marked".to_owned(),
+            // v_received_note_spends
+            "CREATE VIEW v_received_note_spends AS
+            SELECT
+                2 AS pool,
+                sapling_received_note_id AS received_note_id,
+                transaction_id
+            FROM sapling_received_note_spends
+            UNION
+            SELECT
+                3 AS pool,
+                orchard_received_note_id AS received_note_id,
+                transaction_id
+            FROM orchard_received_note_spends".to_owned(),
             // v_received_notes
             "CREATE VIEW v_received_notes AS
                 SELECT
@@ -697,7 +730,6 @@ mod tests {
                     sapling_received_notes.value,
                     is_change,
                     sapling_received_notes.memo,
-                    spent,
                     sent_notes.id AS sent_note_id
                 FROM sapling_received_notes
                 LEFT JOIN sent_notes
@@ -713,7 +745,6 @@ mod tests {
                     orchard_received_notes.value,
                     is_change,
                     orchard_received_notes.memo,
-                    spent,
                     sent_notes.id AS sent_note_id
                 FROM orchard_received_notes
                 LEFT JOIN sent_notes
@@ -834,8 +865,11 @@ mod tests {
                            0                            AS received_count,
                            0                            AS memo_present
                     FROM v_received_notes
+                    JOIN v_received_note_spends rns
+                         ON rns.pool = v_received_notes.pool
+                         AND rns.received_note_id = v_received_notes.id_within_pool_table
                     JOIN transactions
-                         ON transactions.id_tx = v_received_notes.spent
+                         ON transactions.id_tx = rns.transaction_id
                     UNION
                     -- Transparent TXOs spent in this transaction
                     SELECT utxos.received_by_account_id AS account_id,
@@ -848,8 +882,10 @@ mod tests {
                            0                            AS received_count,
                            0                            AS memo_present
                     FROM utxos
+                    JOIN transparent_received_output_spends tros
+                         ON tros.transparent_received_output_id = utxos.id
                     JOIN transactions
-                         ON transactions.id_tx = utxos.spent_in_tx
+                         ON transactions.id_tx = tros.transaction_id
                 ),
                 -- Obtain a count of the notes that the wallet created in each transaction,
                 -- not counting change notes.

@@ -716,7 +716,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
             value,
         );
     }
-    st.scan_cached_blocks(h1 + 1, 41);
+    st.scan_cached_blocks(h1 + 1, 40);
 
     // Second proposal still fails
     assert_matches!(
@@ -1705,20 +1705,20 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     // Scan the cache
     st.scan_cached_blocks(h, 2);
 
-    // Account balance should reflect both received notes
+    // Spendable balance should reflect both received notes
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_spendable_balance(account.account_id(), 1),
         (value + value2).unwrap()
     );
 
-    // "Rewind" to height of last scanned block
+    // "Rewind" to height of last scanned block (this is a no-op)
     st.wallet_mut()
         .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
         .unwrap();
 
-    // Account balance should be unaltered
+    // Spendable balance should be unaltered
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_spendable_balance(account.account_id(), 1),
         (value + value2).unwrap()
     );
 
@@ -1727,15 +1727,20 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
         .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
         .unwrap();
 
-    // Account balance should only contain the first received note
-    assert_eq!(st.get_total_balance(account.account_id()), value);
+    // Spendable balance should only contain the first received note;
+    // the rest should be pending.
+    assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
+    assert_eq!(
+        st.get_pending_shielded_balance(account.account_id(), 1),
+        value2
+    );
 
     // Scan the cache again
     st.scan_cached_blocks(h, 2);
 
     // Account balance should again reflect both received notes
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_spendable_balance(account.account_id(), 1),
         (value + value2).unwrap()
     );
 }

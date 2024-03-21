@@ -3,7 +3,7 @@ use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
 };
-use rusqlite::{named_params, params, Connection, Row};
+use rusqlite::{named_params, Connection, Row, Transaction};
 
 use zcash_client_backend::{
     data_api::NullifierQuery,
@@ -222,7 +222,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
 pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
-    conn: &Connection,
+    conn: &Transaction,
     output: &T,
     tx_ref: i64,
     spent_in: Option<i64>,
@@ -232,13 +232,13 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
         (
             tx, action_index, account_id,
             diversifier, value, rho, rseed, memo, nf,
-            is_change, spent, commitment_tree_position,
+            is_change, commitment_tree_position,
             recipient_key_scope
         )
         VALUES (
             :tx, :action_index, :account_id,
             :diversifier, :value, :rho, :rseed, :memo, :nf,
-            :is_change, :spent, :commitment_tree_position,
+            :is_change, :commitment_tree_position,
             :recipient_key_scope
         )
         ON CONFLICT (tx, action_index) DO UPDATE
@@ -250,9 +250,9 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
             is_change = IFNULL(:is_change, is_change),
-            spent = IFNULL(:spent, spent),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
-            recipient_key_scope = :recipient_key_scope",
+            recipient_key_scope = :recipient_key_scope
+        RETURNING orchard_received_notes.id",
     )?;
 
     let rseed = output.note().rseed();
@@ -270,15 +270,25 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
         ":nf": output.nullifier().map(|nf| nf.to_bytes()),
         ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change(),
-        ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
         ":recipient_key_scope": output.recipient_key_scope().map(scope_code),
     ];
 
-    stmt_upsert_received_note
-        .execute(sql_args)
+    let received_note_id = stmt_upsert_received_note
+        .query_row(sql_args, |row| row.get::<_, i64>(0))
         .map_err(SqliteClientError::from)?;
 
+    if let Some(spent_in) = spent_in {
+        conn.execute(
+            "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
+             VALUES (:orchard_received_note_id, :transaction_id)
+             ON CONFLICT (orchard_received_note_id, transaction_id) DO NOTHING",
+            named_params![
+                ":orchard_received_note_id": received_note_id,
+                ":transaction_id": spent_in
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -297,10 +307,16 @@ pub(crate) fn get_orchard_nullifiers(
         NullifierQuery::Unspent => conn.prepare(
             "SELECT rn.account_id, rn.nf
              FROM orchard_received_notes rn
-             LEFT OUTER JOIN transactions tx
-             ON tx.id_tx = rn.spent
-             WHERE tx.block IS NULL
-             AND nf IS NOT NULL",
+             JOIN transactions tx ON tx.id_tx = rn.tx
+             WHERE rn.nf IS NOT NULL
+             AND tx.block IS NOT NULL
+             AND rn.id NOT IN (
+               SELECT spends.orchard_received_note_id
+               FROM orchard_received_note_spends spends
+               JOIN transactions stx ON stx.id_tx = spends.transaction_id
+               WHERE stx.block IS NOT NULL  -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+             )",
         )?,
         NullifierQuery::All => conn.prepare(
             "SELECT rn.account_id, rn.nf
@@ -329,10 +345,16 @@ pub(crate) fn mark_orchard_note_spent(
     tx_ref: i64,
     nf: &Nullifier,
 ) -> Result<bool, SqliteClientError> {
-    let mut stmt_mark_orchard_note_spent =
-        conn.prepare_cached("UPDATE orchard_received_notes SET spent = ? WHERE nf = ?")?;
+    let mut stmt_mark_orchard_note_spent = conn.prepare_cached(
+        "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
+         SELECT id, :transaction_id FROM orchard_received_notes WHERE nf = :nf
+         ON CONFLICT (orchard_received_note_id, transaction_id) DO NOTHING",
+    )?;
 
-    match stmt_mark_orchard_note_spent.execute(params![tx_ref, nf.to_bytes()])? {
+    match stmt_mark_orchard_note_spent.execute(named_params![
+       ":nf": nf.to_bytes(),
+       ":transaction_id": tx_ref
+    ])? {
         0 => Ok(false),
         1 => Ok(true),
         _ => unreachable!("nf column is marked as UNIQUE"),
