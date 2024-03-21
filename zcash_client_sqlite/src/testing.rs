@@ -14,6 +14,7 @@ use rand_core::{CryptoRng, RngCore, SeedableRng};
 use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
 
+use shardtree::error::ShardTreeError;
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
@@ -774,6 +775,24 @@ impl<Cache> TestState<Cache> {
         self.test_account
             .as_ref()
             .and_then(|(_, acct)| acct.usk.to_unified_full_viewing_key().orchard().cloned())
+    }
+
+    /// Insert shard roots for both trees.
+    pub(crate) fn put_subtree_roots(
+        &mut self,
+        sapling_start_index: u64,
+        sapling_roots: &[CommitmentTreeRoot<sapling::Node>],
+        #[cfg(feature = "orchard")] orchard_start_index: u64,
+        #[cfg(feature = "orchard")] orchard_roots: &[CommitmentTreeRoot<MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
+        self.wallet_mut()
+            .put_sapling_subtree_roots(sapling_start_index, sapling_roots)?;
+
+        #[cfg(feature = "orchard")]
+        self.wallet_mut()
+            .put_orchard_subtree_roots(orchard_start_index, orchard_roots)?;
+
+        Ok(())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.

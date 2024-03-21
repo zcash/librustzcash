@@ -342,10 +342,11 @@ mod tests {
         testing::TestBuilder, wallet::scanning::priority_code, WalletDb, DEFAULT_UA_REQUEST,
     };
 
-    use super::{init_wallet_db, WalletMigrationError};
+    use super::init_wallet_db;
 
     #[cfg(feature = "transparent-inputs")]
     use {
+        super::WalletMigrationError,
         crate::wallet::{self, pool_code, PoolType},
         zcash_address::test_vectors,
         zcash_client_backend::data_api::WalletWrite,
