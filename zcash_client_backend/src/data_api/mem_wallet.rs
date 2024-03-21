@@ -110,8 +110,10 @@ impl MemoryWalletDb {
             blocks: BTreeMap::new(),
             tx_idx: HashMap::new(),
             sapling_spends: BTreeMap::new(),
+            #[cfg(feature = "orchard")]
             orchard_spends: BTreeMap::new(),
             sapling_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
+            #[cfg(feature = "orchard")]
             orchard_tree: ShardTree::new(MemoryShardStore::empty(), max_checkpoints),
         }
     }
