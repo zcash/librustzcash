@@ -120,13 +120,18 @@ pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 #[cfg(feature = "orchard")]
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
+#[cfg(not(feature = "orchard"))]
+pub(crate) const UA_ORCHARD: bool = false;
+#[cfg(feature = "orchard")]
+pub(crate) const UA_ORCHARD: bool = true;
+
 #[cfg(not(feature = "transparent-inputs"))]
 pub(crate) const UA_TRANSPARENT: bool = false;
 #[cfg(feature = "transparent-inputs")]
 pub(crate) const UA_TRANSPARENT: bool = true;
 
 pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+    UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT);
 
 /// The ID type for accounts.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
