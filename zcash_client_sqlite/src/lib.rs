@@ -535,7 +535,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
-        birthday: AccountBirthday,
+        birthday: &AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
             let seed_fingerprint =
@@ -1695,7 +1695,8 @@ extern crate assert_matches;
 #[cfg(test)]
 mod tests {
     use secrecy::SecretVec;
-    use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
+    use zcash_client_backend::data_api::{WalletRead, WalletWrite};
+    use zcash_primitives::block::BlockHash;
 
     use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
 
@@ -1708,29 +1709,28 @@ mod tests {
     #[test]
     fn validate_seed() {
         let st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
+        let account = st.test_account().unwrap();
 
         assert!({
-            let account = st.test_account().unwrap().0;
             st.wallet()
-                .validate_seed(account, st.test_seed().unwrap())
+                .validate_seed(account.account_id(), st.test_seed().unwrap())
                 .unwrap()
         });
 
         // check that passing an invalid account results in a failure
         assert!({
-            let account = AccountId(3);
+            let wrong_account_index = AccountId(3);
             !st.wallet()
-                .validate_seed(account, st.test_seed().unwrap())
+                .validate_seed(wrong_account_index, st.test_seed().unwrap())
                 .unwrap()
         });
 
         // check that passing an invalid seed results in a failure
         assert!({
-            let account = st.test_account().unwrap().0;
             !st.wallet()
-                .validate_seed(account, &SecretVec::new(vec![1u8; 32]))
+                .validate_seed(account.account_id(), &SecretVec::new(vec![1u8; 32]))
                 .unwrap()
         });
     }
@@ -1738,22 +1738,28 @@ mod tests {
     #[test]
     pub(crate) fn get_next_available_address() {
         let mut st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
-        let account = st.test_account().unwrap();
+        let account = st.test_account().cloned().unwrap();
 
-        let current_addr = st.wallet().get_current_address(account.0).unwrap();
+        let current_addr = st
+            .wallet()
+            .get_current_address(account.account_id())
+            .unwrap();
         assert!(current_addr.is_some());
 
         // TODO: Add Orchard
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.0, DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.account_id(), DEFAULT_UA_REQUEST)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = st.wallet().get_current_address(account.0).unwrap();
+        let addr2_cur = st
+            .wallet()
+            .get_current_address(account.account_id())
+            .unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1763,15 +1769,16 @@ mod tests {
         // Add an account to the wallet.
         let st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
+        let ufvk = account.usk().to_unified_full_viewing_key();
+        let (taddr, _) = account.usk().default_transparent_address();
 
-        let (_, usk, _) = st.test_account().unwrap();
-        let ufvk = usk.to_unified_full_viewing_key();
-        let (taddr, _) = usk.default_transparent_address();
-
-        let receivers = st.wallet().get_transparent_receivers(account.0).unwrap();
+        let receivers = st
+            .wallet()
+            .get_transparent_receivers(account.account_id())
+            .unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
@@ -1799,8 +1806,8 @@ mod tests {
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
-        let account = zip32::AccountId::ZERO;
-        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
+        let hd_account_index = zip32::AccountId::ZERO;
+        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), hd_account_index);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,

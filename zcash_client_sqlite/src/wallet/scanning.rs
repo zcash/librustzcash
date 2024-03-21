@@ -583,7 +583,6 @@ pub(crate) mod tests {
 
     use incrementalmerkletree::{frontier::Frontier, Hashable, Position};
 
-    use sapling::Node;
     use secrecy::SecretVec;
     use zcash_client_backend::data_api::{
         chain::{ChainState, CommitmentTreeRoot},
@@ -599,7 +598,10 @@ pub(crate) mod tests {
 
     use crate::{
         error::SqliteClientError,
-        testing::{pool::ShieldedPoolTester, AddressType, BlockCache, TestBuilder, TestState},
+        testing::{
+            pool::ShieldedPoolTester, AddressType, BlockCache, InitialChainState, TestBuilder,
+            TestState,
+        },
         wallet::{
             sapling::tests::SaplingPoolTester,
             scanning::{insert_queue_entries, replace_queue_entries, suggest_scan_ranges},
@@ -626,66 +628,69 @@ pub(crate) mod tests {
 
     fn scan_complete<T: ShieldedPoolTester>() {
         use ScanPriority::*;
-        let initial_height_offset = 310;
-        let mut st = TestBuilder::new()
-            .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
-            .build();
-
-        let sapling_activation_height = st.sapling_activation_height();
 
         // We'll start inserting leaf notes 5 notes after the end of the third subtree, with a gap
         // of 10 blocks. After `scan_cached_blocks`, the scan queue should have a requested scan
         // range of 300..310 with `FoundNote` priority, 310..320 with `Scanned` priority.
         // We set both Sapling and Orchard to the same initial tree size for simplicity.
+        let prior_block_hash = BlockHash([0; 32]);
         let initial_sapling_tree_size: u32 = (0x1 << 16) * 3 + 5;
         let initial_orchard_tree_size: u32 = (0x1 << 16) * 3 + 5;
+        let initial_height_offset = 310;
 
-        // Construct a fake chain state for the end of block 300
-        let (prior_sapling_frontiers, sapling_initial_tree) =
-            Frontier::random_with_prior_subtree_roots(
-                st.rng(),
-                initial_sapling_tree_size.into(),
-                NonZeroU8::new(16).unwrap(),
-            );
-        let sapling_subtree_roots = prior_sapling_frontiers
-            .into_iter()
-            .zip(0u32..)
-            .map(|(root, i)| {
-                CommitmentTreeRoot::from_parts(sapling_activation_height + (100 * (i + 1)), root)
-            })
-            .collect::<Vec<_>>();
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_initial_chain_state(|rng, network| {
+                let sapling_activation_height =
+                    network.activation_height(NetworkUpgrade::Sapling).unwrap();
+                // Construct a fake chain state for the end of block 300
+                let (prior_sapling_roots, sapling_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        initial_sapling_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                let prior_sapling_roots = prior_sapling_roots
+                    .into_iter()
+                    .zip(1u32..)
+                    .map(|(root, i)| {
+                        CommitmentTreeRoot::from_parts(sapling_activation_height + (100 * i), root)
+                    })
+                    .collect::<Vec<_>>();
 
-        #[cfg(feature = "orchard")]
-        let (prior_orchard_frontiers, orchard_initial_tree) =
-            Frontier::random_with_prior_subtree_roots(
-                st.rng(),
-                initial_orchard_tree_size.into(),
-                NonZeroU8::new(16).unwrap(),
-            );
-        #[cfg(feature = "orchard")]
-        let orchard_subtree_roots = prior_orchard_frontiers
-            .into_iter()
-            .zip(0u32..)
-            .map(|(root, i)| {
-                CommitmentTreeRoot::from_parts(sapling_activation_height + (100 * (i + 1)), root)
-            })
-            .collect::<Vec<_>>();
-
-        let prior_block_hash = BlockHash([0; 32]);
-        st.establish_chain_state(
-            ChainState::new(
-                sapling_activation_height + initial_height_offset - 1,
-                prior_block_hash,
-                sapling_initial_tree,
                 #[cfg(feature = "orchard")]
-                orchard_initial_tree,
-            ),
-            &sapling_subtree_roots,
-            #[cfg(feature = "orchard")]
-            &orchard_subtree_roots,
-        )
-        .unwrap();
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        initial_orchard_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                #[cfg(feature = "orchard")]
+                let prior_orchard_roots = prior_orchard_roots
+                    .into_iter()
+                    .zip(1u32..)
+                    .map(|(root, i)| {
+                        CommitmentTreeRoot::from_parts(sapling_activation_height + (100 * i), root)
+                    })
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        sapling_activation_height + initial_height_offset - 1,
+                        prior_block_hash,
+                        sapling_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        orchard_initial_tree,
+                    ),
+                    prior_sapling_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_orchard_roots,
+                }
+            })
+            .with_account_from_sapling_activation(BlockHash([3; 32]))
+            .build();
+
+        let sapling_activation_height = st.sapling_activation_height();
 
         let dfvk = T::test_account_fvk(&st);
         let value = NonNegativeAmount::const_from_u64(50000);
@@ -776,43 +781,49 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn test_with_nu5_birthday_offset<T: ShieldedPoolTester>(
-        offset: u32,
+        birthday_offset: u32,
+        prior_block_hash: BlockHash,
     ) -> (TestState<BlockCache>, T::Fvk, AccountBirthday, u32) {
         let st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(|network| {
+            .with_account_birthday(|rng, network, initial_chain_state| {
+                // We're constructing the birthday without adding any chain data.
+                assert!(initial_chain_state.is_none());
+
                 // We set the Sapling and Orchard frontiers at the birthday height to be
                 // 1234 notes into the second shard.
-                let birthday_height =
-                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + offset;
                 let frontier_position = Position::from((0x1 << 16) + 1234);
-                let sapling_frontier = Frontier::from_parts(
-                    frontier_position,
-                    Node::empty_leaf(),
-                    vec![Node::empty_leaf(); frontier_position.past_ommer_count().into()],
-                )
-                .unwrap();
+                let birthday_height =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
+
+                // Construct a fake chain state for the end of the block with the given
+                // birthday_offset from the Nu5 birthday.
+                let (_, sapling_initial_tree) = Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    (frontier_position + 1).into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
                 #[cfg(feature = "orchard")]
-                let orchard_frontier = Frontier::from_parts(
-                    frontier_position,
-                    MerkleHashOrchard::empty_leaf(),
-                    vec![
-                        MerkleHashOrchard::empty_leaf();
-                        frontier_position.past_ommer_count().into()
-                    ],
-                )
-                .unwrap();
+                let (_, orchard_initial_tree) = Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    (frontier_position + 1).into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
+
                 AccountBirthday::from_parts(
-                    birthday_height,
-                    sapling_frontier,
-                    #[cfg(feature = "orchard")]
-                    orchard_frontier,
+                    ChainState::new(
+                        birthday_height,
+                        prior_block_hash,
+                        sapling_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        orchard_initial_tree,
+                    ),
                     None,
                 )
             })
             .build();
 
-        let (_, _, birthday) = st.test_account().unwrap();
+        let birthday = st.test_account().unwrap().birthday().clone();
         let dfvk = T::test_account_fvk(&st);
         let sap_active = st.sapling_activation_height();
 
@@ -824,8 +835,8 @@ pub(crate) mod tests {
         create_account_creates_ignored_range::<SaplingPoolTester>();
     }
 
-    #[cfg(feature = "orchard")]
     #[test]
+    #[cfg(feature = "orchard")]
     fn orchard_create_account_creates_ignored_range() {
         create_account_creates_ignored_range::<OrchardPoolTester>();
     }
@@ -834,7 +845,8 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-        let (st, _, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
+        let (st, _, birthday, sap_active) =
+            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
         let birthday_height = birthday.height().into();
 
         let expected = vec![
@@ -869,11 +881,8 @@ pub(crate) mod tests {
         st.wallet_mut()
             .create_account(
                 &SecretVec::new(vec![0; 32]),
-                AccountBirthday::from_parts(
-                    wallet_birthday,
-                    Frontier::empty(),
-                    #[cfg(feature = "orchard")]
-                    Frontier::empty(),
+                &AccountBirthday::from_parts(
+                    ChainState::empty(wallet_birthday - 1, BlockHash([0; 32])),
                     None,
                 ),
             )
@@ -904,7 +913,8 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-        let (mut st, _, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
+        let (mut st, _, birthday, sap_active) =
+            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
 
         // Set up the following situation:
         //
@@ -921,7 +931,9 @@ pub(crate) mod tests {
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            // The wallet's birthday onward is marked for recovery.
+            // The wallet's birthday onward is marked for recovery. Because we don't
+            // yet have any chain state, it is marked with `Historic` priority rather
+            // than `ChainTip`.
             scan_range(wallet_birthday..chain_end, Historic),
             // The range below the wallet's birthday height is ignored.
             scan_range(sap_active..wallet_birthday, Ignored),
@@ -946,7 +958,8 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-        let (mut st, _, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
+        let (mut st, _, birthday, sap_active) =
+            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
 
         // Set up the following situation:
         //
@@ -987,120 +1000,162 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
     }
 
-    // FIXME: This requires fixes to the test framework.
     #[test]
-    #[cfg(feature = "orchard")]
     fn sapling_update_chain_tip_unstable_max_scanned() {
         update_chain_tip_unstable_max_scanned::<SaplingPoolTester>();
     }
 
-    #[cfg(feature = "orchard")]
     #[test]
+    #[cfg(feature = "orchard")]
     fn orchard_update_chain_tip_unstable_max_scanned() {
         update_chain_tip_unstable_max_scanned::<OrchardPoolTester>();
     }
 
-    // FIXME: This requires fixes to the test framework.
-    #[allow(dead_code)]
     fn update_chain_tip_unstable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
-
-        // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-        // this birthday is 1234 notes into the second shard
-        let (mut st, dfvk, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
-
         // Set up the following situation:
         //
         //                                                prior_tip           new_tip
-        //        |<------ 1000 ------>|<--- 500 --->|<- 40 ->|<-- 70 -->|<- 20 ->|
+        //        |<------- 10 ------->|<--- 500 --->|<- 40 ->|<-- 70 -->|<- 20 ->|
         // initial_shard_end    wallet_birthday  max_scanned     last_shard_start
         //
-        let max_scanned = birthday.height() + 500;
+        let birthday_offset = 76;
+        let birthday_prior_block_hash = BlockHash([0; 32]);
+        // We set the Sapling and Orchard frontiers at the birthday block initial state to 1234
+        // notes beyond the end of the first shard.
+        let frontier_tree_size: u32 = (0x1 << 16) + 1234;
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_initial_chain_state(|rng, network| {
+                let birthday_height =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
 
-        // Set up some shard root history before the wallet birthday.
-        let initial_shard_end = birthday.height() - 1000;
-        T::put_subtree_roots(
-            &mut st,
-            0,
-            &[CommitmentTreeRoot::from_parts(
-                initial_shard_end,
-                // fake a hash, the value doesn't matter
-                T::empty_tree_leaf(),
-            )],
-        )
-        .unwrap();
+                // Construct a fake chain state for the end of the block with the given
+                // birthday_offset from the Nu5 birthday.
+                let (prior_sapling_roots, sapling_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        frontier_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                // There will only be one prior root
+                let prior_sapling_roots = prior_sapling_roots
+                    .into_iter()
+                    .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
+                    .collect::<Vec<_>>();
+
+                #[cfg(feature = "orchard")]
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        frontier_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                // There will only be one prior root
+                #[cfg(feature = "orchard")]
+                let prior_orchard_roots = prior_orchard_roots
+                    .into_iter()
+                    .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        birthday_prior_block_hash,
+                        sapling_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        orchard_initial_tree,
+                    ),
+                    prior_sapling_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_orchard_roots,
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let dfvk = T::test_account_fvk(&st);
+        let sap_active = st.sapling_activation_height();
+        let max_scanned = account.birthday().height() + 500;
 
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
         let prior_tip = max_scanned + 40;
         st.wallet_mut().update_chain_tip(prior_tip).unwrap();
 
+        let pre_birthday_range = scan_range(
+            sap_active.into()..account.birthday().height().into(),
+            Ignored,
+        );
+
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
-            scan_range(birthday.height().into()..(prior_tip + 1).into(), ChainTip),
-            scan_range(sap_active..birthday.height().into(), Ignored),
+            scan_range(
+                account.birthday().height().into()..(prior_tip + 1).into(),
+                ChainTip,
+            ),
+            pre_birthday_range.clone(),
         ];
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // Now, scan the max scanned block.
-        let initial_sapling_tree_size = birthday
-            .sapling_frontier()
-            .value()
-            .map(|f| u64::from(f.position() + 1))
-            .unwrap_or(0)
-            .try_into()
-            .unwrap();
-        #[cfg(feature = "orchard")]
-        let initial_orchard_tree_size = birthday
-            .orchard_frontier()
-            .value()
-            .map(|f| u64::from(f.position() + 1))
-            .unwrap_or(0)
-            .try_into()
-            .unwrap();
-        #[cfg(not(feature = "orchard"))]
-        let initial_orchard_tree_size = 0;
+        // Simulate that in the blocks between the wallet birthday and the max_scanned height,
+        // there are 10 Sapling notes and 10 Orchard notes created on the chain.
         st.generate_block_at(
             max_scanned,
-            BlockHash([0u8; 32]),
+            BlockHash([1u8; 32]),
             &dfvk,
             AddressType::DefaultExternal,
             // 1235 notes into into the second shard
             NonNegativeAmount::const_from_u64(10000),
-            initial_sapling_tree_size,
-            initial_orchard_tree_size,
+            frontier_tree_size + 10,
+            frontier_tree_size + 10,
         );
         st.scan_cached_blocks(max_scanned, 1);
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
             scan_range((max_scanned + 1).into()..(prior_tip + 1).into(), ChainTip),
-            scan_range(birthday.height().into()..max_scanned.into(), ChainTip),
+            scan_range(
+                account.birthday().height().into()..max_scanned.into(),
+                ChainTip,
+            ),
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
-            scan_range(sap_active..birthday.height().into(), Ignored),
+            pre_birthday_range.clone(),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
         // Now simulate shutting down, and then restarting 90 blocks later, after a shard
-        // has been completed.
+        // has been completed. We have to update both trees, because otherwise we will pick the
+        // lesser of the tip shard start heights as where we must scan from.
         let last_shard_start = prior_tip + 70;
-        T::put_subtree_roots(
-            &mut st,
-            0,
+        st.put_subtree_roots(
+            1,
             &[CommitmentTreeRoot::from_parts(
                 last_shard_start,
                 // fake a hash, the value doesn't matter
-                T::empty_tree_leaf(),
+                sapling::Node::empty_leaf(),
+            )],
+            #[cfg(feature = "orchard")]
+            1,
+            #[cfg(feature = "orchard")]
+            &[CommitmentTreeRoot::from_parts(
+                last_shard_start,
+                // fake a hash, the value doesn't matter
+                MerkleHashOrchard::empty_leaf(),
             )],
         )
         .unwrap();
 
+        // Just inserting the subtree roots doesn't affect the scan ranges.
+        let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
+        assert_eq!(actual, expected);
+
         let new_tip = last_shard_start + 20;
         st.wallet_mut().update_chain_tip(new_tip).unwrap();
-        let chain_end = u32::from(new_tip + 1);
 
         // Verify that the suggested scan ranges match what is expected
         let expected = vec![
@@ -1110,20 +1165,23 @@ pub(crate) mod tests {
                 Verify,
             ),
             // The last shard needs to catch up to the chain tip in order to make notes spendable.
-            scan_range(last_shard_start.into()..chain_end, ChainTip),
+            scan_range(last_shard_start.into()..u32::from(new_tip + 1), ChainTip),
             // The range between the verification blocks and the prior tip is still in the queue.
             scan_range(
                 (max_scanned + 1 + VERIFY_LOOKAHEAD).into()..(prior_tip + 1).into(),
                 ChainTip,
             ),
             // The remainder of the second-to-last shard's range is still in the queue.
-            scan_range(birthday.height().into()..max_scanned.into(), ChainTip),
+            scan_range(
+                account.birthday().height().into()..max_scanned.into(),
+                ChainTip,
+            ),
             // The gap between the prior tip and the last shard is deferred as low priority.
             scan_range((prior_tip + 1).into()..last_shard_start.into(), Historic),
             // The max scanned block itself is left as-is.
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
             // The range below the second-to-last shard is ignored.
-            scan_range(sap_active..birthday.height().into(), Ignored),
+            pre_birthday_range,
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
@@ -1149,7 +1207,8 @@ pub(crate) mod tests {
         use ScanPriority::*;
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-        let (mut st, dfvk, birthday, sap_active) = test_with_nu5_birthday_offset::<T>(76);
+        let (mut st, dfvk, birthday, sap_active) =
+            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
 
         // Set up the following situation:
         //

@@ -351,7 +351,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     params: &P,
     kind: AccountSource,
     viewing_key: ViewingKey,
-    birthday: AccountBirthday,
+    birthday: &AccountBirthday,
 ) -> Result<AccountId, SqliteClientError> {
     let (hd_seed_fingerprint, hd_account_index) = match kind {
         AccountSource::Derived {
@@ -2720,7 +2720,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use sapling::zip32::ExtendedSpendingKey;
-    use zcash_client_backend::data_api::{AccountBirthday, AccountSource, WalletRead};
+    use zcash_client_backend::data_api::{AccountSource, WalletRead};
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
@@ -2749,7 +2749,7 @@ mod tests {
     #[test]
     fn empty_database_has_no_balance() {
         let st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
 
@@ -2765,11 +2765,15 @@ mod tests {
         );
 
         // The default address is set for the test account
-        assert_matches!(st.wallet().get_current_address(account.0), Ok(Some(_)));
+        assert_matches!(
+            st.wallet().get_current_address(account.account_id()),
+            Ok(Some(_))
+        );
 
         // No default address is set for an un-initialized account
         assert_matches!(
-            st.wallet().get_current_address(AccountId(account.0 .0 + 1)),
+            st.wallet()
+                .get_current_address(AccountId(account.account_id().0 + 1)),
             Ok(None)
         );
     }
@@ -2780,10 +2784,10 @@ mod tests {
         use crate::testing::TestBuilder;
 
         let mut st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
-        let (account_id, _, _) = st.test_account().unwrap();
+        let account_id = st.test_account().unwrap().account_id();
         let uaddr = st
             .wallet()
             .get_current_address(account_id)
@@ -2869,9 +2873,9 @@ mod tests {
         use crate::testing::TestBuilder;
 
         let st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
-        let account_id = st.test_account().unwrap().0;
+        let account_id = st.test_account().unwrap().account_id();
         let account_parameters = st.wallet().get_account(account_id).unwrap().unwrap();
 
         let expected_account_index = zip32::AccountId::try_from(0).unwrap();
@@ -2888,13 +2892,13 @@ mod tests {
 
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
-        let (account_id, usk, _) = st.test_account().unwrap();
+        let account = st.test_account().cloned().unwrap();
         let uaddr = st
             .wallet()
-            .get_current_address(account_id)
+            .get_current_address(account.account_id())
             .unwrap()
             .unwrap();
         let taddr = uaddr.transparent().unwrap();
@@ -2916,14 +2920,17 @@ mod tests {
                 .get_wallet_summary(min_confirmations)
                 .unwrap()
                 .unwrap();
-            let balance = summary.account_balances().get(&account_id).unwrap();
+            let balance = summary
+                .account_balances()
+                .get(&account.account_id())
+                .unwrap();
             assert_eq!(balance.unshielded(), expected);
 
             // Check the older APIs for consistency.
             let max_height = st.wallet().chain_height().unwrap().unwrap() + 1 - min_confirmations;
             assert_eq!(
                 st.wallet()
-                    .get_transparent_balances(account_id, max_height)
+                    .get_transparent_balances(account.account_id(), max_height)
                     .unwrap()
                     .get(taddr)
                     .cloned()
@@ -2975,7 +2982,7 @@ mod tests {
             DustOutputPolicy::default(),
         );
         let txid = st
-            .shield_transparent_funds(&input_selector, value, &usk, &[*taddr], 1)
+            .shield_transparent_funds(&input_selector, value, account.usk(), &[*taddr], 1)
             .unwrap()[0];
 
         // The wallet should have zero transparent balance, because the shielding
@@ -3036,7 +3043,7 @@ mod tests {
     fn block_fully_scanned() {
         let mut st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
 
         let block_fully_scanned = |st: &TestState<BlockCache>| {

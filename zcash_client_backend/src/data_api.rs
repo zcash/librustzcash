@@ -1297,11 +1297,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
 /// note commitment tree state is recorded at that height.
 #[derive(Clone, Debug)]
 pub struct AccountBirthday {
-    height: BlockHeight,
-    sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
-    #[cfg(feature = "orchard")]
-    orchard_frontier:
-        Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>,
+    prior_chain_state: ChainState,
     recover_until: Option<BlockHeight>,
 }
 
@@ -1326,10 +1322,9 @@ impl From<io::Error> for BirthdayError {
 impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
-    /// * `height`: The birthday height of the account. This is defined as the height of the first
-    ///    block to be scanned in wallet recovery.
-    /// * `sapling_frontier`: The Sapling note commitment tree frontier as of the end of the block
-    ///    prior to the birthday height.
+    /// * `prior_chain_state`: The chain state prior to the birthday height of the account. The
+    ///    birthday height  is defined as the height of the first block to be scanned in wallet
+    ///    recovery.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
     ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
     ///    visible to a user during the process of recovering from seed, wallets may optionally set a
@@ -1340,20 +1335,9 @@ impl AccountBirthday {
     /// This API is intended primarily to be used in testing contexts; under normal circumstances,
     /// [`AccountBirthday::from_treestate`] should be used instead.
     #[cfg(feature = "test-dependencies")]
-    pub fn from_parts(
-        height: BlockHeight,
-        sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
-        #[cfg(feature = "orchard")] orchard_frontier: Frontier<
-            orchard::tree::MerkleHashOrchard,
-            { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
-        >,
-        recover_until: Option<BlockHeight>,
-    ) -> Self {
+    pub fn from_parts(prior_chain_state: ChainState, recover_until: Option<BlockHeight>) -> Self {
         Self {
-            height,
-            sapling_frontier,
-            #[cfg(feature = "orchard")]
-            orchard_frontier,
+            prior_chain_state,
             recover_until,
         }
     }
@@ -1373,10 +1357,7 @@ impl AccountBirthday {
         recover_until: Option<BlockHeight>,
     ) -> Result<Self, BirthdayError> {
         Ok(Self {
-            height: BlockHeight::try_from(treestate.height + 1)?,
-            sapling_frontier: treestate.sapling_tree()?.to_frontier(),
-            #[cfg(feature = "orchard")]
-            orchard_frontier: treestate.orchard_tree()?.to_frontier(),
+            prior_chain_state: treestate.to_chain_state()?,
             recover_until,
         })
     }
@@ -1386,7 +1367,7 @@ impl AccountBirthday {
     pub fn sapling_frontier(
         &self,
     ) -> &Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }> {
-        &self.sapling_frontier
+        self.prior_chain_state.final_sapling_tree()
     }
 
     /// Returns the Orchard note commitment tree frontier as of the end of the block at
@@ -1396,12 +1377,12 @@ impl AccountBirthday {
         &self,
     ) -> &Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>
     {
-        &self.orchard_frontier
+        self.prior_chain_state.final_orchard_tree()
     }
 
     /// Returns the birthday height of the account.
     pub fn height(&self) -> BlockHeight {
-        self.height
+        self.prior_chain_state.block_height() + 1
     }
 
     /// Returns the height at which the wallet should exit "recovery mode".
@@ -1409,7 +1390,7 @@ impl AccountBirthday {
         self.recover_until
     }
 
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     /// Constructs a new [`AccountBirthday`] at the given network upgrade's activation,
     /// with no "recover until" height.
     ///
@@ -1419,17 +1400,18 @@ impl AccountBirthday {
     pub fn from_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
         network_upgrade: NetworkUpgrade,
+        prior_block_hash: BlockHash,
     ) -> AccountBirthday {
         AccountBirthday::from_parts(
-            params.activation_height(network_upgrade).unwrap(),
-            Frontier::empty(),
-            #[cfg(feature = "orchard")]
-            Frontier::empty(),
+            ChainState::empty(
+                params.activation_height(network_upgrade).unwrap() - 1,
+                prior_block_hash,
+            ),
             None,
         )
     }
 
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     /// Constructs a new [`AccountBirthday`] at Sapling activation, with no
     /// "recover until" height.
     ///
@@ -1438,8 +1420,9 @@ impl AccountBirthday {
     /// Panics if the Sapling activation height is not set.
     pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
+        prior_block_hash: BlockHash,
     ) -> AccountBirthday {
-        Self::from_activation(params, NetworkUpgrade::Sapling)
+        Self::from_activation(params, NetworkUpgrade::Sapling, prior_block_hash)
     }
 }
 
@@ -1482,7 +1465,7 @@ pub trait WalletWrite: WalletRead {
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
-        birthday: AccountBirthday,
+        birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
@@ -1887,7 +1870,7 @@ pub mod testing {
         fn create_account(
             &mut self,
             seed: &SecretVec<u8>,
-            _birthday: AccountBirthday,
+            _birthday: &AccountBirthday,
         ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
             let account = zip32::AccountId::ZERO;
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)
