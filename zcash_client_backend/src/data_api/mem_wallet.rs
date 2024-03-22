@@ -419,6 +419,8 @@ impl WalletWrite for MemoryWalletDb {
                     })
                     .count();
 
+                // TODO: Add orchard nullifiers to the orchard spends.
+
                 // Is `self.tx_idx` field filled with all the transaction ids from the scanned blocks ?
                 self.tx_idx.insert(txid, block.block_height);
                 transactions.insert(txid, transaction);
@@ -434,6 +436,18 @@ impl WalletWrite for MemoryWalletDb {
             };
 
             self.blocks.insert(block.block_height, memory_block);
+
+            // Add the sapling commitments to the sapling tree.
+            let sapling_block_commitments = block.into_commitments().sapling;
+            sapling_block_commitments.iter().map(|(node, height)| {
+                self.sapling_tree.append(*node, *height);
+            });
+
+            // TODO: Add orchard commitments to the orchard tree.
+
+            // TODO: Received notes need to be made available for note selection & balance calculation
+
+            // TODO: Spent notes need to be made unavailable for note selection & balance calculation
         }
 
         Ok(())
