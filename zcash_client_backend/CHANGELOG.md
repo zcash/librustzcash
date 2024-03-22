@@ -53,6 +53,7 @@ and this library adheres to Rust's notion of
   - `ReceivedNote::map_note`
   - `ReceivedNote<_, sapling::Note>::note_value`
   - `ReceivedNote<_, orchard::note::Note>::note_value`
+- `zcash_client_backend::zip321::Payment::without_memo`
 
 ### Changed
 - `zcash_client_backend::data_api`:
