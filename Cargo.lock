@@ -2105,7 +2105,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.1.2"
-source = "git+https://github.com/nuttycom/sapling-crypto?rev=827534329f3ff61f9212f7933ed1688fa04e987c#827534329f3ff61f9212f7933ed1688fa04e987c"
+source = "git+https://github.com/zcash/sapling-crypto?rev=54fc7d3d9c8eeb8e6ef6f64619deed43b0b681a6#54fc7d3d9c8eeb8e6ef6f64619deed43b0b681a6"
 dependencies = [
  "aes",
  "bellman",
@@ -3306,3 +3306,8 @@ dependencies = [
  "memuse",
  "subtle",
 ]
+
+[[patch.unused]]
+name = "sapling-crypto"
+version = "0.1.2"
+source = "git+https://github.com/nuttycom/sapling-crypto?rev=827534329f3ff61f9212f7933ed1688fa04e987c#827534329f3ff61f9212f7933ed1688fa04e987c"
