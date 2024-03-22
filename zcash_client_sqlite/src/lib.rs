@@ -838,7 +838,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 >(
                     // An iterator of checkpoints heights for which we wish to ensure that
                     // checkpoints exists.
-                    checkpoint_heights: I,
+                    ensure_heights: I,
                     // The map of checkpoint positions from which we will draw note commitment tree
                     // position information for the newly created checkpoints.
                     existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
@@ -846,15 +846,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     // there is no preceding checkpoint in existing_checkpoint_positions.
                     state_final_tree: &Frontier<H, DEPTH>,
                 ) -> Vec<(BlockHeight, Checkpoint)> {
-                    checkpoint_heights
-                        .flat_map(|from_checkpoint_height| {
+                    ensure_heights
+                        .flat_map(|ensure_height| {
                             existing_checkpoint_positions
-                                .range::<BlockHeight, _>(..=*from_checkpoint_height)
+                                .range::<BlockHeight, _>(..=*ensure_height)
                                 .last()
                                 .map_or_else(
                                     || {
                                         Some((
-                                            *from_checkpoint_height,
+                                            *ensure_height,
                                             state_final_tree
                                                 .value()
                                                 .map_or_else(Checkpoint::tree_empty, |t| {
@@ -862,10 +862,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                                 }),
                                         ))
                                     },
-                                    |(to_prev_height, position)| {
-                                        if *to_prev_height < *from_checkpoint_height {
+                                    |(existing_checkpoint_height, position)| {
+                                        if *existing_checkpoint_height < *ensure_height {
                                             Some((
-                                                *from_checkpoint_height,
+                                                *ensure_height,
                                                 Checkpoint::at_position(*position),
                                             ))
                                         } else {
