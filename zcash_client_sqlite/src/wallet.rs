@@ -70,7 +70,7 @@ use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zip32::fingerprint::SeedFingerprint;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
@@ -139,6 +139,8 @@ pub mod init;
 pub(crate) mod orchard;
 pub(crate) mod sapling;
 pub(crate) mod scanning;
+#[cfg(feature = "transparent-inputs")]
+pub(crate) mod transparent;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
@@ -1497,6 +1499,40 @@ pub(crate) fn get_transaction<P: Parameters>(
         }
     })
     .transpose()
+}
+
+pub(crate) fn get_funding_accounts(
+    conn: &rusqlite::Connection,
+    tx: &Transaction,
+) -> Result<HashSet<AccountId>, rusqlite::Error> {
+    let mut funding_accounts = HashSet::new();
+    #[cfg(feature = "transparent-inputs")]
+    funding_accounts.extend(transparent::detect_spending_accounts(
+        conn,
+        tx.transparent_bundle()
+            .iter()
+            .flat_map(|bundle| bundle.vin.iter().map(|txin| &txin.prevout)),
+    )?);
+
+    funding_accounts.extend(sapling::detect_spending_accounts(
+        conn,
+        tx.sapling_bundle().iter().flat_map(|bundle| {
+            bundle
+                .shielded_spends()
+                .iter()
+                .map(|spend| spend.nullifier())
+        }),
+    )?);
+
+    #[cfg(feature = "orchard")]
+    funding_accounts.extend(orchard::detect_spending_accounts(
+        conn,
+        tx.orchard_bundle()
+            .iter()
+            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier())),
+    )?);
+
+    Ok(funding_accounts)
 }
 
 /// Returns the memo for a sent note, if the sent note is known to the wallet.

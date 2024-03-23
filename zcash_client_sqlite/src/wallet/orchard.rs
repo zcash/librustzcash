@@ -1,9 +1,11 @@
+use std::{collections::HashSet, rc::Rc};
+
 use incrementalmerkletree::Position;
 use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
 };
-use rusqlite::{named_params, Connection, Row, Transaction};
+use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
 
 use zcash_client_backend::{
     data_api::NullifierQuery,
@@ -332,6 +334,27 @@ pub(crate) fn get_orchard_nullifiers(
     })?;
 
     let res: Vec<_> = nullifiers.collect::<Result<_, _>>()?;
+    Ok(res)
+}
+
+pub(crate) fn detect_spending_accounts<'a>(
+    conn: &Connection,
+    nfs: impl Iterator<Item = &'a Nullifier>,
+) -> Result<HashSet<AccountId>, rusqlite::Error> {
+    let mut account_q = conn.prepare_cached(
+        "SELECT rn.account_id
+        FROM orchard_received_notes rn
+        WHERE rn.nf IN :nf_ptr",
+    )?;
+
+    let nf_values: Vec<Value> = nfs.map(|nf| Value::Blob(nf.to_bytes().to_vec())).collect();
+    let nf_ptr = Rc::new(nf_values);
+    let res = account_q
+        .query_and_then(named_params![":nf_ptr": &nf_ptr], |row| {
+            row.get::<_, u32>(0).map(AccountId)
+        })?
+        .collect::<Result<HashSet<_>, _>>()?;
+
     Ok(res)
 }
 
