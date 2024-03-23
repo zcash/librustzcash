@@ -344,7 +344,7 @@ pub(crate) fn detect_spending_accounts<'a>(
     let mut account_q = conn.prepare_cached(
         "SELECT rn.account_id
         FROM orchard_received_notes rn
-        WHERE rn.nf IN :nf_ptr",
+        WHERE rn.nf IN rarray(:nf_ptr)",
     )?;
 
     let nf_values: Vec<Value> = nfs.map(|nf| Value::Blob(nf.to_bytes().to_vec())).collect();

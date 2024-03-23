@@ -1888,9 +1888,10 @@ pub(crate) fn get_tx_height(
     conn.query_row(
         "SELECT block FROM transactions WHERE txid = ?",
         [txid.as_ref().to_vec()],
-        |row| row.get(0).map(u32::into),
+        |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
     .optional()
+    .map(|opt| opt.flatten())
 }
 
 /// Returns the block hash for the block at the specified height,
