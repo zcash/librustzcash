@@ -3103,6 +3103,7 @@ mod tests {
             not_our_value,
             0,
             0,
+            false,
         );
         let (mid_height, _, _) =
             st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);

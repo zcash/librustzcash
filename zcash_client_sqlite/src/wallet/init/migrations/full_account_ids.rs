@@ -10,7 +10,9 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
 use zip32::fingerprint::SeedFingerprint;
 
-use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness, wallet_summaries};
+use super::{
+    add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness, wallet_summaries,
+};
 
 /// The migration that switched from presumed seed-derived account IDs to supporting
 /// HD accounts and all sorts of imported keys.

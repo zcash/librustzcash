@@ -1312,6 +1312,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
         not_our_value,
         initial_sapling_tree_size,
         initial_orchard_tree_size,
+        false,
     );
     for _ in 1..9 {
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
@@ -1392,6 +1393,7 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         not_our_value,
         st.latest_cached_block().unwrap().sapling_end_size,
         st.latest_cached_block().unwrap().orchard_end_size,
+        false,
     );
 
     // Scan the block
@@ -1888,6 +1890,7 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
         NonNegativeAmount::const_from_u64(8),
         2,
         2,
+        true,
     );
     st.generate_next_block(
         &dfvk,
