@@ -612,7 +612,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height()))))]
+    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
@@ -838,7 +838,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 >(
                     // An iterator of checkpoints heights for which we wish to ensure that
                     // checkpoints exists.
-                    checkpoint_heights: I,
+                    ensure_heights: I,
                     // The map of checkpoint positions from which we will draw note commitment tree
                     // position information for the newly created checkpoints.
                     existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
@@ -846,15 +846,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     // there is no preceding checkpoint in existing_checkpoint_positions.
                     state_final_tree: &Frontier<H, DEPTH>,
                 ) -> Vec<(BlockHeight, Checkpoint)> {
-                    checkpoint_heights
-                        .flat_map(|from_checkpoint_height| {
+                    ensure_heights
+                        .flat_map(|ensure_height| {
                             existing_checkpoint_positions
-                                .range::<BlockHeight, _>(..=*from_checkpoint_height)
+                                .range::<BlockHeight, _>(..=*ensure_height)
                                 .last()
                                 .map_or_else(
                                     || {
                                         Some((
-                                            *from_checkpoint_height,
+                                            *ensure_height,
                                             state_final_tree
                                                 .value()
                                                 .map_or_else(Checkpoint::tree_empty, |t| {
@@ -862,10 +862,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                                 }),
                                         ))
                                     },
-                                    |(to_prev_height, position)| {
-                                        if *to_prev_height < *from_checkpoint_height {
+                                    |(existing_checkpoint_height, position)| {
+                                        if *existing_checkpoint_height < *ensure_height {
                                             Some((
-                                                *from_checkpoint_height,
+                                                *ensure_height,
                                                 Checkpoint::at_position(*position),
                                             ))
                                         } else {
@@ -881,16 +881,17 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }
 
                 #[cfg(feature = "orchard")]
-                let missing_sapling_checkpoints = ensure_checkpoints(
-                    orchard_checkpoint_positions.keys(),
-                    &sapling_checkpoint_positions,
-                    from_state.final_sapling_tree(),
-                );
-                #[cfg(feature = "orchard")]
-                let missing_orchard_checkpoints = ensure_checkpoints(
-                    sapling_checkpoint_positions.keys(),
-                    &orchard_checkpoint_positions,
-                    from_state.final_orchard_tree(),
+                let (missing_sapling_checkpoints, missing_orchard_checkpoints) = (
+                    ensure_checkpoints(
+                        orchard_checkpoint_positions.keys(),
+                        &sapling_checkpoint_positions,
+                        from_state.final_sapling_tree(),
+                    ),
+                    ensure_checkpoints(
+                        sapling_checkpoint_positions.keys(),
+                        &orchard_checkpoint_positions,
+                        from_state.final_orchard_tree(),
+                    ),
                 );
 
                 // Update the Sapling note commitment tree with all newly read note commitments
@@ -909,13 +910,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             sapling_tree.insert_tree(tree, checkpoints)?;
                         }
 
-                        // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height
+                        // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height.
+                        // We skip all checkpoints below the minimum retained checkpoint in the
+                        // Sapling tree, because branches below this height may be pruned.
                         #[cfg(feature = "orchard")]
-                        for (height, checkpoint) in &missing_sapling_checkpoints {
-                            sapling_tree
-                                .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
-                                .map_err(ShardTreeError::Storage)?;
+                        {
+                            let min_checkpoint_height = sapling_tree
+                                .store()
+                                .min_checkpoint_id()
+                                .map_err(ShardTreeError::Storage)?
+                                .expect(
+                                    "At least one checkpoint was inserted (by insert_frontier)",
+                                );
+
+                            for (height, checkpoint) in &missing_sapling_checkpoints {
+                                if *height > min_checkpoint_height {
+                                    sapling_tree
+                                        .store_mut()
+                                        .add_checkpoint(*height, checkpoint.clone())
+                                        .map_err(ShardTreeError::Storage)?;
+                                }
+                            }
                         }
 
                         Ok(())
@@ -939,13 +954,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             orchard_tree.insert_tree(tree, checkpoints)?;
                         }
 
-                        for (height, checkpoint) in &missing_orchard_checkpoints {
-                            orchard_tree
-                                .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
-                                .map_err(ShardTreeError::Storage)?;
-                        }
+                        // Ensure we have an Orchard checkpoint for each checkpointed Sapling block height.
+                        // We skip all checkpoints below the minimum retained checkpoint in the
+                        // Orchard tree, because branches below this height may be pruned.
+                        {
+                            let min_checkpoint_height = orchard_tree
+                                .store()
+                                .min_checkpoint_id()
+                                .map_err(ShardTreeError::Storage)?
+                                .expect(
+                                    "At least one checkpoint was inserted (by insert_frontier)",
+                                );
 
+                            for (height, checkpoint) in &missing_orchard_checkpoints {
+                                if *height > min_checkpoint_height {
+                                    orchard_tree
+                                        .store_mut()
+                                        .add_checkpoint(*height, checkpoint.clone())
+                                        .map_err(ShardTreeError::Storage)?;
+                                }
+                            }
+                        }
                         Ok(())
                     })?;
                 }

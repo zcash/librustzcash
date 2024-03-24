@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, convert::Infallible};
 use std::fs::File;
 
 use group::ff::Field;
-use incrementalmerkletree::Retention;
+use incrementalmerkletree::{Position, Retention};
 use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
@@ -477,6 +477,41 @@ where
         );
 
         (height, res, nf)
+    }
+
+    /// Adds an empty block to the cache, advancing the simulated chain height.
+    #[allow(dead_code)] // used only for tests that are flagged off by default
+    pub(crate) fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
+        let new_hash = {
+            let mut hash = vec![0; 32];
+            self.rng.fill_bytes(&mut hash);
+            hash
+        };
+
+        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
+        let prior_cached_block = self
+            .latest_cached_block()
+            .unwrap_or(&pre_activation_block)
+            .clone();
+        let new_height = prior_cached_block.height() + 1;
+
+        let mut cb = CompactBlock {
+            hash: new_hash,
+            height: new_height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash
+            .extend_from_slice(&prior_cached_block.chain_state.block_hash().0);
+
+        cb.chain_metadata = Some(compact::ChainMetadata {
+            sapling_commitment_tree_size: prior_cached_block.sapling_end_size,
+            orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
+        });
+
+        let res = self.cache_block(&prior_cached_block, cb);
+        self.latest_block_height = Some(new_height);
+
+        (new_height, res)
     }
 
     /// Creates a fake block with the given height and hash containing a single output of
@@ -1139,6 +1174,34 @@ impl<Cache> TestState<Cache> {
                     memo_count: row.get("memo_count")?,
                     expired_unmined: row.get("expired_unmined")?,
                 })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+
+    #[allow(dead_code)] // used only for tests that are flagged off by default
+    pub(crate) fn get_checkpoint_history(
+        &self,
+    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<Position>)>, SqliteClientError> {
+        let mut stmt = self.wallet().conn.prepare_cached(
+            "SELECT checkpoint_id, 2 AS pool, position FROM sapling_tree_checkpoints
+             UNION
+             SELECT checkpoint_id, 3 AS pool, position FROM orchard_tree_checkpoints
+             ORDER BY checkpoint_id",
+        )?;
+
+        let results = stmt
+            .query_and_then::<_, SqliteClientError, _, _>([], |row| {
+                Ok((
+                    BlockHeight::from(row.get::<_, u32>(0)?),
+                    match row.get::<_, i64>(1)? {
+                        2 => ShieldedProtocol::Sapling,
+                        3 => ShieldedProtocol::Orchard,
+                        _ => unreachable!(),
+                    },
+                    row.get::<_, Option<u64>>(2)?.map(Position::from),
+                ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 

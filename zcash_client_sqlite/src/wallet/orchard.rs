@@ -370,7 +370,7 @@ pub(crate) mod tests {
             pool::{OutputRecoveryError, ShieldedPoolTester},
             TestState,
         },
-        wallet::commitment_tree,
+        wallet::{commitment_tree, sapling::tests::SaplingPoolTester},
         ORCHARD_TABLES_PREFIX,
     };
 
@@ -601,15 +601,21 @@ pub(crate) mod tests {
 
     #[test]
     fn pool_crossing_required() {
-        use crate::wallet::sapling::tests::SaplingPoolTester;
-
         testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
     }
 
     #[test]
     fn fully_funded_fully_private() {
-        use crate::wallet::sapling::tests::SaplingPoolTester;
-
         testing::pool::fully_funded_fully_private::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn multi_pool_checkpoint() {
+        testing::pool::multi_pool_checkpoint::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn multi_pool_checkpoints_with_pruning() {
+        testing::pool::multi_pool_checkpoints_with_pruning::<OrchardPoolTester, SaplingPoolTester>()
     }
 }

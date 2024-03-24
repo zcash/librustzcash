@@ -622,4 +622,20 @@ pub(crate) mod tests {
 
         testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
     }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn multi_pool_checkpoint() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn multi_pool_checkpoints_with_pruning() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
+    }
 }

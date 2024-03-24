@@ -5,6 +5,7 @@
 use std::{convert::Infallible, num::NonZeroU32};
 
 use incrementalmerkletree::Level;
+use rand_core::RngCore;
 use rusqlite::params;
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
@@ -86,6 +87,19 @@ pub(crate) trait ShieldedPoolTester {
     fn sk_default_address(sk: &Self::Sk) -> Address;
     fn fvk_default_address(fvk: &Self::Fvk) -> Address;
     fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool;
+
+    fn random_fvk(mut rng: impl RngCore) -> Self::Fvk {
+        let sk = {
+            let mut sk_bytes = vec![0; 32];
+            rng.fill_bytes(&mut sk_bytes);
+            Self::sk(&sk_bytes)
+        };
+
+        Self::sk_to_fvk(&sk)
+    }
+    fn random_address(rng: impl RngCore) -> Address {
+        Self::fvk_default_address(&Self::random_fvk(rng))
+    }
 
     fn empty_tree_leaf() -> Self::MerkleTreeHash;
     fn empty_tree_root(level: Level) -> Self::MerkleTreeHash;
@@ -1597,6 +1611,214 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
         st.get_spendable_balance(account.account_id(), 1),
         (initial_balance - expected_fee).unwrap()
     );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
+        // activation after Sapling
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+    let acct_id = account.account_id();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+
+    // Add some funds to the wallet; we add two notes to allow successive spends. Also,
+    // we will generate a note in the P1 pool to ensure that we have some tree state.
+    let note_value = NonNegativeAmount::const_from_u64(500000);
+    let (start_height, _, _) =
+        st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    let scanned = st.scan_cached_blocks(start_height, 3);
+
+    let next_to_scan = scanned.scanned_range().end;
+
+    let initial_balance = (note_value * 3).unwrap();
+    assert_eq!(st.get_total_balance(acct_id), initial_balance);
+    assert_eq!(st.get_spendable_balance(acct_id, 1), initial_balance);
+
+    // Generate several empty blocks
+    for _ in 0..10 {
+        st.generate_empty_block();
+    }
+
+    // Scan into the middle of the empty range
+    let scanned = st.scan_cached_blocks(next_to_scan, 5);
+    let next_to_scan = scanned.scanned_range().end;
+
+    // The initial balance should be unchanged.
+    assert_eq!(st.get_total_balance(acct_id), initial_balance);
+    assert_eq!(st.get_spendable_balance(acct_id, 1), initial_balance);
+
+    // Set up the fee rule and input selector we'll use for all the transfers.
+    let fee_rule = StandardFeeRule::Zip317;
+    let input_selector = GreedyInputSelector::new(
+        standard::SingleOutputChangeStrategy::new(fee_rule, None, P1::SHIELDED_PROTOCOL),
+        DustOutputPolicy::default(),
+    );
+
+    // First, send funds just to P0
+    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let p0_transfer = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        P0::random_address(&mut st.rng),
+        transfer_amount,
+    )])
+    .unwrap();
+    let res = st
+        .spend(
+            &input_selector,
+            account.usk(),
+            p0_transfer,
+            OvkPolicy::Sender,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+    st.generate_next_block_including(*res.first());
+
+    let expected_fee = NonNegativeAmount::const_from_u64(10000);
+    let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
+    assert_eq!(
+        st.get_total_balance(acct_id),
+        ((note_value * 2).unwrap() + expected_change).unwrap()
+    );
+    assert_eq!(st.get_pending_change(acct_id, 1), expected_change);
+
+    // In the next block, send funds to both P0 and P1
+    let both_transfer = zip321::TransactionRequest::new(vec![
+        Payment::without_memo(P0::random_address(&mut st.rng), transfer_amount),
+        Payment::without_memo(P1::random_address(&mut st.rng), transfer_amount),
+    ])
+    .unwrap();
+    let res = st
+        .spend(
+            &input_selector,
+            account.usk(),
+            both_transfer,
+            OvkPolicy::Sender,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+    st.generate_next_block_including(*res.first());
+
+    // Generate a few more empty blocks
+    for _ in 0..5 {
+        st.generate_empty_block();
+    }
+
+    // Generate another block with funds for us
+    let (max_height, _, _) =
+        st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+
+    // Scan everything.
+    st.scan_cached_blocks(
+        next_to_scan,
+        usize::try_from(u32::from(max_height) - u32::from(next_to_scan) + 1).unwrap(),
+    );
+
+    let expected_final = (initial_balance + note_value
+        - (transfer_amount * 3).unwrap()
+        - (expected_fee * 3).unwrap())
+    .unwrap();
+    assert_eq!(st.get_total_balance(acct_id), expected_final);
+
+    use incrementalmerkletree::Position;
+    let expected_checkpoints_p0: Vec<(BlockHeight, ShieldedProtocol, Option<Position>)> = [
+        (99999, None),
+        (100000, Some(0)),
+        (100001, Some(1)),
+        (100002, Some(1)),
+        (100007, Some(1)), // synthetic checkpoint in empty span from scan start
+        (100013, Some(3)),
+        (100014, Some(5)),
+        (100020, Some(6)),
+    ]
+    .into_iter()
+    .map(|(h, pos)| {
+        (
+            BlockHeight::from(h),
+            P0::SHIELDED_PROTOCOL,
+            pos.map(Position::from),
+        )
+    })
+    .collect();
+
+    let expected_checkpoints_p1: Vec<(BlockHeight, ShieldedProtocol, Option<Position>)> = [
+        (99999, None),
+        (100000, None),
+        (100001, None),
+        (100002, Some(0)),
+        (100007, Some(0)), // synthetic checkpoint in empty span from scan start
+        (100013, Some(0)),
+        (100014, Some(2)),
+        (100020, Some(2)),
+    ]
+    .into_iter()
+    .map(|(h, pos)| {
+        (
+            BlockHeight::from(h),
+            P1::SHIELDED_PROTOCOL,
+            pos.map(Position::from),
+        )
+    })
+    .collect();
+
+    let actual_checkpoints = st.get_checkpoint_history().unwrap();
+
+    assert_eq!(
+        actual_checkpoints
+            .iter()
+            .filter(|(_, p, _)| p == &P0::SHIELDED_PROTOCOL)
+            .cloned()
+            .collect::<Vec<_>>(),
+        expected_checkpoints_p0
+    );
+    assert_eq!(
+        actual_checkpoints
+            .iter()
+            .filter(|(_, p, _)| p == &P1::SHIELDED_PROTOCOL)
+            .cloned()
+            .collect::<Vec<_>>(),
+        expected_checkpoints_p1
+    );
+}
+
+#[cfg(feature = "orchard")]
+pub(crate) fn multi_pool_checkpoints_with_pruning<
+    P0: ShieldedPoolTester,
+    P1: ShieldedPoolTester,
+>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
+        // activation after Sapling
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::random_fvk(&mut st.rng);
+    let p1_fvk = P1::random_fvk(&mut st.rng);
+
+    let note_value = NonNegativeAmount::const_from_u64(10000);
+    // Generate 100 P0 blocks, then 100 P1 blocks, then another 100 P0 blocks.
+    for _ in 0..10 {
+        for _ in 0..10 {
+            st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+        }
+        for _ in 0..10 {
+            st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+        }
+    }
+    st.scan_cached_blocks(account.birthday().height(), 200);
+    for _ in 0..100 {
+        st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+        st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    }
+    st.scan_cached_blocks(account.birthday().height() + 200, 200);
 }
 
 pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
