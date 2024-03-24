@@ -235,7 +235,7 @@ impl<Cache> TestBuilder<Cache> {
 
         let mut cached_blocks = BTreeMap::new();
 
-        if let Some(initial_state) = self.initial_chain_state {
+        if let Some(initial_state) = &self.initial_chain_state {
             db_data
                 .put_sapling_subtree_roots(0, &initial_state.prior_sapling_roots)
                 .unwrap();
@@ -302,7 +302,9 @@ impl<Cache> TestBuilder<Cache> {
         TestState {
             cache: self.cache,
             cached_blocks,
-            latest_block_height: None,
+            latest_block_height: self
+                .initial_chain_state
+                .map(|s| s.chain_state.block_height()),
             _data_file: data_file,
             db_data,
             test_account,
@@ -776,6 +778,11 @@ impl<Cache> TestState<Cache> {
     /// Exposes a mutable reference to the test's [`WalletDb`].
     pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
         &mut self.db_data
+    }
+
+    /// Exposes the test framework's source of randomness.
+    pub(crate) fn rng_mut(&mut self) -> &mut ChaChaRng {
+        &mut self.rng
     }
 
     /// Exposes the network in use.
