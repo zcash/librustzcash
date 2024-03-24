@@ -372,7 +372,7 @@ impl ChainState {
 /// ## Panics
 ///
 /// This method will panic if `from_height != from_state.block_height() + 1`.
-#[tracing::instrument(skip(params, block_source, data_db))]
+#[tracing::instrument(skip(params, block_source, data_db, from_state))]
 #[allow(clippy::type_complexity)]
 pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,

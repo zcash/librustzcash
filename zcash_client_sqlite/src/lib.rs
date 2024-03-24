@@ -46,14 +46,7 @@ use std::{
     path::Path,
 };
 use subtle::ConditionallySelectable;
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{self, BlockHeight},
-    memo::{Memo, MemoBytes},
-    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
-    zip32::{self, DiversifierIndex, Scope},
-};
-use zip32::fingerprint::SeedFingerprint;
+use tracing::{debug, trace, warn};
 
 use zcash_client_backend::{
     address::UnifiedAddress,
@@ -72,6 +65,14 @@ use zcash_client_backend::{
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
 };
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight},
+    memo::{Memo, MemoBytes},
+    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
+    zip32::{self, DiversifierIndex, Scope},
+};
+use zip32::fingerprint::SeedFingerprint;
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
@@ -757,6 +758,26 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                 last_scanned_height = Some(block.height());
                 let block_commitments = block.into_commitments();
+                trace!(
+                    "Sapling commitments for {:?}: {:?}",
+                    last_scanned_height,
+                    block_commitments
+                        .sapling
+                        .iter()
+                        .map(|(_, r)| *r)
+                        .collect::<Vec<_>>()
+                );
+                #[cfg(feature = "orchard")]
+                trace!(
+                    "Orchard commitments for {:?}: {:?}",
+                    last_scanned_height,
+                    block_commitments
+                        .orchard
+                        .iter()
+                        .map(|(_, r)| *r)
+                        .collect::<Vec<_>>()
+                );
+
                 sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
                 #[cfg(feature = "orchard")]
                 orchard_commitments.extend(block_commitments.orchard.into_iter().map(Some));
@@ -898,6 +919,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 {
                     let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
                     wdb.with_sapling_tree_mut::<_, _, Self::Error>(|sapling_tree| {
+                        debug!(
+                            "Sapling initial tree size at {:?}: {:?}",
+                            from_state.block_height(),
+                            from_state.final_sapling_tree().tree_size()
+                        );
                         sapling_tree.insert_frontier(
                             from_state.final_sapling_tree().clone(),
                             Retention::Checkpoint {
@@ -942,6 +968,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 {
                     let mut orchard_subtrees = orchard_subtrees.into_iter();
                     wdb.with_orchard_tree_mut::<_, _, Self::Error>(|orchard_tree| {
+                        debug!(
+                            "Orchard initial tree size at {:?}: {:?}",
+                            from_state.block_height(),
+                            from_state.final_orchard_tree().tree_size()
+                        );
                         orchard_tree.insert_frontier(
                             from_state.final_orchard_tree().clone(),
                             Retention::Checkpoint {
@@ -968,6 +999,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                             for (height, checkpoint) in &missing_orchard_checkpoints {
                                 if *height > min_checkpoint_height {
+                                    debug!(
+                                        "Adding missing Orchard checkpoint for height: {:?}: {:?}",
+                                        height,
+                                        checkpoint.position()
+                                    );
                                     orchard_tree
                                         .store_mut()
                                         .add_checkpoint(*height, checkpoint.clone())
