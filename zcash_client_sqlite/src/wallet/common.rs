@@ -157,7 +157,8 @@ where
                     ON accounts.id = {table_prefix}_received_notes.account_id
                  INNER JOIN transactions
                     ON transactions.id_tx = {table_prefix}_received_notes.tx
-                 WHERE {table_prefix}_received_notes.account_id = :account
+                 WHERE value >= 5000 -- FIXME, allow seslection of a dust input
+                 AND {table_prefix}_received_notes.account_id = :account
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
