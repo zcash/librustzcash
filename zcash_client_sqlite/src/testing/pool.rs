@@ -1114,6 +1114,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     assert_eq!(st.get_total_balance(account_id), amount_left);
 }
 
+#[allow(dead_code)]
 pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
