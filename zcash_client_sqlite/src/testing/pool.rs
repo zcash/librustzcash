@@ -33,7 +33,10 @@ use zcash_client_backend::{
         self,
         chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
-        wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
+        wallet::{
+            decrypt_and_store_transaction,
+            input_selection::{GreedyInputSelector, GreedyInputSelectorError},
+        },
         AccountBirthday, DecryptedTransaction, Ratio, WalletRead, WalletSummary, WalletWrite,
     },
     decrypt_transaction,
@@ -235,23 +238,25 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     assert!(found_tx_empty_memo);
 
     // Verify that the stored sent notes match what we're expecting
-    let mut stmt_sent_notes = st
-        .wallet()
-        .conn
-        .prepare(
-            "SELECT output_index
-            FROM sent_notes
-            JOIN transactions ON transactions.id_tx = sent_notes.tx
-            WHERE transactions.txid = ?",
-        )
-        .unwrap();
+    let sent_note_ids = {
+        let mut stmt_sent_notes = st
+            .wallet()
+            .conn
+            .prepare(
+                "SELECT output_index
+                FROM sent_notes
+                JOIN transactions ON transactions.id_tx = sent_notes.tx
+                WHERE transactions.txid = ?",
+            )
+            .unwrap();
 
-    let sent_note_ids = stmt_sent_notes
-        .query(rusqlite::params![sent_tx_id.as_ref()])
-        .unwrap()
-        .mapped(|row| Ok(NoteId::new(sent_tx_id, T::SHIELDED_PROTOCOL, row.get(0)?)))
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+        stmt_sent_notes
+            .query(rusqlite::params![sent_tx_id.as_ref()])
+            .unwrap()
+            .mapped(|row| Ok(NoteId::new(sent_tx_id, T::SHIELDED_PROTOCOL, row.get(0)?)))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
 
     assert_eq!(sent_note_ids.len(), 2);
 
@@ -288,6 +293,11 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let tx_history = st.get_tx_history().unwrap();
     assert_eq!(tx_history.len(), 2);
+
+    assert_matches!(
+        decrypt_and_store_transaction(&st.network(), st.wallet_mut(), &tx),
+        Ok(_)
+    );
 }
 
 #[cfg(feature = "transparent-inputs")]

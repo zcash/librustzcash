@@ -70,7 +70,7 @@ use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zip32::fingerprint::SeedFingerprint;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::io::{self, Cursor};
 use std::num::NonZeroU32;
@@ -139,6 +139,8 @@ pub mod init;
 pub(crate) mod orchard;
 pub(crate) mod sapling;
 pub(crate) mod scanning;
+#[cfg(feature = "transparent-inputs")]
+pub(crate) mod transparent;
 
 pub(crate) const BLOCK_SAPLING_FRONTIER_ABSENT: &[u8] = &[0x0];
 
@@ -1499,6 +1501,40 @@ pub(crate) fn get_transaction<P: Parameters>(
     .transpose()
 }
 
+pub(crate) fn get_funding_accounts(
+    conn: &rusqlite::Connection,
+    tx: &Transaction,
+) -> Result<HashSet<AccountId>, rusqlite::Error> {
+    let mut funding_accounts = HashSet::new();
+    #[cfg(feature = "transparent-inputs")]
+    funding_accounts.extend(transparent::detect_spending_accounts(
+        conn,
+        tx.transparent_bundle()
+            .iter()
+            .flat_map(|bundle| bundle.vin.iter().map(|txin| &txin.prevout)),
+    )?);
+
+    funding_accounts.extend(sapling::detect_spending_accounts(
+        conn,
+        tx.sapling_bundle().iter().flat_map(|bundle| {
+            bundle
+                .shielded_spends()
+                .iter()
+                .map(|spend| spend.nullifier())
+        }),
+    )?);
+
+    #[cfg(feature = "orchard")]
+    funding_accounts.extend(orchard::detect_spending_accounts(
+        conn,
+        tx.orchard_bundle()
+            .iter()
+            .flat_map(|bundle| bundle.actions().iter().map(|action| action.nullifier())),
+    )?);
+
+    Ok(funding_accounts)
+}
+
 /// Returns the memo for a sent note, if the sent note is known to the wallet.
 pub(crate) fn get_sent_memo(
     conn: &rusqlite::Connection,
@@ -1852,9 +1888,10 @@ pub(crate) fn get_tx_height(
     conn.query_row(
         "SELECT block FROM transactions WHERE txid = ?",
         [txid.as_ref().to_vec()],
-        |row| row.get(0).map(u32::into),
+        |row| Ok(row.get::<_, Option<u32>>(0)?.map(BlockHeight::from)),
     )
     .optional()
+    .map(|opt| opt.flatten())
 }
 
 /// Returns the block hash for the block at the specified height,
@@ -2490,9 +2527,13 @@ fn recipient_params<P: consensus::Parameters>(
             PoolType::Shielded(ShieldedProtocol::Sapling),
         ),
         Recipient::Unified(addr, pool) => (Some(addr.encode(params)), None, *pool),
-        Recipient::InternalAccount(id, note) => (
-            None,
-            Some(id.to_owned()),
+        Recipient::InternalAccount {
+            receiving_account,
+            external_address,
+            note,
+        } => (
+            external_address.as_ref().map(|a| a.encode(params)),
+            Some(*receiving_account),
             PoolType::Shielded(note.protocol()),
         ),
     }
@@ -2564,7 +2605,7 @@ pub(crate) fn put_sent_output<P: consensus::Parameters>(
         ON CONFLICT (tx, output_pool, output_index) DO UPDATE
         SET from_account_id = :from_account_id,
             to_address = :to_address,
-            to_account_id = :to_account_id,
+            to_account_id = IFNULL(to_account_id, :to_account_id),
             value = :value,
             memo = IFNULL(:memo, memo)",
     )?;
