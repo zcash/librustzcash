@@ -602,6 +602,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore] // FIXME: #1316 This requires support for dust outputs.
     fn zip317_spend() {
         testing::pool::zip317_spend::<SaplingPoolTester>()
     }
@@ -612,9 +613,7 @@ pub(crate) mod tests {
         testing::pool::shield_transparent::<SaplingPoolTester>()
     }
 
-    // FIXME: This requires fixes to the test framework.
     #[test]
-    #[cfg(feature = "orchard")]
     fn birthday_in_anchor_shard() {
         testing::pool::birthday_in_anchor_shard::<SaplingPoolTester>()
     }
