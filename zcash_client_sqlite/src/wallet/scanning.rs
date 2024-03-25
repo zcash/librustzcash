@@ -594,7 +594,6 @@ pub(crate) mod tests {
         consensus::{BlockHeight, NetworkUpgrade, Parameters},
         transaction::components::amount::NonNegativeAmount,
     };
-    use zcash_protocol::ShieldedProtocol;
 
     use crate::{
         error::SqliteClientError,
@@ -610,10 +609,7 @@ pub(crate) mod tests {
     };
 
     #[cfg(feature = "orchard")]
-    use {
-        crate::wallet::orchard::tests::OrchardPoolTester, orchard::tree::MerkleHashOrchard,
-        zcash_client_backend::data_api::ORCHARD_SHARD_HEIGHT,
-    };
+    use {crate::wallet::orchard::tests::OrchardPoolTester, orchard::tree::MerkleHashOrchard};
 
     #[test]
     fn sapling_scan_complete() {
@@ -703,6 +699,7 @@ pub(crate) mod tests {
             value,
             initial_sapling_tree_size,
             initial_orchard_tree_size,
+            false,
         );
 
         for _ in 1..=10 {
@@ -1111,6 +1108,7 @@ pub(crate) mod tests {
             NonNegativeAmount::const_from_u64(10000),
             frontier_tree_size + 10,
             frontier_tree_size + 10,
+            false,
         );
         st.scan_cached_blocks(max_scanned, 1);
 
@@ -1188,9 +1186,7 @@ pub(crate) mod tests {
         assert_eq!(actual, expected);
     }
 
-    // FIXME: This requires fixes to the test framework.
     #[test]
-    #[cfg(feature = "orchard")]
     fn sapling_update_chain_tip_stable_max_scanned() {
         update_chain_tip_stable_max_scanned::<SaplingPoolTester>();
     }
@@ -1201,14 +1197,8 @@ pub(crate) mod tests {
         update_chain_tip_stable_max_scanned::<OrchardPoolTester>();
     }
 
-    // FIXME: This requires fixes to the test framework.
-    #[allow(dead_code)]
     fn update_chain_tip_stable_max_scanned<T: ShieldedPoolTester>() {
         use ScanPriority::*;
-
-        // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-        let (mut st, dfvk, birthday, sap_active) =
-            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
 
         // Set up the following situation:
         //
@@ -1216,21 +1206,65 @@ pub(crate) mod tests {
         //        |<--- 500 --->|<- 20 ->|<-- 50 -->|<- 20 ->|
         // wallet_birthday  max_scanned     last_shard_start
         //
-        let max_scanned = birthday.height() + 500;
-        let prior_tip = max_scanned + 20;
+        let birthday_offset = 76;
+        let birthday_prior_block_hash = BlockHash([0; 32]);
+        // We set the Sapling and Orchard frontiers at the birthday block initial state to 1234
+        // notes beyond the end of the first shard.
+        let frontier_tree_size: u32 = (0x1 << 16) + 1234;
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_initial_chain_state(|rng, network| {
+                let birthday_height =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
 
-        // Set up some shard root history before the wallet birthday.
-        let second_to_last_shard_start = birthday.height() - 1000;
-        T::put_subtree_roots(
-            &mut st,
-            0,
-            &[CommitmentTreeRoot::from_parts(
-                second_to_last_shard_start,
-                // fake a hash, the value doesn't matter
-                T::empty_tree_leaf(),
-            )],
-        )
-        .unwrap();
+                // Construct a fake chain state for the end of the block with the given
+                // birthday_offset from the Nu5 birthday.
+                let (prior_sapling_roots, sapling_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        frontier_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                // There will only be one prior root
+                let prior_sapling_roots = prior_sapling_roots
+                    .into_iter()
+                    .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
+                    .collect::<Vec<_>>();
+
+                #[cfg(feature = "orchard")]
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        frontier_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+                // There will only be one prior root
+                #[cfg(feature = "orchard")]
+                let prior_orchard_roots = prior_orchard_roots
+                    .into_iter()
+                    .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        birthday_prior_block_hash,
+                        sapling_initial_tree,
+                        #[cfg(feature = "orchard")]
+                        orchard_initial_tree,
+                    ),
+                    prior_sapling_roots,
+                    #[cfg(feature = "orchard")]
+                    prior_orchard_roots,
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let dfvk = T::test_account_fvk(&st);
+        let birthday = account.birthday();
+        let sap_active = st.sapling_activation_height();
 
         // We have scan ranges and a subtree, but have scanned no blocks.
         let summary = st.get_wallet_summary(1);
@@ -1238,67 +1272,56 @@ pub(crate) mod tests {
 
         // Set up prior chain state. This simulates us having imported a wallet
         // with a birthday 520 blocks below the chain tip.
+        let max_scanned = birthday.height() + 500;
+        let prior_tip = max_scanned + 20;
         st.wallet_mut().update_chain_tip(prior_tip).unwrap();
 
         // Verify that the suggested scan ranges match what is expected.
         let expected = vec![
             scan_range(birthday.height().into()..(prior_tip + 1).into(), ChainTip),
-            scan_range(sap_active..birthday.height().into(), Ignored),
+            scan_range(sap_active.into()..birthday.height().into(), Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // Now, scan the max scanned block.
-        let initial_sapling_tree_size = birthday
-            .sapling_frontier()
-            .value()
-            .map(|f| u64::from(f.position() + 1))
-            .unwrap_or(0)
-            .try_into()
-            .unwrap();
-        #[cfg(feature = "orchard")]
-        let initial_orchard_tree_size = birthday
-            .orchard_frontier()
-            .value()
-            .map(|f| u64::from(f.position() + 1))
-            .unwrap_or(0)
-            .try_into()
-            .unwrap();
-        #[cfg(not(feature = "orchard"))]
-        let initial_orchard_tree_size = 0;
+        // Simulate that in the blocks between the wallet birthday and the max_scanned height,
+        // there are 10 Sapling notes and 10 Orchard notes created on the chain.
         st.generate_block_at(
             max_scanned,
-            BlockHash([0u8; 32]),
+            BlockHash([1; 32]),
             &dfvk,
             AddressType::DefaultExternal,
             NonNegativeAmount::const_from_u64(10000),
-            initial_sapling_tree_size,
-            initial_orchard_tree_size,
+            frontier_tree_size + 10,
+            frontier_tree_size + 10,
+            false,
         );
         st.scan_cached_blocks(max_scanned, 1);
 
         // We have scanned a block, so we now have a starting tree position, 500 blocks above the
         // wallet birthday but before the end of the shard.
         let summary = st.get_wallet_summary(1);
-        assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0),);
+        assert_eq!(summary.as_ref().map(|s| T::next_subtree_index(s)), Some(0));
 
         // Progress denominator depends on which pools are enabled (which changes the
-        // initial tree states in `test_with_nu5_birthday_offset`).
-        let expected_denom = 1 << SAPLING_SHARD_HEIGHT;
+        // initial tree states). Here we compute the denominator based upon the fact that
+        // the trees are the same size at present.
+        let expected_denom = (1 << SAPLING_SHARD_HEIGHT) * 2 - frontier_tree_size;
         #[cfg(feature = "orchard")]
-        let expected_denom = expected_denom + (1 << ORCHARD_SHARD_HEIGHT);
+        let expected_denom = expected_denom * 2;
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
-            Some(Ratio::new(1, expected_denom))
+            Some(Ratio::new(1, u64::from(expected_denom)))
         );
 
         // Now simulate shutting down, and then restarting 70 blocks later, after a shard
-        // has been completed.
+        // has been completed in one pool. This shard will have index 2, as our birthday
+        // was in shard 1.
         let last_shard_start = prior_tip + 50;
         T::put_subtree_roots(
             &mut st,
-            0,
+            2,
             &[CommitmentTreeRoot::from_parts(
                 last_shard_start,
                 // fake a hash, the value doesn't matter
@@ -1306,6 +1329,36 @@ pub(crate) mod tests {
             )],
         )
         .unwrap();
+
+        {
+            let mut shard_stmt = st
+                .wallet_mut()
+                .conn
+                .prepare("SELECT shard_index, subtree_end_height FROM sapling_tree_shards")
+                .unwrap();
+            (shard_stmt
+                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>())
+            .unwrap();
+        }
+
+        {
+            let mut shard_stmt = st
+                .wallet_mut()
+                .conn
+                .prepare("SELECT shard_index, subtree_end_height FROM orchard_tree_shards")
+                .unwrap();
+            (shard_stmt
+                .query_and_then::<_, rusqlite::Error, _, _>([], |row| {
+                    Ok((row.get::<_, u32>(0)?, row.get::<_, Option<u32>>(1)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>())
+            .unwrap();
+        }
 
         let new_tip = last_shard_start + 20;
         st.wallet_mut().update_chain_tip(new_tip).unwrap();
@@ -1320,26 +1373,20 @@ pub(crate) mod tests {
             // The max scanned block itself is left as-is.
             scan_range(max_scanned.into()..(max_scanned + 1).into(), Scanned),
             // The range below the second-to-last shard is ignored.
-            scan_range(sap_active..birthday.height().into(), Ignored),
+            scan_range(sap_active.into()..birthday.height().into(), Ignored),
         ];
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
 
-        // We've crossed a subtree boundary, and so still only have one scanned note but have two
-        // shards worth of notes to scan.
-        let expected_denom = expected_denom
-            + match T::SHIELDED_PROTOCOL {
-                ShieldedProtocol::Sapling => 1 << SAPLING_SHARD_HEIGHT,
-                #[cfg(feature = "orchard")]
-                ShieldedProtocol::Orchard => 1 << ORCHARD_SHARD_HEIGHT,
-                #[cfg(not(feature = "orchard"))]
-                ShieldedProtocol::Orchard => unreachable!(),
-            };
+        // We've crossed a subtree boundary, but only in one pool. We still only have one scanned
+        // note but in the pool where we crossed the subtree boundary we have two shards worth of
+        // notes to scan.
+        let expected_denom = expected_denom + (1 << 16);
         let summary = st.get_wallet_summary(1);
         assert_eq!(
             summary.and_then(|s| s.scan_progress()),
-            Some(Ratio::new(1, expected_denom))
+            Some(Ratio::new(1, u64::from(expected_denom)))
         );
     }
 

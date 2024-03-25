@@ -166,12 +166,8 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
         .flat_map(|bundle| {
             ufvks
                 .iter()
-                .flat_map(move |(account, ufvk)| {
-                    ufvk.orchard()
-                        .into_iter()
-                        .map(|fvk| (account.to_owned(), fvk))
-                })
-                .flat_map(move |(account, fvk)| {
+                .flat_map(|(account, ufvk)| ufvk.orchard().into_iter().map(|fvk| (*account, fvk)))
+                .flat_map(|(account, fvk)| {
                     let ivk_external = orchard::keys::PreparedIncomingViewingKey::new(
                         &fvk.to_ivk(Scope::External),
                     );
