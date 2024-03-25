@@ -2,6 +2,7 @@
 //! light client.
 
 use incrementalmerkletree::Position;
+use zcash_keys::address::Address;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
@@ -70,7 +71,11 @@ pub enum Recipient<AccountId, N> {
     Transparent(TransparentAddress),
     Sapling(sapling::PaymentAddress),
     Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, N),
+    InternalAccount {
+        receiving_account: AccountId,
+        external_address: Option<Address>,
+        note: N,
+    },
 }
 
 impl<AccountId, N> Recipient<AccountId, N> {
@@ -79,7 +84,15 @@ impl<AccountId, N> Recipient<AccountId, N> {
             Recipient::Transparent(t) => Recipient::Transparent(t),
             Recipient::Sapling(s) => Recipient::Sapling(s),
             Recipient::Unified(u, p) => Recipient::Unified(u, p),
-            Recipient::InternalAccount(a, n) => Recipient::InternalAccount(a, f(n)),
+            Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note,
+            } => Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note: f(note),
+            },
         }
     }
 }
@@ -90,7 +103,15 @@ impl<AccountId, N> Recipient<AccountId, Option<N>> {
             Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
             Recipient::Sapling(s) => Some(Recipient::Sapling(s)),
             Recipient::Unified(u, p) => Some(Recipient::Unified(u, p)),
-            Recipient::InternalAccount(a, n) => n.map(|n0| Recipient::InternalAccount(a, n0)),
+            Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note,
+            } => note.map(|n0| Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note: n0,
+            }),
         }
     }
 }

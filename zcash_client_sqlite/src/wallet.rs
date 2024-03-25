@@ -2527,9 +2527,13 @@ fn recipient_params<P: consensus::Parameters>(
             PoolType::Shielded(ShieldedProtocol::Sapling),
         ),
         Recipient::Unified(addr, pool) => (Some(addr.encode(params)), None, *pool),
-        Recipient::InternalAccount(id, note) => (
-            None,
-            Some(id.to_owned()),
+        Recipient::InternalAccount {
+            receiving_account,
+            external_address,
+            note,
+        } => (
+            external_address.as_ref().map(|a| a.encode(params)),
+            Some(*receiving_account),
             PoolType::Shielded(note.protocol()),
         ),
     }

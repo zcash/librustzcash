@@ -103,6 +103,8 @@ and this library adheres to Rust's notion of
     feature flag.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
+- `zcash_client_backend::wallet::Recipient::InternalAccount` is now a structured
+  variant with an additional `external_address` field.
 - `zcash_client_backend::zip321::render::amount_str` now takes a
   `NonNegativeAmount` rather than a signed `Amount` as its argument.
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a
