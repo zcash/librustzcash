@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.15.0] - 2024-03-25
+
 ### Added
 - `zcash_primitives::transaction::components::sapling::zip212_enforcement`
 
@@ -21,6 +23,7 @@ and this library adheres to Rust's notion of
     `Amount` and `NonNegativeAmount` value types now return
     `Result<_, BalanceError>` instead of `Result<_, ()>`.
   - `zcash_primitives::memo` re-exports `zcash_protocol::memo`.
+  - Update to `orchard` version `0.8.0`
 
 ### Removed
 - `zcash_primitives::consensus::sapling_zip212_enforcement` instead use
