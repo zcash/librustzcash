@@ -3133,7 +3133,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "bech32",
  "blake2b_simd",
