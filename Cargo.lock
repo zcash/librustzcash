@@ -3239,7 +3239,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "document-features",
  "incrementalmerkletree",
