@@ -1062,16 +1062,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
             for output in d_tx.sapling_outputs() {
                 match output.transfer_type() {
-                    TransferType::Outgoing | TransferType::WalletInternal => {
-                        let recipient = if output.transfer_type() == TransferType::Outgoing {
-                            //TODO: Recover the UA, if possible.
-                            Recipient::Sapling(output.note().recipient())
-                        } else {
-                            Recipient::InternalAccount {
-                                receiving_account: *output.account(),
-                                external_address: None,
-                                note: Note::Sapling(output.note().clone()),
-                            }
+                    TransferType::Outgoing => {
+                        //TODO: Recover the UA, if possible.
+                        let recipient = Recipient::Sapling(output.note().recipient());
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            &wdb.params,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
+                    }
+                    TransferType::WalletInternal => {
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        let recipient = Recipient::InternalAccount {
+                            receiving_account: *output.account(),
+                            external_address: None,
+                            note: Note::Sapling(output.note().clone()),
                         };
 
                         wallet::put_sent_output(
@@ -1084,10 +1095,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             output.note_value(),
                             Some(output.memo()),
                         )?;
-
-                        if matches!(recipient, Recipient::InternalAccount { .. }) {
-                            wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-                        }
                     }
                     TransferType::Incoming => {
                         wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
@@ -1118,24 +1125,36 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             #[cfg(feature = "orchard")]
             for output in d_tx.orchard_outputs() {
                 match output.transfer_type() {
-                    TransferType::Outgoing | TransferType::WalletInternal => {
-                        let recipient = if output.transfer_type() == TransferType::Outgoing {
-                            // TODO: Recover the actual UA, if possible.
-                            Recipient::Unified(
-                                UnifiedAddress::from_receivers(
-                                    Some(output.note().recipient()),
-                                    None,
-                                    None,
-                                )
-                                .expect("UA has an Orchard receiver by construction."),
-                                PoolType::Shielded(ShieldedProtocol::Orchard),
+                    TransferType::Outgoing => {
+                        // TODO: Recover the actual UA, if possible.
+                        let recipient = Recipient::Unified(
+                            UnifiedAddress::from_receivers(
+                                Some(output.note().recipient()),
+                                None,
+                                None,
                             )
-                        } else {
-                            Recipient::InternalAccount {
-                                receiving_account: *output.account(),
-                                external_address: None,
-                                note: Note::Orchard(*output.note()),
-                            }
+                            .expect("UA has an Orchard receiver by construction."),
+                            PoolType::Shielded(ShieldedProtocol::Orchard),
+                        );
+
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            &wdb.params,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
+                    }
+                    TransferType::WalletInternal => {
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        let recipient = Recipient::InternalAccount {
+                            receiving_account: *output.account(),
+                            external_address: None,
+                            note: Note::Orchard(*output.note()),
                         };
 
                         wallet::put_sent_output(
@@ -1148,10 +1167,6 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             output.note_value(),
                             Some(output.memo()),
                         )?;
-
-                        if matches!(recipient, Recipient::InternalAccount { .. }) {
-                            wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-                        }
                     }
                     TransferType::Incoming => {
                         wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
