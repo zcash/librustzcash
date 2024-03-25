@@ -37,7 +37,7 @@ zcash_protocol = { version = "0.1", path = "components/zcash_protocol" }
 
 zcash_note_encryption = "0.4"
 zcash_primitives = { version = "0.15", path = "zcash_primitives", default-features = false }
-zcash_proofs = { version = "0.14", path = "zcash_proofs", default-features = false }
+zcash_proofs = { version = "0.15", path = "zcash_proofs", default-features = false }
 
 # Shielded protocols
 ff = "0.13"
