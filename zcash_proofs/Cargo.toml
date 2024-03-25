@@ -67,6 +67,9 @@ local-prover = ["directories"]
 ## Enables multithreading support for creating proofs.
 multicore = ["bellman/multicore", "zcash_primitives/multicore"]
 
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
+
 [lib]
 bench = false
 

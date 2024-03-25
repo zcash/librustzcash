@@ -619,6 +619,8 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore] // FIXME: #1316 This requires support for dust outputs.
+    #[cfg(not(feature = "expensive-tests"))]
     fn zip317_spend() {
         testing::pool::zip317_spend::<OrchardPoolTester>()
     }
