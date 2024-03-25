@@ -229,12 +229,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 nf BLOB UNIQUE,
                 is_change INTEGER NOT NULL,
                 memo BLOB,
-                spent INTEGER,
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
             );
             CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes_new" (
@@ -243,11 +241,36 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes_new" (
                 "tx" ASC
             );
-            CREATE INDEX "sapling_received_notes_spent" ON "sapling_received_notes_new" (
-                "spent" ASC
+
+            -- Replace the `spent` column in `sapling_received_notes` with a junction table between
+            -- received notes and the transactions that spend them. This is necessary as otherwise
+            -- we cannot compute the correct value of transactions that expire unmined.
+            CREATE TABLE sapling_received_note_spends (
+                sapling_received_note_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (sapling_received_note_id)
+                    REFERENCES sapling_received_notes(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (sapling_received_note_id, transaction_id)
             );
-            INSERT INTO sapling_received_notes_new (id, tx, output_index, account_id, diversifier, value, rcm, nf, is_change, memo, spent, commitment_tree_position, recipient_key_scope)
-            SELECT id_note, tx, output_index, account, diversifier, value, rcm, nf, is_change, memo, spent, commitment_tree_position, recipient_key_scope
+
+            INSERT INTO sapling_received_note_spends (sapling_received_note_id, transaction_id)
+            SELECT id_note, spent
+            FROM sapling_received_notes
+            WHERE spent IS NOT NULL;
+
+            INSERT INTO sapling_received_notes_new (
+                id, tx, output_index, account_id,
+                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
+                recipient_key_scope
+            )
+            SELECT
+                id_note, tx, output_index, account,
+                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
+                recipient_key_scope
             FROM sapling_received_notes;
 
             DROP TABLE sapling_received_notes;
@@ -295,21 +318,39 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 script BLOB NOT NULL,
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
-                spent_in_tx INTEGER,
                 FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
             );
             CREATE INDEX utxos_received_by_account ON utxos_new (received_by_account_id);
-            CREATE INDEX utxos_spent_in_tx ON utxos_new (spent_in_tx);
-            INSERT INTO utxos_new (id, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height, spent_in_tx)
-            SELECT id_utxo, received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height, spent_in_tx
+
+            INSERT INTO utxos_new (id, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height)
+            SELECT id_utxo, received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height
             FROM utxos;
+
+            -- Replace the `spent_in_tx` column in `utxos` with a junction table between received
+            -- outputs and the transactions that spend them. This is necessary as otherwise we
+            -- cannot compute the correct value of transactions that expire unmined.
+            CREATE TABLE transparent_received_output_spends (
+                transparent_received_output_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (transparent_received_output_id)
+                    REFERENCES utxos(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (transparent_received_output_id, transaction_id)
+            );
+
+            INSERT INTO transparent_received_output_spends (transparent_received_output_id, transaction_id)
+            SELECT id_utxo, spent_in_tx
+            FROM utxos
+            WHERE spent_in_tx IS NOT NULL;
 
             DROP TABLE utxos;
             ALTER TABLE utxos_new RENAME TO utxos;
             "#,
-            )?;
+        )?;
 
         // Rewrite v_transactions view
         transaction.execute_batch(
@@ -361,8 +402,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                            0                             AS received_count,
                            0                             AS memo_present
                     FROM sapling_received_notes
+                    JOIN sapling_received_note_spends
+                         ON sapling_received_note_id = sapling_received_notes.id
                     JOIN transactions
-                         ON transactions.id_tx = sapling_received_notes.spent
+                         ON transactions.id_tx = sapling_received_note_spends.transaction_id
                     UNION
                     SELECT utxos.id                      AS id,
                            utxos.received_by_account_id  AS account_id,
@@ -374,8 +417,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                            0                             AS received_count,
                            0                             AS memo_present
                     FROM utxos
-                    JOIN transactions
-                         ON transactions.id_tx = utxos.spent_in_tx
+                JOIN transparent_received_output_spends txo_spends
+                     ON txo_spends.transparent_received_output_id = txos.id
+                JOIN transactions
+                     ON transactions.id_tx = txo_spends.transaction_id
                 ),
                 sent_note_counts AS (
                     SELECT sent_notes.from_account_id AS account_id,
