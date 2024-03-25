@@ -197,7 +197,6 @@ impl Era {
 
 /// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
 #[derive(Clone, Debug)]
-#[doc(hidden)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: legacy::AccountPrivKey,
@@ -207,7 +206,6 @@ pub struct UnifiedSpendingKey {
     orchard: orchard::keys::SpendingKey,
 }
 
-#[doc(hidden)]
 impl UnifiedSpendingKey {
     pub fn from_seed<P: consensus::Parameters>(
         _params: &P,
@@ -624,7 +622,6 @@ pub struct UnifiedFullViewingKey {
     unknown: Vec<(u32, Vec<u8>)>,
 }
 
-#[doc(hidden)]
 impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key.
     ///
