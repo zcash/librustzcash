@@ -123,6 +123,9 @@ test-dependencies = [
     "zcash_protocol/test-dependencies",
 ]
 
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
+
 [lib]
 bench = false
 

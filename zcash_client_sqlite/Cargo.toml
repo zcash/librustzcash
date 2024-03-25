@@ -127,5 +127,8 @@ transparent-inputs = [
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["zcash_client_backend/unstable"]
 
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
+
 [lib]
 bench = false
