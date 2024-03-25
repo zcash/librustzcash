@@ -2,16 +2,19 @@
 //!
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
-use std::{convert::Infallible, num::NonZeroU32};
+use std::{
+    convert::Infallible,
+    num::{NonZeroU32, NonZeroU8},
+};
 
-use incrementalmerkletree::Level;
+use incrementalmerkletree::{frontier::Frontier, Level};
 use rand_core::RngCore;
 use rusqlite::params;
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::BranchId,
+    consensus::{BranchId, NetworkUpgrade, Parameters},
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     transaction::{
@@ -28,7 +31,7 @@ use zcash_client_backend::{
     address::Address,
     data_api::{
         self,
-        chain::{self, CommitmentTreeRoot, ScanSummary},
+        chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
         wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
         AccountBirthday, DecryptedTransaction, Ratio, WalletRead, WalletSummary, WalletWrite,
@@ -46,11 +49,8 @@ use zcash_protocol::consensus::BlockHeight;
 use super::TestFvk;
 use crate::{
     error::SqliteClientError,
-    testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
-    wallet::{
-        block_max_scanned, commitment_tree, parse_scope,
-        scanning::tests::test_with_nu5_birthday_offset, truncate_to_height,
-    },
+    testing::{input_selector, AddressType, BlockCache, InitialChainState, TestBuilder, TestState},
+    wallet::{block_max_scanned, commitment_tree, parse_scope, truncate_to_height},
     AccountId, NoteId, ReceivedNoteId,
 };
 
@@ -1260,66 +1260,75 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
 // FIXME: This requires fixes to the test framework.
 #[allow(dead_code)]
 pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
-    // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-    let (mut st, dfvk, birthday, _) = test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
-
     // Set up the following situation:
     //
     //        |<------ 500 ------->|<--- 10 --->|<--- 10 --->|
     // last_shard_start   wallet_birthday  received_tx  anchor_height
     //
-    // Set up some shard root history before the wallet birthday.
-    let prev_shard_start = birthday.height() - 500;
-    T::put_subtree_roots(
-        &mut st,
-        0,
-        &[CommitmentTreeRoot::from_parts(
-            prev_shard_start,
-            // fake a hash, the value doesn't matter
-            T::empty_tree_leaf(),
-        )],
-    )
-    .unwrap();
+    // We set the Sapling and Orchard frontiers at the birthday block initial state to 1234
+    // notes beyond the end of the first shard.
+    let frontier_tree_size: u32 = (0x1 << 16) + 1234;
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_initial_chain_state(|rng, network| {
+            let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
 
-    let received_tx_height = birthday.height() + 10;
+            // Construct a fake chain state for the end of the block with the given
+            // birthday_offset from the Nu5 birthday.
+            let (prior_sapling_roots, sapling_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    frontier_tree_size.into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
+            // There will only be one prior root
+            let prior_sapling_roots = prior_sapling_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
 
-    let initial_sapling_tree_size = birthday
-        .sapling_frontier()
-        .value()
-        .map(|f| u64::from(f.position() + 1))
-        .unwrap_or(0)
-        .try_into()
-        .unwrap();
-    #[cfg(feature = "orchard")]
-    let initial_orchard_tree_size = birthday
-        .orchard_frontier()
-        .value()
-        .map(|f| u64::from(f.position() + 1))
-        .unwrap_or(0)
-        .try_into()
-        .unwrap();
-    #[cfg(not(feature = "orchard"))]
-    let initial_orchard_tree_size = 0;
+            #[cfg(feature = "orchard")]
+            let (prior_orchard_roots, orchard_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    frontier_tree_size.into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
+            // There will only be one prior root
+            #[cfg(feature = "orchard")]
+            let prior_orchard_roots = prior_orchard_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([5; 32]),
+                    sapling_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    orchard_initial_tree,
+                ),
+                prior_sapling_roots,
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots,
+            }
+        })
+        .with_account_having_current_birthday()
+        .build();
 
     // Generate 9 blocks that have no value for us, starting at the birthday height.
-    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = NonNegativeAmount::const_from_u64(10000);
-    st.generate_block_at(
-        birthday.height(),
-        BlockHash([0; 32]),
-        &not_our_key,
-        AddressType::DefaultExternal,
-        not_our_value,
-        initial_sapling_tree_size,
-        initial_orchard_tree_size,
-    );
+    let not_our_key = T::random_fvk(st.rng_mut());
+    let (initial_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
     for _ in 1..9 {
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
     }
 
     // Now, generate a block that belongs to our wallet
-    st.generate_next_block(
-        &dfvk,
+    let (received_tx_height, _, _) = st.generate_next_block(
+        &T::test_account_fvk(&st),
         AddressType::DefaultExternal,
         NonNegativeAmount::const_from_u64(500000),
     );
@@ -1331,7 +1340,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 
     // Scan a block range that includes our received note, but skips some blocks we need to
     // make it spendable.
-    st.scan_cached_blocks(birthday.height() + 5, 20);
+    st.scan_cached_blocks(initial_height + 5, 20);
 
     // Verify that the received note is not considered spendable
     let account = st.test_account().unwrap();
@@ -1348,7 +1357,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     assert_eq!(spendable.len(), 0);
 
     // Scan the blocks we skipped
-    st.scan_cached_blocks(birthday.height(), 5);
+    st.scan_cached_blocks(initial_height, 5);
 
     // Verify that the received note is now considered spendable
     let spendable = T::select_spendable_notes(
@@ -1392,6 +1401,7 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         not_our_value,
         st.latest_cached_block().unwrap().sapling_end_size,
         st.latest_cached_block().unwrap().orchard_end_size,
+        false,
     );
 
     // Scan the block
@@ -1888,6 +1898,7 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
         NonNegativeAmount::const_from_u64(8),
         2,
         2,
+        true,
     );
     st.generate_next_block(
         &dfvk,

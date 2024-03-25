@@ -370,8 +370,23 @@ mod tests {
                 sapling_fvk_item_cache BLOB,
                 p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
+                birthday_sapling_tree_size INTEGER,
+                birthday_orchard_tree_size INTEGER,
                 recover_until_height INTEGER,
-                CHECK ( (account_kind = 0 AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL) OR (account_kind = 1 AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL) )
+                CHECK (
+                  (
+                    account_kind = 0
+                    AND hd_seed_fingerprint IS NOT NULL
+                    AND hd_account_index IS NOT NULL
+                    AND ufvk IS NOT NULL
+                  )
+                  OR
+                  (
+                    account_kind = 1
+                    AND hd_seed_fingerprint IS NULL
+                    AND hd_account_index IS NULL
+                  )
+                )
             )"#,
             r#"CREATE TABLE "addresses" (
                 account_id INTEGER NOT NULL,

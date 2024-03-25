@@ -374,19 +374,27 @@ pub(crate) fn add_account<P: consensus::Parameters>(
     #[cfg(not(feature = "transparent-inputs"))]
     let transparent_item: Option<Vec<u8>> = None;
 
+    let birthday_sapling_tree_size = Some(birthday.sapling_frontier().tree_size());
+    #[cfg(feature = "orchard")]
+    let birthday_orchard_tree_size = Some(birthday.orchard_frontier().tree_size());
+    #[cfg(not(feature = "orchard"))]
+    let birthday_orchard_tree_size: Option<u64> = None;
+
     let account_id: AccountId = conn.query_row(
         r#"
         INSERT INTO accounts (
             account_kind, hd_seed_fingerprint, hd_account_index,
             ufvk, uivk,
             orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
-            birthday_height, recover_until_height
+            birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+            recover_until_height
         )
         VALUES (
             :account_kind, :hd_seed_fingerprint, :hd_account_index,
             :ufvk, :uivk,
             :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
-            :birthday_height, :recover_until_height
+            :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
+            :recover_until_height
         )
         RETURNING id;
         "#,
@@ -400,6 +408,8 @@ pub(crate) fn add_account<P: consensus::Parameters>(
             ":sapling_fvk_item_cache": sapling_item,
             ":p2pkh_fvk_item_cache": transparent_item,
             ":birthday_height": u32::from(birthday.height()),
+            ":birthday_sapling_tree_size": birthday_sapling_tree_size,
+            ":birthday_orchard_tree_size": birthday_orchard_tree_size,
             ":recover_until_height": birthday.recover_until().map(u32::from)
         ],
         |row| Ok(AccountId(row.get(0)?)),
@@ -884,22 +894,39 @@ impl ScanProgress for SubtreeScanProgress {
             )
             .map_err(SqliteClientError::from)
         } else {
-            let start_height = birthday_height;
-            // Compute the starting number of notes directly from the blocks table
-            let start_size = conn.query_row(
-                "SELECT MAX(sapling_commitment_tree_size)
-                 FROM blocks
-                 WHERE height <= :start_height",
-                named_params![":start_height": u32::from(start_height)],
-                |row| row.get::<_, Option<u64>>(0),
-            )?;
+            // Get the starting note commitment tree size from the wallet birthday, or failing that
+            // from the blocks table.
+            let start_size = conn
+                .query_row(
+                    "SELECT birthday_sapling_tree_size
+                     FROM accounts
+                     WHERE birthday_height = :birthday_height",
+                    named_params![":birthday_height": u32::from(birthday_height)],
+                    |row| row.get::<_, Option<u64>>(0),
+                )
+                .optional()?
+                .flatten()
+                .map(Ok)
+                .or_else(|| {
+                    conn.query_row(
+                        "SELECT MAX(sapling_commitment_tree_size - sapling_output_count)
+                         FROM blocks
+                         WHERE height <= :start_height",
+                        named_params![":start_height": u32::from(birthday_height)],
+                        |row| row.get::<_, Option<u64>>(0),
+                    )
+                    .optional()
+                    .map(|opt| opt.flatten())
+                    .transpose()
+                })
+                .transpose()?;
 
             // Compute the total blocks scanned so far above the starting height
             let scanned_count = conn.query_row(
                 "SELECT SUM(sapling_output_count)
                  FROM blocks
                  WHERE height > :start_height",
-                named_params![":start_height": u32::from(start_height)],
+                named_params![":start_height": u32::from(birthday_height)],
                 |row| row.get::<_, Option<u64>>(0),
             )?;
 
@@ -915,22 +942,22 @@ impl ScanProgress for SubtreeScanProgress {
                      FROM sapling_tree_shards
                      WHERE subtree_end_height > :start_height
                      OR subtree_end_height IS NULL",
-                    named_params![":start_height": u32::from(start_height)],
+                    named_params![":start_height": u32::from(birthday_height)],
                     |row| {
                         let min_tree_size = row
                             .get::<_, Option<u64>>(0)?
-                            .map(|min| min << SAPLING_SHARD_HEIGHT);
-                        let max_idx = row.get::<_, Option<u64>>(1)?;
-                        Ok(start_size
-                            .or(min_tree_size)
-                            .zip(max_idx)
-                            .map(|(min_tree_size, max)| {
-                                let max_tree_size = (max + 1) << SAPLING_SHARD_HEIGHT;
+                            .map(|min_idx| min_idx << SAPLING_SHARD_HEIGHT);
+                        let max_tree_size = row
+                            .get::<_, Option<u64>>(1)?
+                            .map(|max_idx| (max_idx + 1) << SAPLING_SHARD_HEIGHT);
+                        Ok(start_size.or(min_tree_size).zip(max_tree_size).map(
+                            |(min_tree_size, max_tree_size)| {
                                 Ratio::new(
                                     scanned_count.unwrap_or(0),
                                     max_tree_size - min_tree_size,
                                 )
-                            }))
+                            },
+                        ))
                     },
                 )
                 .optional()?
@@ -961,22 +988,38 @@ impl ScanProgress for SubtreeScanProgress {
             )
             .map_err(SqliteClientError::from)
         } else {
-            let start_height = birthday_height;
             // Compute the starting number of notes directly from the blocks table
-            let start_size = conn.query_row(
-                "SELECT MAX(orchard_commitment_tree_size)
-                 FROM blocks
-                 WHERE height <= :start_height",
-                named_params![":start_height": u32::from(start_height)],
-                |row| row.get::<_, Option<u64>>(0),
-            )?;
+            let start_size = conn
+                .query_row(
+                    "SELECT birthday_orchard_tree_size
+                     FROM accounts
+                     WHERE birthday_height = :birthday_height",
+                    named_params![":birthday_height": u32::from(birthday_height)],
+                    |row| row.get::<_, Option<u64>>(0),
+                )
+                .optional()?
+                .flatten()
+                .map(Ok)
+                .or_else(|| {
+                    conn.query_row(
+                        "SELECT MAX(orchard_commitment_tree_size - orchard_action_count)
+                         FROM blocks
+                         WHERE height <= :start_height",
+                        named_params![":start_height": u32::from(birthday_height)],
+                        |row| row.get::<_, Option<u64>>(0),
+                    )
+                    .optional()
+                    .map(|opt| opt.flatten())
+                    .transpose()
+                })
+                .transpose()?;
 
             // Compute the total blocks scanned so far above the starting height
             let scanned_count = conn.query_row(
                 "SELECT SUM(orchard_action_count)
                  FROM blocks
                  WHERE height > :start_height",
-                named_params![":start_height": u32::from(start_height)],
+                named_params![":start_height": u32::from(birthday_height)],
                 |row| row.get::<_, Option<u64>>(0),
             )?;
 
@@ -992,22 +1035,22 @@ impl ScanProgress for SubtreeScanProgress {
                      FROM orchard_tree_shards
                      WHERE subtree_end_height > :start_height
                      OR subtree_end_height IS NULL",
-                    named_params![":start_height": u32::from(start_height)],
+                    named_params![":start_height": u32::from(birthday_height)],
                     |row| {
                         let min_tree_size = row
                             .get::<_, Option<u64>>(0)?
-                            .map(|min| min << ORCHARD_SHARD_HEIGHT);
-                        let max_idx = row.get::<_, Option<u64>>(1)?;
-                        Ok(start_size
-                            .or(min_tree_size)
-                            .zip(max_idx)
-                            .map(|(min_tree_size, max)| {
-                                let max_tree_size = (max + 1) << ORCHARD_SHARD_HEIGHT;
+                            .map(|min_idx| min_idx << ORCHARD_SHARD_HEIGHT);
+                        let max_tree_size = row
+                            .get::<_, Option<u64>>(1)?
+                            .map(|max_idx| (max_idx + 1) << ORCHARD_SHARD_HEIGHT);
+                        Ok(start_size.or(min_tree_size).zip(max_tree_size).map(
+                            |(min_tree_size, max_tree_size)| {
                                 Ratio::new(
                                     scanned_count.unwrap_or(0),
                                     max_tree_size - min_tree_size,
                                 )
-                            }))
+                            },
+                        ))
                     },
                 )
                 .optional()?
@@ -3060,6 +3103,7 @@ mod tests {
             not_our_value,
             0,
             0,
+            false,
         );
         let (mid_height, _, _) =
             st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);

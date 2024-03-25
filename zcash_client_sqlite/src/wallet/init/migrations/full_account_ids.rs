@@ -1,7 +1,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use crate::wallet::{account_kind_code, init::WalletMigrationError};
-use rusqlite::{named_params, Transaction};
+use rusqlite::{named_params, OptionalExtension, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
@@ -10,7 +10,9 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
 use zip32::fingerprint::SeedFingerprint;
 
-use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness};
+use super::{
+    add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness, wallet_summaries,
+};
 
 /// The migration that switched from presumed seed-derived account IDs to supporting
 /// HD accounts and all sorts of imported keys.
@@ -31,6 +33,7 @@ impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
             receiving_key_scopes::MIGRATION_ID,
             add_account_birthdays::MIGRATION_ID,
             v_transactions_note_uniqueness::MIGRATION_ID,
+            wallet_summaries::MIGRATION_ID,
         ]
         .into_iter()
         .collect()
@@ -50,8 +53,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             account_index: zip32::AccountId::ZERO,
         });
         let account_kind_imported = account_kind_code(AccountSource::Imported);
-        transaction.execute_batch(
-            &format!(r#"
+        transaction.execute_batch(&format!(
+            r#"
             PRAGMA foreign_keys = OFF;
             PRAGMA legacy_alter_table = ON;
 
@@ -66,18 +69,29 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 sapling_fvk_item_cache BLOB,
                 p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
+                birthday_sapling_tree_size INTEGER,
+                birthday_orchard_tree_size INTEGER,
                 recover_until_height INTEGER,
                 CHECK (
-                    (account_kind = {account_kind_derived} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
-                    OR
-                    (account_kind = {account_kind_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
+                  (
+                    account_kind = {account_kind_derived}
+                    AND hd_seed_fingerprint IS NOT NULL
+                    AND hd_account_index IS NOT NULL
+                    AND ufvk IS NOT NULL
+                  )
+                  OR
+                  (
+                    account_kind = {account_kind_imported}
+                    AND hd_seed_fingerprint IS NULL
+                    AND hd_account_index IS NULL
+                  )
                 )
             );
             CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
             CREATE UNIQUE INDEX accounts_uivk ON accounts_new (uivk);
             CREATE UNIQUE INDEX accounts_ufvk ON accounts_new (ufvk);
-            "#),
-        )?;
+            "#
+        ))?;
 
         // We require the seed *if* there are existing accounts in the table.
         if transaction.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
@@ -158,19 +172,40 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     #[cfg(not(feature = "transparent-inputs"))]
                     let transparent_item: Option<Vec<u8>> = None;
 
+                    // Get the tree sizes for the birthday height from the blocks table, if
+                    // available.
+                    let (birthday_sapling_tree_size, birthday_orchard_tree_size) = transaction
+                        .query_row(
+                            "SELECT sapling_commitment_tree_size - sapling_output_count,
+                                    orchard_commitment_tree_size - orchard_action_count
+                             FROM blocks
+                             WHERE height = :birthday_height",
+                            named_params![":birthday_height": birthday_height],
+                            |row| {
+                                Ok(row
+                                    .get::<_, Option<u32>>(0)?
+                                    .zip(row.get::<_, Option<u32>>(1)?))
+                            },
+                        )
+                        .optional()?
+                        .flatten()
+                        .map_or((None, None), |(s, o)| (Some(s), Some(o)));
+
                     transaction.execute(
                         r#"
                         INSERT INTO accounts_new (
                             id, account_kind, hd_seed_fingerprint, hd_account_index,
                             ufvk, uivk,
                             orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
-                            birthday_height, recover_until_height
+                            birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+                            recover_until_height
                         )
                         VALUES (
                             :account_id, :account_kind, :seed_id, :account_index,
                             :ufvk, :uivk,
                             :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
-                            :birthday_height, :recover_until_height
+                            :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
+                            :recover_until_height
                         );
                         "#,
                         named_params![
@@ -184,6 +219,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             ":sapling_fvk_item_cache": ufvk_parsed.sapling().map(|k| k.to_bytes()),
                             ":p2pkh_fvk_item_cache": transparent_item,
                             ":birthday_height": birthday_height,
+                            ":birthday_sapling_tree_size": birthday_sapling_tree_size,
+                            ":birthday_orchard_tree_size": birthday_orchard_tree_size,
                             ":recover_until_height": recover_until_height,
                         ],
                     )?;

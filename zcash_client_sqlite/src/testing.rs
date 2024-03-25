@@ -235,7 +235,7 @@ impl<Cache> TestBuilder<Cache> {
 
         let mut cached_blocks = BTreeMap::new();
 
-        if let Some(initial_state) = self.initial_chain_state {
+        if let Some(initial_state) = &self.initial_chain_state {
             db_data
                 .put_sapling_subtree_roots(0, &initial_state.prior_sapling_roots)
                 .unwrap();
@@ -302,7 +302,9 @@ impl<Cache> TestBuilder<Cache> {
         TestState {
             cache: self.cache,
             cached_blocks,
-            latest_block_height: None,
+            latest_block_height: self
+                .initial_chain_state
+                .map(|s| s.chain_state.block_height()),
             _data_file: data_file,
             db_data,
             test_account,
@@ -474,6 +476,7 @@ where
             value,
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
+            false,
         );
 
         (height, res, nf)
@@ -529,6 +532,7 @@ where
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
         initial_orchard_tree_size: u32,
+        allow_broken_hash_chain: bool,
     ) -> (Cache::InsertResult, Fvk::Nullifier) {
         let mut prior_cached_block = self
             .latest_cached_block_below_height(height)
@@ -542,7 +546,9 @@ where
         // we need to generate a new prior cached block that the block to be generated can
         // successfully chain from, with the provided tree sizes.
         if prior_cached_block.chain_state.block_height() == height - 1 {
-            assert_eq!(prev_hash, prior_cached_block.chain_state.block_hash());
+            if !allow_broken_hash_chain {
+                assert_eq!(prev_hash, prior_cached_block.chain_state.block_hash());
+            }
         } else {
             let final_sapling_tree =
                 (prior_cached_block.sapling_end_size..initial_sapling_tree_size).fold(
@@ -772,6 +778,11 @@ impl<Cache> TestState<Cache> {
     /// Exposes a mutable reference to the test's [`WalletDb`].
     pub(crate) fn wallet_mut(&mut self) -> &mut WalletDb<Connection, LocalNetwork> {
         &mut self.db_data
+    }
+
+    /// Exposes the test framework's source of randomness.
+    pub(crate) fn rng_mut(&mut self) -> &mut ChaChaRng {
+        &mut self.rng
     }
 
     /// Exposes the network in use.
