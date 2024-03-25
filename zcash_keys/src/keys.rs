@@ -281,7 +281,7 @@ impl UnifiedSpendingKey {
         &self.orchard
     }
 
-    /// Returns a binary encoding of this key suitable for decoding with [`decode`].
+    /// Returns a binary encoding of this key suitable for decoding with [`Self::from_bytes`].
     ///
     /// The encoded form of a unified spending key is only intended for use
     /// within wallets when required for storage and/or crossing FFI boundaries;
@@ -330,7 +330,7 @@ impl UnifiedSpendingKey {
 
     /// Decodes a [`UnifiedSpendingKey`] value from its serialized representation.
     ///
-    /// See [`to_bytes`] for additional detail about the encoded form.
+    /// See [`Self::to_bytes`] for additional detail about the encoded form.
     #[allow(clippy::unnecessary_unwrap)]
     #[cfg(feature = "unstable")]
     pub fn from_bytes(era: Era, encoded: &[u8]) -> Result<Self, DecodingError> {
