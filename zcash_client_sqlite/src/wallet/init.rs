@@ -552,7 +552,7 @@ mod tests {
                 FOREIGN KEY (to_account_id) REFERENCES accounts(id),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
                 CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) != (to_account_id IS NOT NULL)
+                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
                 )
             )"#,
             // Internal table created by SQLite when we started using `AUTOINCREMENT`.
