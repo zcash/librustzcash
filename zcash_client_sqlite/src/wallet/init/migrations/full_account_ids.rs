@@ -16,7 +16,7 @@ use super::{
 
 /// The migration that switched from presumed seed-derived account IDs to supporting
 /// HD accounts and all sorts of imported keys.
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x1b104345_f27e_42da_a9e3_1de22694da43);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x6d02ec76_8720_4cc6_b646_c4e2ce69221c);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) seed: Option<Rc<SecretVec<u8>>>,
@@ -329,7 +329,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 FOREIGN KEY (to_account_id) REFERENCES accounts(id),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
                 CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) != (to_account_id IS NOT NULL)
+                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
                 )
             );
             CREATE INDEX sent_notes_tx ON sent_notes_new (tx);
