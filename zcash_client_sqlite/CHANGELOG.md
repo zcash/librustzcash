@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.10.1] - 2024-03-25
+
 ### Fixed
 - The `sent_notes` table's `received_note` constraint was excessively restrictive 
  after zcash/librustzcash#1306. Any databases that have migrations from 
