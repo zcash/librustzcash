@@ -7,6 +7,13 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.12.1] - 2024-03-27
+
+### Fixed
+- This release fixes a problem in note selection when sending to a transparent
+  recipient, whereby available funds were being incorrectly excluded from 
+  input selection.
+
 ## [0.12.0] - 2024-03-25
 
 ### Added

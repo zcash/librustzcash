@@ -670,6 +670,14 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "orchard")]
+    fn fully_funded_send_to_t() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
     fn multi_pool_checkpoint() {
         use crate::wallet::orchard::tests::OrchardPoolTester;
 
