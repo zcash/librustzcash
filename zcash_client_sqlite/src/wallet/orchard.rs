@@ -657,6 +657,11 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn fully_funded_send_to_t() {
+        testing::pool::fully_funded_send_to_t::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
     fn multi_pool_checkpoint() {
         testing::pool::multi_pool_checkpoint::<OrchardPoolTester, SaplingPoolTester>()
     }

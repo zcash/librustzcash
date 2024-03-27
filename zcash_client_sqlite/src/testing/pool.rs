@@ -1635,6 +1635,97 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
 }
 
 #[cfg(feature = "orchard")]
+pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
+        // activation after Sapling
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let (p1_to, _) = account.usk().default_transparent_address();
+
+    let note_value = NonNegativeAmount::const_from_u64(350000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+
+    let initial_balance = (note_value * 2).unwrap();
+    assert_eq!(st.get_total_balance(account.account_id()), initial_balance);
+    assert_eq!(
+        st.get_spendable_balance(account.account_id(), 1),
+        initial_balance
+    );
+
+    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
+        recipient_address: Address::Transparent(p1_to),
+        amount: transfer_amount,
+        memo: None,
+        label: None,
+        message: None,
+        other_params: vec![],
+    }])
+    .unwrap();
+
+    let fee_rule = StandardFeeRule::Zip317;
+    let input_selector = GreedyInputSelector::new(
+        // We set the default change output pool to P0, because we want to verify later that
+        // change is actually sent to P1 (as the transaction is fully fundable from P1).
+        standard::SingleOutputChangeStrategy::new(fee_rule, None, P0::SHIELDED_PROTOCOL),
+        DustOutputPolicy::default(),
+    );
+    let proposal0 = st
+        .propose_transfer(
+            account.account_id(),
+            &input_selector,
+            p0_to_p1,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+
+    let _min_target_height = proposal0.min_target_height();
+    assert_eq!(proposal0.steps().len(), 1);
+    let step0 = &proposal0.steps().head;
+
+    // We expect 3 logical actions, one for the transparent output and two for the source pool.
+    let expected_fee = NonNegativeAmount::const_from_u64(15000);
+    assert_eq!(step0.balance().fee_required(), expected_fee);
+
+    let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
+    let proposed_change = step0.balance().proposed_change();
+    assert_eq!(proposed_change.len(), 1);
+    let change_output = proposed_change.get(0).unwrap();
+    // Since there are sufficient funds in either pool, change is kept in the same pool as
+    // the source note (the target pool), and does not necessarily follow preference order.
+    // The source note will always be sapling, as we spend Sapling funds preferentially.
+    assert_eq!(change_output.output_pool(), ShieldedProtocol::Sapling);
+    assert_eq!(change_output.value(), expected_change);
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal0,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+
+    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(
+        st.get_total_balance(account.account_id()),
+        (initial_balance - transfer_amount - expected_fee).unwrap()
+    );
+    assert_eq!(
+        st.get_spendable_balance(account.account_id(), 1),
+        (initial_balance - transfer_amount - expected_fee).unwrap()
+    );
+}
+
+#[cfg(feature = "orchard")]
 pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
