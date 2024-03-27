@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.10.2] - 2024-03-27
+
+### Fixed
+- A bug in the SQL querey for `WalletDb::get_unspent_transparent_output` was fixed.
+
 ## [0.10.1] - 2024-03-25
 
 ### Fixed
