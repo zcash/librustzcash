@@ -2116,7 +2116,7 @@ pub(crate) fn get_unspent_transparent_output(
          WHERE u.prevout_txid = :txid
          AND u.prevout_idx = :output_index
          AND u.id NOT IN (
-            SELECT txo_spends.id
+            SELECT txo_spends.transparent_received_output_id
             FROM transparent_received_output_spends txo_spends
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
             WHERE tx.block IS NOT NULL  -- the spending tx is mined
@@ -2901,6 +2901,10 @@ mod tests {
             ).as_deref(),
             Ok(&[ref ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
         );
+        assert_matches!(
+            st.wallet().get_unspent_transparent_output(utxo.outpoint()),
+            Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
+        );
 
         // Change the mined height of the UTXO and upsert; we should get back
         // the same `UtxoId`.
@@ -2915,6 +2919,12 @@ mod tests {
                 .get_unspent_transparent_outputs(taddr, height_1, &[])
                 .as_deref(),
             Ok(&[])
+        );
+
+        // We can still look up the specific output, and it has the expected height.
+        assert_matches!(
+            st.wallet().get_unspent_transparent_output(utxo2.outpoint()),
+            Ok(Some(ret)) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo2.outpoint(), utxo2.txout(), height_2)
         );
 
         // If we include `height_2` then the output is returned.
