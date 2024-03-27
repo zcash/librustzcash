@@ -2116,7 +2116,7 @@ pub(crate) fn get_unspent_transparent_output(
          WHERE u.prevout_txid = :txid
          AND u.prevout_idx = :output_index
          AND u.id NOT IN (
-            SELECT txo_spends.id
+            SELECT txo_spends.transparent_received_output_id
             FROM transparent_received_output_spends txo_spends
             JOIN transactions tx ON tx.id_tx = txo_spends.transaction_id
             WHERE tx.block IS NOT NULL  -- the spending tx is mined
