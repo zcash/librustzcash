@@ -258,13 +258,14 @@ pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
-    init_wallet_db_internal(wdb, seed, &[])
+    init_wallet_db_internal(wdb, seed, &[], true)
 }
 
 fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
+    verify_seed_relevance: bool,
 ) -> Result<(), MigratorError<WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
@@ -295,18 +296,24 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
         .map_err(|e| MigratorError::Adapter(WalletMigrationError::from(e)))?;
 
     // Now that the migration succeeded, check whether the seed is relevant to the wallet.
-    if let Some(seed) = seed {
-        match wdb
-            .seed_relevance_to_derived_accounts(&seed)
-            .map_err(sqlite_client_error_to_wallet_migration_error)?
-        {
-            SeedRelevance::Relevant { .. } => (),
-            // Every seed is relevant to a wallet with no accounts; this is most likely a
-            // new wallet database being initialized for the first time.
-            SeedRelevance::NoAccounts => (),
-            // No seed is relevant to a wallet that only has imported accounts.
-            SeedRelevance::NotRelevant | SeedRelevance::NoDerivedAccounts => {
-                return Err(WalletMigrationError::SeedNotRelevant.into())
+    // We can only check this if we have migrated as far as `full_account_ids::MIGRATION_ID`,
+    // but unfortunately `schemer` does not currently expose its DAG of migrations. As a
+    // consequence, the caller has to choose whether or not this check should be performed
+    // based upon which migrations they're asking to apply.
+    if verify_seed_relevance {
+        if let Some(seed) = seed {
+            match wdb
+                .seed_relevance_to_derived_accounts(&seed)
+                .map_err(sqlite_client_error_to_wallet_migration_error)?
+            {
+                SeedRelevance::Relevant { .. } => (),
+                // Every seed is relevant to a wallet with no accounts; this is most likely a
+                // new wallet database being initialized for the first time.
+                SeedRelevance::NoAccounts => (),
+                // No seed is relevant to a wallet that only has imported accounts.
+                SeedRelevance::NotRelevant | SeedRelevance::NoDerivedAccounts => {
+                    return Err(WalletMigrationError::SeedNotRelevant.into())
+                }
             }
         }
     }

@@ -483,6 +483,7 @@ mod tests {
                 add_account_birthdays::MIGRATION_ID,
                 shardtree_support::MIGRATION_ID,
             ],
+            false,
         )
         .unwrap();
 
@@ -537,7 +538,7 @@ mod tests {
             .unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         // There should be two rows in the `sapling_received_notes` table with correct scopes.
         let mut q = db_data
@@ -581,6 +582,7 @@ mod tests {
                 wallet_summaries::MIGRATION_ID,
                 shardtree_support::MIGRATION_ID,
             ],
+            false,
         )
         .unwrap();
 
@@ -714,7 +716,7 @@ mod tests {
             .unwrap();
 
         // Apply the current migration
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         // There should be two rows in the `sapling_received_notes` table with correct scopes.
         let mut q = db_data
