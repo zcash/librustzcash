@@ -52,8 +52,9 @@ use crate::{
 use crate::transaction::components::amount::NonNegativeAmount;
 use crate::transaction::components::sapling::zip212_enforcement;
 
-use orchard::{note::AssetBase, note_encryption_vanilla::OrchardDomainVanilla};
+use orchard::note::AssetBase;
 use orchard::issuance::{IssueBundle, Signed};
+use orchard::orchard_flavor::OrchardVanilla;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>

@@ -20,6 +20,7 @@ use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
 use orchard::issuance::{IssueBundle, Signed};
+use orchard::orchard_flavor::OrchardVanilla;
 use zcash_encoding::{Array, CompactSize, Vector};
 use orchard::orchard_flavor::OrchardVanilla;
 
@@ -42,8 +43,6 @@ use self::{
 
 #[cfg(zcash_unstable = "zfuture")]
 use self::components::tze::{self, TzeIn, TzeOut};
-
-use orchard::note_encryption_vanilla::OrchardDomainVanilla;
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;

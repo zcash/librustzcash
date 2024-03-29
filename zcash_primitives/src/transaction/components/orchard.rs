@@ -7,13 +7,12 @@ use nonempty::NonEmpty;
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
-    note_encryption_vanilla::{NoteCiphertextBytes, OrchardDomainVanilla, ENC_CIPHERTEXT_SIZE},
     primitives::redpallas::{self, SigType, Signature, SpendAuth, VerificationKey},
     value::ValueCommitment,
     Action, Anchor,
 };
 use orchard::note_encryption::OrchardDomain;
-use orchard::orchard_flavor::OrchardVanilla;
+use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use zcash_encoding::{Array, CompactSize, Vector};
 
 use super::Amount;
@@ -140,19 +139,27 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 pub fn read_note_ciphertext<R: Read>(
     mut reader: R,
 ) -> io::Result<TransmittedNoteCiphertext<OrchardVanilla>> {
-    /*
-            let mut epk_bytes = [0u8; 32]
-            // FIXME: use another ENC_CIPHERTEXT_SIZE for ZSA
-            let enc_ciphertext = [0u8;  ENC_CIPHERTEXT_SIZE];
-            let out_ciphertext = [0u8; 80];
 
-                enc_ciphertext: [0u8;  ENC_CIPHERTEXT_SIZE],
-    */
     let mut tnc = TransmittedNoteCiphertext::<OrchardVanilla> {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: <OrchardVanilla as OrchardDomain>::NoteCiphertextBytes::from(
-            [0u8; OrchardVanilla::ENC_CIPHERTEXT_SIZE].as_ref(),
-        ),
+        enc_ciphertext: <OrchardVanilla as OrchardDomain>::NoteCiphertextBytes::from([0u8; OrchardVanilla::ENC_CIPHERTEXT_SIZE].as_ref()),
+        out_ciphertext: [0u8; 80],
+    };
+
+    reader.read_exact(&mut tnc.epk_bytes)?;
+    reader.read_exact(&mut tnc.enc_ciphertext.0)?;
+    reader.read_exact(&mut tnc.out_ciphertext)?;
+
+    Ok(tnc)
+}
+
+pub fn read_zsa_note_ciphertext<R: Read>(
+    mut reader: R,
+) -> io::Result<TransmittedNoteCiphertext<OrchardZSA>> {
+
+    let mut tnc = TransmittedNoteCiphertext::<OrchardZSA> {
+        epk_bytes: [0u8; 32],
+        enc_ciphertext: <OrchardZSA as OrchardDomain>::NoteCiphertextBytes::from([0u8; OrchardZSA::ENC_CIPHERTEXT_SIZE].as_ref()),
         out_ciphertext: [0u8; 80],
     };
 
