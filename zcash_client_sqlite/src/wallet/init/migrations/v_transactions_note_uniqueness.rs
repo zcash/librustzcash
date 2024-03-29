@@ -175,7 +175,13 @@ mod tests {
     fn v_transactions_note_uniqueness_migration() {
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), Network::TestNetwork).unwrap();
-        init_wallet_db_internal(&mut db_data, None, &[v_transactions_net::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(
+            &mut db_data,
+            None,
+            &[v_transactions_net::MIGRATION_ID],
+            false,
+        )
+        .unwrap();
 
         // Create an account in the wallet
         let usk0 = UnifiedSpendingKey::from_seed(&db_data.params, &[0u8; 32][..], AccountId::ZERO)
@@ -241,7 +247,7 @@ mod tests {
         check_balance_delta(&mut db_data, 1);
 
         // Apply the current migration.
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         // Now it should be correct.
         check_balance_delta(&mut db_data, 2);
