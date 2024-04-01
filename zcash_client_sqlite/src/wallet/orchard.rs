@@ -99,11 +99,11 @@ fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedProtocol::Orchard, row.get(0)?);
-    let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
-    let action_index = row.get(2)?;
+    let note_id = ReceivedNoteId(ShieldedProtocol::Orchard, row.get("id")?);
+    let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
+    let action_index = row.get("action_index")?;
     let diversifier = {
-        let d: Vec<_> = row.get(3)?;
+        let d: Vec<_> = row.get("diversifier")?;
         if d.len() != 11 {
             return Err(SqliteClientError::CorruptedData(
                 "Invalid diversifier length".to_string(),
@@ -114,30 +114,31 @@ fn to_spendable_note<P: consensus::Parameters>(
         Diversifier::from_bytes(tmp)
     };
 
-    let note_value: u64 = row.get::<_, i64>(4)?.try_into().map_err(|_e| {
+    let note_value: u64 = row.get::<_, i64>("value")?.try_into().map_err(|_e| {
         SqliteClientError::CorruptedData("Note values must be nonnegative".to_string())
     })?;
 
     let rho = {
-        let rho_bytes: [u8; 32] = row.get(5)?;
+        let rho_bytes: [u8; 32] = row.get("rho")?;
         Option::from(Rho::from_bytes(&rho_bytes))
             .ok_or_else(|| SqliteClientError::CorruptedData("Invalid rho.".to_string()))
     }?;
 
     let rseed = {
-        let rseed_bytes: [u8; 32] = row.get(6)?;
+        let rseed_bytes: [u8; 32] = row.get("rseed")?;
         Option::from(RandomSeed::from_bytes(rseed_bytes, &rho)).ok_or_else(|| {
             SqliteClientError::CorruptedData("Invalid Orchard random seed.".to_string())
         })
     }?;
 
-    let note_commitment_tree_position =
-        Position::from(u64::try_from(row.get::<_, i64>(7)?).map_err(|_| {
+    let note_commitment_tree_position = Position::from(
+        u64::try_from(row.get::<_, i64>("commitment_tree_position")?).map_err(|_| {
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
-        })?);
+        })?,
+    );
 
-    let ufvk_str: Option<String> = row.get(8)?;
-    let scope_code: Option<i64> = row.get(9)?;
+    let ufvk_str: Option<String> = row.get("ufvk")?;
+    let scope_code: Option<i64> = row.get("recipient_key_scope")?;
 
     // If we don't have information about the recipient key scope or the ufvk we can't determine
     // which spending key to use. This may be because the received note was associated with an

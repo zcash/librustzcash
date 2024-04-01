@@ -98,11 +98,11 @@ fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get(0)?);
-    let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
-    let output_index = row.get(2)?;
+    let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get("id")?);
+    let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
+    let output_index = row.get("output_index")?;
     let diversifier = {
-        let d: Vec<_> = row.get(3)?;
+        let d: Vec<_> = row.get("diversifier")?;
         if d.len() != 11 {
             return Err(SqliteClientError::CorruptedData(
                 "Invalid diversifier length".to_string(),
@@ -113,12 +113,12 @@ fn to_spendable_note<P: consensus::Parameters>(
         Diversifier(tmp)
     };
 
-    let note_value: u64 = row.get::<_, i64>(4)?.try_into().map_err(|_e| {
+    let note_value: u64 = row.get::<_, i64>("value")?.try_into().map_err(|_e| {
         SqliteClientError::CorruptedData("Note values must be nonnegative".to_string())
     })?;
 
     let rseed = {
-        let rcm_bytes: Vec<_> = row.get(5)?;
+        let rcm_bytes: Vec<_> = row.get("rcm")?;
 
         // We store rcm directly in the data DB, regardless of whether the note
         // used a v1 or v2 note plaintext, so for the purposes of spending let's
@@ -132,13 +132,14 @@ fn to_spendable_note<P: consensus::Parameters>(
         Rseed::BeforeZip212(rcm)
     };
 
-    let note_commitment_tree_position =
-        Position::from(u64::try_from(row.get::<_, i64>(6)?).map_err(|_| {
+    let note_commitment_tree_position = Position::from(
+        u64::try_from(row.get::<_, i64>("commitment_tree_position")?).map_err(|_| {
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
-        })?);
+        })?,
+    );
 
-    let ufvk_str: Option<String> = row.get(7)?;
-    let scope_code: Option<i64> = row.get(8)?;
+    let ufvk_str: Option<String> = row.get("ufvk")?;
+    let scope_code: Option<i64> = row.get("recipient_key_scope")?;
 
     // If we don't have information about the recipient key scope or the ufvk we can't determine
     // which spending key to use. This may be because the received note was associated with an
