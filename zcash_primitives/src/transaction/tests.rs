@@ -1,5 +1,7 @@
 use blake2b_simd::Hash as Blake2bHash;
 use std::ops::Deref;
+use orchard::circuit::OrchardCircuit;
+use orchard::note_encryption::OrchardDomain;
 
 use proptest::prelude::*;
 
@@ -55,6 +57,10 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
     prop_assert_eq!(
         tx.orchard_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_bundle.as_ref().map(|v| *v.value_balance())
+    );
+    prop_assert_eq!(
+        tx.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance()),
+        txo.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance())
     );
     Ok(())
 }
@@ -116,6 +122,14 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn tx_serialization_roundtrip_nu5(tx in arb_tx(BranchId::Nu5)) {
+        check_roundtrip(tx)?;
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(10))]
+    #[test]
+    fn tx_serialization_roundtrip_v6(tx in arb_tx(BranchId::V6)) {
         check_roundtrip(tx)?;
     }
 }
@@ -262,6 +276,7 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            txdata.orchard_zsa_bundle().cloned(),
             txdata.issue_bundle().cloned(),
         );
         #[cfg(zcash_unstable = "zfuture")]
@@ -274,6 +289,7 @@ fn zip_0244() {
             txdata.sprout_bundle().cloned(),
             txdata.sapling_bundle().cloned(),
             txdata.orchard_bundle().cloned(),
+            txdata.orchard_zsa_bundle().cloned(),
             txdata.issue_bundle().cloned(),
             txdata.tze_bundle().cloned(),
         );

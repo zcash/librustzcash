@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
+use orchard::builder::InProgress;
 
 use rand::{CryptoRng, RngCore};
 
@@ -54,7 +55,7 @@ use crate::transaction::components::sapling::zip212_enforcement;
 
 use orchard::note::AssetBase;
 use orchard::issuance::{IssueBundle, Signed};
-use orchard::orchard_flavor::OrchardVanilla;
+use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -727,20 +728,23 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             None => (None, SaplingMetadata::empty()),
         };
 
-        let (orchard_bundle, orchard_meta) = match self
-            .orchard_builder
-            .and_then(|builder| {
-                builder
-                    .build(&mut rng)
-                    .map_err(Error::OrchardBuild)
-                    .transpose()
-            })
-            .transpose()?
-        {
-            Some((bundle, meta)) => (Some(bundle), meta),
-            None => (None, orchard::builder::BundleMetadata::empty()),
-        };
+        // let orchard_bundle: Option<orchard::Bundle<_, Amount, OrchardVanilla>> =
+        //     if let Some(builder) = self.orchard_builder {
+        //         Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?)
+        //     } else {
+        //         None
+        //     };
 
+        let (orchard_bundle, orchard_zsa_bundle) = if let Some(builder) = self.orchard_builder {
+            if version.has_zsa() {
+                let zsa_bundle: orchard::Bundle<InProgress<_, _>, Amount, OrchardZSA> = builder.build(&mut rng).map_err(Error::OrchardBuild)?;
+                (None, Some(zsa_bundle))
+            } else {
+                (Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?), None)
+            }
+        } else {
+            (None, None)
+        };
 
         let issue_bundle: Option<IssueBundle<Signed>> = None; // TODO
 
@@ -756,6 +760,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: None,
             sapling_bundle,
             orchard_bundle,
+            orchard_zsa_bundle,
             issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
@@ -830,6 +835,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
+            orchard_zsa_bundle: None, // TODO
             issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
