@@ -2796,6 +2796,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use sapling::zip32::ExtendedSpendingKey;
+    use secrecy::{ExposeSecret, SecretVec};
     use zcash_client_backend::data_api::{AccountSource, WalletRead};
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
@@ -2969,6 +2970,25 @@ mod tests {
             account_parameters.kind,
             AccountSource::Derived{account_index, ..} if account_index == expected_account_index
         );
+    }
+
+    #[test]
+    fn get_account_ids() {
+        use crate::testing::TestBuilder;
+        use zcash_client_backend::data_api::WalletWrite;
+
+        let mut st = TestBuilder::new()
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let seed = SecretVec::new(st.test_seed().unwrap().expose_secret().clone());
+        let birthday = st.test_account().unwrap().birthday().clone();
+
+        st.wallet_mut().create_account(&seed, &birthday).unwrap();
+
+        for acct_id in st.wallet().get_account_ids().unwrap() {
+            assert_matches!(st.wallet().get_account(acct_id), Ok(Some(_)))
+        }
     }
 
     #[test]
