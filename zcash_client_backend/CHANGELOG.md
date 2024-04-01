@@ -39,6 +39,7 @@ and this library adheres to Rust's notion of
   - `WalletSummary::next_orchard_subtree_index`
   - `chain::ChainState`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
+  - `chain::BlockCache` trait
   - `impl Debug for chain::CommitmentTreeRoot`
 - `zcash_client_backend::fees`:
   - `orchard`
@@ -54,6 +55,7 @@ and this library adheres to Rust's notion of
   - `Nullifiers::{orchard, extend_orchard, retain_orchard}`
   - `TaggedOrchardBatch`
   - `TaggedOrchardBatchRunner`
+  - `testing` module
 - `zcash_client_backend::wallet`:
   - `Note::Orchard`
   - `WalletOrchardSpend`
