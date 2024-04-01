@@ -2077,17 +2077,17 @@ pub(crate) fn truncate_to_height<P: consensus::Parameters>(
 
 #[cfg(feature = "transparent-inputs")]
 fn to_unspent_transparent_output(row: &Row) -> Result<WalletTransparentOutput, SqliteClientError> {
-    let txid: Vec<u8> = row.get(0)?;
+    let txid: Vec<u8> = row.get("prevout_txid")?;
     let mut txid_bytes = [0u8; 32];
     txid_bytes.copy_from_slice(&txid);
 
-    let index: u32 = row.get(1)?;
-    let script_pubkey = Script(row.get(2)?);
-    let raw_value: i64 = row.get(3)?;
+    let index: u32 = row.get("prevout_idx")?;
+    let script_pubkey = Script(row.get("script")?);
+    let raw_value: i64 = row.get("value_zat")?;
     let value = NonNegativeAmount::from_nonnegative_i64(raw_value).map_err(|_| {
         SqliteClientError::CorruptedData(format!("Invalid UTXO value: {}", raw_value))
     })?;
-    let height: u32 = row.get(4)?;
+    let height: u32 = row.get("height")?;
 
     let outpoint = OutPoint::new(txid_bytes, index);
     WalletTransparentOutput::from_parts(
