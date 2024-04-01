@@ -65,7 +65,7 @@
 //! - `memo` the shielded memo associated with the output, if any.
 
 use incrementalmerkletree::Retention;
-use rusqlite::{self, named_params, params, OptionalExtension};
+use rusqlite::{self, named_params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
 use zip32::fingerprint::SeedFingerprint;
@@ -1623,10 +1623,10 @@ pub(crate) fn get_account<P: Parameters>(
         SELECT account_kind, hd_seed_fingerprint, hd_account_index, ufvk, uivk
         FROM accounts
         WHERE id = :account_id
-    "#,
+        "#,
     )?;
 
-    let mut result = sql.query(params![account_id.0])?;
+    let mut result = sql.query(named_params![":account_id": account_id.0])?;
     let row = result.next()?;
     match row {
         Some(row) => {
