@@ -235,10 +235,7 @@ impl WalletRead for MemoryWalletDb {
     }
 
     fn chain_height(&self) -> Result<Option<BlockHeight>, Self::Error> {
-        match self.blocks.last_key_value() {
-            Some((last_key, _)) => Ok(Some(*last_key)),
-            None => Ok(None),
-        }
+        todo!()
     }
 
     fn get_block_hash(&self, block_height: BlockHeight) -> Result<Option<BlockHash>, Self::Error> {
