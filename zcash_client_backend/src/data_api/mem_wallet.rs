@@ -458,18 +458,16 @@ impl WalletWrite for MemoryWalletDb {
 
             // Add the Sapling commitments to the sapling tree.
             let block_commitments = block.into_commitments();
-            let sapling_block_commitments = block_commitments.sapling;
-            sapling_block_commitments.iter().map(|(node, height)| {
-                self.sapling_tree.append(*node, *height);
-            });
+            if let Ok(Some(pos)) = self.sapling_tree.max_leaf_position(0) {
+                self.sapling_tree
+                    .batch_insert(pos, block_commitments.sapling.into_iter());
+            }
 
             #[cfg(feature = "orchard")]
-            {
-                // Add the Orchard commitments to the sapling tree.
-                let orchard_block_commitments = block_commitments.orchard;
-                orchard_block_commitments.iter().map(|(node, height)| {
-                    self.orchard_tree.append(*node, *height);
-                });
+            // Add the Orchard commitments to the orchard tree.
+            if let Ok(Some(pos)) = self.orchard_tree.max_leaf_position(0) {
+                self.orchard_tree
+                    .batch_insert(pos, block_commitments.orchard.into_iter());
             }
 
             // TODO: Received notes need to be made available for note selection & balance calculation
