@@ -456,13 +456,21 @@ impl WalletWrite for MemoryWalletDb {
 
             self.blocks.insert(block.block_height, memory_block);
 
-            // Add the sapling commitments to the sapling tree.
-            let sapling_block_commitments = block.into_commitments().sapling;
+            // Add the Sapling commitments to the sapling tree.
+            let block_commitments = block.into_commitments();
+            let sapling_block_commitments = block_commitments.sapling;
             sapling_block_commitments.iter().map(|(node, height)| {
                 self.sapling_tree.append(*node, *height);
             });
 
-            // TODO: Add orchard commitments to the orchard tree.
+            #[cfg(feature = "orchard")]
+            {
+                // Add the Orchard commitments to the sapling tree.
+                let orchard_block_commitments = block_commitments.orchard;
+                orchard_block_commitments.iter().map(|(node, height)| {
+                    self.orchard_tree.append(*node, *height);
+                });
+            }
 
             // TODO: Received notes need to be made available for note selection & balance calculation
 
