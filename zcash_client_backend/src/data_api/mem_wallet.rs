@@ -1,5 +1,5 @@
 #![allow(unused)]
-use incrementalmerkletree::Address;
+use incrementalmerkletree::{Address, Retention};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
@@ -383,8 +383,7 @@ impl WalletWrite for MemoryWalletDb {
     /// Assumes blocks will be here in order.
     fn put_blocks(
         &mut self,
-        // TODO: Figure out what to do with this field.
-        _from_state: &super::chain::ChainState,
+        from_state: &super::chain::ChainState,
         blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
         // TODO:
@@ -421,6 +420,25 @@ impl WalletWrite for MemoryWalletDb {
                             .or_insert((txid, true));
                     }
                 });
+
+                // Add frontier to the sapling tree
+                self.sapling_tree.insert_frontier(
+                    from_state.final_sapling_tree().clone(),
+                    Retention::Checkpoint {
+                        id: from_state.block_height(),
+                        is_marked: false,
+                    },
+                );
+
+                #[cfg(feature = "orchard")]
+                // Add frontier to the orchard tree
+                self.orchard_tree.insert_frontier(
+                    from_state.final_orchard_tree().clone(),
+                    Retention::Checkpoint {
+                        id: from_state.block_height(),
+                        is_marked: false,
+                    },
+                );
 
                 // TODO: Is `self.tx_idx` field filled with all the transaction ids from the scanned blocks ?
                 self.tx_idx.insert(txid, block.block_height);
