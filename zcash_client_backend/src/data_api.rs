@@ -992,7 +992,7 @@ pub struct ScannedBundles<NoteCommitment, NF> {
 }
 
 impl<NoteCommitment, NF> ScannedBundles<NoteCommitment, NF> {
-    pub fn new(
+    pub(crate) fn new(
         final_tree_size: u32,
         commitments: Vec<(NoteCommitment, Retention<BlockHeight>)>,
         nullifier_map: Vec<(TxId, u16, Vec<NF>)>,
@@ -1053,7 +1053,7 @@ pub struct ScannedBlock<A> {
 
 impl<A> ScannedBlock<A> {
     /// Constructs a new `ScannedBlock`
-    pub fn from_parts(
+    pub(crate) fn from_parts(
         block_height: BlockHeight,
         block_hash: BlockHash,
         block_time: u32,
