@@ -405,20 +405,24 @@ impl WalletWrite for MemoryWalletDb {
                     .ok_or(Error::ViewingKeyNotFound(0))?;
                 let nk = ufvk.to_nk(Scope::External);
 
-                let spent_nullifiers = transaction
-                    .sapling_outputs()
-                    .iter()
-                    .map(|o| {
-                        let nullifier = o.note().nf(&nk, o.note_commitment_tree_position().into());
-                        // TODO: Populate the bool field properly.
-                        self.sapling_spends.entry(nullifier).or_insert((txid, true));
-                        nullifier
-                    })
-                    .count();
+                // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
+                transaction.sapling_outputs().iter().map(|o| {
+                    let nullifier = o.note().nf(&nk, o.note_commitment_tree_position().into());
+                    // TODO: Populate the bool field properly.
+                    self.sapling_spends.entry(nullifier).or_insert((txid, true));
+                });
 
-                // TODO: Add orchard nullifiers to the orchard spends.
+                #[cfg(feature = "orchard")]
+                // Insert the Orchard nullifiers of the spent notes into the `orchard_spends` map.
+                transaction.orchard_outputs().iter().map(|o| {
+                    if let Some(nullifier) = o.nf() {
+                        self.orchard_spends
+                            .entry(*nullifier)
+                            .or_insert((txid, true));
+                    }
+                });
 
-                // Is `self.tx_idx` field filled with all the transaction ids from the scanned blocks ?
+                // TODO: Is `self.tx_idx` field filled with all the transaction ids from the scanned blocks ?
                 self.tx_idx.insert(txid, block.block_height);
                 transactions.insert(txid, transaction);
             }
