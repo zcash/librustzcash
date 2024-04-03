@@ -409,8 +409,9 @@ impl WalletWrite for MemoryWalletDb {
                 transaction.sapling_outputs().iter().map(|o| {
                     // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
                     let nullifier = o.note().nf(&nk, o.note_commitment_tree_position().into());
-                    // TODO: Populate the bool field properly.
-                    self.sapling_spends.entry(nullifier).or_insert((txid, true));
+                    self.sapling_spends
+                        .entry(nullifier)
+                        .or_insert((txid, false));
 
                     // Insert the memo into the `memos` map.
                     let note_id = NoteId::new(
@@ -429,7 +430,7 @@ impl WalletWrite for MemoryWalletDb {
                     if let Some(nullifier) = o.nf() {
                         self.orchard_spends
                             .entry(*nullifier)
-                            .or_insert((txid, true));
+                            .or_insert((txid, false));
                     }
 
                     // Insert the memo into the `memos` map.
@@ -462,6 +463,23 @@ impl WalletWrite for MemoryWalletDb {
                     },
                 );
 
+                // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
+                transaction.sapling_spends().iter().map(|s| {
+                    let nullifier = s.nf();
+                    if let Some((txid, spent)) = self.sapling_spends.get_mut(&nullifier) {
+                        *spent = true;
+                    }
+                });
+
+                #[cfg(feature = "orchard")]
+                // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
+                transaction.orchard_spends().iter().map(|s| {
+                    let nullifier = s.nf();
+                    if let Some((txid, spent)) = self.orchard_spends.get_mut(&nullifier) {
+                        *spent = true;
+                    }
+                });
+
                 // TODO: Is `self.tx_idx` field filled with all the transaction ids from the scanned blocks ?
                 self.tx_idx.insert(txid, block.block_height);
                 transactions.insert(txid, transaction);
@@ -490,10 +508,6 @@ impl WalletWrite for MemoryWalletDb {
                 self.orchard_tree
                     .batch_insert(pos, block_commitments.orchard.into_iter());
             }
-
-            // TODO: Received notes need to be made available for note selection & balance calculation
-
-            // TODO: Spent notes need to be made unavailable for note selection & balance calculation
         }
 
         Ok(())
