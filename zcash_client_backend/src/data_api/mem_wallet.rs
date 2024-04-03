@@ -21,6 +21,7 @@ use zcash_primitives::{
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
     value::Zatoshis,
+    ShieldedProtocol::{Orchard, Sapling},
 };
 
 use crate::{
@@ -392,6 +393,7 @@ impl WalletWrite for MemoryWalletDb {
         // - Add a check to make sure the blocks are not already in the data store.
         for block in blocks.into_iter() {
             let mut transactions = HashMap::new();
+            let mut memos = HashMap::new();
             for transaction in block.transactions().into_iter().cloned() {
                 let txid = transaction.txid();
                 let account_id = 0; // TODO: Assuming the account is 0, handle this accordingly.
@@ -404,20 +406,40 @@ impl WalletWrite for MemoryWalletDb {
                     .ok_or(Error::ViewingKeyNotFound(0))?;
                 let nk = ufvk.to_nk(Scope::External);
 
-                // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
                 transaction.sapling_outputs().iter().map(|o| {
+                    // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
                     let nullifier = o.note().nf(&nk, o.note_commitment_tree_position().into());
                     // TODO: Populate the bool field properly.
                     self.sapling_spends.entry(nullifier).or_insert((txid, true));
+
+                    // Insert the memo into the `memos` map.
+                    let note_id = NoteId::new(
+                        txid,
+                        Sapling,
+                        u16::try_from(o.index()).expect("output indices are representable as u16"),
+                    );
+                    if let Ok(Some(memo)) = self.get_memo(note_id) {
+                        memos.insert(note_id, memo.encode());
+                    }
                 });
 
                 #[cfg(feature = "orchard")]
-                // Insert the Orchard nullifiers of the spent notes into the `orchard_spends` map.
                 transaction.orchard_outputs().iter().map(|o| {
+                    // Insert the Orchard nullifiers of the spent notes into the `orchard_spends` map.
                     if let Some(nullifier) = o.nf() {
                         self.orchard_spends
                             .entry(*nullifier)
                             .or_insert((txid, true));
+                    }
+
+                    // Insert the memo into the `memos` map.
+                    let note_id = NoteId::new(
+                        txid,
+                        Orchard,
+                        u16::try_from(o.index()).expect("output indices are representable as u16"),
+                    );
+                    if let Ok(Some(memo)) = self.get_memo(note_id) {
+                        memos.insert(note_id, memo.encode());
                     }
                 });
 
@@ -450,8 +472,7 @@ impl WalletWrite for MemoryWalletDb {
                 hash: block.block_hash,
                 block_time: block.block_time,
                 transactions,
-                // TODO: Add memos
-                memos: HashMap::new(),
+                memos,
             };
 
             self.blocks.insert(block.block_height, memory_block);
