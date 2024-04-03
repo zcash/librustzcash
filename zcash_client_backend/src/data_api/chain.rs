@@ -151,9 +151,8 @@
 //! # }
 //! ```
 
-use std::ops::{Add, Range};
+use std::ops::Range;
 
-use async_trait::async_trait;
 use incrementalmerkletree::frontier::Frontier;
 use subtle::ConditionallySelectable;
 use zcash_primitives::{
@@ -162,15 +161,20 @@ use zcash_primitives::{
 };
 
 use crate::{
-    data_api::{scanning::ScanRange, NullifierQuery, WalletWrite},
+    data_api::{NullifierQuery, WalletWrite},
     proto::compact_formats::CompactBlock,
     scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
+};
+
+#[cfg(feature = "sync")]
+use {
+    super::scanning::ScanPriority, crate::data_api::scanning::ScanRange, async_trait::async_trait,
 };
 
 pub mod error;
 use error::Error;
 
-use super::{scanning::ScanPriority, WalletRead};
+use super::WalletRead;
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -300,7 +304,7 @@ pub trait BlockSource {
 ///            Ok(())
 ///        }
 ///
-///        async fn delete(&self, range: &ScanRange) -> Result<(), Self::Error> {
+///        async fn delete(&self, range: ScanRange) -> Result<(), Self::Error> {
 ///            self.cached_blocks
 ///                .lock()
 ///                .unwrap()
@@ -368,11 +372,12 @@ pub trait BlockSource {
 ///
 ///    // Delete blocks from the block cache
 ///    rt.block_on(async {
-///        block_cache.delete(&range).await.unwrap();
+///        block_cache.delete(range).await.unwrap();
 ///    });
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
 ///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
+#[cfg(feature = "sync")]
 #[async_trait]
 pub trait BlockCache: BlockSource + Send + Sync
 where
@@ -404,10 +409,10 @@ where
     /// Removes all cached blocks above a specified block height.
     async fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error> {
         if let Some(latest) = self.get_tip_height(None)? {
-            self.delete(&ScanRange::from_parts(
+            self.delete(ScanRange::from_parts(
                 Range {
-                    start: block_height.add(1),
-                    end: latest.add(1),
+                    start: block_height + 1,
+                    end: latest + 1,
                 },
                 ScanPriority::Ignored,
             ))
@@ -421,7 +426,7 @@ where
     /// # Errors
     ///
     /// In the case of an error, some blocks requested for deletion may remain in the block cache.
-    async fn delete(&self, range: &ScanRange) -> Result<(), Self::Error>;
+    async fn delete(&self, range: ScanRange) -> Result<(), Self::Error>;
 }
 
 /// Metadata about modifications to the wallet state made in the course of scanning a set of
