@@ -497,16 +497,16 @@ impl WalletWrite for MemoryWalletDb {
 
             // Add the Sapling commitments to the sapling tree.
             let block_commitments = block.into_commitments();
-            if let Ok(Some(pos)) = self.sapling_tree.max_leaf_position(0) {
+            if let Some(value) = from_state.final_sapling_tree().value() {
                 self.sapling_tree
-                    .batch_insert(pos, block_commitments.sapling.into_iter());
+                    .batch_insert(value.position(), block_commitments.sapling.into_iter());
             }
 
             #[cfg(feature = "orchard")]
             // Add the Orchard commitments to the orchard tree.
-            if let Ok(Some(pos)) = self.orchard_tree.max_leaf_position(0) {
+            if let Some(value) = from_state.final_orchard_tree().value() {
                 self.orchard_tree
-                    .batch_insert(pos, block_commitments.orchard.into_iter());
+                    .batch_insert(value.position(), block_commitments.orchard.into_iter());
             }
         }
 
