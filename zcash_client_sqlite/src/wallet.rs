@@ -1591,7 +1591,7 @@ pub(crate) fn account_birthday(
     conn.query_row(
         "SELECT birthday_height
          FROM accounts
-         WHERE account = :account_id",
+         WHERE id = :account_id",
         named_params![":account_id": account.0],
         |row| row.get::<_, u32>(0).map(BlockHeight::from),
     )
@@ -3212,6 +3212,9 @@ mod tests {
             .build();
 
         let account_id = st.test_account().unwrap().account_id();
-        assert_matches!(account_birthday(&st.wallet().conn, account_id), Ok(_))
+        assert_matches!(
+            account_birthday(&st.wallet().conn, account_id),
+            Ok(birthday) if birthday == st.sapling_activation_height()
+        )
     }
 }
