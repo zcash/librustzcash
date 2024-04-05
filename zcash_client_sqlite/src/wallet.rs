@@ -2805,6 +2805,8 @@ mod tests {
         AccountId,
     };
 
+    use super::account_birthday;
+
     #[cfg(feature = "transparent-inputs")]
     use {
         crate::PRUNING_DEPTH,
@@ -3200,5 +3202,16 @@ mod tests {
         // The fully-scanned height should now be the latest block, as the two disjoint
         // ranges have been connected.
         assert_eq!(block_fully_scanned(&st), Some(end_height));
+    }
+
+    #[test]
+    fn test_account_birthday() {
+        let st = TestBuilder::new()
+            .with_block_cache()
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
+            .build();
+
+        let account_id = st.test_account().unwrap().account_id();
+        assert_matches!(account_birthday(&st.wallet().conn, account_id), Ok(_))
     }
 }
