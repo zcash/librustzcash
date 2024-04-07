@@ -1053,7 +1053,7 @@ where
                 {
                     builder.add_orchard_output(
                         orchard_internal_ovk(),
-                        orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
+                        orchard_fvk.address_at(0u32, orchard::keys::Scope::External),
                         change_value.value().into(),
                         memo.clone(),
                     )?;
