@@ -969,14 +969,6 @@ where
                             payment.amount.into(),
                             memo.clone(),
                         )?;
-                        orchard_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
-                                PoolType::Shielded(ShieldedProtocol::Orchard),
-                            ),
-                            payment.amount,
-                            Some(memo),
-                        ));
                     }
 
                     PoolType::Shielded(ShieldedProtocol::Sapling) => {
@@ -986,14 +978,6 @@ where
                             payment.amount,
                             memo.clone(),
                         )?;
-                        sapling_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
-                                PoolType::Shielded(ShieldedProtocol::Sapling),
-                            ),
-                            payment.amount,
-                            Some(memo),
-                        ));
                     }
 
                     PoolType::Transparent => {
