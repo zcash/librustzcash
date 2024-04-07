@@ -43,7 +43,7 @@ fn build() -> io::Result<()> {
 
     // Build the gRPC types and client.
     tonic_build::configure()
-        .build_server(false)
+        .build_server(true)
         .client_mod_attribute(
             "cash.z.wallet.sdk.rpc",
             r#"#[cfg(feature = "lightwalletd-tonic")]"#,
