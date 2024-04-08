@@ -7,6 +7,12 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.10.3] - 2024-04-08
+
+### Added
+- Added a migration to ensure that the default address for existing wallets is
+  upgraded to include an Orchard receiver.
+
 ### Fixed
 - A bug in the SQL query for `WalletDb::get_account_birthday` was fixed.
 
