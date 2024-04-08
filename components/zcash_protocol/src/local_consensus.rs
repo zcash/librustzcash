@@ -44,6 +44,10 @@ pub struct LocalNetwork {
 }
 
 impl LocalNetwork {
+    /// Construct a new `LocalNetwork` where all network upgrade activation heights are specified.
+    ///
+    /// Sequential network upgrades may share the same activation height but this constructor will
+    /// panic if the order in which network upgrades activate is changed.
     pub fn new(
         overwinter: u64,
         sapling: u64,
@@ -52,6 +56,15 @@ impl LocalNetwork {
         canopy: u64,
         nu5: u64,
     ) -> Self {
+        assert!(
+            overwinter <= sapling
+                && sapling <= blossom
+                && blossom <= heartwood
+                && heartwood <= canopy
+                && canopy <= nu5,
+            "Network upgrade activation heights must be in ascending order"
+        );
+
         LocalNetwork {
             overwinter: Some(BlockHeight::from_u32(overwinter as u32)),
             sapling: Some(BlockHeight::from_u32(sapling as u32)),
@@ -59,15 +72,19 @@ impl LocalNetwork {
             heartwood: Some(BlockHeight::from_u32(heartwood as u32)),
             canopy: Some(BlockHeight::from_u32(canopy as u32)),
             nu5: Some(BlockHeight::from_u32(nu5 as u32)),
+            #[cfg(zcash_unstable = "nu6")]
+            nu6: None,
+            #[cfg(zcash_unstable = "zfuture")]
+            z_future: None,
         }
     }
 
-    /// Creates a `LocalNetwork` with all network upgrades initially active.
+    /// Construct a new `LocalNetwork` with all network upgrades initially active.
     pub fn all_upgrades_active() -> Self {
         Self::new(1, 1, 1, 1, 1, 1)
     }
 
-    /// Creates a `LocalNetwork` with all network upgrades up to and including canopy
+    /// Construct a new `LocalNetwork` with all network upgrades up to and including canopy
     /// initally active.
     pub fn canopy_active(nu5_activation_height: u64) -> Self {
         Self::new(1, 1, 1, 1, 1, nu5_activation_height)
