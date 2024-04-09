@@ -485,7 +485,6 @@ impl WalletWrite for MemoryWalletDb {
                         }
                     });
 
-                    // TODO: Is `self.tx_idx` field filled with all the transaction ids from the scanned blocks ?
                     self.tx_idx.insert(txid, block.block_height);
                     transactions.insert(txid, transaction.clone());
                 }
