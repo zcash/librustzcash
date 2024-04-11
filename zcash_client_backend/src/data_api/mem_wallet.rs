@@ -502,16 +502,22 @@ impl WalletWrite for MemoryWalletDb {
 
             // Add the Sapling commitments to the sapling tree.
             let block_commitments = block.into_commitments();
-            if let Some(value) = from_state.final_sapling_tree().value() {
-                self.sapling_tree
-                    .batch_insert(value.position(), block_commitments.sapling.into_iter());
-            }
+            let start_position = from_state
+                .final_sapling_tree()
+                .value()
+                .map_or(0.into(), |t| t.position() + 1);
+            self.sapling_tree
+                .batch_insert(start_position, block_commitments.sapling.into_iter());
 
             #[cfg(feature = "orchard")]
-            // Add the Orchard commitments to the orchard tree.
-            if let Some(value) = from_state.final_orchard_tree().value() {
+            {
+                // Add the Orchard commitments to the orchard tree.
+                let start_position = from_state
+                    .final_orchard_tree()
+                    .value()
+                    .map_or(0.into(), |t| t.position() + 1);
                 self.orchard_tree
-                    .batch_insert(value.position(), block_commitments.orchard.into_iter());
+                    .batch_insert(start_position, block_commitments.orchard.into_iter());
             }
         }
 
