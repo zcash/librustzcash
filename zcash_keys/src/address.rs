@@ -251,12 +251,14 @@ impl Receiver {
     /// as bare Sapling addresses, and Transparent receivers will be rendered as taddrs.
     pub fn to_zcash_address(&self, net: NetworkType) -> ZcashAddress {
         match self {
+            #[cfg(feature = "orchard")]
             Receiver::Orchard(addr) => {
                 let receiver = unified::Receiver::Orchard(addr.to_raw_address_bytes());
                 let ua = unified::Address::try_from_items(vec![receiver])
                     .expect("A unified address may contain a single Orchard receiver.");
                 ZcashAddress::from_unified(net, ua)
             }
+            #[cfg(feature = "sapling")]
             Receiver::Sapling(addr) => ZcashAddress::from_sapling(net, addr.to_bytes()),
             Receiver::Transparent(TransparentAddress::PublicKeyHash(data)) => {
                 ZcashAddress::from_transparent_p2pkh(net, *data)
@@ -269,7 +271,9 @@ impl Receiver {
 
     pub fn corresponds(&self, addr: &ZcashAddress) -> bool {
         addr.matches_receiver(&match self {
+            #[cfg(feature = "orchard")]
             Receiver::Orchard(addr) => unified::Receiver::Orchard(addr.to_raw_address_bytes()),
+            #[cfg(feature = "sapling")]
             Receiver::Sapling(addr) => unified::Receiver::Sapling(addr.to_bytes()),
             Receiver::Transparent(TransparentAddress::PublicKeyHash(data)) => {
                 unified::Receiver::P2pkh(*data)
