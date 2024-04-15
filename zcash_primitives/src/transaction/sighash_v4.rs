@@ -1,5 +1,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
+use orchard::issuance::IssueAuth;
 
 use crate::{
     consensus::BranchId,
@@ -135,8 +136,9 @@ fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]
 pub fn v4_signature_hash<
     SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
     A: Authorization<SaplingAuth = SA>,
+    IA: IssueAuth,
 >(
-    tx: &TransactionData<A>,
+    tx: &TransactionData<A, IA>,
     signable_input: &SignableInput<'_>,
 ) -> Blake2bHash {
     let hash_type = signable_input.hash_type();

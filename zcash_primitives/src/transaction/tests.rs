@@ -1,5 +1,6 @@
 use blake2b_simd::Hash as Blake2bHash;
 use std::ops::Deref;
+use orchard::issuance::Signed;
 
 use proptest::prelude::*;
 
@@ -60,6 +61,13 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
         tx.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance()),
         txo.orchard_zsa_bundle.as_ref().map(|v| *v.value_balance())
     );
+    if tx.issue_bundle.is_some() {
+        prop_assert_eq!(
+            tx.issue_bundle.as_ref(),
+            txo.issue_bundle.as_ref()
+        );
+    }
+
     Ok(())
 }
 
@@ -222,7 +230,7 @@ impl Authorization for TestUnauthorized {
 fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
-    ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
+    ) -> (TransactionData<TestUnauthorized, Signed>, TxDigests<Blake2bHash>) {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);
