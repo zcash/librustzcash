@@ -2,8 +2,12 @@
 use std::convert::TryFrom;
 use std::io::{self, Read, Write};
 
+use crate::transaction::components::issuance::read_asset;
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
+use orchard::note::AssetBase;
+use orchard::note_encryption::OrchardDomain;
+use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use orchard::{
     bundle::{Authorization, Authorized, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
@@ -11,11 +15,7 @@ use orchard::{
     value::ValueCommitment,
     Action, Anchor,
 };
-use orchard::note::AssetBase;
-use orchard::note_encryption::OrchardDomain;
-use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use zcash_encoding::{Array, CompactSize, Vector};
-use crate::transaction::components::issuance::read_asset;
 
 use super::Amount;
 use crate::transaction::Transaction;
@@ -86,13 +86,12 @@ pub fn read_v5_bundle<R: Read>(
     }
 }
 
-
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v6_bundle<R: Read>(
     mut reader: R,
 ) -> io::Result<Option<orchard::Bundle<Authorized, Amount, OrchardZSA>>> {
     #[allow(clippy::redundant_closure)]
-        let actions_without_auth = Vector::read(&mut reader, |r| read_zsa_action_without_auth(r))?;
+    let actions_without_auth = Vector::read(&mut reader, |r| read_zsa_action_without_auth(r))?;
     if actions_without_auth.is_empty() {
         Ok(None)
     } else {
@@ -106,29 +105,23 @@ pub fn read_v6_bundle<R: Read>(
                 .map(|act| act.try_map(|_| read_signature::<_, redpallas::SpendAuth>(&mut reader)))
                 .collect::<Result<Vec<_>, _>>()?,
         )
-            .expect("A nonzero number of actions was read from the transaction data.");
+        .expect("A nonzero number of actions was read from the transaction data.");
 
         let burn = Vector::read(&mut reader, |r| read_burn(r))?;
 
         let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
 
-        let authorization = Authorized::from_parts(
-            orchard::Proof::new(proof_bytes),
-            binding_signature,
-        );
+        let authorization =
+            Authorized::from_parts(orchard::Proof::new(proof_bytes), binding_signature);
 
-        Ok(
-            Some(
-                orchard::Bundle::from_parts(
-                    actions,
-                    flags,
-                    value_balance,
-                    burn,
-                    anchor,
-                    authorization,
-                )
-            )
-        )
+        Ok(Some(orchard::Bundle::from_parts(
+            actions,
+            flags,
+            value_balance,
+            burn,
+            anchor,
+            authorization,
+        )))
     }
 }
 
@@ -191,10 +184,11 @@ pub fn read_cmx<R: Read>(mut reader: R) -> io::Result<ExtractedNoteCommitment> {
 pub fn read_note_ciphertext<R: Read>(
     mut reader: R,
 ) -> io::Result<TransmittedNoteCiphertext<OrchardVanilla>> {
-
     let mut tnc = TransmittedNoteCiphertext::<OrchardVanilla> {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: <OrchardVanilla as OrchardDomain>::NoteCiphertextBytes::from([0u8; OrchardVanilla::ENC_CIPHERTEXT_SIZE].as_ref()),
+        enc_ciphertext: <OrchardVanilla as OrchardDomain>::NoteCiphertextBytes::from(
+            [0u8; OrchardVanilla::ENC_CIPHERTEXT_SIZE].as_ref(),
+        ),
         out_ciphertext: [0u8; 80],
     };
 
@@ -208,10 +202,11 @@ pub fn read_note_ciphertext<R: Read>(
 pub fn read_zsa_note_ciphertext<R: Read>(
     mut reader: R,
 ) -> io::Result<TransmittedNoteCiphertext<OrchardZSA>> {
-
     let mut tnc = TransmittedNoteCiphertext::<OrchardZSA> {
         epk_bytes: [0u8; 32],
-        enc_ciphertext: <OrchardZSA as OrchardDomain>::NoteCiphertextBytes::from([0u8; OrchardZSA::ENC_CIPHERTEXT_SIZE].as_ref()),
+        enc_ciphertext: <OrchardZSA as OrchardDomain>::NoteCiphertextBytes::from(
+            [0u8; OrchardZSA::ENC_CIPHERTEXT_SIZE].as_ref(),
+        ),
         out_ciphertext: [0u8; 80],
     };
 
@@ -222,9 +217,7 @@ pub fn read_zsa_note_ciphertext<R: Read>(
     Ok(tnc)
 }
 
-pub fn read_action_without_auth<R: Read>(
-    mut reader: R,
-) -> io::Result<Action<(), OrchardVanilla>> {
+pub fn read_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<(), OrchardVanilla>> {
     let cv_net = read_value_commitment(&mut reader)?;
     let nf_old = read_nullifier(&mut reader)?;
     let rk = read_verification_key(&mut reader)?;
@@ -241,9 +234,7 @@ pub fn read_action_without_auth<R: Read>(
     ))
 }
 
-pub fn read_zsa_action_without_auth<R: Read>(
-    mut reader: R,
-) -> io::Result<Action<(), OrchardZSA>> {
+pub fn read_zsa_action_without_auth<R: Read>(mut reader: R) -> io::Result<Action<(), OrchardZSA>> {
     let cv_net = read_value_commitment(&mut reader)?;
     let nf_old = read_nullifier(&mut reader)?;
     let rk = read_verification_key(&mut reader)?;
@@ -326,7 +317,6 @@ pub fn write_v6_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, Amount, OrchardZSA>>,
     mut writer: W,
 ) -> io::Result<()> {
-
     // TODO deduplicate
     if let Some(bundle) = &bundle {
         Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
@@ -407,11 +397,9 @@ pub fn write_action_without_auth<W: Write, D: OrchardDomain>(
 pub mod testing {
     use proptest::prelude::*;
 
-    use orchard::{
-        bundle::{
-            testing::{self as t_orch},
-            Authorized, Bundle,
-        },
+    use orchard::bundle::{
+        testing::{self as t_orch},
+        Authorized, Bundle,
     };
     use crate::transaction::components::Amount;
     use crate::transaction::components::amount::testing::arb_amount;

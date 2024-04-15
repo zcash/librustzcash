@@ -1,16 +1,14 @@
 use blake2b_simd::Hash as Blake2bHash;
 use orchard::issuance::IssueAuth;
 
-use crate::transaction::{
-    Authorization,
-    sighash::{
-        SignableInput, TransparentAuthorizingContext
-        ,
-    },
-    TransactionData, TxDigests, txid::to_hash,
-};
 use crate::transaction::sighash_v5::transparent_sig_digest;
-#[cfg(feature = "zfuture")] use crate::transaction::sighash_v5::tze_input_sigdigests;
+#[cfg(feature = "zfuture")]
+use crate::transaction::sighash_v5::tze_input_sigdigests;
+use crate::transaction::{
+    sighash::{SignableInput, TransparentAuthorizingContext},
+    txid::to_hash,
+    Authorization, TransactionData, TxDigests,
+};
 
 pub fn v6_signature_hash<
     TA: TransparentAuthorizingContext,
@@ -44,7 +42,7 @@ pub fn v6_signature_hash<
         txid_parts.orchard_digest,
         txid_parts.issue_digest,
         #[cfg(feature = "zfuture")]
-            tx.tze_bundle
+        tx.tze_bundle
             .as_ref()
             .zip(txid_parts.tze_digests.as_ref())
             .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))

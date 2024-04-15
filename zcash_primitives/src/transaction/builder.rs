@@ -1,11 +1,11 @@
 //! Structs for building transactions.
 
+use orchard::builder::{InProgress, Unproven};
+use orchard::{issuance, Address};
 use std::cmp::Ordering;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
-use orchard::{Address, issuance};
-use orchard::builder::{InProgress, Unproven};
 
 use rand::{CryptoRng, RngCore};
 
@@ -54,9 +54,9 @@ use crate::{
 use crate::transaction::components::amount::NonNegativeAmount;
 use crate::transaction::components::sapling::zip212_enforcement;
 
-use orchard::note::AssetBase;
 use orchard::issuance::{IssueBundle, IssueInfo};
 use orchard::keys::{IssuanceAuthorizingKey, IssuanceValidatingKey};
+use orchard::note::AssetBase;
 use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
@@ -377,9 +377,9 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         orchard_anchor: Option<orchard::tree::Anchor>,
         rng: R,
     ) -> Builder<'a, P, R> {
-
         let is_orchard_zsa_enabled = params.is_nu_active(NetworkUpgrade::V6, target_height);
-        let is_orchard_enabled = params.is_nu_active(NetworkUpgrade::Nu5, target_height) || is_orchard_zsa_enabled;
+        let is_orchard_enabled =
+            params.is_nu_active(NetworkUpgrade::Nu5, target_height) || is_orchard_zsa_enabled;
 
         let orchard_builder = if is_orchard_enabled {
             orchard_anchor.map(|anchor| {
@@ -458,18 +458,27 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ) -> Result<(), Error<FeeError>> {
         if self.issuance_builder.is_none() {
             self.issuance_builder = Some(
-                IssueBundle::new(IssuanceValidatingKey::from(&ik), asset_desc, Some(IssueInfo { recipient, value }), OsRng)
-                    .map_err(Error::IssuanceBuild)?.0
+                IssueBundle::new(
+                    IssuanceValidatingKey::from(&ik),
+                    asset_desc,
+                    Some(IssueInfo { recipient, value }),
+                    OsRng,
+                )
+                .map_err(Error::IssuanceBuild)?
+                .0,
             );
             self.issuance_key = Some(ik);
         } else {
             // TODO Here we ignore provided 'ik', probably might want to check if it corresponds to the one we already have
-            self.issuance_builder.as_mut().unwrap().add_recipient(asset_desc, recipient, value, OsRng).map_err(Error::IssuanceBuild)?;
+            self.issuance_builder
+                .as_mut()
+                .unwrap()
+                .add_recipient(asset_desc, recipient, value, OsRng)
+                .map_err(Error::IssuanceBuild)?;
         };
 
         Ok(())
     }
-
 
     pub fn add_burn<FE>(
         &mut self,
@@ -852,15 +861,22 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             None => (None, SaplingMetadata::empty()),
         };
 
-        let (unproven_orchard_bundle, unproven_orchard_zsa_bundle) = if let Some(builder) = self.orchard_builder {
-            if version.has_zsa() {
-                (None, Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?.into()))
+        let (unproven_orchard_bundle, unproven_orchard_zsa_bundle) =
+            if let Some(builder) = self.orchard_builder {
+                if version.has_zsa() {
+                    (
+                        None,
+                        Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?.into()),
+                    )
+                } else {
+                    (
+                        Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?.into()),
+                        None,
+                    )
+                }
             } else {
-                (Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?.into()), None)
-            }
-        } else {
-            (None, None)
-        };
+                (None, None)
+            };
 
         let unauthorized_issue_bundle = self.issuance_builder;
 
@@ -925,18 +941,20 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
         let orchard_bundle = unauthed_tx
             .orchard_bundle
             .map(|b| {
-                let vanilla: orchard::Bundle<InProgress<Unproven<OrchardVanilla>, _>, _, _> = b.into();
-                vanilla.create_proof(
-                    &orchard::circuit::ProvingKey::build::<OrchardVanilla>(),
-                    &mut rng,
-                )
-                .and_then(|b| {
-                    b.apply_signatures(
+                let vanilla: orchard::Bundle<InProgress<Unproven<OrchardVanilla>, _>, _, _> =
+                    b.into();
+                vanilla
+                    .create_proof(
+                        &orchard::circuit::ProvingKey::build::<OrchardVanilla>(),
                         &mut rng,
-                        *shielded_sig_commitment.as_ref(),
-                        &self.orchard_saks,
                     )
-                })
+                    .and_then(|b| {
+                        b.apply_signatures(
+                            &mut rng,
+                            *shielded_sig_commitment.as_ref(),
+                            &self.orchard_saks,
+                        )
+                    })
             })
             .transpose()
             .map_err(Error::OrchardBuild)?;
@@ -949,13 +967,13 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                     &orchard::circuit::ProvingKey::build::<OrchardZSA>(),
                     &mut rng,
                 )
-                    .and_then(|b| {
-                        b.apply_signatures(
-                            &mut rng,
-                            *shielded_sig_commitment.as_ref(),
-                            &self.orchard_saks,
-                        )
-                    })
+                .and_then(|b| {
+                    b.apply_signatures(
+                        &mut rng,
+                        *shielded_sig_commitment.as_ref(),
+                        &self.orchard_saks,
+                    )
+                })
             })
             .transpose()
             .map_err(Error::OrchardBuild)?;

@@ -158,7 +158,9 @@ impl Bundle<Unauthorized> {
     pub fn into_authorized(
         self,
         unauthed_tx: &tx::TransactionData<tx::Unauthorized, orchard::issuance::Unauthorized>,
-        signers: Vec<TzeSigner<'_, tx::TransactionData<tx::Unauthorized, orchard::issuance::Unauthorized>>>,
+        signers: Vec<
+            TzeSigner<'_, tx::TransactionData<tx::Unauthorized, orchard::issuance::Unauthorized>>,
+        >,
     ) -> Result<Bundle<Authorized>, Error> {
         // Create TZE input witnesses
         let payloads = signers

@@ -414,7 +414,7 @@ pub(crate) fn to_hash(
                 .unwrap_or_else(bundle::commitments::hash_issue_bundle_txid_empty)
                 .as_bytes(),
         )
-            .unwrap();
+        .unwrap();
     }
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -524,10 +524,9 @@ impl TransactionDigest<Authorized, Signed> for BlockTxCommitmentDigester {
     }
 
     fn digest_issue(&self, issue_bundle: Option<&IssueBundle<Signed>>) -> Self::IssueDigest {
-        issue_bundle.map_or_else(
-            bundle::commitments::hash_issue_bundle_auth_empty,
-            |b| b.authorizing_commitment().0,
-        )
+        issue_bundle.map_or_else(bundle::commitments::hash_issue_bundle_auth_empty, |b| {
+            b.authorizing_commitment().0
+        })
     }
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -550,11 +549,7 @@ impl TransactionDigest<Authorized, Signed> for BlockTxCommitmentDigester {
         issue_digest: Self::IssueDigest,
         #[cfg(zcash_unstable = "zfuture")] tze_digest: Self::TzeDigest,
     ) -> Self::Digest {
-        let digests = [
-            transparent_digest,
-            sapling_digest,
-            orchard_digest,
-        ];
+        let digests = [transparent_digest, sapling_digest, orchard_digest];
 
         let mut personal = [0; 16];
         personal[..12].copy_from_slice(ZCASH_AUTH_PERSONALIZATION_PREFIX);
