@@ -4,7 +4,8 @@ use std::cmp::Ordering;
 use std::error;
 use std::fmt;
 use std::sync::mpsc::Sender;
-use orchard::builder::InProgress;
+use orchard::Address;
+use orchard::builder::{InProgress, Unproven};
 
 use rand::{CryptoRng, RngCore};
 
@@ -347,11 +348,40 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     ///
     /// The expiry height will be set to the given height plus the default transaction
     /// expiry delta (20 blocks).
-    pub fn new(params: P, target_height: BlockHeight, build_config: BuildConfig) -> Self {
-        let orchard_builder = if params.is_nu_active(NetworkUpgrade::Nu5, target_height) {
-            build_config
-                .orchard_builder_config()
-                .map(|(bundle_type, anchor)| orchard::builder::Builder::new(bundle_type, anchor))
+    pub fn new(
+        params: P,
+        target_height: BlockHeight,
+        orchard_anchor: Option<orchard::tree::Anchor>,
+    ) -> Self {
+        Builder::new_with_rng(params, target_height, orchard_anchor, OsRng)
+    }
+}
+
+impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
+    /// Creates a new `Builder` targeted for inclusion in the block with the given height
+    /// and randomness source, using default values for general transaction fields.
+    ///
+    /// # Default values
+    ///
+    /// The expiry height will be set to the given height plus the default transaction
+    /// expiry delta (20 blocks).
+    pub fn new_with_rng(
+        params: P,
+        target_height: BlockHeight,
+        orchard_anchor: Option<orchard::tree::Anchor>,
+        rng: R,
+    ) -> Builder<'a, P, R> {
+
+        let is_orchard_zsa_enabled = params.is_nu_active(NetworkUpgrade::V6, target_height);
+        let is_orchard_enabled = params.is_nu_active(NetworkUpgrade::Nu5, target_height) || is_orchard_zsa_enabled;
+
+        let orchard_builder = if is_orchard_enabled {
+            orchard_anchor.map(|anchor| {
+                orchard::builder::Builder::new(
+                    orchard::bundle::Flags::from_parts(true, true, is_orchard_zsa_enabled),
+                    anchor,
+                )
+            })
         } else {
             None
         };
@@ -410,7 +440,55 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     }
 }
 
-impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
+    pub fn add_burn<FE>(
+        &mut self,
+        value: u64,
+        asset: AssetBase,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder
+            .as_mut()
+            .ok_or(Error::OrchardAnchorNotAvailable)?
+            .add_burn(asset, orchard::value::NoteValue::from_raw(value))
+            .unwrap(); // TODO   .map_err(Error::OrchardBuild)?; or new error type
+
+        Ok(())
+    }
+
+    /// Adds an Orchard ZSA note to be spent in this bundle.
+    ///
+    /// Returns an error if the given Merkle path does not have the required anchor for
+    /// the given note.
+    pub fn add_orchard_zsa_spend<FE>(
+        &mut self,
+        sk: orchard::keys::SpendingKey,
+        note: orchard::Note,
+        merkle_path: orchard::tree::MerklePath,
+    ) -> Result<(), Error<FE>> {
+        self.add_orchard_spend_impl(sk, note, merkle_path)
+    }
+
+    /// Adds an Orchard ZSA output to the transaction.
+    pub fn add_orchard_zsa_output<FE>(
+        &mut self,
+        ovk: Option<orchard::keys::OutgoingViewingKey>,
+        recipient: Address,
+        value: u64,
+        asset: AssetBase,
+        memo: MemoBytes,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder
+            .as_mut()
+            .ok_or(Error::OrchardAnchorNotAvailable)?
+            .add_recipient(
+                ovk,
+                recipient,
+                orchard::value::NoteValue::from_raw(value),
+                asset,
+                Some(*memo.as_array()),
+            )
+            .map_err(Error::OrchardRecipient)
+    }
+
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -421,8 +499,21 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
-        if let Some(builder) = self.orchard_builder.as_mut() {
-            builder.add_spend(orchard::keys::FullViewingKey::from(sk), note, merkle_path)?;
+        assert_eq!(note.asset().is_native().unwrap_u8(), 1);
+        self.add_orchard_spend_impl(sk, note, merkle_path)
+    }
+
+    fn add_orchard_spend_impl<FE>(
+        &mut self,
+        sk: orchard::keys::SpendingKey,
+        note: orchard::Note,
+        merkle_path: orchard::tree::MerklePath,
+    ) -> Result<(), Error<FE>> {
+        self.orchard_builder
+            .as_mut()
+            .ok_or(Error::OrchardAnchorNotAvailable)?
+            .add_spend(orchard::keys::FullViewingKey::from(&sk), note, merkle_path)
+            .map_err(Error::OrchardSpend)?;
 
             self.orchard_saks
                 .push(orchard::keys::SpendAuthorizingKey::from(sk));
@@ -437,7 +528,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
     pub fn add_orchard_output<FE>(
         &mut self,
         ovk: Option<orchard::keys::OutgoingViewingKey>,
-        recipient: orchard::Address,
+        recipient: Address,
         value: u64,
         memo: MemoBytes,
     ) -> Result<(), Error<FE>> {
@@ -728,19 +819,11 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             None => (None, SaplingMetadata::empty()),
         };
 
-        // let orchard_bundle: Option<orchard::Bundle<_, Amount, OrchardVanilla>> =
-        //     if let Some(builder) = self.orchard_builder {
-        //         Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?)
-        //     } else {
-        //         None
-        //     };
-
-        let (orchard_bundle, orchard_zsa_bundle) = if let Some(builder) = self.orchard_builder {
+        let (unproven_orchard_bundle, unproven_orchard_zsa_bundle) = if let Some(builder) = self.orchard_builder {
             if version.has_zsa() {
-                let zsa_bundle: orchard::Bundle<InProgress<_, _>, Amount, OrchardZSA> = builder.build(&mut rng).map_err(Error::OrchardBuild)?;
-                (None, Some(zsa_bundle))
+                (None, Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?.into()))
             } else {
-                (Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?), None)
+                (Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?.into()), None)
             }
         } else {
             (None, None)
@@ -759,8 +842,8 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             transparent_bundle,
             sprout_bundle: None,
             sapling_bundle,
-            orchard_bundle,
-            orchard_zsa_bundle,
+            orchard_bundle: unproven_orchard_bundle,
+            orchard_zsa_bundle: unproven_orchard_zsa_bundle,
             issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,
@@ -809,7 +892,8 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let orchard_bundle = unauthed_tx
             .orchard_bundle
             .map(|b| {
-                b.create_proof(
+                let vanilla: orchard::Bundle<InProgress<Unproven<OrchardVanilla>, _>, _, _> = b.into();
+                vanilla.create_proof(
                     &orchard::circuit::ProvingKey::build::<OrchardVanilla>(),
                     &mut rng,
                 )
@@ -820,6 +904,25 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
                         &self.orchard_saks,
                     )
                 })
+            })
+            .transpose()
+            .map_err(Error::OrchardBuild)?;
+
+        let orchard_zsa_bundle = unauthed_tx
+            .orchard_zsa_bundle
+            .map(|b| {
+                let zsa: orchard::Bundle<InProgress<Unproven<OrchardZSA>, _>, _, _> = b.into();
+                zsa.create_proof(
+                    &orchard::circuit::ProvingKey::build::<OrchardZSA>(),
+                    &mut rng,
+                )
+                    .and_then(|b| {
+                        b.apply_signatures(
+                            &mut rng,
+                            *shielded_sig_commitment.as_ref(),
+                            &self.orchard_saks,
+                        )
+                    })
             })
             .transpose()
             .map_err(Error::OrchardBuild)?;
@@ -835,7 +938,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
             sprout_bundle: unauthed_tx.sprout_bundle,
             sapling_bundle,
             orchard_bundle,
-            orchard_zsa_bundle: None, // TODO
+            orchard_zsa_bundle,
             issue_bundle,
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle,

@@ -11,9 +11,11 @@ use orchard::{
     value::ValueCommitment,
     Action, Anchor,
 };
+use orchard::note::AssetBase;
 use orchard::note_encryption::OrchardDomain;
 use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use zcash_encoding::{Array, CompactSize, Vector};
+use crate::transaction::components::issuance::read_asset;
 
 use super::Amount;
 use crate::transaction::Transaction;
@@ -105,6 +107,9 @@ pub fn read_v6_bundle<R: Read>(
                 .collect::<Result<Vec<_>, _>>()?,
         )
             .expect("A nonzero number of actions was read from the transaction data.");
+
+        let burn = Vector::read(&mut reader, |r| read_burn(r))?;
+
         let binding_signature = read_signature::<_, redpallas::Binding>(&mut reader)?;
 
         let authorization = Authorized::from_parts(
@@ -118,13 +123,17 @@ pub fn read_v6_bundle<R: Read>(
                     actions,
                     flags,
                     value_balance,
-                    Default::default(),
+                    burn,
                     anchor,
                     authorization,
                 )
             )
         )
     }
+}
+
+fn read_burn<R: Read>(reader: &mut R) -> io::Result<(AssetBase, Amount)> {
+    Ok((read_asset(reader)?, Transaction::read_amount(reader)?))
 }
 
 pub fn read_value_commitment<R: Read>(mut reader: R) -> io::Result<ValueCommitment> {
@@ -338,7 +347,11 @@ pub fn write_v6_bundle<W: Write>(
             |w, auth| w.write_all(&<[u8; 64]>::from(*auth)),
         )?;
 
-        // TODO write burned assets
+        Vector::write(&mut writer, bundle.burn(), |w, (asset, amount)| {
+            w.write_all(&asset.to_bytes())?;
+            w.write_all(&amount.to_i64_le_bytes())?;
+            Ok(())
+        })?;
 
         writer.write_all(&<[u8; 64]>::from(
             bundle.authorization().binding_signature(),

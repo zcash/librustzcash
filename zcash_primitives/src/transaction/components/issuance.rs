@@ -1,4 +1,4 @@
-use crate::transaction::components::orchard::{read_nullifier};
+use crate::transaction::components::orchard::read_nullifier;
 use bitvec::macros::internal::funty::Fundamental;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use zcash_encoding::{CompactSize, Vector};
 
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
-pub fn read_v5_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
+pub fn read_v6_bundle<R: Read>(mut reader: R) -> io::Result<Option<IssueBundle<Signed>>> {
     let actions = Vector::read(&mut reader, |r| read_action(r))?;
 
     if actions.is_empty() {
@@ -63,7 +63,7 @@ fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
         rho,
         rseed,
     ))
-        .unwrap())
+    .unwrap())
 }
 
 fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
@@ -72,7 +72,7 @@ fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
     Ok(Option::from(Address::from_raw_address_bytes(&bytes)).unwrap())
 }
 
-fn read_asset<R: Read>(mut reader: R) -> io::Result<AssetBase> {
+pub fn read_asset<R: Read>(reader: &mut R) -> io::Result<AssetBase> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
     Ok(Option::from(AssetBase::from_bytes(&bytes)).unwrap())
@@ -85,7 +85,7 @@ fn read_rseed<R: Read>(mut reader: R, nullifier: &Nullifier) -> io::Result<Rando
 }
 
 /// Writes an [`IssueBundle`] in the v5 transaction format.
-pub fn write_v5_bundle<W: Write>(
+pub fn write_v6_bundle<W: Write>(
     bundle: Option<&IssueBundle<Signed>>,
     mut writer: W,
 ) -> io::Result<()> {
@@ -141,7 +141,7 @@ pub mod testing {
     pub fn arb_bundle_for_version(
         v: TxVersion,
     ) -> impl Strategy<Value = Option<IssueBundle<Signed>>> {
-        if v.has_orchard() {
+        if v.has_zsa() {
             Strategy::boxed((1usize..100).prop_flat_map(|n| prop::option::of(arb_issue_bundle(n))))
         } else {
             Strategy::boxed(Just(None))

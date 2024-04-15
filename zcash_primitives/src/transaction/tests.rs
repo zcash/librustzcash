@@ -1,7 +1,5 @@
 use blake2b_simd::Hash as Blake2bHash;
 use std::ops::Deref;
-use orchard::circuit::OrchardCircuit;
-use orchard::note_encryption::OrchardDomain;
 
 use proptest::prelude::*;
 

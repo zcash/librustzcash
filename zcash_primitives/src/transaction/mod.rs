@@ -19,9 +19,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
-use orchard::circuit::OrchardCircuit;
 use orchard::issuance::{IssueBundle, Signed};
-use orchard::note_encryption::OrchardDomain;
 use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use zcash_encoding::{Array, CompactSize, Vector};
 use orchard::orchard_flavor::OrchardVanilla;
@@ -31,6 +29,7 @@ use crate::{
     sapling::{self, builder as sapling_builder},
 };
 use crate::{consensus::{BlockHeight, BranchId}, sapling::redjubjub};
+use crate::transaction::components::issuance;
 
 use self::{
     components::{
@@ -307,10 +306,11 @@ pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
-    type SaplingAuth =
-        sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
-    type OrchardAuth =
-        orchard::builder::InProgress<orchard::builder::Unproven<OrchardVanilla>, orchard::builder::Unauthorized>;
+    type SaplingAuth = sapling::builder::Unauthorized;
+    type OrchardAuth = orchard::builder::InProgress<
+        orchard::bundle_enum_adapter::UnprovenEnum,
+        orchard::builder::Unauthorized,
+    >;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::builder::Unauthorized;
@@ -834,10 +834,8 @@ impl Transaction {
             Self::read_v5_header_fragment(&mut reader)?;
         let transparent_bundle = Self::read_transparent(&mut reader)?;
         let sapling_bundle = Self::read_v5_sapling(&mut reader)?;
-        // TODO zsa orchards bundle
         let orchard_zsa_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
-        // TODO issue bundle
-        let issue_bundle = None;
+        let issue_bundle = issuance::read_v6_bundle(&mut reader)?;
 
         #[cfg(feature = "zfuture")]
             let tze_bundle = if version.has_tze() {
@@ -1142,7 +1140,7 @@ pub mod testing {
             transparent_bundle in transparent::arb_bundle(),
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
-            orchard_zsa_bundle in orchard::arb_bundle_for_version(version),
+            orchard_zsa_bundle in orchard::arb_zsa_bundle_for_version(version),
             issue_bundle in issuance::testing::arb_bundle_for_version(version),
             version in Just(version)
         ) -> TransactionData<Authorized> {
@@ -1155,7 +1153,7 @@ pub mod testing {
                 sprout_bundle: None,
                 sapling_bundle,
                 orchard_bundle,
-                orchard_zsa_bundle: None,
+                orchard_zsa_bundle,
                 issue_bundle,
             }
         }
