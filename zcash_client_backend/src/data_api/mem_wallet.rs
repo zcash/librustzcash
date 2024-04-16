@@ -471,7 +471,7 @@ impl WalletWrite for MemoryWalletDb {
                     // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
                     transaction.sapling_spends().iter().map(|s| {
                         let nullifier = s.nf();
-                        if let Some((txid, spent)) = self.sapling_spends.get_mut(&nullifier) {
+                        if let Some((txid, spent)) = self.sapling_spends.get_mut(nullifier) {
                             *spent = true;
                         }
                     });
@@ -480,7 +480,7 @@ impl WalletWrite for MemoryWalletDb {
                     // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
                     transaction.orchard_spends().iter().map(|s| {
                         let nullifier = s.nf();
-                        if let Some((txid, spent)) = self.orchard_spends.get_mut(&nullifier) {
+                        if let Some((txid, spent)) = self.orchard_spends.get_mut(nullifier) {
                             *spent = true;
                         }
                     });
