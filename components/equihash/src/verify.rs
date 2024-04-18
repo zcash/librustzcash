@@ -8,47 +8,12 @@ use std::fmt;
 use std::io::Cursor;
 use std::mem::size_of;
 
-#[derive(Clone, Copy)]
-pub(crate) struct Params {
-    pub(crate) n: u32,
-    pub(crate) k: u32,
-}
+use crate::params::Params;
 
 #[derive(Clone)]
 struct Node {
     hash: Vec<u8>,
     indices: Vec<u32>,
-}
-
-impl Params {
-    fn new(n: u32, k: u32) -> Result<Self, Error> {
-        // We place the following requirements on the parameters:
-        // - n is a multiple of 8, so the hash output has an exact byte length.
-        // - k >= 3 so the encoded solutions have an exact byte length.
-        // - k < n, so the collision bit length is at least 1.
-        // - n is a multiple of k + 1, so we have an integer collision bit length.
-        if (n % 8 == 0) && (k >= 3) && (k < n) && (n % (k + 1) == 0) {
-            Ok(Params { n, k })
-        } else {
-            Err(Error(Kind::InvalidParams))
-        }
-    }
-    fn indices_per_hash_output(&self) -> u32 {
-        512 / self.n
-    }
-    fn hash_output(&self) -> u8 {
-        (self.indices_per_hash_output() * self.n / 8) as u8
-    }
-    fn collision_bit_length(&self) -> usize {
-        (self.n / (self.k + 1)) as usize
-    }
-    fn collision_byte_length(&self) -> usize {
-        (self.collision_bit_length() + 7) / 8
-    }
-    #[cfg(test)]
-    fn hash_length(&self) -> usize {
-        ((self.k as usize) + 1) * self.collision_byte_length()
-    }
 }
 
 impl Node {
@@ -347,7 +312,7 @@ pub fn is_valid_solution(
     nonce: &[u8],
     soln: &[u8],
 ) -> Result<(), Error> {
-    let p = Params::new(n, k)?;
+    let p = Params::new(n, k).ok_or(Error(Kind::InvalidParams))?;
     let indices = indices_from_minimal(p, soln)?;
 
     // Recursive validation is faster
