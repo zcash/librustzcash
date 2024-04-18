@@ -1049,10 +1049,11 @@ where
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
-                    Recipient::InternalAccount(
-                        account,
-                        PoolType::Shielded(ShieldedProtocol::Sapling),
-                    ),
+                    Recipient::InternalAccount {
+                        receiving_account: account,
+                        external_address: None,
+                        note: PoolType::Shielded(ShieldedProtocol::Sapling),
+                    },
                     change_value.value(),
                     Some(memo),
                 ))
@@ -1072,10 +1073,11 @@ where
                         memo.clone(),
                     )?;
                     orchard_output_meta.push((
-                        Recipient::InternalAccount(
-                            account,
-                            PoolType::Shielded(ShieldedProtocol::Orchard),
-                        ),
+                        Recipient::InternalAccount {
+                            receiving_account: account,
+                            external_address: None,
+                            note: PoolType::Shielded(ShieldedProtocol::Orchard),
+                        },
                         change_value.value(),
                         Some(memo),
                     ))

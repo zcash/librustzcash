@@ -6,7 +6,8 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
-    num::NonZeroU32, hash::Hash,
+    hash::Hash,
+    num::NonZeroU32,
 };
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
 use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
@@ -100,10 +101,7 @@ pub struct MemoryWalletDb {
 }
 
 impl MemoryWalletDb {
-    pub fn new(
-        network: Network,
-        max_checkpoints: usize
-    ) -> Self {
+    pub fn new(network: Network, max_checkpoints: usize) -> Self {
         Self {
             network,
             accounts: BTreeMap::new(),
@@ -343,7 +341,7 @@ impl WalletWrite for MemoryWalletDb {
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
-        birthday: AccountBirthday,
+        birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
         let seed_fingerprint =
             SeedFingerprint::from_seed(seed.expose_secret()).expect("Valid seed.");
@@ -358,7 +356,7 @@ impl WalletWrite for MemoryWalletDb {
                 seed_fingerprint,
                 account_id: account_index,
                 ufvk,
-                birthday,
+                birthday: birthday.clone(),
                 addresses: BTreeMap::new(),
                 notes: HashSet::new(),
             },

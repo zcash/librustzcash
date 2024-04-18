@@ -6,12 +6,16 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.0] - 2024-03-25
+
 ### Added
 - `zcash_keys::address::Address::has_receiver`
 - `impl Display for zcash_keys::keys::AddressGenerationError`
 - `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
+- `impl From<hdwallet::error::Error> for zcash_keys::keys::DerivationError`
+  when the `transparent-inputs` feature is enabled.
 - `zcash_keys::keys::DecodingError`
-- `zcash_keys::keys::UnifiedFullViewingKey::to_unified_incoming_viewing_key`
+- `zcash_keys::keys::UnifiedFullViewingKey::{parse, to_unified_incoming_viewing_key}`
 - `zcash_keys::keys::UnifiedIncomingViewingKey`
 
 ### Changed
@@ -22,6 +26,7 @@ and this library adheres to Rust's notion of
   - Added `DiversifierSpaceExhausted` variant.
 - At least one of the `orchard`, `sapling`, or `transparent-inputs` features
   must be enabled for the `keys` module to be accessible.
+- Updated to `zcash_primitives-0.15.0`
 
 ### Removed
 - `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`

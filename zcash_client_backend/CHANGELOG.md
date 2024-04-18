@@ -8,6 +8,22 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_client_backend::data_api`:
+  - `chain::BlockCache` trait, behind the `sync` feature flag.
+- `zcash_client_backend::scanning`:
+  - `testing` module
+- `zcash_client_backend::sync` module, behind the `sync` feature flag.
+
+## [0.12.1] - 2024-03-27
+
+### Fixed
+- This release fixes a problem in note selection when sending to a transparent
+  recipient, whereby available funds were being incorrectly excluded from 
+  input selection.
+
+## [0.12.0] - 2024-03-25
+
+### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies. Additions and
   changes related to `Orchard` below are introduced under this feature
@@ -53,6 +69,7 @@ and this library adheres to Rust's notion of
   - `ReceivedNote::map_note`
   - `ReceivedNote<_, sapling::Note>::note_value`
   - `ReceivedNote<_, orchard::note::Note>::note_value`
+- `zcash_client_backend::zip321::Payment::without_memo`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -71,6 +88,8 @@ and this library adheres to Rust's notion of
     - `get_transaction` now returns `Result<Option<Transaction>, _>` rather
       than returning an `Err` if the `txid` parameter does not correspond to
       a transaction in the database.
+  - `WalletWrite::create_account` now takes its `AccountBirthday` argument by 
+    reference.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a
       `NonNegativeAmount`. Also, it now returns a `SpendableNotes` data 
@@ -100,6 +119,8 @@ and this library adheres to Rust's notion of
     feature flag.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
+- `zcash_client_backend::wallet::Recipient::InternalAccount` is now a structured
+  variant with an additional `external_address` field.
 - `zcash_client_backend::zip321::render::amount_str` now takes a
   `NonNegativeAmount` rather than a signed `Amount` as its argument.
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a

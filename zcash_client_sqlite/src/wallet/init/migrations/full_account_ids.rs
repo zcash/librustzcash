@@ -1,7 +1,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use crate::wallet::{account_kind_code, init::WalletMigrationError};
-use rusqlite::{named_params, Transaction};
+use rusqlite::{named_params, OptionalExtension, Transaction};
 use schemer_rusqlite::RusqliteMigration;
 use secrecy::{ExposeSecret, SecretVec};
 use uuid::Uuid;
@@ -10,11 +10,13 @@ use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_primitives::consensus;
 use zip32::fingerprint::SeedFingerprint;
 
-use super::{add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness};
+use super::{
+    add_account_birthdays, receiving_key_scopes, v_transactions_note_uniqueness, wallet_summaries,
+};
 
 /// The migration that switched from presumed seed-derived account IDs to supporting
 /// HD accounts and all sorts of imported keys.
-pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x1b104345_f27e_42da_a9e3_1de22694da43);
+pub(super) const MIGRATION_ID: Uuid = Uuid::from_u128(0x6d02ec76_8720_4cc6_b646_c4e2ce69221c);
 
 pub(crate) struct Migration<P: consensus::Parameters> {
     pub(super) seed: Option<Rc<SecretVec<u8>>>,
@@ -31,6 +33,7 @@ impl<P: consensus::Parameters> schemer::Migration for Migration<P> {
             receiving_key_scopes::MIGRATION_ID,
             add_account_birthdays::MIGRATION_ID,
             v_transactions_note_uniqueness::MIGRATION_ID,
+            wallet_summaries::MIGRATION_ID,
         ]
         .into_iter()
         .collect()
@@ -50,8 +53,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             account_index: zip32::AccountId::ZERO,
         });
         let account_kind_imported = account_kind_code(AccountSource::Imported);
-        transaction.execute_batch(
-            &format!(r#"
+        transaction.execute_batch(&format!(
+            r#"
             PRAGMA foreign_keys = OFF;
             PRAGMA legacy_alter_table = ON;
 
@@ -66,18 +69,29 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 sapling_fvk_item_cache BLOB,
                 p2pkh_fvk_item_cache BLOB,
                 birthday_height INTEGER NOT NULL,
+                birthday_sapling_tree_size INTEGER,
+                birthday_orchard_tree_size INTEGER,
                 recover_until_height INTEGER,
                 CHECK (
-                    (account_kind = {account_kind_derived} AND hd_seed_fingerprint IS NOT NULL AND hd_account_index IS NOT NULL AND ufvk IS NOT NULL)
-                    OR
-                    (account_kind = {account_kind_imported} AND hd_seed_fingerprint IS NULL AND hd_account_index IS NULL)
+                  (
+                    account_kind = {account_kind_derived}
+                    AND hd_seed_fingerprint IS NOT NULL
+                    AND hd_account_index IS NOT NULL
+                    AND ufvk IS NOT NULL
+                  )
+                  OR
+                  (
+                    account_kind = {account_kind_imported}
+                    AND hd_seed_fingerprint IS NULL
+                    AND hd_account_index IS NULL
+                  )
                 )
             );
             CREATE UNIQUE INDEX hd_account ON accounts_new (hd_seed_fingerprint, hd_account_index);
             CREATE UNIQUE INDEX accounts_uivk ON accounts_new (uivk);
             CREATE UNIQUE INDEX accounts_ufvk ON accounts_new (ufvk);
-            "#),
-        )?;
+            "#
+        ))?;
 
         // We require the seed *if* there are existing accounts in the table.
         if transaction.query_row("SELECT COUNT(*) FROM accounts", [], |row| {
@@ -158,19 +172,40 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                     #[cfg(not(feature = "transparent-inputs"))]
                     let transparent_item: Option<Vec<u8>> = None;
 
+                    // Get the tree sizes for the birthday height from the blocks table, if
+                    // available.
+                    let (birthday_sapling_tree_size, birthday_orchard_tree_size) = transaction
+                        .query_row(
+                            "SELECT sapling_commitment_tree_size - sapling_output_count,
+                                    orchard_commitment_tree_size - orchard_action_count
+                             FROM blocks
+                             WHERE height = :birthday_height",
+                            named_params![":birthday_height": birthday_height],
+                            |row| {
+                                Ok(row
+                                    .get::<_, Option<u32>>(0)?
+                                    .zip(row.get::<_, Option<u32>>(1)?))
+                            },
+                        )
+                        .optional()?
+                        .flatten()
+                        .map_or((None, None), |(s, o)| (Some(s), Some(o)));
+
                     transaction.execute(
                         r#"
                         INSERT INTO accounts_new (
                             id, account_kind, hd_seed_fingerprint, hd_account_index,
                             ufvk, uivk,
                             orchard_fvk_item_cache, sapling_fvk_item_cache, p2pkh_fvk_item_cache,
-                            birthday_height, recover_until_height
+                            birthday_height, birthday_sapling_tree_size, birthday_orchard_tree_size,
+                            recover_until_height
                         )
                         VALUES (
                             :account_id, :account_kind, :seed_id, :account_index,
                             :ufvk, :uivk,
                             :orchard_fvk_item_cache, :sapling_fvk_item_cache, :p2pkh_fvk_item_cache,
-                            :birthday_height, :recover_until_height
+                            :birthday_height, :birthday_sapling_tree_size, :birthday_orchard_tree_size,
+                            :recover_until_height
                         );
                         "#,
                         named_params![
@@ -184,6 +219,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                             ":sapling_fvk_item_cache": ufvk_parsed.sapling().map(|k| k.to_bytes()),
                             ":p2pkh_fvk_item_cache": transparent_item,
                             ":birthday_height": birthday_height,
+                            ":birthday_sapling_tree_size": birthday_sapling_tree_size,
+                            ":birthday_orchard_tree_size": birthday_orchard_tree_size,
                             ":recover_until_height": recover_until_height,
                         ],
                     )?;
@@ -229,12 +266,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 nf BLOB UNIQUE,
                 is_change INTEGER NOT NULL,
                 memo BLOB,
-                spent INTEGER,
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, output_index)
             );
             CREATE INDEX "sapling_received_notes_account" ON "sapling_received_notes_new" (
@@ -243,11 +278,36 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
             CREATE INDEX "sapling_received_notes_tx" ON "sapling_received_notes_new" (
                 "tx" ASC
             );
-            CREATE INDEX "sapling_received_notes_spent" ON "sapling_received_notes_new" (
-                "spent" ASC
+
+            -- Replace the `spent` column in `sapling_received_notes` with a junction table between
+            -- received notes and the transactions that spend them. This is necessary as otherwise
+            -- we cannot compute the correct value of transactions that expire unmined.
+            CREATE TABLE sapling_received_note_spends (
+                sapling_received_note_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (sapling_received_note_id)
+                    REFERENCES sapling_received_notes(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (sapling_received_note_id, transaction_id)
             );
-            INSERT INTO sapling_received_notes_new (id, tx, output_index, account_id, diversifier, value, rcm, nf, is_change, memo, spent, commitment_tree_position, recipient_key_scope)
-            SELECT id_note, tx, output_index, account, diversifier, value, rcm, nf, is_change, memo, spent, commitment_tree_position, recipient_key_scope
+
+            INSERT INTO sapling_received_note_spends (sapling_received_note_id, transaction_id)
+            SELECT id_note, spent
+            FROM sapling_received_notes
+            WHERE spent IS NOT NULL;
+
+            INSERT INTO sapling_received_notes_new (
+                id, tx, output_index, account_id,
+                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
+                recipient_key_scope
+            )
+            SELECT
+                id_note, tx, output_index, account,
+                diversifier, value, rcm, nf, is_change, memo, commitment_tree_position,
+                recipient_key_scope
             FROM sapling_received_notes;
 
             DROP TABLE sapling_received_notes;
@@ -269,7 +329,7 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 FOREIGN KEY (to_account_id) REFERENCES accounts(id),
                 CONSTRAINT tx_output UNIQUE (tx, output_pool, output_index),
                 CONSTRAINT note_recipient CHECK (
-                    (to_address IS NOT NULL) != (to_account_id IS NOT NULL)
+                    (to_address IS NOT NULL) OR (to_account_id IS NOT NULL)
                 )
             );
             CREATE INDEX sent_notes_tx ON sent_notes_new (tx);
@@ -295,21 +355,39 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                 script BLOB NOT NULL,
                 value_zat INTEGER NOT NULL,
                 height INTEGER NOT NULL,
-                spent_in_tx INTEGER,
                 FOREIGN KEY (received_by_account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent_in_tx) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_outpoint UNIQUE (prevout_txid, prevout_idx)
             );
             CREATE INDEX utxos_received_by_account ON utxos_new (received_by_account_id);
-            CREATE INDEX utxos_spent_in_tx ON utxos_new (spent_in_tx);
-            INSERT INTO utxos_new (id, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height, spent_in_tx)
-            SELECT id_utxo, received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height, spent_in_tx
+
+            INSERT INTO utxos_new (id, received_by_account_id, address, prevout_txid, prevout_idx, script, value_zat, height)
+            SELECT id_utxo, received_by_account, address, prevout_txid, prevout_idx, script, value_zat, height
             FROM utxos;
+
+            -- Replace the `spent_in_tx` column in `utxos` with a junction table between received
+            -- outputs and the transactions that spend them. This is necessary as otherwise we
+            -- cannot compute the correct value of transactions that expire unmined.
+            CREATE TABLE transparent_received_output_spends (
+                transparent_received_output_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (transparent_received_output_id)
+                    REFERENCES utxos(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (transparent_received_output_id, transaction_id)
+            );
+
+            INSERT INTO transparent_received_output_spends (transparent_received_output_id, transaction_id)
+            SELECT id_utxo, spent_in_tx
+            FROM utxos
+            WHERE spent_in_tx IS NOT NULL;
 
             DROP TABLE utxos;
             ALTER TABLE utxos_new RENAME TO utxos;
             "#,
-            )?;
+        )?;
 
         // Rewrite v_transactions view
         transaction.execute_batch(
@@ -361,8 +439,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                            0                             AS received_count,
                            0                             AS memo_present
                     FROM sapling_received_notes
+                    JOIN sapling_received_note_spends
+                         ON sapling_received_note_id = sapling_received_notes.id
                     JOIN transactions
-                         ON transactions.id_tx = sapling_received_notes.spent
+                         ON transactions.id_tx = sapling_received_note_spends.transaction_id
                     UNION
                     SELECT utxos.id                      AS id,
                            utxos.received_by_account_id  AS account_id,
@@ -374,8 +454,10 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                            0                             AS received_count,
                            0                             AS memo_present
                     FROM utxos
-                    JOIN transactions
-                         ON transactions.id_tx = utxos.spent_in_tx
+                JOIN transparent_received_output_spends txo_spends
+                     ON txo_spends.transparent_received_output_id = txos.id
+                JOIN transactions
+                     ON transactions.id_tx = txo_spends.transaction_id
                 ),
                 sent_note_counts AS (
                     SELECT sent_notes.from_account_id AS account_id,

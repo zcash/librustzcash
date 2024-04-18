@@ -7,6 +7,7 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.1.1] - 2024-03-25
 ### Added
 - `zcash_protocol::memo`:
   - `impl TryFrom<&MemoBytes> for Memo`

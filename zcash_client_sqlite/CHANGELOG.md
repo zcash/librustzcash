@@ -7,6 +7,34 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.10.3] - 2024-04-08
+
+### Added
+- Added a migration to ensure that the default address for existing wallets is
+  upgraded to include an Orchard receiver.
+
+### Fixed
+- A bug in the SQL query for `WalletDb::get_account_birthday` was fixed.
+
+## [0.10.2] - 2024-03-27
+
+### Fixed
+- A bug in the SQL query for `WalletDb::get_unspent_transparent_output` was fixed.
+
+## [0.10.1] - 2024-03-25
+
+### Fixed
+- The `sent_notes` table's `received_note` constraint was excessively restrictive 
+ after zcash/librustzcash#1306. Any databases that have migrations from 
+ zcash_client_sqlite 0.10.0 applied should be wiped and restored from seed.
+ In order to ensure that the incorrect migration is not used, the migration
+ id for the `full_account_ids` migration has been changed from 
+ `0x1b104345_f27e_42da_a9e3_1de22694da43` to `0x6d02ec76_8720_4cc6_b646_c4e2ce69221c`
+
+## [0.10.0] - 2024-03-25
+
+This version was yanked, use 0.10.1 instead.
+
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.

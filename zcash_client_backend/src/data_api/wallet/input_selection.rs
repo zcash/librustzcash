@@ -394,20 +394,25 @@ where
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
         loop {
-            #[cfg(feature = "orchard")]
-            let (sapling_input_total, orchard_input_total) = (
-                shielded_inputs.sapling_value()?,
-                shielded_inputs.orchard_value()?,
-            );
-
             #[cfg(not(feature = "orchard"))]
-            let orchard_input_total = NonNegativeAmount::ZERO;
-
-            let use_sapling =
-                !(sapling_outputs.is_empty() && orchard_input_total >= amount_required);
+            let use_sapling = true;
             #[cfg(feature = "orchard")]
-            let use_orchard =
-                !(orchard_outputs.is_empty() && sapling_input_total >= amount_required);
+            let (use_sapling, use_orchard) = {
+                let (sapling_input_total, orchard_input_total) = (
+                    shielded_inputs.sapling_value()?,
+                    shielded_inputs.orchard_value()?,
+                );
+
+                // Use Sapling inputs if there are no Orchard outputs or there are not sufficient
+                // Orchard outputs to cover the amount required.
+                let use_sapling =
+                    orchard_outputs.is_empty() || amount_required > orchard_input_total;
+                // Use Orchard inputs if there are insufficient Sapling funds to cover the amount
+                // reqiuired.
+                let use_orchard = !use_sapling || amount_required > sapling_input_total;
+
+                (use_sapling, use_orchard)
+            };
 
             let sapling_inputs = if use_sapling {
                 shielded_inputs

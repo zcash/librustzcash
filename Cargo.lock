@@ -784,6 +784,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb1d22c66e66d9d72e1758f0bd7d4fd0bee04cad842ee34587d68c07e45d088c"
 
 [[package]]
+name = "futures-macro"
+version = "0.3.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53b153fd91e4b0147f4aced87be237c98248656bb01050b96bf3ee89220a8ddb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.39",
+]
+
+[[package]]
 name = "futures-sink"
 version = "0.3.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -802,9 +813,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a19526d624e703a3179b3d322efec918b6246ea0fa51d41124525f00f1cc8104"
 dependencies = [
  "futures-core",
+ "futures-macro",
  "futures-task",
  "pin-project-lite",
  "pin-utils",
+ "slab",
 ]
 
 [[package]]
@@ -1086,8 +1099,9 @@ dependencies = [
 
 [[package]]
 name = "incrementalmerkletree"
-version = "0.5.0"
-source = "git+https://github.com/zcash/incrementalmerkletree?rev=e1a7a80212c22e5a8912d05860f7eb6899c56a7c#e1a7a80212c22e5a8912d05860f7eb6899c56a7c"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb1872810fb725b06b8c153dde9e86f3ec26747b9b60096da7a869883b549cbe"
 dependencies = [
  "either",
  "proptest",
@@ -1476,8 +1490,9 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "orchard"
-version = "0.7.1"
-source = "git+https://github.com/zcash/orchard?rev=33474bdbfd7268e1f84718078d47f63d01a879d5#33474bdbfd7268e1f84718078d47f63d01a879d5"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0462569fc8b0d1b158e4d640571867a4e4319225ebee2ab6647e60c70af19ae3"
 dependencies = [
  "aes",
  "bitvec",
@@ -2104,8 +2119,9 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.1.2"
-source = "git+https://github.com/nuttycom/sapling-crypto?rev=827534329f3ff61f9212f7933ed1688fa04e987c#827534329f3ff61f9212f7933ed1688fa04e987c"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02f4270033afcb0c74c5c7d59c73cfd1040367f67f224fe7ed9a919ae618f1b7"
 dependencies = [
  "aes",
  "bellman",
@@ -2244,8 +2260,9 @@ dependencies = [
 
 [[package]]
 name = "shardtree"
-version = "0.2.0"
-source = "git+https://github.com/zcash/incrementalmerkletree?rev=e1a7a80212c22e5a8912d05860f7eb6899c56a7c#e1a7a80212c22e5a8912d05860f7eb6899c56a7c"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b3cdd24424ce0b381646737fedddc33c4dcf7dcd2d545056b53f7982097bef5"
 dependencies = [
  "assert_matches",
  "bitflags 2.4.1",
@@ -2484,6 +2501,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "num_cpus",
  "pin-project-lite",
  "socket2 0.5.5",
  "windows-sys",
@@ -3005,9 +3023,10 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.11.1"
+version = "0.12.1"
 dependencies = [
  "assert_matches",
+ "async-trait",
  "base64",
  "bech32",
  "bls12_381",
@@ -3015,6 +3034,7 @@ dependencies = [
  "byteorder",
  "crossbeam-channel",
  "document-features",
+ "futures-util",
  "group",
  "gumdrop",
  "hdwallet",
@@ -3035,6 +3055,7 @@ dependencies = [
  "shardtree",
  "subtle",
  "time",
+ "tokio",
  "tonic",
  "tonic-build",
  "tracing",
@@ -3051,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_sqlite"
-version = "0.9.1"
+version = "0.10.3"
 dependencies = [
  "assert_matches",
  "bls12_381",
@@ -3129,7 +3150,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -3172,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "aes",
  "assert_matches",
@@ -3215,7 +3236,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -3239,7 +3260,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "document-features",
  "incrementalmerkletree",

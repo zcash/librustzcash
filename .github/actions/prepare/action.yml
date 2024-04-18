@@ -28,6 +28,7 @@ runs:
         bundled-prover
         download-params
         lightwalletd-tonic
+        sync
         temporary-zcashd
         transparent-inputs
         unstable

@@ -1,7 +1,7 @@
 [package]
 name = "zcash_proofs"
 description = "Zcash zk-SNARK circuits and proving APIs"
-version = "0.14.0"
+version = "0.15.0"
 authors = [
     "Jack Grigg <jack@z.cash>",
 ]
@@ -66,6 +66,9 @@ local-prover = ["directories"]
 
 ## Enables multithreading support for creating proofs.
 multicore = ["bellman/multicore", "zcash_primitives/multicore"]
+
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
 
 [lib]
 bench = false

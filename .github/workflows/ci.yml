@@ -72,6 +72,7 @@ jobs:
           --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+          --features expensive-tests
           -- --ignored
       - name: Verify working directory is clean
         run: git diff --exit-code
@@ -317,7 +318,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Install protoc
-        uses: supplypike/setup-bin@v3
+        uses: supplypike/setup-bin@v4
         with:
           uri: 'https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip'
           name: 'protoc'

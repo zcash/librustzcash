@@ -166,6 +166,11 @@ use crate::{
     scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
 };
 
+#[cfg(feature = "sync")]
+use {
+    super::scanning::ScanPriority, crate::data_api::scanning::ScanRange, async_trait::async_trait,
+};
+
 pub mod error;
 use error::Error;
 
@@ -222,6 +227,206 @@ pub trait BlockSource {
     ) -> Result<(), error::Error<WalletErrT, Self::Error>>
     where
         F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
+}
+
+/// `BlockCache` is a trait that extends `BlockSource` and defines methods for managing
+/// a cache of compact blocks.
+///
+/// # Examples
+///
+/// ```
+///    use async_trait::async_trait;
+///    use std::sync::{Arc, Mutex};
+///    use zcash_client_backend::data_api::{
+///        chain::{error, BlockCache, BlockSource},
+///        scanning::{ScanPriority, ScanRange},
+///    };
+///    use zcash_client_backend::proto::compact_formats::CompactBlock;
+///    use zcash_primitives::consensus::BlockHeight;
+///
+///    struct ExampleBlockCache {
+///        cached_blocks: Arc<Mutex<Vec<CompactBlock>>>,
+///    }
+///
+/// #    impl BlockSource for ExampleBlockCache {
+/// #        type Error = ();
+/// #
+/// #        fn with_blocks<F, WalletErrT>(
+/// #            &self,
+/// #            _from_height: Option<BlockHeight>,
+/// #            _limit: Option<usize>,
+/// #            _with_block: F,
+/// #        ) -> Result<(), error::Error<WalletErrT, Self::Error>>
+/// #        where
+/// #            F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>,
+/// #        {
+/// #            Ok(())
+/// #        }
+/// #    }
+/// #
+///    #[async_trait]
+///    impl BlockCache for ExampleBlockCache {
+///        fn get_tip_height(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+///            let cached_blocks = self.cached_blocks.lock().unwrap();
+///            let blocks: Vec<&CompactBlock> = match range {
+///                Some(range) => cached_blocks
+///                    .iter()
+///                    .filter(|&block| {
+///                        let block_height = BlockHeight::from_u32(block.height as u32);
+///                        range.block_range().contains(&block_height)
+///                    })
+///                    .collect(),
+///                None => cached_blocks.iter().collect(),
+///            };
+///            let highest_block = blocks.iter().max_by_key(|&&block| block.height);
+///            Ok(highest_block.map(|&block| BlockHeight::from_u32(block.height as u32)))
+///        }
+///
+///        async fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
+///            Ok(self
+///                .cached_blocks
+///                .lock()
+///                .unwrap()
+///                .iter()
+///                .filter(|block| {
+///                    let block_height = BlockHeight::from_u32(block.height as u32);
+///                    range.block_range().contains(&block_height)
+///                })
+///                .cloned()
+///                .collect())
+///        }
+///
+///        async fn insert(&self, mut compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+///            self.cached_blocks
+///                .lock()
+///                .unwrap()
+///                .append(&mut compact_blocks);
+///            Ok(())
+///        }
+///
+///        async fn delete(&self, range: ScanRange) -> Result<(), Self::Error> {
+///            self.cached_blocks
+///                .lock()
+///                .unwrap()
+///                .retain(|block| !range.block_range().contains(&BlockHeight::from_u32(block.height as u32)));
+///            Ok(())
+///        }
+///    }
+///
+///    // Example usage
+///    let rt = tokio::runtime::Runtime::new().unwrap();
+///    let mut block_cache = ExampleBlockCache {
+///        cached_blocks: Arc::new(Mutex::new(Vec::new())),
+///    };
+///    let range = ScanRange::from_parts(
+///        BlockHeight::from_u32(1)..BlockHeight::from_u32(3),
+///        ScanPriority::Historic,
+///    );
+/// #    let extsk = sapling::zip32::ExtendedSpendingKey::master(&[]);
+/// #    let dfvk = extsk.to_diversifiable_full_viewing_key();
+/// #    let compact_block1 = zcash_client_backend::scanning::testing::fake_compact_block(
+/// #        1u32.into(),
+/// #        zcash_primitives::block::BlockHash([0; 32]),
+/// #        sapling::Nullifier([0; 32]),
+/// #        &dfvk,
+/// #        zcash_primitives::transaction::components::amount::NonNegativeAmount::const_from_u64(5),
+/// #        false,
+/// #        None,
+/// #    );
+/// #    let compact_block2 = zcash_client_backend::scanning::testing::fake_compact_block(
+/// #        2u32.into(),
+/// #        zcash_primitives::block::BlockHash([0; 32]),
+/// #        sapling::Nullifier([0; 32]),
+/// #        &dfvk,
+/// #        zcash_primitives::transaction::components::amount::NonNegativeAmount::const_from_u64(5),
+/// #        false,
+/// #        None,
+/// #    );
+///    let compact_blocks = vec![compact_block1, compact_block2];
+///
+///    // Insert blocks into the block cache
+///    rt.block_on(async {
+///        block_cache.insert(compact_blocks.clone()).await.unwrap();
+///    });
+///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
+///
+///    // Find highest block in the block cache
+///    let get_tip_height = block_cache.get_tip_height(None).unwrap();
+///    assert_eq!(get_tip_height, Some(BlockHeight::from_u32(2)));
+///
+///    // Read from the block cache
+///    rt.block_on(async {
+///        let blocks_from_cache = block_cache.read(&range).await.unwrap();
+///        assert_eq!(blocks_from_cache, compact_blocks);
+///    });
+///
+///    // Truncate the block cache
+///    rt.block_on(async {
+///        block_cache.truncate(BlockHeight::from_u32(1)).await.unwrap();
+///    });
+///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 1);
+///    assert_eq!(
+///        block_cache.get_tip_height(None).unwrap(),
+///        Some(BlockHeight::from_u32(1))
+///    );
+///
+///    // Delete blocks from the block cache
+///    rt.block_on(async {
+///        block_cache.delete(range).await.unwrap();
+///    });
+///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
+///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
+/// ```
+#[cfg(feature = "sync")]
+#[async_trait]
+pub trait BlockCache: BlockSource + Send + Sync
+where
+    Self::Error: Send,
+{
+    /// Finds the height of the highest block known to the block cache within a specified range.
+    ///
+    /// If `range` is `None`, returns the tip of the entire cache.
+    /// If no blocks are found in the cache, returns Ok(`None`).
+    fn get_tip_height(&self, range: Option<&ScanRange>)
+        -> Result<Option<BlockHeight>, Self::Error>;
+
+    /// Retrieves contiguous compact blocks specified by the given `range` from the block cache.
+    ///
+    /// Short reads are allowed, meaning that this method may return fewer blocks than requested
+    /// provided that all returned blocks are contiguous and start from `range.block_range().start`.
+    ///
+    /// # Errors
+    ///
+    /// This method should return an error if contiguous blocks cannot be read from the cache,
+    /// indicating there are blocks missing.
+    async fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error>;
+
+    /// Inserts a vec of compact blocks into the block cache.
+    ///
+    /// This method permits insertion of non-contiguous compact blocks.
+    async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
+
+    /// Removes all cached blocks above a specified block height.
+    async fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error> {
+        if let Some(latest) = self.get_tip_height(None)? {
+            self.delete(ScanRange::from_parts(
+                Range {
+                    start: block_height + 1,
+                    end: latest + 1,
+                },
+                ScanPriority::Ignored,
+            ))
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Deletes a range of compact blocks from the block cache.
+    ///
+    /// # Errors
+    ///
+    /// In the case of an error, some blocks requested for deletion may remain in the block cache.
+    async fn delete(&self, range: ScanRange) -> Result<(), Self::Error>;
 }
 
 /// Metadata about modifications to the wallet state made in the course of scanning a set of
@@ -372,7 +577,7 @@ impl ChainState {
 /// ## Panics
 ///
 /// This method will panic if `from_height != from_state.block_height() + 1`.
-#[tracing::instrument(skip(params, block_source, data_db))]
+#[tracing::instrument(skip(params, block_source, data_db, from_state))]
 #[allow(clippy::type_complexity)]
 pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,

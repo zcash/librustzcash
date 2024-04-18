@@ -1,9 +1,11 @@
+use std::{collections::HashSet, rc::Rc};
+
 use incrementalmerkletree::Position;
 use orchard::{
     keys::Diversifier,
     note::{Note, Nullifier, RandomSeed, Rho},
 };
-use rusqlite::{named_params, params, Connection, Row};
+use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
 
 use zcash_client_backend::{
     data_api::NullifierQuery,
@@ -97,11 +99,11 @@ fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
 ) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
-    let note_id = ReceivedNoteId(ShieldedProtocol::Orchard, row.get(0)?);
-    let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
-    let action_index = row.get(2)?;
+    let note_id = ReceivedNoteId(ShieldedProtocol::Orchard, row.get("id")?);
+    let txid = row.get::<_, [u8; 32]>("txid").map(TxId::from_bytes)?;
+    let action_index = row.get("action_index")?;
     let diversifier = {
-        let d: Vec<_> = row.get(3)?;
+        let d: Vec<_> = row.get("diversifier")?;
         if d.len() != 11 {
             return Err(SqliteClientError::CorruptedData(
                 "Invalid diversifier length".to_string(),
@@ -112,30 +114,31 @@ fn to_spendable_note<P: consensus::Parameters>(
         Diversifier::from_bytes(tmp)
     };
 
-    let note_value: u64 = row.get::<_, i64>(4)?.try_into().map_err(|_e| {
+    let note_value: u64 = row.get::<_, i64>("value")?.try_into().map_err(|_e| {
         SqliteClientError::CorruptedData("Note values must be nonnegative".to_string())
     })?;
 
     let rho = {
-        let rho_bytes: [u8; 32] = row.get(5)?;
+        let rho_bytes: [u8; 32] = row.get("rho")?;
         Option::from(Rho::from_bytes(&rho_bytes))
             .ok_or_else(|| SqliteClientError::CorruptedData("Invalid rho.".to_string()))
     }?;
 
     let rseed = {
-        let rseed_bytes: [u8; 32] = row.get(6)?;
+        let rseed_bytes: [u8; 32] = row.get("rseed")?;
         Option::from(RandomSeed::from_bytes(rseed_bytes, &rho)).ok_or_else(|| {
             SqliteClientError::CorruptedData("Invalid Orchard random seed.".to_string())
         })
     }?;
 
-    let note_commitment_tree_position =
-        Position::from(u64::try_from(row.get::<_, i64>(7)?).map_err(|_| {
+    let note_commitment_tree_position = Position::from(
+        u64::try_from(row.get::<_, i64>("commitment_tree_position")?).map_err(|_| {
             SqliteClientError::CorruptedData("Note commitment tree position invalid.".to_string())
-        })?);
+        })?,
+    );
 
-    let ufvk_str: Option<String> = row.get(8)?;
-    let scope_code: Option<i64> = row.get(9)?;
+    let ufvk_str: Option<String> = row.get("ufvk")?;
+    let scope_code: Option<i64> = row.get("recipient_key_scope")?;
 
     // If we don't have information about the recipient key scope or the ufvk we can't determine
     // which spending key to use. This may be because the received note was associated with an
@@ -222,7 +225,7 @@ pub(crate) fn select_spendable_orchard_notes<P: consensus::Parameters>(
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
 pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
-    conn: &Connection,
+    conn: &Transaction,
     output: &T,
     tx_ref: i64,
     spent_in: Option<i64>,
@@ -232,13 +235,13 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
         (
             tx, action_index, account_id,
             diversifier, value, rho, rseed, memo, nf,
-            is_change, spent, commitment_tree_position,
+            is_change, commitment_tree_position,
             recipient_key_scope
         )
         VALUES (
             :tx, :action_index, :account_id,
             :diversifier, :value, :rho, :rseed, :memo, :nf,
-            :is_change, :spent, :commitment_tree_position,
+            :is_change, :commitment_tree_position,
             :recipient_key_scope
         )
         ON CONFLICT (tx, action_index) DO UPDATE
@@ -250,9 +253,9 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
             is_change = IFNULL(:is_change, is_change),
-            spent = IFNULL(:spent, spent),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
-            recipient_key_scope = :recipient_key_scope",
+            recipient_key_scope = :recipient_key_scope
+        RETURNING orchard_received_notes.id",
     )?;
 
     let rseed = output.note().rseed();
@@ -270,15 +273,25 @@ pub(crate) fn put_received_note<T: ReceivedOrchardOutput>(
         ":nf": output.nullifier().map(|nf| nf.to_bytes()),
         ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change(),
-        ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
         ":recipient_key_scope": output.recipient_key_scope().map(scope_code),
     ];
 
-    stmt_upsert_received_note
-        .execute(sql_args)
+    let received_note_id = stmt_upsert_received_note
+        .query_row(sql_args, |row| row.get::<_, i64>(0))
         .map_err(SqliteClientError::from)?;
 
+    if let Some(spent_in) = spent_in {
+        conn.execute(
+            "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
+             VALUES (:orchard_received_note_id, :transaction_id)
+             ON CONFLICT (orchard_received_note_id, transaction_id) DO NOTHING",
+            named_params![
+                ":orchard_received_note_id": received_note_id,
+                ":transaction_id": spent_in
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -297,10 +310,16 @@ pub(crate) fn get_orchard_nullifiers(
         NullifierQuery::Unspent => conn.prepare(
             "SELECT rn.account_id, rn.nf
              FROM orchard_received_notes rn
-             LEFT OUTER JOIN transactions tx
-             ON tx.id_tx = rn.spent
-             WHERE tx.block IS NULL
-             AND nf IS NOT NULL",
+             JOIN transactions tx ON tx.id_tx = rn.tx
+             WHERE rn.nf IS NOT NULL
+             AND tx.block IS NOT NULL
+             AND rn.id NOT IN (
+               SELECT spends.orchard_received_note_id
+               FROM orchard_received_note_spends spends
+               JOIN transactions stx ON stx.id_tx = spends.transaction_id
+               WHERE stx.block IS NOT NULL  -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+             )",
         )?,
         NullifierQuery::All => conn.prepare(
             "SELECT rn.account_id, rn.nf
@@ -319,6 +338,27 @@ pub(crate) fn get_orchard_nullifiers(
     Ok(res)
 }
 
+pub(crate) fn detect_spending_accounts<'a>(
+    conn: &Connection,
+    nfs: impl Iterator<Item = &'a Nullifier>,
+) -> Result<HashSet<AccountId>, rusqlite::Error> {
+    let mut account_q = conn.prepare_cached(
+        "SELECT rn.account_id
+        FROM orchard_received_notes rn
+        WHERE rn.nf IN rarray(:nf_ptr)",
+    )?;
+
+    let nf_values: Vec<Value> = nfs.map(|nf| Value::Blob(nf.to_bytes().to_vec())).collect();
+    let nf_ptr = Rc::new(nf_values);
+    let res = account_q
+        .query_and_then(named_params![":nf_ptr": &nf_ptr], |row| {
+            row.get::<_, u32>(0).map(AccountId)
+        })?
+        .collect::<Result<HashSet<_>, _>>()?;
+
+    Ok(res)
+}
+
 /// Marks a given nullifier as having been revealed in the construction
 /// of the specified transaction.
 ///
@@ -329,10 +369,16 @@ pub(crate) fn mark_orchard_note_spent(
     tx_ref: i64,
     nf: &Nullifier,
 ) -> Result<bool, SqliteClientError> {
-    let mut stmt_mark_orchard_note_spent =
-        conn.prepare_cached("UPDATE orchard_received_notes SET spent = ? WHERE nf = ?")?;
+    let mut stmt_mark_orchard_note_spent = conn.prepare_cached(
+        "INSERT INTO orchard_received_note_spends (orchard_received_note_id, transaction_id)
+         SELECT id, :transaction_id FROM orchard_received_notes WHERE nf = :nf
+         ON CONFLICT (orchard_received_note_id, transaction_id) DO NOTHING",
+    )?;
 
-    match stmt_mark_orchard_note_spent.execute(params![tx_ref, nf.to_bytes()])? {
+    match stmt_mark_orchard_note_spent.execute(named_params![
+       ":nf": nf.to_bytes(),
+       ":transaction_id": tx_ref
+    ])? {
         0 => Ok(false),
         1 => Ok(true),
         _ => unreachable!("nf column is marked as UNIQUE"),
@@ -370,7 +416,7 @@ pub(crate) mod tests {
             pool::{OutputRecoveryError, ShieldedPoolTester},
             TestState,
         },
-        wallet::commitment_tree,
+        wallet::{commitment_tree, sapling::tests::SaplingPoolTester},
         ORCHARD_TABLES_PREFIX,
     };
 
@@ -574,6 +620,8 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore] // FIXME: #1316 This requires support for dust outputs.
+    #[cfg(not(feature = "expensive-tests"))]
     fn zip317_spend() {
         testing::pool::zip317_spend::<OrchardPoolTester>()
     }
@@ -601,15 +649,26 @@ pub(crate) mod tests {
 
     #[test]
     fn pool_crossing_required() {
-        use crate::wallet::sapling::tests::SaplingPoolTester;
-
         testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
     }
 
     #[test]
     fn fully_funded_fully_private() {
-        use crate::wallet::sapling::tests::SaplingPoolTester;
-
         testing::pool::fully_funded_fully_private::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn fully_funded_send_to_t() {
+        testing::pool::fully_funded_send_to_t::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn multi_pool_checkpoint() {
+        testing::pool::multi_pool_checkpoint::<OrchardPoolTester, SaplingPoolTester>()
+    }
+
+    #[test]
+    fn multi_pool_checkpoints_with_pruning() {
+        testing::pool::multi_pool_checkpoints_with_pruning::<OrchardPoolTester, SaplingPoolTester>()
     }
 }

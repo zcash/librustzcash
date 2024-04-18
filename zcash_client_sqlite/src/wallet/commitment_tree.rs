@@ -1035,22 +1035,22 @@ pub(crate) fn put_shard_roots<
     )
     .map_err(ShardTreeError::Storage)?;
 
-    let put_roots = tracing::info_span!("write_shards").entered();
-    for (root, i) in roots.iter().zip(0u64..) {
-        // We want to avoid deserializing the subtree just to annotate its root node, so we simply
-        // cache the downloaded root alongside of any already-persisted subtree. We will update the
-        // subtree data itself by reannotating the root node of the tree, handling conflicts, at
-        // the time that we deserialize the tree.
-        let mut stmt = conn
-            .prepare_cached(&format!(
+    // We want to avoid deserializing the subtree just to annotate its root node, so we simply
+    // cache the downloaded root alongside of any already-persisted subtree. We will update the
+    // subtree data itself by reannotating the root node of the tree, handling conflicts, at
+    // the time that we deserialize the tree.
+    let mut stmt = conn
+        .prepare_cached(&format!(
             "INSERT INTO {}_tree_shards (shard_index, subtree_end_height, root_hash, shard_data)
             VALUES (:shard_index, :subtree_end_height, :root_hash, :shard_data)
             ON CONFLICT (shard_index) DO UPDATE
             SET subtree_end_height = :subtree_end_height, root_hash = :root_hash",
             table_prefix
         ))
-            .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
+        .map_err(|e| ShardTreeError::Storage(Error::Query(e)))?;
 
+    let put_roots = tracing::info_span!("write_shards").entered();
+    for (root, i) in roots.iter().zip(0u64..) {
         // The `shard_data` value will only be used in the case that no tree already exists.
         let mut shard_data: Vec<u8> = vec![];
         let tree = PrunableTree::leaf((root.root_hash().clone(), RetentionFlags::EPHEMERAL));
