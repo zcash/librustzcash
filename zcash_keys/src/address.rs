@@ -269,6 +269,8 @@ impl Receiver {
         }
     }
 
+    /// Returns whether or not this receiver corresponds to `addr`, or is contained
+    /// in `addr` when the latter is a Unified Address.
     pub fn corresponds(&self, addr: &ZcashAddress) -> bool {
         addr.matches_receiver(&match self {
             #[cfg(feature = "orchard")]

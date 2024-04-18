@@ -211,7 +211,7 @@ pub mod testing {
     }
 
     /// Generates an arbitrary Unified address containing receivers corresponding to the provided
-    /// set of typecodes.. The receivers of this address are ikely to not represent valid protocol
+    /// set of typecodes. The receivers of this address are likely to not represent valid protocol
     /// receivers, and should only be used for testing parsing and/or encoding functions that do
     /// not concern themselves with the validity of the underlying receivers.
     pub fn arb_unified_address_for_typecodes(
@@ -231,7 +231,7 @@ pub mod testing {
             .collect::<Vec<_>>()
     }
 
-    /// Generates an arbitrary Unified address. The receivers of this address are ikely to not
+    /// Generates an arbitrary Unified address. The receivers of this address are likely to not
     /// represent valid protocol receivers, and should only be used for testing parsing and/or
     /// encoding functions that do not concern themselves with the validity of the underlying
     /// receivers.
