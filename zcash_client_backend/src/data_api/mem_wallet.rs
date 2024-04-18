@@ -1,5 +1,6 @@
 #![allow(unused)]
-use incrementalmerkletree::Address;
+use incrementalmerkletree::{Address, Retention};
+use sapling::NullifierDerivingKey;
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
 use std::{
@@ -10,7 +11,7 @@ use std::{
     num::NonZeroU32,
 };
 use zcash_keys::keys::{AddressGenerationError, DerivationError};
-use zip32::{fingerprint::SeedFingerprint, DiversifierIndex};
+use zip32::{fingerprint::SeedFingerprint, DiversifierIndex, Scope};
 
 use zcash_primitives::{
     block::BlockHash,
@@ -21,16 +22,17 @@ use zcash_primitives::{
 use zcash_protocol::{
     memo::{self, Memo, MemoBytes},
     value::Zatoshis,
+    ShieldedProtocol::{Orchard, Sapling},
 };
 
 use crate::{
     address::UnifiedAddress,
     keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
-    wallet::{NoteId, WalletTransparentOutput, WalletTx},
+    wallet::{NoteId, WalletSpend, WalletTransparentOutput, WalletTx},
 };
 
 use super::{
-    chain::CommitmentTreeRoot, scanning::ScanRange, AccountBirthday, BlockMetadata,
+    chain::CommitmentTreeRoot, scanning::ScanRange, Account, AccountBirthday, BlockMetadata,
     DecryptedTransaction, NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees,
     WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
 };
@@ -120,6 +122,7 @@ impl MemoryWalletDb {
 #[derive(Debug)]
 pub enum Error {
     AccountUnknown(u32),
+    ViewingKeyNotFound(u32),
     MemoDecryption(memo::Error),
     KeyDerivation(DerivationError),
     AddressGeneration(AddressGenerationError),
@@ -377,12 +380,148 @@ impl WalletWrite for MemoryWalletDb {
         todo!()
     }
 
+    /// Adds a sequence of blocks to the data store.
+    ///
+    /// Assumes blocks will be here in order.
     fn put_blocks(
         &mut self,
-        _from_state: &super::chain::ChainState,
-        _blocks: Vec<ScannedBlock<Self::AccountId>>,
+        from_state: &super::chain::ChainState,
+        blocks: Vec<ScannedBlock<Self::AccountId>>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        // TODO:
+        // - Make sure blocks are coming in order.
+        // - Make sure the first block in the sequence is tip + 1?
+        // - Add a check to make sure the blocks are not already in the data store.
+        for block in blocks.into_iter() {
+            let mut transactions = HashMap::new();
+            let mut memos = HashMap::new();
+            for transaction in block.transactions().iter() {
+                let txid = transaction.txid();
+                for account_id in self.get_account_ids()? {
+                    let ufvk = self
+                        .get_account(account_id)?
+                        .ok_or(Error::AccountUnknown(account_id))?
+                        .ufvk()
+                        .ok_or(Error::ViewingKeyNotFound(account_id))?
+                        .clone();
+                    let dfvk = ufvk
+                        .sapling()
+                        .ok_or(Error::ViewingKeyNotFound(account_id))?;
+                    let nk = dfvk.to_nk(Scope::External);
+
+                    transaction.sapling_outputs().iter().map(|o| {
+                        // Insert the Sapling nullifiers of the spent notes into the `sapling_spends` map.
+                        let nullifier = o.note().nf(&nk, o.note_commitment_tree_position().into());
+                        self.sapling_spends
+                            .entry(nullifier)
+                            .or_insert((txid, false));
+
+                        // Insert the memo into the `memos` map.
+                        let note_id = NoteId::new(
+                            txid,
+                            Sapling,
+                            u16::try_from(o.index())
+                                .expect("output indices are representable as u16"),
+                        );
+                        if let Ok(Some(memo)) = self.get_memo(note_id) {
+                            memos.insert(note_id, memo.encode());
+                        }
+                    });
+
+                    #[cfg(feature = "orchard")]
+                    transaction.orchard_outputs().iter().map(|o| {
+                        // Insert the Orchard nullifiers of the spent notes into the `orchard_spends` map.
+                        if let Some(nullifier) = o.nf() {
+                            self.orchard_spends
+                                .entry(*nullifier)
+                                .or_insert((txid, false));
+                        }
+
+                        // Insert the memo into the `memos` map.
+                        let note_id = NoteId::new(
+                            txid,
+                            Orchard,
+                            u16::try_from(o.index())
+                                .expect("output indices are representable as u16"),
+                        );
+                        if let Ok(Some(memo)) = self.get_memo(note_id) {
+                            memos.insert(note_id, memo.encode());
+                        }
+                    });
+
+                    // Add frontier to the sapling tree
+                    self.sapling_tree.insert_frontier(
+                        from_state.final_sapling_tree().clone(),
+                        Retention::Checkpoint {
+                            id: from_state.block_height(),
+                            is_marked: false,
+                        },
+                    );
+
+                    #[cfg(feature = "orchard")]
+                    // Add frontier to the orchard tree
+                    self.orchard_tree.insert_frontier(
+                        from_state.final_orchard_tree().clone(),
+                        Retention::Checkpoint {
+                            id: from_state.block_height(),
+                            is_marked: false,
+                        },
+                    );
+
+                    // Mark the Sapling nullifiers of the spent notes as spent in the `sapling_spends` map.
+                    transaction.sapling_spends().iter().map(|s| {
+                        let nullifier = s.nf();
+                        if let Some((txid, spent)) = self.sapling_spends.get_mut(nullifier) {
+                            *spent = true;
+                        }
+                    });
+
+                    #[cfg(feature = "orchard")]
+                    // Mark the Orchard nullifiers of the spent notes as spent in the `orchard_spends` map.
+                    transaction.orchard_spends().iter().map(|s| {
+                        let nullifier = s.nf();
+                        if let Some((txid, spent)) = self.orchard_spends.get_mut(nullifier) {
+                            *spent = true;
+                        }
+                    });
+
+                    self.tx_idx.insert(txid, block.block_height);
+                    transactions.insert(txid, transaction.clone());
+                }
+            }
+
+            let memory_block = MemoryWalletBlock {
+                height: block.block_height,
+                hash: block.block_hash,
+                block_time: block.block_time,
+                transactions,
+                memos,
+            };
+
+            self.blocks.insert(block.block_height, memory_block);
+
+            // Add the Sapling commitments to the sapling tree.
+            let block_commitments = block.into_commitments();
+            let start_position = from_state
+                .final_sapling_tree()
+                .value()
+                .map_or(0.into(), |t| t.position() + 1);
+            self.sapling_tree
+                .batch_insert(start_position, block_commitments.sapling.into_iter());
+
+            #[cfg(feature = "orchard")]
+            {
+                // Add the Orchard commitments to the orchard tree.
+                let start_position = from_state
+                    .final_orchard_tree()
+                    .value()
+                    .map_or(0.into(), |t| t.position() + 1);
+                self.orchard_tree
+                    .batch_insert(start_position, block_commitments.orchard.into_iter());
+            }
+        }
+
+        Ok(())
     }
 
     /// Adds a transparent UTXO received by the wallet to the data store.
