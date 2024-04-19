@@ -654,7 +654,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     >,
 >
 where
-    DbT: WalletWrite + WalletCommitmentTrees,
+    DbT: WalletRead + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
@@ -1048,17 +1048,6 @@ where
 
     // Build the transaction with the specified fee rule
     let build_result = builder.build(OsRng, spend_prover, output_prover, fee_rule)?;
-    wallet_db
-        .store_sent_tx(&SentTransaction {
-            tx: build_result.transaction(),
-            created: time::OffsetDateTime::now_utc(),
-            account,
-            outputs: vec![],
-            fee_amount: proposal_step.balance().fee_required(),
-            #[cfg(feature = "transparent-inputs")]
-            utxos_spent,
-        })
-        .map_err(Error::DataSource)?;
 
     Ok(build_result)
 }
