@@ -605,9 +605,10 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
+    unimplemented!();
     let mut step_results = Vec::with_capacity(proposal.steps().len());
     for step in proposal.steps() {
-        let step_result = create_proposed_transaction(
+        let step_result = calculate_proposed_transaction(
             wallet_db,
             params,
             spend_prover,
@@ -631,9 +632,10 @@ where
     .expect("proposal.steps is NonEmpty"))
 }
 
+/// Zingo uses calculate_proposed_transaction to create the transaction, and then stores it ASYNCRONOUSLY
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
+fn calculate_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     spend_prover: &impl SpendProver,
