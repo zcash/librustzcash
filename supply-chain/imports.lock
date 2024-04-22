@@ -1,2 +1,149 @@
 
 # cargo-vet imports lock
+
+[[publisher.equihash]]
+version = "0.2.0"
+when = "2022-06-24"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.f4jumble]]
+version = "0.1.0"
+when = "2022-05-10"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.halo2_gadgets]]
+version = "0.3.0"
+when = "2023-03-22"
+user-id = 1244
+user-login = "ebfull"
+
+[[publisher.halo2_legacy_pdqsort]]
+version = "0.1.0"
+when = "2023-03-10"
+user-id = 199950
+user-login = "daira"
+user-name = "Daira Emma Hopwood"
+
+[[publisher.halo2_proofs]]
+version = "0.3.0"
+when = "2023-03-22"
+user-id = 1244
+user-login = "ebfull"
+
+[[publisher.incrementalmerkletree]]
+version = "0.5.1"
+when = "2024-03-25"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.orchard]]
+version = "0.8.0"
+when = "2024-03-25"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.sapling-crypto]]
+version = "0.1.3"
+when = "2024-03-25"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.shardtree]]
+version = "0.3.0"
+when = "2024-03-25"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zcash_address]]
+version = "0.3.2"
+when = "2024-03-06"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.zcash_client_backend]]
+version = "0.12.1"
+when = "2024-03-27"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zcash_client_sqlite]]
+version = "0.10.3"
+when = "2024-04-08"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zcash_encoding]]
+version = "0.2.0"
+when = "2022-10-19"
+user-id = 1244
+user-login = "ebfull"
+
+[[publisher.zcash_extensions]]
+version = "0.0.0"
+when = "2020-04-24"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.zcash_history]]
+version = "0.4.0"
+when = "2024-03-01"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.zcash_keys]]
+version = "0.2.0"
+when = "2024-03-25"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zcash_note_encryption]]
+version = "0.4.0"
+when = "2023-06-06"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zcash_primitives]]
+version = "0.15.0"
+when = "2024-03-25"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.zcash_proofs]]
+version = "0.15.0"
+when = "2024-03-25"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.zcash_protocol]]
+version = "0.1.1"
+when = "2024-03-25"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
+
+[[publisher.zcash_spec]]
+version = "0.1.0"
+when = "2023-12-07"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.zip32]]
+version = "0.1.1"
+when = "2024-03-14"
+user-id = 6289
+user-login = "str4d"
+
+[[publisher.zip321]]
+version = "0.0.0"
+when = "2024-01-15"
+user-id = 169181
+user-login = "nuttycom"
+user-name = "Kris Nuttycombe"
