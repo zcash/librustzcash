@@ -4,10 +4,8 @@ use std::error;
 use std::fmt;
 
 use shardtree::error::ShardTreeError;
-use zcash_client_backend::{
-    encoding::{Bech32DecodeError, TransparentCodecError},
-    PoolType,
-};
+use zcash_address::ParseError;
+use zcash_client_backend::PoolType;
 use zcash_keys::keys::AddressGenerationError;
 use zcash_primitives::zip32;
 use zcash_primitives::{consensus::BlockHeight, transaction::components::amount::BalanceError};
@@ -16,7 +14,10 @@ use crate::wallet::commitment_tree;
 use crate::PRUNING_DEPTH;
 
 #[cfg(feature = "transparent-inputs")]
-use zcash_primitives::legacy::TransparentAddress;
+use {
+    zcash_client_backend::encoding::TransparentCodecError,
+    zcash_primitives::legacy::TransparentAddress,
+};
 
 /// The primary error type for the SQLite wallet backend.
 #[derive(Debug)]
@@ -33,8 +34,8 @@ pub enum SqliteClientError {
     /// Illegal attempt to reinitialize an already-initialized wallet database.
     TableNotEmpty,
 
-    /// A Bech32-encoded key or address decoding error
-    Bech32DecodeError(Bech32DecodeError),
+    /// A Zcash key or address decoding error
+    DecodingError(ParseError),
 
     /// An error produced in legacy transparent address derivation
     #[cfg(feature = "transparent-inputs")]
@@ -42,6 +43,7 @@ pub enum SqliteClientError {
 
     /// An error encountered in decoding a transparent address from its
     /// serialized form.
+    #[cfg(feature = "transparent-inputs")]
     TransparentAddress(TransparentCodecError),
 
     /// Wrapper for rusqlite errors.
@@ -116,7 +118,6 @@ impl error::Error for SqliteClientError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match &self {
             SqliteClientError::InvalidMemo(e) => Some(e),
-            SqliteClientError::Bech32DecodeError(Bech32DecodeError::Bech32Error(e)) => Some(e),
             SqliteClientError::DbError(e) => Some(e),
             SqliteClientError::Io(e) => Some(e),
             SqliteClientError::BalanceError(e) => Some(e),
@@ -136,9 +137,10 @@ impl fmt::Display for SqliteClientError {
             SqliteClientError::InvalidNote => write!(f, "Invalid note"),
             SqliteClientError::RequestedRewindInvalid(h, r) =>
                 write!(f, "A rewind must be either of less than {} blocks, or at least back to block {} for your wallet; the requested height was {}.", PRUNING_DEPTH, h, r),
-            SqliteClientError::Bech32DecodeError(e) => write!(f, "{}", e),
+            SqliteClientError::DecodingError(e) => write!(f, "{}", e),
             #[cfg(feature = "transparent-inputs")]
             SqliteClientError::HdwalletError(e) => write!(f, "{:?}", e),
+            #[cfg(feature = "transparent-inputs")]
             SqliteClientError::TransparentAddress(e) => write!(f, "{}", e),
             SqliteClientError::TableNotEmpty => write!(f, "Table is not empty"),
             SqliteClientError::DbError(e) => write!(f, "{}", e),
@@ -175,10 +177,9 @@ impl From<std::io::Error> for SqliteClientError {
         SqliteClientError::Io(e)
     }
 }
-
-impl From<Bech32DecodeError> for SqliteClientError {
-    fn from(e: Bech32DecodeError) -> Self {
-        SqliteClientError::Bech32DecodeError(e)
+impl From<ParseError> for SqliteClientError {
+    fn from(e: ParseError) -> Self {
+        SqliteClientError::DecodingError(e)
     }
 }
 
@@ -195,6 +196,7 @@ impl From<hdwallet::error::Error> for SqliteClientError {
     }
 }
 
+#[cfg(feature = "transparent-inputs")]
 impl From<TransparentCodecError> for SqliteClientError {
     fn from(e: TransparentCodecError) -> Self {
         SqliteClientError::TransparentAddress(e)

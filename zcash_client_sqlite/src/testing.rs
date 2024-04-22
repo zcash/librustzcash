@@ -1896,7 +1896,7 @@ fn check_proposal_serialization_roundtrip(
     db_data: &WalletDb<rusqlite::Connection, LocalNetwork>,
     proposal: &Proposal<StandardFeeRule, ReceivedNoteId>,
 ) {
-    let proposal_proto = proposal::Proposal::from_standard_proposal(&db_data.params, proposal);
-    let deserialized_proposal = proposal_proto.try_into_standard_proposal(&db_data.params, db_data);
+    let proposal_proto = proposal::Proposal::from_standard_proposal(proposal);
+    let deserialized_proposal = proposal_proto.try_into_standard_proposal(db_data);
     assert_matches!(deserialized_proposal, Ok(r) if &r == proposal);
 }

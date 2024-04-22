@@ -3068,6 +3068,7 @@ dependencies = [
  "zcash_proofs",
  "zcash_protocol",
  "zip32",
+ "zip321",
 ]
 
 [[package]]
@@ -3326,4 +3327,16 @@ dependencies = [
  "blake2b_simd",
  "memuse",
  "subtle",
+]
+
+[[package]]
+name = "zip321"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "nom",
+ "percent-encoding",
+ "proptest",
+ "zcash_address",
+ "zcash_protocol",
 ]
