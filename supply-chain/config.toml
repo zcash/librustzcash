@@ -4,6 +4,9 @@
 [cargo-vet]
 version = "0.9"
 
+[imports.mozilla]
+url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
+
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
@@ -110,10 +113,6 @@ criteria = "safe-to-deploy"
 version = "0.2.14"
 criteria = "safe-to-run"
 
-[[exemptions.autocfg]]
-version = "1.1.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.axum]]
 version = "0.6.20"
 criteria = "safe-to-deploy"
@@ -144,14 +143,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.bip0039]]
 version = "0.10.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.bit-set]]
-version = "0.5.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.bit-vec]]
-version = "0.6.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.bitflags]]
@@ -298,20 +289,8 @@ criteria = "safe-to-deploy"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.debugid]]
-version = "0.8.0"
-criteria = "safe-to-run"
-
 [[exemptions.digest]]
 version = "0.10.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.document-features]]
-version = "0.2.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.either]]
-version = "1.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.equivalent]]
@@ -348,10 +327,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fixedbitset]]
 version = "0.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.fnv]]
-version = "1.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.fpe]]
@@ -414,14 +389,6 @@ criteria = "safe-to-run"
 version = "0.3.21"
 criteria = "safe-to-deploy"
 
-[[exemptions.half]]
-version = "1.8.2"
-criteria = "safe-to-run"
-
-[[exemptions.hashbrown]]
-version = "0.12.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.hashbrown]]
 version = "0.14.2"
 criteria = "safe-to-deploy"
@@ -444,10 +411,6 @@ criteria = "safe-to-run"
 
 [[exemptions.hermit-abi]]
 version = "0.3.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.hex]]
-version = "0.4.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.hmac]]
@@ -518,10 +481,6 @@ criteria = "safe-to-deploy"
 version = "0.10.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.lazy_static]]
-version = "1.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.libc]]
 version = "0.2.150"
 criteria = "safe-to-deploy"
@@ -538,17 +497,9 @@ criteria = "safe-to-deploy"
 version = "0.4.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.litrs]]
-version = "0.4.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.lock_api]]
 version = "0.4.11"
 criteria = "safe-to-run"
-
-[[exemptions.log]]
-version = "0.4.20"
-criteria = "safe-to-deploy"
 
 [[exemptions.matchit]]
 version = "0.7.3"
@@ -613,10 +564,6 @@ criteria = "safe-to-deploy"
 [[exemptions.num-format]]
 version = "0.4.4"
 criteria = "safe-to-run"
-
-[[exemptions.num-integer]]
-version = "0.1.45"
-criteria = "safe-to-deploy"
 
 [[exemptions.num-traits]]
 version = "0.2.17"
@@ -846,10 +793,6 @@ criteria = "safe-to-deploy"
 version = "0.101.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.rustversion]]
-version = "1.0.14"
-criteria = "safe-to-deploy"
-
 [[exemptions.rusty-fork]]
 version = "0.3.0"
 criteria = "safe-to-deploy"
@@ -974,10 +917,6 @@ criteria = "safe-to-deploy"
 version = "3.8.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.textwrap]]
-version = "0.16.0"
-criteria = "safe-to-run"
-
 [[exemptions.thiserror]]
 version = "1.0.50"
 criteria = "safe-to-deploy"
@@ -988,14 +927,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.time]]
 version = "0.3.23"
-criteria = "safe-to-deploy"
-
-[[exemptions.time-core]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.time-macros]]
-version = "0.2.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.tinytemplate]]
@@ -1076,10 +1007,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unicode-ident]]
 version = "1.0.12"
-criteria = "safe-to-deploy"
-
-[[exemptions.unicode-normalization]]
-version = "0.1.22"
 criteria = "safe-to-deploy"
 
 [[exemptions.universal-hash]]
