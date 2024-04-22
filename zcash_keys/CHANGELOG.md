@@ -6,8 +6,14 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::UnifiedKeyError`
+
 ### Changed
 - MSRV is now 1.77.0.
+
+### Removed
+- `zcash_keys::keys::DerivationError` use `UnifiedKeyError` instead.
 
 ## [0.4.0] - 2024-10-04
 
