@@ -6,6 +6,9 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_keys::keys::UnifiedKeyError`
+
 ### Changed
 - The `UnifiedAddressRequest` argument to the following methods is now optional:
   - `zcash_keys::keys::UnifiedSpendingKey::address`
@@ -21,6 +24,9 @@ and this library adheres to Rust's notion of
 ### Changed
 - Migrated to `zcash_primitives 0.20.0`
 - MSRV is now 1.77.0.
+
+### Removed
+- `zcash_keys::keys::DerivationError` use `UnifiedKeyError` instead.
 
 ## [0.4.0] - 2024-10-04
 
