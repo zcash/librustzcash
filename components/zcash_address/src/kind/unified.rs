@@ -561,7 +561,6 @@ pub(crate) mod private {
         ) -> Result<Self, ParseError> {
             assert!(u32::from(Typecode::P2SH) == u32::from(Typecode::P2PKH) + 1);
 
-            let mut only_transparent = true;
             let mut prev_code = None; // less than any Some
             for item in &items {
                 let t = item.typecode();
@@ -576,16 +575,11 @@ pub(crate) mod private {
                     return Err(ParseError::BothP2phkAndP2sh);
                 } else {
                     prev_code = t_code;
-                    only_transparent = only_transparent && item.is_transparent_data_item();
                 }
             }
 
-            if only_transparent {
-                Err(ParseError::OnlyTransparent)
-            } else {
-                // All checks pass!
-                Ok(Self::from_inner(revision, items))
-            }
+            // All checks pass!
+            Ok(Self::from_inner(revision, items))
         }
 
         fn parse_internal<T: Into<Vec<u8>>>(hrp: &str, buf: T) -> Result<Self, ParseError> {
