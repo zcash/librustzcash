@@ -317,7 +317,6 @@ pub fn write_v6_bundle<W: Write>(
     bundle: Option<&orchard::Bundle<Authorized, Amount, OrchardZSA>>,
     mut writer: W,
 ) -> io::Result<()> {
-    // TODO deduplicate
     if let Some(bundle) = &bundle {
         Vector::write_nonempty(&mut writer, bundle.actions(), |w, a| {
             write_action_without_auth(w, a)

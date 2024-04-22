@@ -10,7 +10,7 @@ use orchard::bundle;
 use orchard::orchard_flavor::OrchardVanilla;
 use orchard::bundle;
 use orchard::issuance::{IssueAuth, IssueBundle, Signed};
-use orchard::note_encryption::OrchardDomain;
+use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
@@ -339,9 +339,16 @@ impl<A: Authorization, IA: IssueAuth> TransactionDigest<A, IA> for TxIdDigester 
         sapling_bundle.map(hash_sapling_txid_data)
     }
 
-    fn digest_orchard<O: OrchardDomain>(
+    fn digest_orchard(
         &self,
-        orchard_bundle: Option<&bundle::Bundle<A::OrchardAuth, Amount, O>>,
+        orchard_bundle: Option<&bundle::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
+    ) -> Self::OrchardDigest {
+        orchard_bundle.map(|b| b.commitment().0)
+    }
+
+    fn digest_orchard_zsa(
+        &self,
+        orchard_bundle: Option<&bundle::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| b.commitment().0)
     }
@@ -515,9 +522,18 @@ impl TransactionDigest<Authorized, Signed> for BlockTxCommitmentDigester {
         h.finalize()
     }
 
-    fn digest_orchard<O: OrchardDomain>(
+    fn digest_orchard(
         &self,
-        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, O>>,
+        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, OrchardVanilla>>,
+    ) -> Self::OrchardDigest {
+        orchard_bundle.map_or_else(bundle::commitments::hash_bundle_auth_empty, |b| {
+            b.authorizing_commitment().0
+        })
+    }
+
+    fn digest_orchard_zsa(
+        &self,
+        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, OrchardZSA>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map_or_else(bundle::commitments::hash_bundle_auth_empty, |b| {
             b.authorizing_commitment().0

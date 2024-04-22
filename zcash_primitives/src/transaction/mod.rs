@@ -15,8 +15,8 @@ mod tests;
 use blake2b_simd::Hash as Blake2bHash;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use memuse::DynamicUsage;
+use orchard::builder::Unproven;
 use orchard::issuance::{IssueAuth, IssueBundle, Signed};
-use orchard::note_encryption::OrchardDomain;
 use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
 use std::convert::TryFrom;
 use std::fmt;
@@ -288,6 +288,7 @@ pub trait Authorization {
     type TransparentAuth: transparent::Authorization;
     type SaplingAuth: sapling::bundle::Authorization;
     type OrchardAuth: orchard::bundle::Authorization;
+    type OrchardZsaAuth: orchard::bundle::Authorization;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth: tze::Authorization;
@@ -301,6 +302,7 @@ impl Authorization for Authorized {
     type TransparentAuth = transparent::Authorized;
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+    type OrchardZsaAuth = orchard::bundle::Authorized;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::Authorized;
@@ -315,10 +317,10 @@ pub struct Unauthorized;
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
     type SaplingAuth = sapling::builder::Unauthorized;
-    type OrchardAuth = orchard::builder::InProgress<
-        orchard::bundle_enum_adapter::UnprovenEnum,
-        orchard::builder::Unauthorized,
-    >;
+    type OrchardAuth =
+        orchard::builder::InProgress<Unproven<OrchardVanilla>, orchard::builder::Unauthorized>;
+    type OrchardZsaAuth =
+        orchard::builder::InProgress<Unproven<OrchardZSA>, orchard::builder::Unauthorized>;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::builder::Unauthorized;
@@ -356,7 +358,7 @@ pub struct TransactionData<A: Authorization, IA: IssueAuth> {
     sprout_bundle: Option<sprout::Bundle>,
     sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
     orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
-    orchard_zsa_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount, OrchardZSA>>,
+    orchard_zsa_bundle: Option<orchard::bundle::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
     issue_bundle: Option<IssueBundle<IA>>,
     #[cfg(feature = "zfuture")]
     tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
@@ -374,7 +376,7 @@ impl<A: Authorization, IA: IssueAuth> TransactionData<A, IA> {
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
-        orchard_zsa_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount, OrchardZSA>>,
+        orchard_zsa_bundle: Option<orchard::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
         issue_bundle: Option<IssueBundle<IA>>,
     ) -> Self {
         TransactionData {
@@ -406,7 +408,7 @@ impl<A: Authorization, IA: IssueAuth> TransactionData<A, IA> {
         sprout_bundle: Option<sprout::Bundle>,
         sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
         orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
-        orchard_zsa_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount, OrchardZSA>>,
+        orchard_zsa_bundle: Option<orchard::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
         issue_bundle: Option<IssueBundle<IA>>,
         tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
     ) -> Self {
@@ -463,7 +465,7 @@ impl<A: Authorization, IA: IssueAuth> TransactionData<A, IA> {
 
     pub fn orchard_zsa_bundle(
         &self,
-    ) -> Option<&orchard::Bundle<A::OrchardAuth, Amount, OrchardZSA>> {
+    ) -> Option<&orchard::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>> {
         self.orchard_zsa_bundle.as_ref()
     }
 
@@ -517,7 +519,7 @@ impl<A: Authorization, IA: IssueAuth> TransactionData<A, IA> {
             digester.digest_transparent(self.transparent_bundle.as_ref()),
             digester.digest_sapling(self.sapling_bundle.as_ref()),
             if self.version.has_zsa() {
-                digester.digest_orchard(self.orchard_zsa_bundle.as_ref())
+                digester.digest_orchard_zsa(self.orchard_zsa_bundle.as_ref())
             } else {
                 digester.digest_orchard(self.orchard_bundle.as_ref())
             },
@@ -545,9 +547,9 @@ impl<A: Authorization, IA: IssueAuth> TransactionData<A, IA> {
             orchard::bundle::Bundle<B::OrchardAuth, Amount, OrchardVanilla>,
         >,
         f_zsa_orchard: impl FnOnce(
-            Option<orchard::bundle::Bundle<A::OrchardAuth, Amount, OrchardZSA>>,
+            Option<orchard::bundle::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
         ) -> Option<
-            orchard::bundle::Bundle<B::OrchardAuth, Amount, OrchardZSA>,
+            orchard::bundle::Bundle<B::OrchardZsaAuth, Amount, OrchardZSA>,
         >,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
             Option<tze::Bundle<A::TzeAuth>>,
@@ -574,6 +576,7 @@ impl<A: Authorization, IA: IssueAuth> TransactionData<A, IA> {
         f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
         mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, B::SaplingAuth>,
         mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
+        mut f_orchard_zsa: impl orchard_serialization::MapAuth<A::OrchardZsaAuth, B::OrchardZsaAuth>,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
     ) -> TransactionData<B, IA> {
         TransactionData {
@@ -603,7 +606,7 @@ impl<A: Authorization, IA: IssueAuth> TransactionData<A, IA> {
             }),
             orchard_zsa_bundle: self.orchard_zsa_bundle.map(|b| {
                 b.map_authorization(
-                    &mut f_orchard,
+                    &mut f_orchard_zsa,
                     |f, _, s| f.map_spend_auth(s),
                     |f, a| f.map_authorization(a),
                 )
@@ -1086,9 +1089,14 @@ pub trait TransactionDigest<A: Authorization, IA: IssueAuth> {
         sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
     ) -> Self::SaplingDigest;
 
-    fn digest_orchard<O: OrchardDomain>(
+    fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount, O>>,
+        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
+    ) -> Self::OrchardDigest;
+
+    fn digest_orchard_zsa(
+        &self,
+        orchard_bundle: Option<&orchard::Bundle<A::OrchardZsaAuth, Amount, OrchardZSA>>,
     ) -> Self::OrchardDigest;
 
     fn digest_issue(&self, issue_bundle: Option<&IssueBundle<IA>>) -> Self::IssueDigest;

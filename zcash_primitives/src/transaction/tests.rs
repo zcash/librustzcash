@@ -218,6 +218,7 @@ impl Authorization for TestUnauthorized {
     type TransparentAuth = TestTransparentAuth;
     type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+    type OrchardZsaAuth = orchard::bundle::Authorized;
 
     #[cfg(zcash_unstable = "zfuture")]
     type TzeAuth = tze::Authorized;
