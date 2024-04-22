@@ -345,6 +345,8 @@ pub enum ParseError {
     InvalidTypecodeOrder,
     /// The unified container only contains transparent items.
     OnlyTransparent,
+    /// The unified container contains no data items.
+    NoDataItems,
     /// The string is not Bech32m encoded, and so cannot be a unified address.
     NotUnified,
     /// The Bech32m string has an unrecognized human-readable prefix.
@@ -362,6 +364,7 @@ impl fmt::Display for ParseError {
             ParseError::InvalidEncoding(msg) => write!(f, "Invalid encoding: {}", msg),
             ParseError::InvalidTypecodeOrder => write!(f, "Items are out of order."),
             ParseError::OnlyTransparent => write!(f, "UA only contains transparent items"),
+            ParseError::NoDataItems => write!(f, "UA contains no data items"),
             ParseError::NotUnified => write!(f, "Address is not Bech32m encoded"),
             ParseError::UnknownPrefix(s) => {
                 write!(f, "Unrecognized Bech32m human-readable prefix: {}", s)
@@ -569,6 +572,10 @@ pub(crate) mod private {
             revision: Revision,
             items: Vec<Item<Self::DataItem>>,
         ) -> Result<Self, ParseError> {
+            if items.is_empty() {
+                return Err(ParseError::NoDataItems);
+            }
+
             let mut prev_code = None; // less than any Some
             let mut only_transparent = true;
             for item in &items {
@@ -588,7 +595,7 @@ pub(crate) mod private {
                 }
             }
 
-            if only_transparent {
+            if only_transparent && revision == Revision::R0 {
                 Err(ParseError::OnlyTransparent)
             } else {
                 // All checks pass!

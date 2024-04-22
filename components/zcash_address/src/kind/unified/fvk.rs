@@ -369,9 +369,6 @@ mod tests {
             0xf4, 0xf5, 0x16, 0xef, 0x5c, 0xe0, 0x26, 0xbc, 0x23, 0x73, 0x76, 0x3f, 0x4b,
         ];
 
-        assert_eq!(
-            Ufvk::parse_internal(Ufvk::MAINNET_R0, &encoded[..]),
-            Err(ParseError::OnlyTransparent)
-        );
+        assert_matches!(Ufvk::parse_internal(Ufvk::MAINNET_R0, &encoded[..]), Ok(_));
     }
 }

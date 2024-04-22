@@ -31,6 +31,7 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys::UnifiedFullViewingKey::{
    expiry_height, set_expiry_height, unset_expiry_height,
    expiry_time, set_expiry_time, unset_expiry_time,
+   has_sapling, has_orchard,
    unknown_data, unknown_metadata
  }`
 - `zcash_keys::keys::UnifiedIncomingViewingKey::{

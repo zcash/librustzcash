@@ -965,7 +965,10 @@ impl UnifiedFullViewingKey {
             .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
 
         zcash_address::unified::Ufvk::try_from_items(
-            if self.expiry_height().is_some() || self.expiry_time().is_some() {
+            if self.expiry_height().is_some()
+                || self.expiry_time().is_some()
+                || !(self.has_sapling() || self.has_orchard())
+            {
                 Revision::R1
             } else {
                 Revision::R0
@@ -1011,10 +1014,26 @@ impl UnifiedFullViewingKey {
         self.sapling.as_ref()
     }
 
+    /// Returns whether this UFVK contains a Sapling item.
+    pub fn has_sapling(&self) -> bool {
+        #[cfg(feature = "sapling")]
+        return self.sapling.is_some();
+        #[cfg(not(feature = "sapling"))]
+        return false;
+    }
+
     /// Returns the Orchard full viewing key component of this unified key.
     #[cfg(feature = "orchard")]
     pub fn orchard(&self) -> Option<&orchard::keys::FullViewingKey> {
         self.orchard.as_ref()
+    }
+
+    /// Returns whether this UFVK contains an Orchard item.
+    pub fn has_orchard(&self) -> bool {
+        #[cfg(feature = "orchard")]
+        return self.orchard.is_some();
+        #[cfg(not(feature = "orchard"))]
+        return false;
     }
 
     /// Returns any unknown data items parsed from the encoded form of the key.

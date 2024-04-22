@@ -348,9 +348,6 @@ mod tests {
             0xbd, 0xfe, 0xa4, 0xb7, 0x47, 0x20, 0x92, 0x6, 0xf0, 0x0, 0xf9, 0x64,
         ];
 
-        assert_eq!(
-            Uivk::parse_internal(Uivk::MAINNET_R0, &encoded[..]),
-            Err(ParseError::OnlyTransparent)
-        );
+        assert_matches!(Uivk::parse_internal(Uivk::MAINNET_R0, &encoded[..]), Ok(_));
     }
 }

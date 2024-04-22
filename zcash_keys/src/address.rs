@@ -289,7 +289,10 @@ impl UnifiedAddress {
             .chain(self.expiry_time.map(unified::MetadataItem::ExpiryTime));
 
         let ua = unified::Address::try_from_items(
-            if self.expiry_height().is_some() || self.expiry_time().is_some() {
+            if self.expiry_height().is_some()
+                || self.expiry_time().is_some()
+                || !(self.has_orchard() || self.has_sapling())
+            {
                 Revision::R1
             } else {
                 Revision::R0
