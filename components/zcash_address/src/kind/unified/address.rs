@@ -109,8 +109,7 @@ impl Address {
         self.0.iter().any(|r| match r {
             Receiver::Orchard(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Orchard),
             Receiver::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
-            Receiver::P2pkh(_) => pool_type == PoolType::Transparent,
-            Receiver::P2sh(_) => pool_type == PoolType::Transparent,
+            Receiver::P2pkh(_) | Receiver::P2sh(_) => pool_type == PoolType::Transparent,
             Receiver::Unknown { .. } => false,
         })
     }

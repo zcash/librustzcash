@@ -98,14 +98,14 @@ impl std::error::Error for Zip321Error {
 
 /// Converts a [`MemoBytes`] value to a ZIP 321 compatible base64-encoded string.
 ///
-/// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
+/// [`MemoBytes`]: zcash_protocol::memo::MemoBytes
 pub fn memo_to_base64(memo: &MemoBytes) -> String {
     BASE64_URL_SAFE_NO_PAD.encode(memo.as_slice())
 }
 
 /// Parse a [`MemoBytes`] value from a ZIP 321 compatible base64-encoded string.
 ///
-/// [`MemoBytes`]: zcash_primitives::memo::MemoBytes
+/// [`MemoBytes`]: zcash_protocol::memo::MemoBytes
 pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
     BASE64_URL_SAFE_NO_PAD
         .decode(s)
@@ -480,7 +480,7 @@ mod render {
         format!("address{}={}", param_index(idx), addr.encode())
     }
 
-    /// Converts an [`Zatoshis`] value to a correctly formatted decimal ZEC
+    /// Converts a [`Zatoshis`] value to a correctly formatted decimal ZEC
     /// value for inclusion in a ZIP 321 URI.
     pub fn amount_str(amount: Zatoshis) -> String {
         let coins = u64::from(amount) / COIN;
@@ -641,14 +641,14 @@ mod parse {
                 } else {
                     // `try_from_encoded(..).ok()` returns `None` on error, which we want to then
                     // cause `map_opt` to fail.
-                    dbg!(ZcashAddress::try_from_encoded(addr_str)
+                    ZcashAddress::try_from_encoded(addr_str)
                         .map(|a| {
                             Some(IndexedParam {
                                 param: Param::Addr(Box::new(a)),
                                 payment_index: 0,
                             })
                         })
-                        .ok())
+                        .ok()
                 }
             },
         )(input)

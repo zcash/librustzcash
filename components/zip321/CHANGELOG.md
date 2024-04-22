@@ -22,7 +22,7 @@ The entries below are relative to the `zcash_client_backend` crate as of
   its `recipient_address` argument.
 - Uses of `zcash_primitives::transaction::components::amount::NonNegartiveAmount`
   have been replace with `zcash_protocol::value::Zatoshis`. Also, some incorrect
-  uses of the signed `zcash_primitibves::transaction::components::amount Amount`
+  uses of the signed `zcash_primitives::transaction::components::Amount`
   type have been corrected via replacement with the `Zatoshis` type.
 - The following methods that previously required a 
   `zcash_primitives::consensus::Parameters` argument to facilitate address

@@ -293,12 +293,12 @@ impl ZcashAddress {
     /// Returns whether or not this address contains or corresponds to the given unified address
     /// receiver.
     pub fn matches_receiver(&self, receiver: &Receiver) -> bool {
-        match (receiver, &self.kind) {
-            (r, AddressKind::Unified(ua)) => ua.contains_receiver(r),
-            (Receiver::Sapling(r), AddressKind::Sapling(d)) => r == d,
-            (Receiver::P2pkh(r), AddressKind::P2pkh(d)) => r == d,
-            (Receiver::P2pkh(r), AddressKind::Tex(d)) => r == d,
-            (Receiver::P2sh(r), AddressKind::P2sh(d)) => r == d,
+        match (&self.kind, receiver) {
+            (AddressKind::Unified(ua), r) => ua.contains_receiver(r),
+            (AddressKind::Sapling(d), Receiver::Sapling(r)) => r == d,
+            (AddressKind::P2pkh(d), Receiver::P2pkh(r)) => r == d,
+            (AddressKind::Tex(d), Receiver::P2pkh(r)) => r == d,
+            (AddressKind::P2sh(d), Receiver::P2sh(r)) => r == d,
             _ => false,
         }
     }
@@ -362,6 +362,11 @@ pub mod testing {
     }
 
     prop_compose! {
+        /// Create an arbitrary, structurally-valid `ZcashAddress` value.
+        ///
+        /// Note that the data contained in the generated address does _not_ necessarily correspond
+        /// to a valid address according to the Zcash protocol; binary data in the resulting value
+        /// is entirely random.
         pub fn arb_address(net: NetworkType)(
             kind in prop_oneof!(
                 arb_sprout_addr_kind(),

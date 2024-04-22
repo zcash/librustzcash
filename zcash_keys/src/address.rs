@@ -347,10 +347,15 @@ impl TryFromRawAddress for Address {
 }
 
 impl Address {
+    /// Attempts to decode an [`Address`] value from its [`ZcashAddress`] encoded representation.
+    ///
+    /// Returns `None` if any error is encountered in decoding. Use
+    /// [`Self::try_from_zcash_address(s.parse()?)?`] if you need detailed error information.
     pub fn decode<P: consensus::Parameters>(params: &P, s: &str) -> Option<Self> {
         Self::try_from_zcash_address(params, s.parse::<ZcashAddress>().ok()?).ok()
     }
 
+    /// Attempts to decode an [`Address`] value from its [`ZcashAddress`] encoded representation.
     pub fn try_from_zcash_address<P: consensus::Parameters>(
         params: &P,
         zaddr: ZcashAddress,
@@ -358,6 +363,7 @@ impl Address {
         zaddr.convert_if_network(params.network_type())
     }
 
+    /// Converts this [`Address`] to its encoded [`ZcashAddress`] representation.
     pub fn to_zcash_address<P: consensus::Parameters>(&self, params: &P) -> ZcashAddress {
         let net = params.network_type();
 
@@ -376,10 +382,12 @@ impl Address {
         }
     }
 
+    /// Converts this [`Address`] to its encoded string representation.
     pub fn encode<P: consensus::Parameters>(&self, params: &P) -> String {
         self.to_zcash_address(params).to_string()
     }
 
+    /// Returns whether or not this [`Address`] can send funds to the specified pool.
     pub fn has_receiver(&self, pool_type: PoolType) -> bool {
         match self {
             #[cfg(feature = "sapling")]

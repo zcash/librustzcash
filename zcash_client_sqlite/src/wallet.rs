@@ -2373,7 +2373,7 @@ pub(crate) fn put_tx_meta(
 /// Returns the most likely wallet address that corresponds to the protocol-level receiver of a
 /// note or UTXO.
 pub(crate) fn select_receiving_address<P: consensus::Parameters>(
-    params: &P,
+    _params: &P,
     conn: &rusqlite::Connection,
     account: AccountId,
     receiver: &Receiver,
@@ -2386,7 +2386,7 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
                  FROM addresses
                  WHERE cached_transparent_receiver_address = :taddr",
                 named_params! {
-                    ":taddr": Address::Transparent(*taddr).encode(params)
+                    ":taddr": Address::Transparent(*taddr).encode(_params)
                 },
                 |row| row.get::<_, String>(0),
             )
