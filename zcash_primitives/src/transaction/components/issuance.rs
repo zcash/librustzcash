@@ -50,7 +50,7 @@ fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
     Ok(IssueAction::from_parts(asset_descr, notes, finalize))
 }
 
-fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
+pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
     let recipient = read_recipient(&mut reader)?;
     let value = reader.read_u64::<LittleEndian>()?;
     let asset = read_asset(&mut reader)?;
@@ -110,7 +110,7 @@ fn write_action<W: Write>(action: &IssueAction, mut writer: W) -> io::Result<()>
     Ok(())
 }
 
-fn write_note<W: Write>(note: &Note, writer: &mut W) -> io::Result<()> {
+pub fn write_note<W: Write>(note: &Note, writer: &mut W) -> io::Result<()> {
     writer.write_all(&note.recipient().to_raw_address_bytes())?;
     writer.write_u64::<LittleEndian>(note.value().inner())?;
     writer.write_all(&note.asset().to_bytes())?;
