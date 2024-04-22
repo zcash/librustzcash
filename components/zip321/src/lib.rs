@@ -116,11 +116,23 @@ pub fn memo_from_base64(s: &str) -> Result<MemoBytes, Zip321Error> {
 /// A single payment being requested.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
+    /// The address to which the payment should be sent.
     recipient_address: ZcashAddress,
+    /// The amount of the payment that is being requested.
     amount: Zatoshis,
+    /// A memo that, if included, must be provided with the payment.
+    /// If a memo is present and [`recipient_address`] is not a shielded
+    /// address, the wallet should report an error.
+    ///
+    /// [`recipient_address`]: #structfield.recipient_address
     memo: Option<MemoBytes>,
+    /// A human-readable label for this payment within the larger structure
+    /// of the transaction request.
     label: Option<String>,
+    /// A human-readable message to be displayed to the user describing the
+    /// purpose of this payment.
     message: Option<String>,
+    /// A list of other arbitrary key/value pairs associated with this payment.
     other_params: Vec<(String, String)>,
 }
 

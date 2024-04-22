@@ -2395,7 +2395,6 @@ pub(crate) fn select_receiving_address<P: consensus::Parameters>(
             .transpose()
             .map_err(SqliteClientError::from),
         receiver => {
-            // at present,
             let mut stmt =
                 conn.prepare_cached("SELECT address FROM addresses WHERE account_id = :account")?;
 

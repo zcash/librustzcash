@@ -271,25 +271,22 @@ impl ZcashAddress {
 
     /// Returns whether this address has the ability to receive transfers of the given pool type.
     pub fn can_receive_as(&self, pool_type: PoolType) -> bool {
+        use AddressKind::*;
         match &self.kind {
-            AddressKind::Sprout(_) => false,
-            AddressKind::Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
-            AddressKind::Unified(addr) => addr.has_receiver_of_type(pool_type),
-            AddressKind::P2pkh(_) => pool_type == PoolType::Transparent,
-            AddressKind::P2sh(_) => pool_type == PoolType::Transparent,
-            AddressKind::Tex(_) => pool_type == PoolType::Transparent,
+            Sprout(_) => false,
+            Sapling(_) => pool_type == PoolType::Shielded(ShieldedProtocol::Sapling),
+            Unified(addr) => addr.has_receiver_of_type(pool_type),
+            P2pkh(_) | P2sh(_) | Tex(_) => pool_type == PoolType::Transparent,
         }
     }
 
     /// Returns whether this address can receive a memo.
     pub fn can_receive_memo(&self) -> bool {
+        use AddressKind::*;
         match &self.kind {
-            AddressKind::Sprout(_) => true,
-            AddressKind::Sapling(_) => true,
-            AddressKind::Unified(addr) => addr.can_receive_memo(),
-            AddressKind::P2pkh(_) => false,
-            AddressKind::P2sh(_) => false,
-            AddressKind::Tex(_) => false,
+            Sprout(_) | Sapling(_) => true,
+            Unified(addr) => addr.can_receive_memo(),
+            P2pkh(_) | P2sh(_) | Tex(_) => false,
         }
     }
 

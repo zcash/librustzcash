@@ -233,8 +233,11 @@ impl UnifiedAddress {
     }
 }
 
-/// An enumeration of protocol-level receiver types. While these correspond to unified address
-/// receiver
+/// An enumeration of protocol-level receiver types.
+///
+/// While these correspond to unified address receiver types, this is a distinct type because it is
+/// used to represent the protocol-level recipient of a transfer, instead of a part of an encoded
+/// address.
 pub enum Receiver {
     #[cfg(feature = "orchard")]
     Orchard(orchard::Address),
