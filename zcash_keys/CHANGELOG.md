@@ -40,16 +40,27 @@ and this library adheres to Rust's notion of
    unknown_data, unknown_metadata
  }`
 - `zcash_keys::address::UnifiedAddressRequest::unsafe_new_without_expiry`
+- `zcash_keys::keys::UnifiedKeyError`
 - `zcash_keys::address::UnifiedAddressRequest::new` now takes additional
   optional `expiry_height` and `expiry_time` arguments.
 - `zcash_keys::address::UnifiedAddress::from_receivers` is now only available
   under the `test-dependencies` feature flag. It should not be used for
-  non-test purposes as it can potentially generate addresses that contain no
-  receivers.
+  non-test purposes.
+- `zcash_keys::address::UnifiedAddress` can now represent ZIP 316 Revision 1
+  unified addresses, which may lack any shielded receivers; addresses are now
+  constrained to include at least one data item, but are not otherwise
+  restricted in their receiver composition.
 - `zcash_keys::keys::UnifiedSpendingKey::default_address` is now failable, and
   now returns a `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`.
 - `zcash_keys::address::Address` variants now `Box` their contents to
   avoid large discrepancies in enum variant sizing.
+- `zcash_keys::keys::DecodingError` has added variant `ConstraintViolation`.
+- The following methods now return `Result<_, UnifiedKeyError>` instead of
+  `Result<_, DerivationError>`
+  - `zcash_keys::keys::UnifiedSpendingKey::from_seed`
+  - `zcash_keys::keys::UnifiedFullViewingKey::new`
+  - `zcash_keys::keys::UnifiedFullViewingKey::from_orchard_fvk`
+  - `zcash_keys::keys::UnifiedFullViewingKey::from_sapling_extended_full_viewing_key`
 
 ### Removed
 - `zcash_keys::keys::UnifiedAddressRequest::all` (use 
@@ -58,6 +69,7 @@ and this library adheres to Rust's notion of
 - `zcash_keys::address::UnifiedAddress::unknown` (use `unknown_data` instead.)
 - `zcash_keys::address::UnifiedAddressRequest::unsafe_new` (use
   `UnifiedAddressRequest::unsafe_new_without_expiry` instead)
+- `zcash_keys::keys::DerivationError` (use `UnifiedKeyError` instead).
 
 ## [0.6.0] - 2024-12-16
 

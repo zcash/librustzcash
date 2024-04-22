@@ -1,4 +1,5 @@
 //! Helper functions for managing light client key material.
+use alloc::borrow::ToOwned;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::{self, Display};
@@ -93,31 +94,44 @@ fn to_transparent_child_index(j: DiversifierIndex) -> Option<NonHardenedChildInd
     }
 }
 
+/// Errors that can occur in the generation of Unified Spending Keys, Unified Viewing Keys, or
+/// Unified Addresses.
 #[derive(Debug)]
-pub enum DerivationError {
+pub enum UnifiedKeyError {
+    /// A data item (Orchard, Sapling, or P2pkh key or receiver, or some other unknown data item)
+    /// must be present in order for a key or address to be valid.
+    DataItemRequired,
+    /// An error occurred in Orchard key or receiver derivation.
     #[cfg(feature = "orchard")]
     Orchard(orchard::zip32::Error),
+    /// An error occurred in P2pkh key or receiver derivation.
     #[cfg(feature = "transparent-inputs")]
     Transparent(bip32::Error),
 }
 
-impl Display for DerivationError {
+impl Display for UnifiedKeyError {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            UnifiedKeyError::DataItemRequired => write!(
+                _f,
+                "Unified keys must contain at least one non-metadata item."
+            ),
             #[cfg(feature = "orchard")]
-            DerivationError::Orchard(e) => write!(_f, "Orchard error: {}", e),
+            UnifiedKeyError::Orchard(e) => write!(_f, "Orchard key derivation error: {}", e),
             #[cfg(feature = "transparent-inputs")]
-            DerivationError::Transparent(e) => write!(_f, "Transparent error: {}", e),
+            UnifiedKeyError::Transparent(e) => {
+                write!(_f, "Transparent key derivation error: {}", e)
+            }
             #[cfg(not(any(feature = "orchard", feature = "transparent-inputs")))]
             other => {
-                unreachable!("Unhandled DerivationError variant {:?}", other)
+                unreachable!("Unhandled UnifiedKeyError variant {:?}", other)
             }
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for DerivationError {}
+impl std::error::Error for UnifiedKeyError {}
 
 /// A version identifier for the encoding of unified spending keys.
 ///
@@ -150,8 +164,11 @@ pub enum DecodingError {
     LengthMismatch(Typecode, u32),
     #[cfg(feature = "unstable")]
     InsufficientData(Typecode),
-    /// The key data could not be decoded from its string representation to a valid key.
+    /// The key data for the given key type could not be decoded from its string representation to
+    /// a valid key.
     KeyDataInvalid(Typecode),
+    /// Decoding resulted in a value that would violate validity constraints.
+    ConstraintViolation(String),
 }
 
 impl core::fmt::Display for DecodingError {
@@ -180,12 +197,33 @@ impl core::fmt::Display for DecodingError {
                 write!(f, "Insufficient data for typecode {:?}", t)
             }
             DecodingError::KeyDataInvalid(t) => write!(f, "Invalid key data for key type {:?}", t),
+            DecodingError::ConstraintViolation(s) => {
+                write!(f, "Decoding produced an invalid value: {}", s)
+            }
         }
     }
 }
 
 #[cfg(feature = "std")]
 impl std::error::Error for DecodingError {}
+
+impl From<UnifiedKeyError> for DecodingError {
+    fn from(value: UnifiedKeyError) -> Self {
+        match value {
+            UnifiedKeyError::DataItemRequired => {
+                Self::ConstraintViolation("At least one Data Item must be present.".to_owned())
+            }
+            #[cfg(feature = "orchard")]
+            UnifiedKeyError::Orchard(_) => {
+                Self::KeyDataInvalid(Typecode::Data(unified::DataTypecode::Orchard))
+            }
+            #[cfg(feature = "transparent-inputs")]
+            UnifiedKeyError::Transparent(_) => {
+                Self::KeyDataInvalid(Typecode::Data(unified::DataTypecode::P2pkh))
+            }
+        }
+    }
+}
 
 #[cfg(feature = "unstable")]
 impl Era {
@@ -222,7 +260,7 @@ impl UnifiedSpendingKey {
         _params: &P,
         seed: &[u8],
         _account: AccountId,
-    ) -> Result<UnifiedSpendingKey, DerivationError> {
+    ) -> Result<UnifiedSpendingKey, UnifiedKeyError> {
         if seed.len() < 32 {
             panic!("ZIP 32 seeds MUST be at least 32 bytes");
         }
@@ -230,12 +268,12 @@ impl UnifiedSpendingKey {
         UnifiedSpendingKey::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             transparent::keys::AccountPrivKey::from_seed(_params, seed, _account)
-                .map_err(DerivationError::Transparent)?,
+                .map_err(UnifiedKeyError::Transparent)?,
             #[cfg(feature = "sapling")]
             sapling::spending_key(seed, _params.coin_type(), _account),
             #[cfg(feature = "orchard")]
             orchard::keys::SpendingKey::from_zip32_seed(seed, _params.coin_type(), _account)
-                .map_err(DerivationError::Orchard)?,
+                .map_err(UnifiedKeyError::Orchard)?,
         )
     }
 
@@ -245,7 +283,7 @@ impl UnifiedSpendingKey {
         #[cfg(feature = "transparent-inputs")] transparent: transparent::keys::AccountPrivKey,
         #[cfg(feature = "sapling")] sapling: sapling::ExtendedSpendingKey,
         #[cfg(feature = "orchard")] orchard: orchard::keys::SpendingKey,
-    ) -> Result<UnifiedSpendingKey, DerivationError> {
+    ) -> Result<UnifiedSpendingKey, UnifiedKeyError> {
         // Verify that FVK and IVK derivation succeed; we don't want to construct a USK
         // that can't derive transparent addresses.
         #[cfg(feature = "transparent-inputs")]
@@ -461,7 +499,7 @@ impl UnifiedSpendingKey {
                     #[cfg(feature = "orchard")]
                     orchard.unwrap(),
                 )
-                .map_err(|_| DecodingError::KeyDataInvalid(Typecode::P2PKH));
+                .map_err(DecodingError::from);
             }
         }
     }
@@ -672,8 +710,8 @@ impl UnifiedAddressRequest {
         p2pkh: ReceiverRequirement,
     ) -> Self {
         use ReceiverRequirement::*;
-        if matches!(orchard, Omit) && matches!(sapling, Omit) {
-            panic!("At least one shielded receiver must be allowed.")
+        if matches!(orchard, Omit) && matches!(sapling, Omit) && matches!(p2pkh, Omit) {
+            panic!("At least one receiver type must be allowed.")
         }
 
         Self {
@@ -687,9 +725,9 @@ impl UnifiedAddressRequest {
 }
 
 #[cfg(feature = "transparent-inputs")]
-impl From<bip32::Error> for DerivationError {
+impl From<bip32::Error> for UnifiedKeyError {
     fn from(e: bip32::Error) -> Self {
-        DerivationError::Transparent(e)
+        UnifiedKeyError::Transparent(e)
     }
 }
 
@@ -722,7 +760,7 @@ impl UnifiedFullViewingKey {
         #[cfg(feature = "sapling")] sapling: Option<sapling::DiversifiableFullViewingKey>,
         #[cfg(feature = "orchard")] orchard: Option<orchard::keys::FullViewingKey>,
         // TODO: Implement construction of UFVKs with metadata items.
-    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+    ) -> Result<UnifiedFullViewingKey, UnifiedKeyError> {
         Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             transparent,
@@ -742,7 +780,7 @@ impl UnifiedFullViewingKey {
     #[cfg(feature = "unstable-frost")]
     pub fn from_orchard_fvk(
         orchard: orchard::keys::FullViewingKey,
-    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+    ) -> Result<UnifiedFullViewingKey, UnifiedKeyError> {
         Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             None,
@@ -762,7 +800,7 @@ impl UnifiedFullViewingKey {
     #[cfg(all(feature = "sapling", feature = "unstable"))]
     pub fn from_sapling_extended_full_viewing_key(
         sapling: ExtendedFullViewingKey,
-    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+    ) -> Result<UnifiedFullViewingKey, UnifiedKeyError> {
         Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             None,
@@ -791,7 +829,7 @@ impl UnifiedFullViewingKey {
         expiry_height: Option<BlockHeight>,
         expiry_time: Option<u64>,
         unknown_metadata: Vec<(u32, Vec<u8>)>,
-    ) -> Result<UnifiedFullViewingKey, DerivationError> {
+    ) -> Result<UnifiedFullViewingKey, UnifiedKeyError> {
         // Verify that IVK derivation succeeds; we don't want to construct a UFVK
         // that can't derive transparent addresses.
         #[cfg(feature = "transparent-inputs")]
@@ -800,18 +838,37 @@ impl UnifiedFullViewingKey {
             .map(|t| t.derive_external_ivk())
             .transpose()?;
 
-        Ok(UnifiedFullViewingKey {
-            #[cfg(feature = "transparent-inputs")]
-            transparent,
-            #[cfg(feature = "sapling")]
-            sapling,
-            #[cfg(feature = "orchard")]
-            orchard,
-            unknown_data,
-            expiry_height,
-            expiry_time,
-            unknown_metadata,
-        })
+        #[allow(unused_mut)]
+        let mut has_data = !unknown_data.is_empty();
+        #[cfg(feature = "transparent-inputs")]
+        {
+            has_data = has_data || transparent.is_some();
+        }
+        #[cfg(feature = "sapling")]
+        {
+            has_data = has_data || sapling.is_some();
+        }
+        #[cfg(feature = "orchard")]
+        {
+            has_data = has_data || orchard.is_some();
+        }
+
+        if has_data {
+            Ok(Self {
+                #[cfg(feature = "transparent-inputs")]
+                transparent,
+                #[cfg(feature = "sapling")]
+                sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
+                unknown_data,
+                expiry_height,
+                expiry_time,
+                unknown_metadata,
+            })
+        } else {
+            Err(UnifiedKeyError::DataItemRequired)
+        }
     }
 
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
@@ -1170,6 +1227,48 @@ impl UnifiedIncomingViewingKey {
         }
     }
 
+    fn from_checked_parts(
+        #[cfg(feature = "transparent-inputs")] transparent: Option<transparent::keys::ExternalIvk>,
+        #[cfg(feature = "sapling")] sapling: Option<::sapling::zip32::IncomingViewingKey>,
+        #[cfg(feature = "orchard")] orchard: Option<orchard::keys::IncomingViewingKey>,
+        unknown_data: Vec<(u32, Vec<u8>)>,
+        expiry_height: Option<BlockHeight>,
+        expiry_time: Option<u64>,
+        unknown_metadata: Vec<(u32, Vec<u8>)>,
+    ) -> Result<Self, UnifiedKeyError> {
+        #[allow(unused_mut)]
+        let mut has_data = !unknown_data.is_empty();
+        #[cfg(feature = "transparent-inputs")]
+        {
+            has_data = has_data || transparent.is_some();
+        }
+        #[cfg(feature = "sapling")]
+        {
+            has_data = has_data || sapling.is_some();
+        }
+        #[cfg(feature = "orchard")]
+        {
+            has_data = has_data || orchard.is_some();
+        }
+
+        if has_data {
+            Ok(Self {
+                #[cfg(feature = "transparent-inputs")]
+                transparent,
+                #[cfg(feature = "sapling")]
+                sapling,
+                #[cfg(feature = "orchard")]
+                orchard,
+                unknown_data,
+                expiry_height,
+                expiry_time,
+                unknown_metadata,
+            })
+        } else {
+            Err(UnifiedKeyError::DataItemRequired)
+        }
+    }
+
     /// Parses a `UnifiedFullViewingKey` from its [ZIP 316] string encoding.
     ///
     /// [ZIP 316]: https://zips.z.cash/zip-0316
@@ -1254,7 +1353,7 @@ impl UnifiedIncomingViewingKey {
             }
         }
 
-        Ok(Self {
+        Ok(Self::from_checked_parts(
             #[cfg(feature = "transparent-inputs")]
             transparent,
             #[cfg(feature = "sapling")]
@@ -1265,7 +1364,7 @@ impl UnifiedIncomingViewingKey {
             expiry_height,
             expiry_time,
             unknown_metadata,
-        })
+        )?)
     }
 
     /// Returns the string encoding of this `UnifiedFullViewingKey` for the given network.
@@ -1489,12 +1588,13 @@ impl UnifiedIncomingViewingKey {
         #[cfg(not(feature = "transparent-inputs"))]
         let transparent = None;
 
-        Ok(UnifiedAddress::new_internal(
+        Ok(UnifiedAddress::from_checked_parts(
             #[cfg(feature = "orchard")]
             orchard,
             #[cfg(feature = "sapling")]
             sapling,
             transparent,
+            self.unknown_data.clone(),
             self.expiry_height
                 .zip(request.expiry_height)
                 .map(|(l, r)| std::cmp::min(l, r))
@@ -1505,7 +1605,9 @@ impl UnifiedIncomingViewingKey {
                 .map(|(l, r)| std::cmp::min(l, r))
                 .or(self.expiry_time)
                 .or(request.expiry_time),
-        ))
+            self.unknown_metadata.clone(),
+        )
+        .expect("UIVK validity constraints are checked at construction."))
     }
 
     /// Searches the diversifier space starting at diversifier index `j` for one which will produce
@@ -1656,15 +1758,13 @@ mod tests {
 
     #[cfg(feature = "transparent-inputs")]
     use {
-        crate::{address::Address, encoding::AddressCodec},
+        crate::encoding::AddressCodec,
         alloc::string::ToString,
         alloc::vec::Vec,
         transparent::keys::{AccountPrivKey, IncomingViewingKey},
-        zcash_address::test_vectors,
-        zip32::DiversifierIndex,
     };
 
-    #[cfg(feature = "unstable")]
+    #[cfg(all(feature = "unstable", any(feature = "sapling", feature = "orchard")))]
     use super::{testing::arb_unified_spending_key, Era, UnifiedSpendingKey};
 
     #[cfg(all(feature = "orchard", feature = "unstable"))]
@@ -1821,9 +1921,14 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "orchard", feature = "sapling")
+    ))]
     fn ufvk_derivation() {
-        use crate::keys::UnifiedAddressRequest;
+        use crate::{address::Address, keys::UnifiedAddressRequest};
+        use zcash_address::test_vectors;
+        use zip32::DiversifierIndex;
 
         use super::{ReceiverRequirement::*, UnifiedSpendingKey};
 
@@ -2009,9 +2114,14 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "transparent-inputs")]
+    #[cfg(all(
+        feature = "transparent-inputs",
+        any(feature = "sapling", feature = "orchard")
+    ))]
     fn uivk_derivation() {
-        use crate::keys::UnifiedAddressRequest;
+        use crate::{address::Address, keys::UnifiedAddressRequest};
+        use zcash_address::test_vectors;
+        use zip32::DiversifierIndex;
 
         use super::{ReceiverRequirement::*, UnifiedSpendingKey};
 
@@ -2073,7 +2183,7 @@ mod tests {
 
     proptest! {
         #[test]
-        #[cfg(feature = "unstable")]
+        #[cfg(all(feature = "unstable", any(feature = "orchard", feature = "sapling")))]
         fn prop_usk_roundtrip(usk in arb_unified_spending_key(zcash_protocol::consensus::Network::MainNetwork)) {
             let encoded = usk.to_bytes(Era::Orchard);
 
@@ -2102,6 +2212,7 @@ mod tests {
             #[cfg(feature = "orchard")]
             assert!(bool::from(decoded.orchard().ct_eq(usk.orchard())));
 
+            #[cfg(feature = "sapling")]
             assert_eq!(decoded.sapling(), usk.sapling());
 
             #[cfg(feature = "transparent-inputs")]

@@ -98,7 +98,7 @@ impl TryFrom<unified::Address> for UnifiedAddress {
             }
         }
 
-        Ok(Self {
+        Self::from_checked_parts(
             #[cfg(feature = "orchard")]
             orchard,
             #[cfg(feature = "sapling")]
@@ -108,7 +108,8 @@ impl TryFrom<unified::Address> for UnifiedAddress {
             expiry_height,
             expiry_time,
             unknown_metadata,
-        })
+        )
+        .ok_or("Unified addresses without data fields are not permitted.")
     }
 }
 
@@ -123,36 +124,55 @@ impl UnifiedAddress {
         #[cfg(feature = "orchard")] orchard: Option<orchard::Address>,
         #[cfg(feature = "sapling")] sapling: Option<PaymentAddress>,
         transparent: Option<TransparentAddress>,
-    ) -> Self {
-        Self::new_internal(
+    ) -> Option<Self> {
+        Self::from_checked_parts(
             #[cfg(feature = "orchard")]
             orchard,
             #[cfg(feature = "sapling")]
             sapling,
             transparent,
+            vec![],
             None,
             None,
+            vec![],
         )
     }
 
-    pub(crate) fn new_internal(
+    pub(crate) fn from_checked_parts(
         #[cfg(feature = "orchard")] orchard: Option<orchard::Address>,
         #[cfg(feature = "sapling")] sapling: Option<PaymentAddress>,
         transparent: Option<TransparentAddress>,
+        unknown_data: Vec<(u32, Vec<u8>)>,
         expiry_height: Option<BlockHeight>,
         expiry_time: Option<u64>,
-    ) -> Self {
-        Self {
+        unknown_metadata: Vec<(u32, Vec<u8>)>,
+    ) -> Option<Self> {
+        let has_transparent = transparent.is_some();
+
+        #[allow(unused_mut)]
+        let mut has_shielded = false;
+        #[cfg(feature = "sapling")]
+        {
+            has_shielded = has_shielded || sapling.is_some();
+        }
+        #[cfg(feature = "orchard")]
+        {
+            has_shielded = has_shielded || orchard.is_some();
+        }
+
+        let has_unknown = !unknown_data.is_empty();
+
+        (has_transparent || has_shielded || has_unknown).then_some(Self {
             #[cfg(feature = "orchard")]
             orchard,
             #[cfg(feature = "sapling")]
             sapling,
             transparent,
-            unknown_data: vec![],
+            unknown_data,
             expiry_height,
             expiry_time,
-            unknown_metadata: vec![],
-        }
+            unknown_metadata,
+        })
     }
 
     /// Returns whether this address has an Orchard receiver.
@@ -616,15 +636,25 @@ mod tests {
         let transparent = None;
 
         #[cfg(all(feature = "orchard", feature = "sapling"))]
-        let ua = UnifiedAddress::new_internal(orchard, sapling, transparent, None, None);
+        let ua = UnifiedAddress::from_checked_parts(
+            orchard,
+            sapling,
+            transparent,
+            vec![],
+            None,
+            None,
+            vec![],
+        );
 
         #[cfg(all(not(feature = "orchard"), feature = "sapling"))]
-        let ua = UnifiedAddress::new_internal(sapling, transparent, None, None);
+        let ua =
+            UnifiedAddress::from_checked_parts(sapling, transparent, vec![], None, None, vec![]);
 
         #[cfg(all(feature = "orchard", not(feature = "sapling")))]
-        let ua = UnifiedAddress::new_internal(orchard, transparent, None, None);
+        let ua =
+            UnifiedAddress::from_checked_parts(orchard, transparent, vec![], None, None, vec![]);
 
-        let addr = Address::from(ua);
+        let addr = Address::from(ua.expect("test UAs are constructed in valid configurations"));
         let addr_str = addr.encode(&MAIN_NETWORK);
         assert_eq!(Address::decode(&MAIN_NETWORK, &addr_str), Some(addr));
     }
