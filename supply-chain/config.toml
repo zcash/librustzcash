@@ -7,6 +7,9 @@ version = "0.9"
 [imports.bytecode-alliance]
 url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
 
+[imports.embark-studios]
+url = "https://raw.githubusercontent.com/EmbarkStudios/rust-ecosystem/main/audits.toml"
+
 [imports.google]
 url = "https://raw.githubusercontent.com/google/supply-chain/main/audits.toml"
 
@@ -80,10 +83,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.allocator-api2]]
 version = "0.2.16"
-criteria = "safe-to-deploy"
-
-[[exemptions.anyhow]]
-version = "1.0.75"
 criteria = "safe-to-deploy"
 
 [[exemptions.arrayvec]]
@@ -730,10 +729,6 @@ criteria = "safe-to-deploy"
 version = "0.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.tap]]
-version = "1.0.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.tempfile]]
 version = "3.8.1"
 criteria = "safe-to-deploy"
@@ -852,10 +847,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.web-sys]]
 version = "0.3.65"
-criteria = "safe-to-deploy"
-
-[[exemptions.webpki-roots]]
-version = "0.25.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.which]]
