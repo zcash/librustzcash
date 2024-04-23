@@ -397,7 +397,7 @@ version = "0.2.150"
 criteria = "safe-to-deploy"
 
 [[exemptions.libm]]
-version = "0.2.8"
+version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.libsqlite3-sys]]
@@ -730,14 +730,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tempfile]]
 version = "3.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror]]
-version = "1.0.50"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror-impl]]
-version = "1.0.50"
 criteria = "safe-to-deploy"
 
 [[exemptions.time]]
