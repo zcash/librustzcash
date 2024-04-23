@@ -72,7 +72,7 @@ pub mod proto;
 pub mod scan;
 pub mod scanning;
 pub mod wallet;
-pub mod zip321;
+pub use zip321;
 
 #[cfg(feature = "sync")]
 pub mod sync;

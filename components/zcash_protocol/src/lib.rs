@@ -42,6 +42,12 @@ pub enum PoolType {
     Shielded(ShieldedProtocol),
 }
 
+impl PoolType {
+    pub const TRANSPARENT: PoolType = PoolType::Transparent;
+    pub const SAPLING: PoolType = PoolType::Shielded(ShieldedProtocol::Sapling);
+    pub const ORCHARD: PoolType = PoolType::Shielded(ShieldedProtocol::Orchard);
+}
+
 impl fmt::Display for PoolType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

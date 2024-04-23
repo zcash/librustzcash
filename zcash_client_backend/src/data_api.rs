@@ -99,7 +99,7 @@ use {
     zcash_primitives::{legacy::TransparentAddress, transaction::components::OutPoint},
 };
 
-#[cfg(feature = "test-dependencies")]
+#[cfg(any(test, feature = "test-dependencies"))]
 use zcash_primitives::consensus::NetworkUpgrade;
 
 pub mod chain;
@@ -1337,7 +1337,7 @@ impl AccountBirthday {
     ///
     /// This API is intended primarily to be used in testing contexts; under normal circumstances,
     /// [`AccountBirthday::from_treestate`] should be used instead.
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     pub fn from_parts(prior_chain_state: ChainState, recover_until: Option<BlockHeight>) -> Self {
         Self {
             prior_chain_state,

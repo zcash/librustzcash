@@ -80,6 +80,8 @@ This version was yanked, use 0.10.1 instead.
 - `zcash_client_sqlite::error::SqliteClientError` has new error variants:
   - `SqliteClientError::UnsupportedPoolType`
   - `SqliteClientError::BalanceError`
+  - The `Bech32DecodeError` variant has been replaced with a more general
+    `DecodingError` type.
 
 ## [0.8.1] - 2023-10-18
 
