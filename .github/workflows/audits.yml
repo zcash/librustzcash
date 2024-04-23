@@ -19,3 +19,12 @@ jobs:
       - run: rustup override set ${{steps.toolchain.outputs.name}}
       - run: cargo install cargo-vet --version ~0.9
       - run: cargo vet --locked
+
+  cargo-deny:
+    name: Check licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check licenses
