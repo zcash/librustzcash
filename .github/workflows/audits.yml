@@ -1,0 +1,30 @@
+name: Audits
+
+on:
+  pull_request:
+  push:
+    branches: main
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-vet:
+    name: Vet Rust dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
+      - run: rustup override set ${{steps.toolchain.outputs.name}}
+      - run: cargo install cargo-vet --version ~0.9
+      - run: cargo vet --locked
+
+  cargo-deny:
+    name: Check licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check licenses
