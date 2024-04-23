@@ -7,6 +7,9 @@ version = "0.9"
 [imports.google]
 url = "https://raw.githubusercontent.com/google/supply-chain/main/audits.toml"
 
+[imports.isrg]
+url = "https://raw.githubusercontent.com/divviup/libprio-rs/main/supply-chain/audits.toml"
+
 [imports.mozilla]
 url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 
@@ -260,10 +263,6 @@ criteria = "safe-to-deploy"
 version = "0.8.16"
 criteria = "safe-to-deploy"
 
-[[exemptions.crunchy]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.crypto-common]]
 version = "0.1.6"
 criteria = "safe-to-deploy"
@@ -382,10 +381,6 @@ criteria = "safe-to-run"
 
 [[exemptions.hermit-abi]]
 version = "0.3.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.hmac]]
-version = "0.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.home]]
@@ -508,17 +503,9 @@ criteria = "safe-to-deploy"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.num-bigint]]
-version = "0.4.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.num-format]]
 version = "0.4.4"
 criteria = "safe-to-run"
-
-[[exemptions.num-traits]]
-version = "0.2.17"
-criteria = "safe-to-deploy"
 
 [[exemptions.num_cpus]]
 version = "1.16.0"
@@ -535,10 +522,6 @@ criteria = "safe-to-deploy"
 [[exemptions.oorandom]]
 version = "11.1.3"
 criteria = "safe-to-run"
-
-[[exemptions.opaque-debug]]
-version = "0.3.0"
-criteria = "safe-to-deploy"
 
 [[exemptions.os_str_bytes]]
 version = "6.6.1"
@@ -654,22 +637,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rand]]
 version = "0.8.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_chacha]]
-version = "0.3.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand_core]]
-version = "0.6.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.rayon]]
-version = "1.8.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rayon-core]]
-version = "1.12.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.reddsa]]
@@ -906,14 +873,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unarray]]
 version = "0.1.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.universal-hash]]
-version = "0.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.untrusted]]
-version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.untrusted]]
