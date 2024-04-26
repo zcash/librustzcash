@@ -20,3 +20,5 @@ jobs:
           gh api repos/zcash/rust-ecosystem/dispatches
             --field event_type="aggregate-audits"
             --field client_payload[sha]="$GITHUB_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
