@@ -87,8 +87,8 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
         )?;
 
         for ((id_tx, txid), ufvks) in tx_sent_notes {
-            let (block_height, tx) =
-                get_transaction(transaction, &self.params, txid).map_err(|err| match err {
+            let (block_height, tx) = get_transaction(transaction, &self.params, txid)
+                .map_err(|err| match err {
                     SqliteClientError::CorruptedData(msg) => {
                         WalletMigrationError::CorruptedData(msg)
                     }
@@ -97,6 +97,12 @@ impl<P: consensus::Parameters> RusqliteMigration for Migration<P> {
                         "An error was encountered decoding transaction data: {:?}",
                         other
                     )),
+                })?
+                .ok_or_else(|| {
+                    WalletMigrationError::CorruptedData(format!(
+                        "Transaction not found for id {:?}",
+                        txid
+                    ))
                 })?;
 
             let decrypted_outputs = decrypt_transaction(&self.params, block_height, &tx, &ufvks);

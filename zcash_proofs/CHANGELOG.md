@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.15.0] - 2024-03-25
+
+### Changed
+- Migrated to `zcash_primitives 0.15`.
+
 ## [0.14.0] - 2024-03-01
 ### Added
 - `impl zcash_primitives::sapling::prover::{SpendProver, OutputProver}` for

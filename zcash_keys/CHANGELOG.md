@@ -6,18 +6,32 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.2.0] - 2024-03-25
+
 ### Added
-- `zcash_keys::keys::HdSeedFingerprint`
 - `zcash_keys::address::Address::has_receiver`
 - `impl Display for zcash_keys::keys::AddressGenerationError`
 - `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
+- `impl From<hdwallet::error::Error> for zcash_keys::keys::DerivationError`
+  when the `transparent-inputs` feature is enabled.
+- `zcash_keys::keys::DecodingError`
+- `zcash_keys::keys::UnifiedFullViewingKey::{parse, to_unified_incoming_viewing_key}`
+- `zcash_keys::keys::UnifiedIncomingViewingKey`
 
 ### Changed
-- `zcash_keys::keys::AddressGenerationError` has a new variant
-  `DiversifierSpaceExhausted`.
-- `zcash_keys::keys::UnifiedFullViewingKey::{find_address, default_address}` 
+- `zcash_keys::keys::UnifiedFullViewingKey::{find_address, default_address}`
   now return `Result<(UnifiedAddress, DiversifierIndex), AddressGenerationError>`
   (instead of `Option<(UnifiedAddress, DiversifierIndex)>` for `find_address`).
+- `zcash_keys::keys::AddressGenerationError`
+  - Added `DiversifierSpaceExhausted` variant.
+- At least one of the `orchard`, `sapling`, or `transparent-inputs` features
+  must be enabled for the `keys` module to be accessible.
+- Updated to `zcash_primitives-0.15.0`
+
+### Removed
+- `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
+  feature flag. UFVKs should only be produced by derivation from the USK, or
+  parsed from their string representation.
 
 ### Fixed
 - `UnifiedFullViewingKey::find_address` can now find an address for a diversifier
@@ -30,7 +44,7 @@ and this library adheres to Rust's notion of
 - `zcash_keys::keys::UnifiedAddressRequest::all`
 
 ### Fixed
-- A missing application of the `sapling` feature flag was remedied; 
+- A missing application of the `sapling` feature flag was remedied;
   prior to this fix it was not possible to use this crate without the
   `sapling` feature enabled.
 

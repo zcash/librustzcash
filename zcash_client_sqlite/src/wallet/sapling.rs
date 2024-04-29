@@ -1,13 +1,15 @@
 //! Functions for Sapling support in the wallet.
 
+use std::{collections::HashSet, rc::Rc};
+
 use group::ff::PrimeField;
 use incrementalmerkletree::Position;
-use rusqlite::{named_params, params, Connection, Row};
+use rusqlite::{named_params, types::Value, Connection, Row, Transaction};
 
 use sapling::{self, Diversifier, Nullifier, Rseed};
 use zcash_client_backend::{
     data_api::NullifierQuery,
-    wallet::{Note, ReceivedNote, WalletSaplingOutput},
+    wallet::{ReceivedNote, WalletSaplingOutput},
     DecryptedOutput, ShieldedProtocol, TransferType,
 };
 use zcash_keys::keys::UnifiedFullViewingKey;
@@ -95,7 +97,7 @@ impl ReceivedSaplingOutput for DecryptedOutput<sapling::Note, AccountId> {
 fn to_spendable_note<P: consensus::Parameters>(
     params: &P,
     row: &Row,
-) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     let note_id = ReceivedNoteId(ShieldedProtocol::Sapling, row.get(0)?);
     let txid = row.get::<_, [u8; 32]>(1).map(TxId::from_bytes)?;
     let output_index = row.get(2)?;
@@ -169,11 +171,11 @@ fn to_spendable_note<P: consensus::Parameters>(
                 note_id,
                 txid,
                 output_index,
-                Note::Sapling(sapling::Note::from_parts(
+                sapling::Note::from_parts(
                     recipient,
                     sapling::value::NoteValue::from_raw(note_value),
                     rseed,
-                )),
+                ),
                 spending_key_scope,
                 note_commitment_tree_position,
             ))
@@ -190,7 +192,7 @@ pub(crate) fn get_spendable_sapling_note<P: consensus::Parameters>(
     params: &P,
     txid: &TxId,
     index: u32,
-) -> Result<Option<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+) -> Result<Option<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::get_spendable_note(
         conn,
         params,
@@ -213,7 +215,7 @@ pub(crate) fn select_spendable_sapling_notes<P: consensus::Parameters>(
     target_value: NonNegativeAmount,
     anchor_height: BlockHeight,
     exclude: &[ReceivedNoteId],
-) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+) -> Result<Vec<ReceivedNote<ReceivedNoteId, sapling::Note>>, SqliteClientError> {
     super::common::select_spendable_notes(
         conn,
         params,
@@ -241,10 +243,16 @@ pub(crate) fn get_sapling_nullifiers(
         NullifierQuery::Unspent => conn.prepare(
             "SELECT rn.account_id, rn.nf
              FROM sapling_received_notes rn
-             LEFT OUTER JOIN transactions tx
-             ON tx.id_tx = rn.spent
-             WHERE tx.block IS NULL
-             AND nf IS NOT NULL",
+             JOIN transactions tx ON tx.id_tx = rn.tx
+             WHERE rn.nf IS NOT NULL
+             AND tx.block IS NOT NULL
+             AND rn.id NOT IN (
+               SELECT spends.sapling_received_note_id
+               FROM sapling_received_note_spends spends
+               JOIN transactions stx ON stx.id_tx = spends.transaction_id
+               WHERE stx.block IS NOT NULL  -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+             )",
         ),
         NullifierQuery::All => conn.prepare(
             "SELECT rn.account_id, rn.nf
@@ -263,6 +271,27 @@ pub(crate) fn get_sapling_nullifiers(
     Ok(res)
 }
 
+pub(crate) fn detect_spending_accounts<'a>(
+    conn: &Connection,
+    nfs: impl Iterator<Item = &'a Nullifier>,
+) -> Result<HashSet<AccountId>, rusqlite::Error> {
+    let mut account_q = conn.prepare_cached(
+        "SELECT rn.account_id
+        FROM sapling_received_notes rn
+        WHERE rn.nf IN rarray(:nf_ptr)",
+    )?;
+
+    let nf_values: Vec<Value> = nfs.map(|nf| Value::Blob(nf.to_vec())).collect();
+    let nf_ptr = Rc::new(nf_values);
+    let res = account_q
+        .query_and_then(named_params![":nf_ptr": &nf_ptr], |row| {
+            row.get::<_, u32>(0).map(AccountId)
+        })?
+        .collect::<Result<HashSet<_>, _>>()?;
+
+    Ok(res)
+}
+
 /// Marks a given nullifier as having been revealed in the construction
 /// of the specified transaction.
 ///
@@ -273,10 +302,16 @@ pub(crate) fn mark_sapling_note_spent(
     tx_ref: i64,
     nf: &sapling::Nullifier,
 ) -> Result<bool, SqliteClientError> {
-    let mut stmt_mark_sapling_note_spent =
-        conn.prepare_cached("UPDATE sapling_received_notes SET spent = ? WHERE nf = ?")?;
+    let mut stmt_mark_sapling_note_spent = conn.prepare_cached(
+        "INSERT INTO sapling_received_note_spends (sapling_received_note_id, transaction_id)
+         SELECT id, :transaction_id FROM sapling_received_notes WHERE nf = :nf
+         ON CONFLICT (sapling_received_note_id, transaction_id) DO NOTHING",
+    )?;
 
-    match stmt_mark_sapling_note_spent.execute(params![tx_ref, &nf.0[..]])? {
+    match stmt_mark_sapling_note_spent.execute(named_params![
+       ":nf": &nf.0[..],
+       ":transaction_id": tx_ref
+    ])? {
         0 => Ok(false),
         1 => Ok(true),
         _ => unreachable!("nf column is marked as UNIQUE"),
@@ -289,7 +324,7 @@ pub(crate) fn mark_sapling_note_spent(
 /// - A transaction will not contain more than 2^63 shielded outputs.
 /// - A note value will never exceed 2^63 zatoshis.
 pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
-    conn: &Connection,
+    conn: &Transaction,
     output: &T,
     tx_ref: i64,
     spent_in: Option<i64>,
@@ -297,7 +332,7 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
     let mut stmt_upsert_received_note = conn.prepare_cached(
         "INSERT INTO sapling_received_notes
         (tx, output_index, account_id, diversifier, value, rcm, memo, nf,
-         is_change, spent, commitment_tree_position,
+         is_change, commitment_tree_position,
          recipient_key_scope)
         VALUES (
             :tx,
@@ -309,7 +344,6 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             :memo,
             :nf,
             :is_change,
-            :spent,
             :commitment_tree_position,
             :recipient_key_scope
         )
@@ -321,9 +355,9 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
             nf = IFNULL(:nf, nf),
             memo = IFNULL(:memo, memo),
             is_change = IFNULL(:is_change, is_change),
-            spent = IFNULL(:spent, spent),
             commitment_tree_position = IFNULL(:commitment_tree_position, commitment_tree_position),
-            recipient_key_scope = :recipient_key_scope",
+            recipient_key_scope = :recipient_key_scope
+        RETURNING sapling_received_notes.id",
     )?;
 
     let rcm = output.note().rcm().to_repr();
@@ -340,14 +374,25 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
         ":nf": output.nullifier().map(|nf| nf.0.as_ref()),
         ":memo": memo_repr(output.memo()),
         ":is_change": output.is_change(),
-        ":spent": spent_in,
         ":commitment_tree_position": output.note_commitment_tree_position().map(u64::from),
         ":recipient_key_scope": output.recipient_key_scope().map(scope_code)
     ];
 
-    stmt_upsert_received_note
-        .execute(sql_args)
+    let received_note_id = stmt_upsert_received_note
+        .query_row(sql_args, |row| row.get::<_, i64>(0))
         .map_err(SqliteClientError::from)?;
+
+    if let Some(spent_in) = spent_in {
+        conn.execute(
+            "INSERT INTO sapling_received_note_spends (sapling_received_note_id, transaction_id)
+             VALUES (:sapling_received_note_id, :transaction_id)
+             ON CONFLICT (sapling_received_note_id, transaction_id) DO NOTHING",
+            named_params![
+                ":sapling_received_note_id": received_note_id,
+                ":transaction_id": spent_in
+            ],
+        )?;
+    }
 
     Ok(())
 }
@@ -399,10 +444,12 @@ pub(crate) mod tests {
     impl ShieldedPoolTester for SaplingPoolTester {
         const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;
         const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
+        // const MERKLE_TREE_DEPTH: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH;
 
         type Sk = ExtendedSpendingKey;
         type Fvk = DiversifiableFullViewingKey;
         type MerkleTreeHash = sapling::Node;
+        type Note = sapling::Note;
 
         fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
             st.test_account_sapling().unwrap()
@@ -459,7 +506,7 @@ pub(crate) mod tests {
             target_value: NonNegativeAmount,
             anchor_height: BlockHeight,
             exclude: &[ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Note>>, SqliteClientError> {
+        ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Self::Note>>, SqliteClientError> {
             select_spendable_sapling_notes(
                 &st.wallet().conn,
                 &st.wallet().params,
@@ -578,6 +625,8 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore] // FIXME: #1316 This requires support for dust outputs.
+    #[cfg(not(feature = "expensive-tests"))]
     fn zip317_spend() {
         testing::pool::zip317_spend::<SaplingPoolTester>()
     }
@@ -588,9 +637,7 @@ pub(crate) mod tests {
         testing::pool::shield_transparent::<SaplingPoolTester>()
     }
 
-    // FIXME: This requires fixes to the test framework.
     #[test]
-    #[cfg(feature = "orchard")]
     fn birthday_in_anchor_shard() {
         testing::pool::birthday_in_anchor_shard::<SaplingPoolTester>()
     }
@@ -619,5 +666,29 @@ pub(crate) mod tests {
         use crate::wallet::orchard::tests::OrchardPoolTester;
 
         testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn fully_funded_send_to_t() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn multi_pool_checkpoint() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>()
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn multi_pool_checkpoints_with_pruning() {
+        use crate::wallet::orchard::tests::OrchardPoolTester;
+
+        testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
     }
 }

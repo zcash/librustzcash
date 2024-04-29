@@ -64,9 +64,10 @@ use std::{
 };
 
 use incrementalmerkletree::{frontier::Frontier, Retention};
+use nonempty::NonEmpty;
 use secrecy::SecretVec;
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
-use zcash_keys::keys::HdSeedFingerprint;
+use zip32::fingerprint::SeedFingerprint;
 
 use self::{
     chain::{ChainState, CommitmentTreeRoot},
@@ -75,7 +76,9 @@ use self::{
 use crate::{
     address::UnifiedAddress,
     decrypt::DecryptedOutput,
-    keys::{UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
+    keys::{
+        UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedIncomingViewingKey, UnifiedSpendingKey,
+    },
     proto::service::TreeState,
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput, WalletTx},
     ShieldedProtocol,
@@ -317,10 +320,10 @@ impl AccountBalance {
 
 /// The kinds of accounts supported by `zcash_client_backend`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AccountKind {
+pub enum AccountSource {
     /// An account derived from a known seed.
     Derived {
-        seed_fingerprint: HdSeedFingerprint,
+        seed_fingerprint: SeedFingerprint,
         account_index: zip32::AccountId,
     },
 
@@ -335,40 +338,57 @@ pub trait Account<AccountId: Copy> {
 
     /// Returns whether this account is derived or imported, and the derivation parameters
     /// if applicable.
-    fn kind(&self) -> AccountKind;
+    fn source(&self) -> AccountSource;
 
     /// Returns the UFVK that the wallet backend has stored for the account, if any.
     ///
     /// Accounts for which this returns `None` cannot be used in wallet contexts, because
     /// they are unable to maintain an accurate balance.
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey>;
+
+    /// Returns the UIVK that the wallet backend has stored for the account.
+    ///
+    /// All accounts are required to have at least an incoming viewing key. This gives no
+    /// indication about whether an account can be used in a wallet context; for that, use
+    /// [`Account::ufvk`].
+    fn uivk(&self) -> UnifiedIncomingViewingKey;
 }
 
+#[cfg(any(test, feature = "test-dependencies"))]
 impl<A: Copy> Account<A> for (A, UnifiedFullViewingKey) {
     fn id(&self) -> A {
         self.0
     }
 
-    fn kind(&self) -> AccountKind {
-        AccountKind::Imported
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
         Some(&self.1)
     }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.to_unified_incoming_viewing_key()
+    }
 }
 
-impl<A: Copy> Account<A> for (A, Option<UnifiedFullViewingKey>) {
+#[cfg(any(test, feature = "test-dependencies"))]
+impl<A: Copy> Account<A> for (A, UnifiedIncomingViewingKey) {
     fn id(&self) -> A {
         self.0
     }
 
-    fn kind(&self) -> AccountKind {
-        AccountKind::Imported
+    fn source(&self) -> AccountSource {
+        AccountSource::Imported
     }
 
     fn ufvk(&self) -> Option<&UnifiedFullViewingKey> {
-        self.1.as_ref()
+        None
+    }
+
+    fn uivk(&self) -> UnifiedIncomingViewingKey {
+        self.1.clone()
     }
 }
 
@@ -484,6 +504,124 @@ impl<AccountId: Eq + Hash> WalletSummary<AccountId> {
     }
 }
 
+/// A predicate that can be used to choose whether or not a particular note is retained in note
+/// selection.
+pub trait NoteRetention<NoteRef> {
+    /// Returns whether the specified Sapling note should be retained.
+    fn should_retain_sapling(&self, note: &ReceivedNote<NoteRef, sapling::Note>) -> bool;
+    /// Returns whether the specified Orchard note should be retained.
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, note: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool;
+}
+
+pub(crate) struct SimpleNoteRetention {
+    pub(crate) sapling: bool,
+    #[cfg(feature = "orchard")]
+    pub(crate) orchard: bool,
+}
+
+impl<NoteRef> NoteRetention<NoteRef> for SimpleNoteRetention {
+    fn should_retain_sapling(&self, _: &ReceivedNote<NoteRef, sapling::Note>) -> bool {
+        self.sapling
+    }
+
+    #[cfg(feature = "orchard")]
+    fn should_retain_orchard(&self, _: &ReceivedNote<NoteRef, orchard::note::Note>) -> bool {
+        self.orchard
+    }
+}
+
+/// Spendable shielded outputs controlled by the wallet.
+pub struct SpendableNotes<NoteRef> {
+    sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+}
+
+impl<NoteRef> SpendableNotes<NoteRef> {
+    /// Construct a new empty [`SpendableNotes`].
+    pub fn empty() -> Self {
+        Self::new(
+            vec![],
+            #[cfg(feature = "orchard")]
+            vec![],
+        )
+    }
+
+    /// Construct a new [`SpendableNotes`] from its constituent parts.
+    pub fn new(
+        sapling: Vec<ReceivedNote<NoteRef, sapling::Note>>,
+        #[cfg(feature = "orchard")] orchard: Vec<ReceivedNote<NoteRef, orchard::note::Note>>,
+    ) -> Self {
+        Self {
+            sapling,
+            #[cfg(feature = "orchard")]
+            orchard,
+        }
+    }
+
+    /// Returns the set of spendable Sapling notes.
+    pub fn sapling(&self) -> &[ReceivedNote<NoteRef, sapling::Note>] {
+        self.sapling.as_ref()
+    }
+
+    /// Returns the set of spendable Orchard notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard(&self) -> &[ReceivedNote<NoteRef, orchard::note::Note>] {
+        self.orchard.as_ref()
+    }
+
+    /// Computes the total value of Sapling notes.
+    pub fn sapling_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.sapling
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of Sapling notes.
+    #[cfg(feature = "orchard")]
+    pub fn orchard_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.orchard
+            .iter()
+            .try_fold(NonNegativeAmount::ZERO, |acc, n| {
+                (acc + n.note_value()?).ok_or(BalanceError::Overflow)
+            })
+    }
+
+    /// Computes the total value of spendable inputs
+    pub fn total_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        #[cfg(not(feature = "orchard"))]
+        return self.sapling_value();
+
+        #[cfg(feature = "orchard")]
+        return (self.sapling_value()? + self.orchard_value()?).ok_or(BalanceError::Overflow);
+    }
+
+    /// Consumes this [`SpendableNotes`] value and produces a vector of
+    /// [`ReceivedNote<NoteRef, Note>`] values.
+    pub fn into_vec(
+        self,
+        retention: &impl NoteRetention<NoteRef>,
+    ) -> Vec<ReceivedNote<NoteRef, Note>> {
+        let iter = self.sapling.into_iter().filter_map(|n| {
+            retention
+                .should_retain_sapling(&n)
+                .then(|| n.map_note(Note::Sapling))
+        });
+
+        #[cfg(feature = "orchard")]
+        let iter = iter.chain(self.orchard.into_iter().filter_map(|n| {
+            retention
+                .should_retain_orchard(&n)
+                .then(|| n.map_note(Note::Orchard))
+        }));
+
+        iter.collect()
+    }
+}
+
 /// A trait representing the capability to query a data store for unspent transaction outputs
 /// belonging to a wallet.
 pub trait InputSource {
@@ -525,7 +663,7 @@ pub trait InputSource {
         sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error>;
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error>;
 
     /// Fetches a spendable transparent output.
     ///
@@ -580,11 +718,11 @@ pub trait WalletRead {
         account_id: Self::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
-    /// Returns the account corresponding to a given [`HdSeedFingerprint`] and
+    /// Returns the account corresponding to a given [`SeedFingerprint`] and
     /// [`zip32::AccountId`], if any.
     fn get_derived_account(
         &self,
-        seed: &HdSeedFingerprint,
+        seed: &SeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error>;
 
@@ -602,6 +740,16 @@ pub trait WalletRead {
         account_id: Self::AccountId,
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error>;
+
+    /// Checks whether the given seed is relevant to any of the derived accounts (where
+    /// [`Account::source`] is [`AccountSource::Derived`]) in the wallet.
+    ///
+    /// This API does not check whether the seed is relevant to any imported account,
+    /// because that would require brute-forcing the ZIP 32 account index space.
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error>;
 
     /// Returns the account corresponding to a given [`UnifiedFullViewingKey`], if any.
     fn get_account_for_ufvk(
@@ -719,7 +867,7 @@ pub trait WalletRead {
     fn get_memo(&self, note_id: NoteId) -> Result<Option<Memo>, Self::Error>;
 
     /// Returns a transaction.
-    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error>;
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error>;
 
     /// Returns the nullifiers for Sapling notes that the wallet is tracking, along with their
     /// associated account IDs, that are either unspent or have not yet been confirmed as spent (in
@@ -761,6 +909,21 @@ pub trait WalletRead {
     ) -> Result<HashMap<TransparentAddress, NonNegativeAmount>, Self::Error> {
         Ok(HashMap::new())
     }
+}
+
+/// The relevance of a seed to a given wallet.
+///
+/// This is the return type for [`WalletRead::seed_relevance_to_derived_accounts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SeedRelevance<A: Copy> {
+    /// The seed is relevant to at least one derived account within the wallet.
+    Relevant { account_ids: NonEmpty<A> },
+    /// The seed is not relevant to any of the derived accounts within the wallet.
+    NotRelevant,
+    /// The wallet contains no derived accounts.
+    NoDerivedAccounts,
+    /// The wallet contains no accounts.
+    NoAccounts,
 }
 
 /// Metadata describing the sizes of the zcash note commitment trees as of a particular block.
@@ -1134,11 +1297,7 @@ impl<AccountId> SentTransactionOutput<AccountId> {
 /// note commitment tree state is recorded at that height.
 #[derive(Clone, Debug)]
 pub struct AccountBirthday {
-    height: BlockHeight,
-    sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
-    #[cfg(feature = "orchard")]
-    orchard_frontier:
-        Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>,
+    prior_chain_state: ChainState,
     recover_until: Option<BlockHeight>,
 }
 
@@ -1163,10 +1322,9 @@ impl From<io::Error> for BirthdayError {
 impl AccountBirthday {
     /// Constructs a new [`AccountBirthday`] from its constituent parts.
     ///
-    /// * `height`: The birthday height of the account. This is defined as the height of the first
-    ///    block to be scanned in wallet recovery.
-    /// * `sapling_frontier`: The Sapling note commitment tree frontier as of the end of the block
-    ///    prior to the birthday height.
+    /// * `prior_chain_state`: The chain state prior to the birthday height of the account. The
+    ///    birthday height  is defined as the height of the first block to be scanned in wallet
+    ///    recovery.
     /// * `recover_until`: An optional height at which the wallet should exit "recovery mode". In
     ///    order to avoid confusing shifts in wallet balance and spendability that may temporarily be
     ///    visible to a user during the process of recovering from seed, wallets may optionally set a
@@ -1177,20 +1335,9 @@ impl AccountBirthday {
     /// This API is intended primarily to be used in testing contexts; under normal circumstances,
     /// [`AccountBirthday::from_treestate`] should be used instead.
     #[cfg(feature = "test-dependencies")]
-    pub fn from_parts(
-        height: BlockHeight,
-        sapling_frontier: Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>,
-        #[cfg(feature = "orchard")] orchard_frontier: Frontier<
-            orchard::tree::MerkleHashOrchard,
-            { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
-        >,
-        recover_until: Option<BlockHeight>,
-    ) -> Self {
+    pub fn from_parts(prior_chain_state: ChainState, recover_until: Option<BlockHeight>) -> Self {
         Self {
-            height,
-            sapling_frontier,
-            #[cfg(feature = "orchard")]
-            orchard_frontier,
+            prior_chain_state,
             recover_until,
         }
     }
@@ -1210,10 +1357,7 @@ impl AccountBirthday {
         recover_until: Option<BlockHeight>,
     ) -> Result<Self, BirthdayError> {
         Ok(Self {
-            height: BlockHeight::try_from(treestate.height + 1)?,
-            sapling_frontier: treestate.sapling_tree()?.to_frontier(),
-            #[cfg(feature = "orchard")]
-            orchard_frontier: treestate.orchard_tree()?.to_frontier(),
+            prior_chain_state: treestate.to_chain_state()?,
             recover_until,
         })
     }
@@ -1223,7 +1367,7 @@ impl AccountBirthday {
     pub fn sapling_frontier(
         &self,
     ) -> &Frontier<sapling::Node, { sapling::NOTE_COMMITMENT_TREE_DEPTH }> {
-        &self.sapling_frontier
+        self.prior_chain_state.final_sapling_tree()
     }
 
     /// Returns the Orchard note commitment tree frontier as of the end of the block at
@@ -1233,12 +1377,12 @@ impl AccountBirthday {
         &self,
     ) -> &Frontier<orchard::tree::MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>
     {
-        &self.orchard_frontier
+        self.prior_chain_state.final_orchard_tree()
     }
 
     /// Returns the birthday height of the account.
     pub fn height(&self) -> BlockHeight {
-        self.height
+        self.prior_chain_state.block_height() + 1
     }
 
     /// Returns the height at which the wallet should exit "recovery mode".
@@ -1246,7 +1390,7 @@ impl AccountBirthday {
         self.recover_until
     }
 
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     /// Constructs a new [`AccountBirthday`] at the given network upgrade's activation,
     /// with no "recover until" height.
     ///
@@ -1256,17 +1400,18 @@ impl AccountBirthday {
     pub fn from_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
         network_upgrade: NetworkUpgrade,
+        prior_block_hash: BlockHash,
     ) -> AccountBirthday {
         AccountBirthday::from_parts(
-            params.activation_height(network_upgrade).unwrap(),
-            Frontier::empty(),
-            #[cfg(feature = "orchard")]
-            Frontier::empty(),
+            ChainState::empty(
+                params.activation_height(network_upgrade).unwrap() - 1,
+                prior_block_hash,
+            ),
             None,
         )
     }
 
-    #[cfg(feature = "test-dependencies")]
+    #[cfg(any(test, feature = "test-dependencies"))]
     /// Constructs a new [`AccountBirthday`] at Sapling activation, with no
     /// "recover until" height.
     ///
@@ -1275,8 +1420,9 @@ impl AccountBirthday {
     /// Panics if the Sapling activation height is not set.
     pub fn from_sapling_activation<P: zcash_primitives::consensus::Parameters>(
         params: &P,
+        prior_block_hash: BlockHash,
     ) -> AccountBirthday {
-        Self::from_activation(params, NetworkUpgrade::Sapling)
+        Self::from_activation(params, NetworkUpgrade::Sapling, prior_block_hash)
     }
 }
 
@@ -1319,7 +1465,7 @@ pub trait WalletWrite: WalletRead {
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
-        birthday: AccountBirthday,
+        birthday: &AccountBirthday,
     ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error>;
 
     /// Generates and persists the next available diversified address, given the current
@@ -1468,7 +1614,7 @@ pub mod testing {
     use secrecy::{ExposeSecret, SecretVec};
     use shardtree::{error::ShardTreeError, store::memory::MemoryShardStore, ShardTree};
     use std::{collections::HashMap, convert::Infallible, num::NonZeroU32};
-    use zcash_keys::keys::HdSeedFingerprint;
+    use zip32::fingerprint::SeedFingerprint;
 
     use zcash_primitives::{
         block::BlockHash,
@@ -1488,8 +1634,8 @@ pub mod testing {
         chain::{ChainState, CommitmentTreeRoot},
         scanning::ScanRange,
         AccountBirthday, BlockMetadata, DecryptedTransaction, InputSource, NullifierQuery,
-        ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead, WalletSummary,
-        WalletWrite, SAPLING_SHARD_HEIGHT,
+        ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes, WalletCommitmentTrees,
+        WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     };
 
     #[cfg(feature = "transparent-inputs")]
@@ -1545,8 +1691,8 @@ pub mod testing {
             _sources: &[ShieldedProtocol],
             _anchor_height: BlockHeight,
             _exclude: &[Self::NoteRef],
-        ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-            Ok(Vec::new())
+        ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+            Ok(SpendableNotes::empty())
         }
     }
 
@@ -1568,7 +1714,7 @@ pub mod testing {
 
         fn get_derived_account(
             &self,
-            _seed: &HdSeedFingerprint,
+            _seed: &SeedFingerprint,
             _account_id: zip32::AccountId,
         ) -> Result<Option<Self::Account>, Self::Error> {
             Ok(None)
@@ -1580,6 +1726,13 @@ pub mod testing {
             _seed: &SecretVec<u8>,
         ) -> Result<bool, Self::Error> {
             Ok(false)
+        }
+
+        fn seed_relevance_to_derived_accounts(
+            &self,
+            _seed: &SecretVec<u8>,
+        ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+            Ok(SeedRelevance::NoAccounts)
         }
 
         fn get_account_for_ufvk(
@@ -1673,8 +1826,8 @@ pub mod testing {
             Ok(None)
         }
 
-        fn get_transaction(&self, _txid: TxId) -> Result<Transaction, Self::Error> {
-            Err(())
+        fn get_transaction(&self, _txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+            Ok(None)
         }
 
         fn get_sapling_nullifiers(
@@ -1717,7 +1870,7 @@ pub mod testing {
         fn create_account(
             &mut self,
             seed: &SecretVec<u8>,
-            _birthday: AccountBirthday,
+            _birthday: &AccountBirthday,
         ) -> Result<(Self::AccountId, UnifiedSpendingKey), Self::Error> {
             let account = zip32::AccountId::ZERO;
             UnifiedSpendingKey::from_seed(&self.network, seed.expose_secret(), account)

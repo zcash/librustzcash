@@ -45,12 +45,10 @@ impl RusqliteMigration for Migration {
                 nf BLOB UNIQUE,
                 is_change INTEGER NOT NULL,
                 memo BLOB,
-                spent INTEGER,
                 commitment_tree_position INTEGER,
                 recipient_key_scope INTEGER,
                 FOREIGN KEY (tx) REFERENCES transactions(id_tx),
                 FOREIGN KEY (account_id) REFERENCES accounts(id),
-                FOREIGN KEY (spent) REFERENCES transactions(id_tx),
                 CONSTRAINT tx_output UNIQUE (tx, action_index)
             );
             CREATE INDEX orchard_received_notes_account ON orchard_received_notes (
@@ -59,8 +57,17 @@ impl RusqliteMigration for Migration {
             CREATE INDEX orchard_received_notes_tx ON orchard_received_notes (
                 tx ASC
             );
-            CREATE INDEX orchard_received_notes_spent ON orchard_received_notes (
-                spent ASC
+
+            CREATE TABLE orchard_received_note_spends (
+                orchard_received_note_id INTEGER NOT NULL,
+                transaction_id INTEGER NOT NULL,
+                FOREIGN KEY (orchard_received_note_id)
+                    REFERENCES orchard_received_notes(id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (transaction_id)
+                    -- We do not delete transactions, so this does not cascade
+                    REFERENCES transactions(id_tx),
+                UNIQUE (orchard_received_note_id, transaction_id)
             );",
         )?;
 
@@ -70,15 +77,14 @@ impl RusqliteMigration for Migration {
             &format!(
                 "CREATE VIEW v_received_notes AS
                     SELECT
-                        id,
-                        tx,
+                        sapling_received_notes.id AS id_within_pool_table,
+                        sapling_received_notes.tx,
                         {sapling_pool_code} AS pool,
                         sapling_received_notes.output_index AS output_index,
                         account_id,
-                        value,
+                        sapling_received_notes.value,
                         is_change,
-                        memo,
-                        spent,
+                        sapling_received_notes.memo,
                         sent_notes.id AS sent_note_id
                     FROM sapling_received_notes
                     LEFT JOIN sent_notes
@@ -86,20 +92,38 @@ impl RusqliteMigration for Migration {
                        (sapling_received_notes.tx, {sapling_pool_code}, sapling_received_notes.output_index)
                 UNION
                     SELECT
-                        id,
-                        tx,
+                        orchard_received_notes.id AS id_within_pool_table,
+                        orchard_received_notes.tx,
                         {orchard_pool_code} AS pool,
                         orchard_received_notes.action_index AS output_index,
                         account_id,
-                        value,
+                        orchard_received_notes.value,
                         is_change,
-                        memo,
-                        spent,
+                        orchard_received_notes.memo,
                         sent_notes.id AS sent_note_id
                     FROM orchard_received_notes
                     LEFT JOIN sent_notes
                     ON (sent_notes.tx, sent_notes.output_pool, sent_notes.output_index) =
                        (orchard_received_notes.tx, {orchard_pool_code}, orchard_received_notes.action_index);"
+            )
+        })?;
+
+        transaction.execute_batch({
+            let sapling_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Sapling));
+            let orchard_pool_code = pool_code(PoolType::Shielded(ShieldedProtocol::Orchard));
+            &format!(
+                "CREATE VIEW v_received_note_spends AS
+                SELECT
+                    {sapling_pool_code} AS pool,
+                    sapling_received_note_id AS received_note_id,
+                    transaction_id
+                FROM sapling_received_note_spends
+                UNION
+                SELECT
+                    {orchard_pool_code} AS pool,
+                    orchard_received_note_id AS received_note_id,
+                    transaction_id
+                FROM orchard_received_note_spends;"
             )
         })?;
 
@@ -110,11 +134,12 @@ impl RusqliteMigration for Migration {
                 CREATE VIEW v_transactions AS
                 WITH
                 notes AS (
-                    SELECT v_received_notes.id             AS id,
-                           v_received_notes.account_id     AS account_id,
+                    -- Shielded notes received in this transaction
+                    SELECT v_received_notes.account_id     AS account_id,
                            transactions.block              AS block,
                            transactions.txid               AS txid,
                            v_received_notes.pool           AS pool,
+                           id_within_pool_table,
                            v_received_notes.value          AS value,
                            CASE
                                 WHEN v_received_notes.is_change THEN 1
@@ -133,43 +158,53 @@ impl RusqliteMigration for Migration {
                     JOIN transactions
                          ON transactions.id_tx = v_received_notes.tx
                     UNION
-                    SELECT utxos.id                     AS id,
-                           utxos.received_by_account_id AS account_id,
+                    -- Transparent TXOs received in this transaction
+                    SELECT utxos.received_by_account_id AS account_id,
                            utxos.height                 AS block,
                            utxos.prevout_txid           AS txid,
                            {transparent_pool_code}      AS pool,
+                           utxos.id                     AS id_within_pool_table,
                            utxos.value_zat              AS value,
                            0                            AS is_change,
                            1                            AS received_count,
                            0                            AS memo_present
                     FROM utxos
                     UNION
-                    SELECT v_received_notes.id          AS id,
-                           v_received_notes.account_id  AS account_id,
+                    -- Shielded notes spent in this transaction
+                    SELECT v_received_notes.account_id  AS account_id,
                            transactions.block           AS block,
                            transactions.txid            AS txid,
                            v_received_notes.pool        AS pool,
+                           id_within_pool_table,
                            -v_received_notes.value      AS value,
                            0                            AS is_change,
                            0                            AS received_count,
                            0                            AS memo_present
                     FROM v_received_notes
+                    JOIN v_received_note_spends rns
+                         ON rns.pool = v_received_notes.pool
+                         AND rns.received_note_id = v_received_notes.id_within_pool_table
                     JOIN transactions
-                         ON transactions.id_tx = v_received_notes.spent
+                         ON transactions.id_tx = rns.transaction_id
                     UNION
-                    SELECT utxos.id                     AS id,
-                           utxos.received_by_account_id AS account_id,
+                    -- Transparent TXOs spent in this transaction
+                    SELECT utxos.received_by_account_id AS account_id,
                            transactions.block           AS block,
                            transactions.txid            AS txid,
                            {transparent_pool_code}      AS pool,
+                           utxos.id                     AS id_within_pool_table,
                            -utxos.value_zat             AS value,
                            0                            AS is_change,
                            0                            AS received_count,
                            0                            AS memo_present
                     FROM utxos
+                    JOIN transparent_received_output_spends tros
+                         ON tros.transparent_received_output_id = utxos.id
                     JOIN transactions
-                         ON transactions.id_tx = utxos.spent_in_tx
+                         ON transactions.id_tx = tros.transaction_id
                 ),
+                -- Obtain a count of the notes that the wallet created in each transaction,
+                -- not counting change notes.
                 sent_note_counts AS (
                     SELECT sent_notes.from_account_id AS account_id,
                            transactions.txid       AS txid,
@@ -217,9 +252,14 @@ impl RusqliteMigration for Migration {
                 LEFT JOIN sent_note_counts
                      ON sent_note_counts.account_id = notes.account_id
                      AND sent_note_counts.txid = notes.txid
-                GROUP BY notes.account_id, notes.txid;
+                GROUP BY notes.account_id, notes.txid;"
+            )
+        })?;
 
-                DROP VIEW v_tx_outputs;
+        transaction.execute_batch({
+            let transparent_pool_code = pool_code(PoolType::Transparent);
+            &format!(
+                "DROP VIEW v_tx_outputs;
                 CREATE VIEW v_tx_outputs AS
                 SELECT transactions.txid              AS txid,
                        v_received_notes.pool          AS output_pool,
@@ -261,7 +301,8 @@ impl RusqliteMigration for Migration {
                     ON transactions.id_tx = sent_notes.tx
                 LEFT JOIN v_received_notes
                     ON sent_notes.id = v_received_notes.sent_note_id
-                WHERE COALESCE(v_received_notes.is_change, 0) = 0;")
+                WHERE COALESCE(v_received_notes.is_change, 0) = 0;"
+            )
         })?;
 
         Ok(())

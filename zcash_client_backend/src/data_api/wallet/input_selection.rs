@@ -21,10 +21,10 @@ use zcash_primitives::{
 
 use crate::{
     address::{Address, UnifiedAddress},
-    data_api::InputSource,
+    data_api::{InputSource, SimpleNoteRetention, SpendableNotes},
     fees::{sapling, ChangeError, ChangeStrategy, DustOutputPolicy},
     proposal::{Proposal, ProposalError, ShieldedInputs},
-    wallet::{Note, ReceivedNote, WalletTransparentOutput},
+    wallet::WalletTransparentOutput,
     zip321::TransactionRequest,
     PoolType, ShieldedProtocol,
 };
@@ -386,7 +386,7 @@ where
             }
         }
 
-        let mut shielded_inputs: Vec<ReceivedNote<DbT::NoteRef, Note>> = vec![];
+        let mut shielded_inputs = SpendableNotes::empty();
         let mut prior_available = NonNegativeAmount::ZERO;
         let mut amount_required = NonNegativeAmount::ZERO;
         let mut exclude: Vec<DbT::NoteRef> = vec![];
@@ -394,60 +394,46 @@ where
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
         loop {
-            #[cfg(feature = "orchard")]
-            let (sapling_input_total, orchard_input_total) = (
-                shielded_inputs
-                    .iter()
-                    .filter(|i| matches!(i.note(), Note::Sapling(_)))
-                    .map(|i| i.note().value())
-                    .sum::<Option<NonNegativeAmount>>()
-                    .ok_or(BalanceError::Overflow)?,
-                shielded_inputs
-                    .iter()
-                    .filter(|i| matches!(i.note(), Note::Orchard(_)))
-                    .map(|i| i.note().value())
-                    .sum::<Option<NonNegativeAmount>>()
-                    .ok_or(BalanceError::Overflow)?,
-            );
-
             #[cfg(not(feature = "orchard"))]
-            let orchard_input_total = NonNegativeAmount::ZERO;
+            let use_sapling = true;
+            #[cfg(feature = "orchard")]
+            let (use_sapling, use_orchard) = {
+                let (sapling_input_total, orchard_input_total) = (
+                    shielded_inputs.sapling_value()?,
+                    shielded_inputs.orchard_value()?,
+                );
 
-            let sapling_inputs =
-                if sapling_outputs.is_empty() && orchard_input_total >= amount_required {
-                    // Avoid selecting Sapling inputs if we don't have Sapling outputs and the value is
-                    // fully covered by Orchard inputs.
-                    #[cfg(feature = "orchard")]
-                    shielded_inputs.retain(|i| matches!(i.note(), Note::Orchard(_)));
-                    vec![]
-                } else {
-                    #[allow(clippy::unnecessary_filter_map)]
-                    shielded_inputs
-                        .iter()
-                        .filter_map(|i| match i.note() {
-                            Note::Sapling(n) => Some((*i.internal_note_id(), n.value())),
-                            #[cfg(feature = "orchard")]
-                            Note::Orchard(_) => None,
-                        })
-                        .collect::<Vec<_>>()
-                };
+                // Use Sapling inputs if there are no Orchard outputs or there are not sufficient
+                // Orchard outputs to cover the amount required.
+                let use_sapling =
+                    orchard_outputs.is_empty() || amount_required > orchard_input_total;
+                // Use Orchard inputs if there are insufficient Sapling funds to cover the amount
+                // reqiuired.
+                let use_orchard = !use_sapling || amount_required > sapling_input_total;
+
+                (use_sapling, use_orchard)
+            };
+
+            let sapling_inputs = if use_sapling {
+                shielded_inputs
+                    .sapling()
+                    .iter()
+                    .map(|i| (*i.internal_note_id(), i.note().value()))
+                    .collect()
+            } else {
+                vec![]
+            };
 
             #[cfg(feature = "orchard")]
-            let orchard_inputs =
-                if orchard_outputs.is_empty() && sapling_input_total >= amount_required {
-                    // Avoid selecting Orchard inputs if we don't have Orchard outputs and the value is
-                    // fully covered by Sapling inputs.
-                    shielded_inputs.retain(|i| matches!(i.note(), Note::Sapling(_)));
-                    vec![]
-                } else {
-                    shielded_inputs
-                        .iter()
-                        .filter_map(|i| match i.note() {
-                            Note::Sapling(_) => None,
-                            Note::Orchard(n) => Some((*i.internal_note_id(), n.value())),
-                        })
-                        .collect::<Vec<_>>()
-                };
+            let orchard_inputs = if use_orchard {
+                shielded_inputs
+                    .orchard()
+                    .iter()
+                    .map(|i| (*i.internal_note_id(), i.note().value()))
+                    .collect()
+            } else {
+                vec![]
+            };
 
             let balance = self.change_strategy.compute_balance(
                 params,
@@ -474,8 +460,12 @@ where
                         transaction_request,
                         payment_pools,
                         vec![],
-                        NonEmpty::from_vec(shielded_inputs)
-                            .map(|notes| ShieldedInputs::from_parts(anchor_height, notes)),
+                        NonEmpty::from_vec(shielded_inputs.into_vec(&SimpleNoteRetention {
+                            sapling: use_sapling,
+                            #[cfg(feature = "orchard")]
+                            orchard: use_orchard,
+                        }))
+                        .map(|notes| ShieldedInputs::from_parts(anchor_height, notes)),
                         balance,
                         (*self.change_strategy.fee_rule()).clone(),
                         target_height,
@@ -514,12 +504,7 @@ where
                 )
                 .map_err(InputSelectorError::DataSource)?;
 
-            let new_available = shielded_inputs
-                .iter()
-                .map(|n| n.note().value())
-                .sum::<Option<NonNegativeAmount>>()
-                .ok_or(BalanceError::Overflow)?;
-
+            let new_available = shielded_inputs.total_value()?;
             if new_available <= prior_available {
                 return Err(InputSelectorError::InsufficientFunds {
                     required: amount_required,

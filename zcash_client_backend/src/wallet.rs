@@ -2,6 +2,7 @@
 //! light client.
 
 use incrementalmerkletree::Position;
+use zcash_keys::address::Address;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::{
     consensus::BlockHeight,
@@ -16,6 +17,7 @@ use zcash_primitives::{
     },
     zip32::Scope,
 };
+use zcash_protocol::value::BalanceError;
 
 use crate::{address::UnifiedAddress, fees::sapling as sapling_fees, PoolType, ShieldedProtocol};
 
@@ -69,7 +71,11 @@ pub enum Recipient<AccountId, N> {
     Transparent(TransparentAddress),
     Sapling(sapling::PaymentAddress),
     Unified(UnifiedAddress, PoolType),
-    InternalAccount(AccountId, N),
+    InternalAccount {
+        receiving_account: AccountId,
+        external_address: Option<Address>,
+        note: N,
+    },
 }
 
 impl<AccountId, N> Recipient<AccountId, N> {
@@ -78,7 +84,15 @@ impl<AccountId, N> Recipient<AccountId, N> {
             Recipient::Transparent(t) => Recipient::Transparent(t),
             Recipient::Sapling(s) => Recipient::Sapling(s),
             Recipient::Unified(u, p) => Recipient::Unified(u, p),
-            Recipient::InternalAccount(a, n) => Recipient::InternalAccount(a, f(n)),
+            Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note,
+            } => Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note: f(note),
+            },
         }
     }
 }
@@ -89,7 +103,15 @@ impl<AccountId, N> Recipient<AccountId, Option<N>> {
             Recipient::Transparent(t) => Some(Recipient::Transparent(t)),
             Recipient::Sapling(s) => Some(Recipient::Sapling(s)),
             Recipient::Unified(u, p) => Some(Recipient::Unified(u, p)),
-            Recipient::InternalAccount(a, n) => n.map(|n0| Recipient::InternalAccount(a, n0)),
+            Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note,
+            } => note.map(|n0| Recipient::InternalAccount {
+                receiving_account,
+                external_address,
+                note: n0,
+            }),
         }
     }
 }
@@ -429,6 +451,34 @@ impl<NoteRef, NoteT> ReceivedNote<NoteRef, NoteT> {
     }
     pub fn note_commitment_tree_position(&self) -> Position {
         self.note_commitment_tree_position
+    }
+
+    /// Map over the `note` field of this data structure.
+    ///
+    /// Consume this value, applying the provided function to the value of its `note` field and
+    /// returning a new `ReceivedNote` with the result as its `note` field value.
+    pub fn map_note<N, F: Fn(NoteT) -> N>(self, f: F) -> ReceivedNote<NoteRef, N> {
+        ReceivedNote {
+            note_id: self.note_id,
+            txid: self.txid,
+            output_index: self.output_index,
+            note: f(self.note),
+            spending_key_scope: self.spending_key_scope,
+            note_commitment_tree_position: self.note_commitment_tree_position,
+        }
+    }
+}
+
+impl<NoteRef> ReceivedNote<NoteRef, sapling::Note> {
+    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.note.value().inner().try_into()
+    }
+}
+
+#[cfg(feature = "orchard")]
+impl<NoteRef> ReceivedNote<NoteRef, orchard::note::Note> {
+    pub fn note_value(&self) -> Result<NonNegativeAmount, BalanceError> {
+        self.note.value().inner().try_into()
     }
 }
 

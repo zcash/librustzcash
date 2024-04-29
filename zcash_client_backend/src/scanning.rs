@@ -12,6 +12,7 @@ use sapling::{
 };
 use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
+use tracing::{debug, trace};
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
 use zcash_primitives::{
@@ -666,6 +667,11 @@ where
     ) -> Option<ScanError> {
         if let Some(prev) = prior_block_metadata {
             if block.height() != prev.block_height() + 1 {
+                debug!(
+                    "Block height discontinuity at {:?}, previous was {:?} ",
+                    block.height(),
+                    prev.block_height()
+                );
                 return Some(ScanError::BlockHeightDiscontinuity {
                     prev_height: prev.block_height(),
                     new_height: block.height(),
@@ -673,6 +679,7 @@ where
             }
 
             if block.prev_hash() != prev.block_hash() {
+                debug!("Block hash discontinuity at {:?}", block.height());
                 return Some(ScanError::PrevHashMismatch {
                     at_height: block.height(),
                 });
@@ -685,6 +692,8 @@ where
     if let Some(scan_error) = check_hash_continuity(&block, prior_block_metadata) {
         return Err(scan_error);
     }
+
+    trace!("Block continuity okay at {:?}", block.height());
 
     let cur_height = block.height();
     let cur_hash = block.hash();
@@ -736,6 +745,12 @@ where
             },
             Ok,
         )?;
+    let sapling_final_tree_size = sapling_commitment_tree_size
+        + block
+            .vtx
+            .iter()
+            .map(|tx| u32::try_from(tx.outputs.len()).unwrap())
+            .sum::<u32>();
 
     #[cfg(feature = "orchard")]
     let mut orchard_commitment_tree_size = prior_block_metadata
@@ -782,8 +797,14 @@ where
             },
             Ok,
         )?;
+    #[cfg(feature = "orchard")]
+    let orchard_final_tree_size = orchard_commitment_tree_size
+        + block
+            .vtx
+            .iter()
+            .map(|tx| u32::try_from(tx.actions.len()).unwrap())
+            .sum::<u32>();
 
-    let compact_block_tx_count = block.vtx.len();
     let mut wtxs: Vec<WalletTx<AccountId>> = vec![];
     let mut sapling_nullifier_map = Vec::with_capacity(block.vtx.len());
     let mut sapling_note_commitments: Vec<(sapling::Node, Retention<BlockHeight>)> = vec![];
@@ -793,7 +814,7 @@ where
     #[cfg(feature = "orchard")]
     let mut orchard_note_commitments: Vec<(MerkleHashOrchard, Retention<BlockHeight>)> = vec![];
 
-    for (tx_idx, tx) in block.vtx.into_iter().enumerate() {
+    for tx in block.vtx.into_iter() {
         let txid = tx.txid();
         let tx_index =
             u16::try_from(tx.index).expect("Cannot fit more than 2^16 transactions in a block");
@@ -836,9 +857,9 @@ where
 
         let (sapling_outputs, mut sapling_nc) = find_received(
             cur_height,
-            compact_block_tx_count,
+            sapling_final_tree_size
+                == sapling_commitment_tree_size + u32::try_from(tx.outputs.len()).unwrap(),
             txid,
-            tx_idx,
             sapling_commitment_tree_size,
             &scanning_keys.sapling,
             &spent_from_accounts,
@@ -870,9 +891,9 @@ where
         #[cfg(feature = "orchard")]
         let (orchard_outputs, mut orchard_nc) = find_received(
             cur_height,
-            compact_block_tx_count,
+            orchard_final_tree_size
+                == orchard_commitment_tree_size + u32::try_from(tx.actions.len()).unwrap(),
             txid,
-            tx_idx,
             orchard_commitment_tree_size,
             &scanning_keys.orchard,
             &spent_from_accounts,
@@ -1021,9 +1042,8 @@ fn find_received<
     NoteCommitment,
 >(
     block_height: BlockHeight,
-    block_tx_count: usize,
+    last_commitments_in_block: bool,
     txid: TxId,
-    tx_idx: usize,
     commitment_tree_size: u32,
     keys: &HashMap<IvkTag, SK>,
     spent_from_accounts: &HashSet<AccountId>,
@@ -1080,7 +1100,8 @@ fn find_received<
     {
         // Collect block note commitments
         let node = extract_note_commitment(output);
-        let is_checkpoint = output_idx + 1 == decoded.len() && tx_idx + 1 == block_tx_count;
+        // If the commitment is the last in the block, ensure that is is retained as a checkpoint
+        let is_checkpoint = output_idx + 1 == decoded.len() && last_commitments_in_block;
         let retention = match (decrypted_note.is_some(), is_checkpoint) {
             (is_marked, true) => Retention::Checkpoint {
                 id: block_height,

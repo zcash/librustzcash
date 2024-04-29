@@ -62,6 +62,7 @@ fn check_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_sprout(tx in arb_tx(BranchId::Sprout)) {
         check_roundtrip(tx)?;
     }
@@ -70,6 +71,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_overwinter(tx in arb_tx(BranchId::Overwinter)) {
         check_roundtrip(tx)?;
     }
@@ -78,6 +80,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_sapling(tx in arb_tx(BranchId::Sapling)) {
         check_roundtrip(tx)?;
     }
@@ -86,6 +89,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_blossom(tx in arb_tx(BranchId::Blossom)) {
         check_roundtrip(tx)?;
     }
@@ -94,6 +98,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_heartwood(tx in arb_tx(BranchId::Heartwood)) {
         check_roundtrip(tx)?;
     }
@@ -119,6 +124,7 @@ proptest! {
 proptest! {
     #[test]
     #[ignore]
+    #[cfg(feature = "expensive-tests")]
     fn tx_serialization_roundtrip_future(tx in arb_tx(BranchId::ZFuture)) {
         check_roundtrip(tx)?;
     }

@@ -3,10 +3,7 @@
 use rusqlite::{named_params, types::Value, Connection, Row};
 use std::rc::Rc;
 
-use zcash_client_backend::{
-    wallet::{Note, ReceivedNote},
-    ShieldedProtocol,
-};
+use zcash_client_backend::{wallet::ReceivedNote, ShieldedProtocol};
 use zcash_primitives::transaction::{components::amount::NonNegativeAmount, TxId};
 use zcash_protocol::consensus::{self, BlockHeight};
 
@@ -54,7 +51,7 @@ fn unscanned_tip_exists(
 // (https://github.com/rust-lang/rust-clippy/issues/11308) means it fails to identify that the `result` temporary
 // is required in order to resolve the borrows involved in the `query_and_then` call.
 #[allow(clippy::let_and_return)]
-pub(crate) fn get_spendable_note<P: consensus::Parameters, F>(
+pub(crate) fn get_spendable_note<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     txid: &TxId,
@@ -68,19 +65,26 @@ where
     let (table_prefix, index_col, note_reconstruction_cols) = per_protocol_names(protocol);
     let result = conn.query_row_and_then(
         &format!(
-            "SELECT {table_prefix}_received_notes.id, txid, {index_col},
+            "SELECT rn.id, txid, {index_col},
                 diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
                 accounts.ufvk, recipient_key_scope
-             FROM {table_prefix}_received_notes
-             INNER JOIN accounts ON accounts.id = {table_prefix}_received_notes.account_id
-             INNER JOIN transactions ON transactions.id_tx = {table_prefix}_received_notes.tx
+             FROM {table_prefix}_received_notes rn
+             INNER JOIN accounts ON accounts.id = rn.account_id
+             INNER JOIN transactions ON transactions.id_tx = rn.tx
              WHERE txid = :txid
+             AND transactions.block IS NOT NULL
              AND {index_col} = :output_index
              AND accounts.ufvk IS NOT NULL
              AND recipient_key_scope IS NOT NULL
              AND nf IS NOT NULL
              AND commitment_tree_position IS NOT NULL
-             AND spent IS NULL"
+             AND rn.id NOT IN (
+               SELECT {table_prefix}_received_note_id
+               FROM {table_prefix}_received_note_spends
+               JOIN transactions stx ON stx.id_tx = transaction_id
+               WHERE stx.block IS NOT NULL -- the spending tx is mined
+               OR stx.expiry_height IS NULL -- the spending tx will not expire
+             )"
         ),
         named_params![
            ":txid": txid.as_ref(),
@@ -99,7 +103,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn select_spendable_notes<P: consensus::Parameters, F>(
+pub(crate) fn select_spendable_notes<P: consensus::Parameters, F, Note>(
     conn: &Connection,
     params: &P,
     account: AccountId,
@@ -146,10 +150,7 @@ where
                  SELECT
                      {table_prefix}_received_notes.id AS id, txid, {index_col},
                      diversifier, value, {note_reconstruction_cols}, commitment_tree_position,
-                     SUM(value) OVER (
-                         PARTITION BY {table_prefix}_received_notes.account_id, spent
-                         ORDER BY {table_prefix}_received_notes.id
-                     ) AS so_far,
+                     SUM(value) OVER (ROWS UNBOUNDED PRECEDING) AS so_far,
                      accounts.ufvk as ufvk, recipient_key_scope
                  FROM {table_prefix}_received_notes
                  INNER JOIN accounts
@@ -157,13 +158,21 @@ where
                  INNER JOIN transactions
                     ON transactions.id_tx = {table_prefix}_received_notes.tx
                  WHERE {table_prefix}_received_notes.account_id = :account
+                 AND value >= 5000 -- FIXME #1016, allow selection of a dust inputs
                  AND accounts.ufvk IS NOT NULL
                  AND recipient_key_scope IS NOT NULL
                  AND nf IS NOT NULL
                  AND commitment_tree_position IS NOT NULL
-                 AND spent IS NULL
                  AND transactions.block <= :anchor_height
                  AND {table_prefix}_received_notes.id NOT IN rarray(:exclude)
+                 AND {table_prefix}_received_notes.id NOT IN (
+                   SELECT {table_prefix}_received_note_id
+                   FROM {table_prefix}_received_note_spends
+                   JOIN transactions stx ON stx.id_tx = transaction_id
+                   WHERE stx.block IS NOT NULL -- the spending tx is mined
+                   OR stx.expiry_height IS NULL -- the spending tx will not expire
+                   OR stx.expiry_height > :anchor_height -- the spending tx is unexpired
+                 )
                  AND NOT EXISTS (
                     SELECT 1 FROM v_{table_prefix}_shard_unscanned_ranges unscanned
                     -- select all the unscanned ranges involving the shard containing this note

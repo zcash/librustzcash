@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.9.1"
+version = "0.10.2"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -45,6 +45,7 @@ tracing.workspace = true
 
 # - Serialization
 byteorder.workspace = true
+nonempty.workspace = true
 prost.workspace = true
 group.workspace = true
 jubjub.workspace = true
@@ -82,7 +83,6 @@ bls12_381.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
 pasta_curves.workspace = true
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
-nonempty.workspace = true
 orchard = { workspace = true, features = ["test-dependencies"] }
 proptest.workspace = true
 rand_chacha.workspace = true
@@ -126,6 +126,9 @@ transparent-inputs = [
 
 ## Exposes unstable APIs. Their behaviour may change at any time.
 unstable = ["zcash_client_backend/unstable"]
+
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
 
 [lib]
 bench = false

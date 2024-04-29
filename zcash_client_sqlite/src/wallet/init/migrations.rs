@@ -32,9 +32,8 @@ use super::WalletMigrationError;
 
 pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     params: &P,
-    seed: Option<SecretVec<u8>>,
+    seed: Option<Rc<SecretVec<u8>>>,
 ) -> Vec<Box<dyn RusqliteMigration<Error = WalletMigrationError>>> {
-    let seed = Rc::new(seed);
     //                                   initial_setup
     //                                   /           \
     //                          utxos_table         ufvk_support
@@ -57,10 +56,10 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //       v_sapling_shard_unscanned_ranges    \           |       v_tx_outputs_use_legacy_false
     //                        |                   \          |                     |
     //                wallet_summaries             \         |      v_transactions_shielding_balance
-    //                                              \        |                     |
-    //                                               \       |       v_transactions_note_uniqueness
-    //                                                \      |        /
-    //                                                full_account_ids
+    //                        \                     \        |                     |
+    //                         \                     \       |       v_transactions_note_uniqueness
+    //                          \                     \      |        /
+    //                           -------------------- full_account_ids
     //                                                       |
     //                                             orchard_received_notes
     vec![

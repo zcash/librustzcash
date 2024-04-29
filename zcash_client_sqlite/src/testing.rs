@@ -6,12 +6,15 @@ use std::{collections::BTreeMap, convert::Infallible};
 use std::fs::File;
 
 use group::ff::Field;
+use incrementalmerkletree::{Position, Retention};
 use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
 use rusqlite::{params, Connection};
 use secrecy::{Secret, SecretVec};
+
+use shardtree::error::ShardTreeError;
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "unstable")]
@@ -28,13 +31,14 @@ use zcash_client_backend::{
     address::Address,
     data_api::{
         self,
-        chain::{scan_cached_blocks, BlockSource, ScanSummary},
+        chain::{scan_cached_blocks, BlockSource, CommitmentTreeRoot, ScanSummary},
         wallet::{
             create_proposed_transactions, create_spend_to_address,
             input_selection::{GreedyInputSelector, GreedyInputSelectorError, InputSelector},
             propose_standard_transfer_to_address, propose_transfer, spend,
         },
-        AccountBalance, AccountBirthday, WalletRead, WalletSummary, WalletWrite,
+        AccountBalance, AccountBirthday, WalletCommitmentTrees, WalletRead, WalletSummary,
+        WalletWrite,
     },
     keys::UnifiedSpendingKey,
     proposal::Proposal,
@@ -63,6 +67,7 @@ use zcash_primitives::{
     zip32::DiversifierIndex,
 };
 use zcash_protocol::local_consensus::LocalNetwork;
+use zcash_protocol::value::{ZatBalance, Zatoshis};
 
 use crate::{
     chain::init::init_cache_database,
@@ -98,45 +103,57 @@ use crate::{
 
 pub(crate) mod pool;
 
+pub(crate) struct InitialChainState {
+    pub(crate) chain_state: ChainState,
+    pub(crate) prior_sapling_roots: Vec<CommitmentTreeRoot<sapling::Node>>,
+    #[cfg(feature = "orchard")]
+    pub(crate) prior_orchard_roots: Vec<CommitmentTreeRoot<MerkleHashOrchard>>,
+}
+
 /// A builder for a `zcash_client_sqlite` test.
 pub(crate) struct TestBuilder<Cache> {
+    rng: ChaChaRng,
     network: LocalNetwork,
     cache: Cache,
-    test_account_birthday: Option<AccountBirthday>,
-    rng: ChaChaRng,
+    initial_chain_state: Option<InitialChainState>,
+    account_birthday: Option<AccountBirthday>,
 }
 
 impl TestBuilder<()> {
+    pub const DEFAULT_NETWORK: LocalNetwork = LocalNetwork {
+        overwinter: Some(BlockHeight::from_u32(1)),
+        sapling: Some(BlockHeight::from_u32(100_000)),
+        blossom: Some(BlockHeight::from_u32(100_000)),
+        heartwood: Some(BlockHeight::from_u32(100_000)),
+        canopy: Some(BlockHeight::from_u32(100_000)),
+        nu5: Some(BlockHeight::from_u32(100_000)),
+        #[cfg(zcash_unstable = "nu6")]
+        nu6: None,
+        #[cfg(zcash_unstable = "zfuture")]
+        z_future: None,
+    };
+
     /// Constructs a new test.
     pub(crate) fn new() -> Self {
         TestBuilder {
+            rng: ChaChaRng::seed_from_u64(0),
             // Use a fake network where Sapling through NU5 activate at the same height.
             // We pick 100,000 to be large enough to handle any hard-coded test offsets.
-            network: LocalNetwork {
-                overwinter: Some(BlockHeight::from_u32(1)),
-                sapling: Some(BlockHeight::from_u32(100_000)),
-                blossom: Some(BlockHeight::from_u32(100_000)),
-                heartwood: Some(BlockHeight::from_u32(100_000)),
-                canopy: Some(BlockHeight::from_u32(100_000)),
-                nu5: Some(BlockHeight::from_u32(100_000)),
-                #[cfg(zcash_unstable = "nu6")]
-                nu6: None,
-                #[cfg(zcash_unstable = "zfuture")]
-                z_future: None,
-            },
+            network: Self::DEFAULT_NETWORK,
             cache: (),
-            test_account_birthday: None,
-            rng: ChaChaRng::seed_from_u64(0),
+            initial_chain_state: None,
+            account_birthday: None,
         }
     }
 
     /// Adds a [`BlockDb`] cache to the test.
     pub(crate) fn with_block_cache(self) -> TestBuilder<BlockCache> {
         TestBuilder {
+            rng: self.rng,
             network: self.network,
             cache: BlockCache::new(),
-            test_account_birthday: self.test_account_birthday,
-            rng: self.rng,
+            initial_chain_state: self.initial_chain_state,
+            account_birthday: self.account_birthday,
         }
     }
 
@@ -144,20 +161,69 @@ impl TestBuilder<()> {
     #[cfg(feature = "unstable")]
     pub(crate) fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache> {
         TestBuilder {
+            rng: self.rng,
             network: self.network,
             cache: FsBlockCache::new(),
-            test_account_birthday: self.test_account_birthday,
-            rng: self.rng,
+            initial_chain_state: self.initial_chain_state,
+            account_birthday: self.account_birthday,
         }
     }
 }
 
 impl<Cache> TestBuilder<Cache> {
-    pub(crate) fn with_test_account<F: FnOnce(&LocalNetwork) -> AccountBirthday>(
+    pub(crate) fn with_initial_chain_state(
         mut self,
-        birthday: F,
+        chain_state: impl FnOnce(&mut ChaChaRng, &LocalNetwork) -> InitialChainState,
     ) -> Self {
-        self.test_account_birthday = Some(birthday(&self.network));
+        assert!(self.initial_chain_state.is_none());
+        assert!(self.account_birthday.is_none());
+        self.initial_chain_state = Some(chain_state(&mut self.rng, &self.network));
+        self
+    }
+
+    pub(crate) fn with_account_birthday(
+        mut self,
+        birthday: impl FnOnce(
+            &mut ChaChaRng,
+            &LocalNetwork,
+            Option<&InitialChainState>,
+        ) -> AccountBirthday,
+    ) -> Self {
+        assert!(self.account_birthday.is_none());
+        self.account_birthday = Some(birthday(
+            &mut self.rng,
+            &self.network,
+            self.initial_chain_state.as_ref(),
+        ));
+        self
+    }
+
+    pub(crate) fn with_account_from_sapling_activation(mut self, prev_hash: BlockHash) -> Self {
+        assert!(self.account_birthday.is_none());
+        self.account_birthday = Some(AccountBirthday::from_parts(
+            ChainState::empty(
+                self.network
+                    .activation_height(NetworkUpgrade::Sapling)
+                    .unwrap()
+                    - 1,
+                prev_hash,
+            ),
+            None,
+        ));
+        self
+    }
+
+    pub(crate) fn with_account_having_current_birthday(mut self) -> Self {
+        assert!(self.account_birthday.is_none());
+        assert!(self.initial_chain_state.is_some());
+        self.account_birthday = Some(AccountBirthday::from_parts(
+            self.initial_chain_state
+                .as_ref()
+                .unwrap()
+                .chain_state
+                .clone(),
+            None,
+        ));
         self
     }
 
@@ -167,18 +233,78 @@ impl<Cache> TestBuilder<Cache> {
         let mut db_data = WalletDb::for_path(data_file.path(), self.network).unwrap();
         init_wallet_db(&mut db_data, None).unwrap();
 
-        let test_account = if let Some(birthday) = self.test_account_birthday {
-            let seed = Secret::new(vec![0u8; 32]);
-            let (account, usk) = db_data.create_account(&seed, birthday.clone()).unwrap();
-            Some((seed, account, usk, birthday))
-        } else {
-            None
+        let mut cached_blocks = BTreeMap::new();
+
+        if let Some(initial_state) = &self.initial_chain_state {
+            db_data
+                .put_sapling_subtree_roots(0, &initial_state.prior_sapling_roots)
+                .unwrap();
+            db_data
+                .with_sapling_tree_mut(|t| {
+                    t.insert_frontier(
+                        initial_state.chain_state.final_sapling_tree().clone(),
+                        Retention::Checkpoint {
+                            id: initial_state.chain_state.block_height(),
+                            is_marked: false,
+                        },
+                    )
+                })
+                .unwrap();
+
+            #[cfg(feature = "orchard")]
+            {
+                db_data
+                    .put_orchard_subtree_roots(0, &initial_state.prior_orchard_roots)
+                    .unwrap();
+                db_data
+                    .with_orchard_tree_mut(|t| {
+                        t.insert_frontier(
+                            initial_state.chain_state.final_orchard_tree().clone(),
+                            Retention::Checkpoint {
+                                id: initial_state.chain_state.block_height(),
+                                is_marked: false,
+                            },
+                        )
+                    })
+                    .unwrap();
+            }
+
+            let final_sapling_tree_size =
+                initial_state.chain_state.final_sapling_tree().tree_size() as u32;
+            let _final_orchard_tree_size = 0;
+            #[cfg(feature = "orchard")]
+            let _final_orchard_tree_size =
+                initial_state.chain_state.final_orchard_tree().tree_size() as u32;
+
+            cached_blocks.insert(
+                initial_state.chain_state.block_height(),
+                CachedBlock {
+                    chain_state: initial_state.chain_state.clone(),
+                    sapling_end_size: final_sapling_tree_size,
+                    orchard_end_size: _final_orchard_tree_size,
+                },
+            );
         };
+
+        let test_account = self.account_birthday.map(|birthday| {
+            let seed = Secret::new(vec![0u8; 32]);
+            let (account_id, usk) = db_data.create_account(&seed, &birthday).unwrap();
+            (
+                seed,
+                TestAccount {
+                    account_id,
+                    usk,
+                    birthday,
+                },
+            )
+        });
 
         TestState {
             cache: self.cache,
-            cached_blocks: BTreeMap::new(),
-            latest_block_height: None,
+            cached_blocks,
+            latest_block_height: self
+                .initial_chain_state
+                .map(|s| s.chain_state.block_height()),
             _data_file: data_file,
             db_data,
             test_account,
@@ -189,7 +315,6 @@ impl<Cache> TestBuilder<Cache> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct CachedBlock {
-    hash: BlockHash,
     chain_state: ChainState,
     sapling_end_size: u32,
     orchard_end_size: u32,
@@ -198,19 +323,13 @@ pub(crate) struct CachedBlock {
 impl CachedBlock {
     fn none(sapling_activation_height: BlockHeight) -> Self {
         Self {
-            hash: BlockHash([0; 32]),
-            chain_state: ChainState::empty(sapling_activation_height),
+            chain_state: ChainState::empty(sapling_activation_height, BlockHash([0; 32])),
             sapling_end_size: 0,
             orchard_end_size: 0,
         }
     }
 
-    fn at(
-        hash: BlockHash,
-        chain_state: ChainState,
-        sapling_end_size: u32,
-        orchard_end_size: u32,
-    ) -> Self {
+    fn at(chain_state: ChainState, sapling_end_size: u32, orchard_end_size: u32) -> Self {
         assert_eq!(
             chain_state.final_sapling_tree().tree_size() as u32,
             sapling_end_size
@@ -222,7 +341,6 @@ impl CachedBlock {
         );
 
         Self {
-            hash,
             chain_state,
             sapling_end_size,
             orchard_end_size,
@@ -257,9 +375,9 @@ impl CachedBlock {
         });
 
         Self {
-            hash: cb.hash(),
             chain_state: ChainState::new(
                 cb.height(),
+                cb.hash(),
                 sapling_final_tree,
                 #[cfg(feature = "orchard")]
                 orchard_final_tree,
@@ -274,6 +392,27 @@ impl CachedBlock {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct TestAccount {
+    account_id: AccountId,
+    usk: UnifiedSpendingKey,
+    birthday: AccountBirthday,
+}
+
+impl TestAccount {
+    pub(crate) fn account_id(&self) -> AccountId {
+        self.account_id
+    }
+
+    pub(crate) fn usk(&self) -> &UnifiedSpendingKey {
+        &self.usk
+    }
+
+    pub(crate) fn birthday(&self) -> &AccountBirthday {
+        &self.birthday
+    }
+}
+
 /// The state for a `zcash_client_sqlite` test.
 pub(crate) struct TestState<Cache> {
     cache: Cache,
@@ -281,12 +420,7 @@ pub(crate) struct TestState<Cache> {
     latest_block_height: Option<BlockHeight>,
     _data_file: NamedTempFile,
     db_data: WalletDb<Connection, LocalNetwork>,
-    test_account: Option<(
-        SecretVec<u8>,
-        AccountId,
-        UnifiedSpendingKey,
-        AccountBirthday,
-    )>,
+    test_account: Option<(SecretVec<u8>, TestAccount)>,
     rng: ChaChaRng,
 }
 
@@ -336,15 +470,51 @@ where
 
         let (res, nf) = self.generate_block_at(
             height,
-            prior_cached_block.hash,
+            prior_cached_block.chain_state.block_hash(),
             fvk,
             req,
             value,
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
+            false,
         );
 
         (height, res, nf)
+    }
+
+    /// Adds an empty block to the cache, advancing the simulated chain height.
+    #[allow(dead_code)] // used only for tests that are flagged off by default
+    pub(crate) fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
+        let new_hash = {
+            let mut hash = vec![0; 32];
+            self.rng.fill_bytes(&mut hash);
+            hash
+        };
+
+        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
+        let prior_cached_block = self
+            .latest_cached_block()
+            .unwrap_or(&pre_activation_block)
+            .clone();
+        let new_height = prior_cached_block.height() + 1;
+
+        let mut cb = CompactBlock {
+            hash: new_hash,
+            height: new_height.into(),
+            ..Default::default()
+        };
+        cb.prev_hash
+            .extend_from_slice(&prior_cached_block.chain_state.block_hash().0);
+
+        cb.chain_metadata = Some(compact::ChainMetadata {
+            sapling_commitment_tree_size: prior_cached_block.sapling_end_size,
+            orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
+        });
+
+        let res = self.cache_block(&prior_cached_block, cb);
+        self.latest_block_height = Some(new_height);
+
+        (new_height, res)
     }
 
     /// Creates a fake block with the given height and hash containing a single output of
@@ -362,6 +532,7 @@ where
         value: NonNegativeAmount,
         initial_sapling_tree_size: u32,
         initial_orchard_tree_size: u32,
+        allow_broken_hash_chain: bool,
     ) -> (Cache::InsertResult, Fvk::Nullifier) {
         let mut prior_cached_block = self
             .latest_cached_block_below_height(height)
@@ -375,7 +546,9 @@ where
         // we need to generate a new prior cached block that the block to be generated can
         // successfully chain from, with the provided tree sizes.
         if prior_cached_block.chain_state.block_height() == height - 1 {
-            assert_eq!(prev_hash, prior_cached_block.hash);
+            if !allow_broken_hash_chain {
+                assert_eq!(prev_hash, prior_cached_block.chain_state.block_hash());
+            }
         } else {
             let final_sapling_tree =
                 (prior_cached_block.sapling_end_size..initial_sapling_tree_size).fold(
@@ -399,9 +572,9 @@ where
                 );
 
             prior_cached_block = CachedBlock::at(
-                prev_hash,
                 ChainState::new(
                     height - 1,
+                    prev_hash,
                     final_sapling_tree,
                     #[cfg(feature = "orchard")]
                     final_orchard_tree,
@@ -451,7 +624,7 @@ where
         let cb = fake_compact_block_spending(
             &self.network(),
             height,
-            prior_cached_block.hash,
+            prior_cached_block.chain_state.block_hash(),
             note,
             fvk,
             to.into(),
@@ -480,6 +653,7 @@ where
         let tx = self
             .wallet()
             .get_transaction(txid)
+            .unwrap()
             .expect("TxId should exist in the wallet");
 
         // Index 0 is by definition a coinbase transaction, and the wallet doesn't
@@ -506,7 +680,7 @@ where
 
         let cb = fake_compact_block_from_tx(
             height,
-            prior_cached_block.hash,
+            prior_cached_block.chain_state.block_hash(),
             tx_index,
             tx,
             prior_cached_block.sapling_end_size,
@@ -606,6 +780,11 @@ impl<Cache> TestState<Cache> {
         &mut self.db_data
     }
 
+    /// Exposes the test framework's source of randomness.
+    pub(crate) fn rng_mut(&mut self) -> &mut ChaChaRng {
+        &mut self.rng
+    }
+
     /// Exposes the network in use.
     pub(crate) fn network(&self) -> LocalNetwork {
         self.db_data.params
@@ -621,21 +800,19 @@ impl<Cache> TestState<Cache> {
 
     /// Exposes the test seed, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_seed(&self) -> Option<&SecretVec<u8>> {
-        self.test_account.as_ref().map(|(seed, _, _, _)| seed)
+        self.test_account.as_ref().map(|(seed, _)| seed)
     }
 
     /// Exposes the test account, if enabled via [`TestBuilder::with_test_account`].
-    pub(crate) fn test_account(&self) -> Option<(AccountId, UnifiedSpendingKey, AccountBirthday)> {
-        self.test_account
-            .as_ref()
-            .map(|(_, a, k, b)| (*a, k.clone(), b.clone()))
+    pub(crate) fn test_account(&self) -> Option<&TestAccount> {
+        self.test_account.as_ref().map(|(_, acct)| acct)
     }
 
     /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
     pub(crate) fn test_account_sapling(&self) -> Option<DiversifiableFullViewingKey> {
         self.test_account
             .as_ref()
-            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().sapling().cloned())
+            .and_then(|(_, acct)| acct.usk.to_unified_full_viewing_key().sapling().cloned())
     }
 
     /// Exposes the test account's Sapling DFVK, if enabled via [`TestBuilder::with_test_account`].
@@ -643,7 +820,25 @@ impl<Cache> TestState<Cache> {
     pub(crate) fn test_account_orchard(&self) -> Option<orchard::keys::FullViewingKey> {
         self.test_account
             .as_ref()
-            .and_then(|(_, _, usk, _)| usk.to_unified_full_viewing_key().orchard().cloned())
+            .and_then(|(_, acct)| acct.usk.to_unified_full_viewing_key().orchard().cloned())
+    }
+
+    /// Insert shard roots for both trees.
+    pub(crate) fn put_subtree_roots(
+        &mut self,
+        sapling_start_index: u64,
+        sapling_roots: &[CommitmentTreeRoot<sapling::Node>],
+        #[cfg(feature = "orchard")] orchard_start_index: u64,
+        #[cfg(feature = "orchard")] orchard_roots: &[CommitmentTreeRoot<MerkleHashOrchard>],
+    ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
+        self.wallet_mut()
+            .put_sapling_subtree_roots(sapling_start_index, sapling_roots)?;
+
+        #[cfg(feature = "orchard")]
+        self.wallet_mut()
+            .put_orchard_subtree_roots(orchard_start_index, orchard_roots)?;
+
+        Ok(())
     }
 
     /// Invokes [`create_spend_to_address`] with the given arguments.
@@ -956,6 +1151,133 @@ impl<Cache> TestState<Cache> {
             &SubtreeScanProgress,
         )
         .unwrap()
+    }
+
+    /// Returns a vector of transaction summaries
+    pub(crate) fn get_tx_history(
+        &self,
+    ) -> Result<Vec<TransactionSummary<AccountId>>, SqliteClientError> {
+        let mut stmt = self.wallet().conn.prepare_cached(
+            "SELECT * 
+             FROM v_transactions 
+             ORDER BY mined_height DESC, tx_index DESC",
+        )?;
+
+        let results = stmt
+            .query_and_then::<TransactionSummary<AccountId>, SqliteClientError, _, _>([], |row| {
+                Ok(TransactionSummary {
+                    account_id: AccountId(row.get("account_id")?),
+                    txid: TxId::from_bytes(row.get("txid")?),
+                    expiry_height: row
+                        .get::<_, Option<u32>>("expiry_height")?
+                        .map(BlockHeight::from),
+                    mined_height: row
+                        .get::<_, Option<u32>>("mined_height")?
+                        .map(BlockHeight::from),
+                    account_value_delta: ZatBalance::from_i64(row.get("account_balance_delta")?)?,
+                    fee_paid: row
+                        .get::<_, Option<i64>>("fee_paid")?
+                        .map(Zatoshis::from_nonnegative_i64)
+                        .transpose()?,
+                    has_change: row.get("has_change")?,
+                    sent_note_count: row.get("sent_note_count")?,
+                    received_note_count: row.get("received_note_count")?,
+                    memo_count: row.get("memo_count")?,
+                    expired_unmined: row.get("expired_unmined")?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+
+    #[allow(dead_code)] // used only for tests that are flagged off by default
+    pub(crate) fn get_checkpoint_history(
+        &self,
+    ) -> Result<Vec<(BlockHeight, ShieldedProtocol, Option<Position>)>, SqliteClientError> {
+        let mut stmt = self.wallet().conn.prepare_cached(
+            "SELECT checkpoint_id, 2 AS pool, position FROM sapling_tree_checkpoints
+             UNION
+             SELECT checkpoint_id, 3 AS pool, position FROM orchard_tree_checkpoints
+             ORDER BY checkpoint_id",
+        )?;
+
+        let results = stmt
+            .query_and_then::<_, SqliteClientError, _, _>([], |row| {
+                Ok((
+                    BlockHeight::from(row.get::<_, u32>(0)?),
+                    match row.get::<_, i64>(1)? {
+                        2 => ShieldedProtocol::Sapling,
+                        3 => ShieldedProtocol::Orchard,
+                        _ => unreachable!(),
+                    },
+                    row.get::<_, Option<u64>>(2)?.map(Position::from),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(results)
+    }
+}
+
+pub(crate) struct TransactionSummary<AccountId> {
+    account_id: AccountId,
+    txid: TxId,
+    expiry_height: Option<BlockHeight>,
+    mined_height: Option<BlockHeight>,
+    account_value_delta: ZatBalance,
+    fee_paid: Option<Zatoshis>,
+    has_change: bool,
+    sent_note_count: usize,
+    received_note_count: usize,
+    memo_count: usize,
+    expired_unmined: bool,
+}
+
+#[allow(dead_code)]
+impl<AccountId> TransactionSummary<AccountId> {
+    pub(crate) fn account_id(&self) -> &AccountId {
+        &self.account_id
+    }
+
+    pub(crate) fn txid(&self) -> TxId {
+        self.txid
+    }
+
+    pub(crate) fn expiry_height(&self) -> Option<BlockHeight> {
+        self.expiry_height
+    }
+
+    pub(crate) fn mined_height(&self) -> Option<BlockHeight> {
+        self.mined_height
+    }
+
+    pub(crate) fn account_value_delta(&self) -> ZatBalance {
+        self.account_value_delta
+    }
+
+    pub(crate) fn fee_paid(&self) -> Option<Zatoshis> {
+        self.fee_paid
+    }
+
+    pub(crate) fn has_change(&self) -> bool {
+        self.has_change
+    }
+
+    pub(crate) fn sent_note_count(&self) -> usize {
+        self.sent_note_count
+    }
+
+    pub(crate) fn received_note_count(&self) -> usize {
+        self.received_note_count
+    }
+
+    pub(crate) fn expired_unmined(&self) -> bool {
+        self.expired_unmined
+    }
+
+    pub(crate) fn memo_count(&self) -> usize {
+        self.memo_count
     }
 }
 

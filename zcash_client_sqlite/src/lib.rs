@@ -37,6 +37,7 @@ use maybe_rayon::{
     prelude::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
+use nonempty::NonEmpty;
 use rusqlite::{self, Connection};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, ShardTree};
@@ -45,14 +46,7 @@ use std::{
     path::Path,
 };
 use subtle::ConditionallySelectable;
-use zcash_keys::keys::HdSeedFingerprint;
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::{self, BlockHeight},
-    memo::{Memo, MemoBytes},
-    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
-    zip32::{self, DiversifierIndex, Scope},
-};
+use tracing::{debug, trace, warn};
 
 use zcash_client_backend::{
     address::UnifiedAddress,
@@ -60,9 +54,9 @@ use zcash_client_backend::{
         self,
         chain::{BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
-        Account, AccountBirthday, AccountKind, BlockMetadata, DecryptedTransaction, InputSource,
-        NullifierQuery, ScannedBlock, SentTransaction, WalletCommitmentTrees, WalletRead,
-        WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
+        Account, AccountBirthday, AccountSource, BlockMetadata, DecryptedTransaction, InputSource,
+        NullifierQuery, ScannedBlock, SeedRelevance, SentTransaction, SpendableNotes,
+        WalletCommitmentTrees, WalletRead, WalletSummary, WalletWrite, SAPLING_SHARD_HEIGHT,
     },
     keys::{
         AddressGenerationError, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey,
@@ -71,6 +65,15 @@ use zcash_client_backend::{
     wallet::{Note, NoteId, ReceivedNote, Recipient, WalletTransparentOutput},
     DecryptedOutput, PoolType, ShieldedProtocol, TransferType,
 };
+use zcash_keys::address::Address;
+use zcash_primitives::{
+    block::BlockHash,
+    consensus::{self, BlockHeight},
+    memo::{Memo, MemoBytes},
+    transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
+    zip32::{self, DiversifierIndex, Scope},
+};
+use zip32::fingerprint::SeedFingerprint;
 
 use crate::{error::SqliteClientError, wallet::commitment_tree::SqliteShardStore};
 
@@ -119,13 +122,18 @@ pub(crate) const SAPLING_TABLES_PREFIX: &str = "sapling";
 #[cfg(feature = "orchard")]
 pub(crate) const ORCHARD_TABLES_PREFIX: &str = "orchard";
 
+#[cfg(not(feature = "orchard"))]
+pub(crate) const UA_ORCHARD: bool = false;
+#[cfg(feature = "orchard")]
+pub(crate) const UA_ORCHARD: bool = true;
+
 #[cfg(not(feature = "transparent-inputs"))]
 pub(crate) const UA_TRANSPARENT: bool = false;
 #[cfg(feature = "transparent-inputs")]
 pub(crate) const UA_TRANSPARENT: bool = true;
 
 pub(crate) const DEFAULT_UA_REQUEST: UnifiedAddressRequest =
-    UnifiedAddressRequest::unsafe_new(false, true, UA_TRANSPARENT);
+    UnifiedAddressRequest::unsafe_new(UA_ORCHARD, true, UA_TRANSPARENT);
 
 /// The ID type for accounts.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
@@ -212,7 +220,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                 &self.params,
                 txid,
                 index,
-            ),
+            )
+            .map(|opt| opt.map(|n| n.map_note(Note::Sapling))),
             ShieldedProtocol::Orchard => {
                 #[cfg(feature = "orchard")]
                 return wallet::orchard::get_spendable_orchard_note(
@@ -220,7 +229,8 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
                     &self.params,
                     txid,
                     index,
-                );
+                )
+                .map(|opt| opt.map(|n| n.map_note(Note::Orchard)));
 
                 #[cfg(not(feature = "orchard"))]
                 return Err(SqliteClientError::UnsupportedPoolType(PoolType::Shielded(
@@ -237,26 +247,26 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> InputSource for 
         _sources: &[ShieldedProtocol],
         anchor_height: BlockHeight,
         exclude: &[Self::NoteRef],
-    ) -> Result<Vec<ReceivedNote<Self::NoteRef, Note>>, Self::Error> {
-        let received_iter = std::iter::empty();
-        let received_iter = received_iter.chain(wallet::sapling::select_spendable_sapling_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        #[cfg(feature = "orchard")]
-        let received_iter = received_iter.chain(wallet::orchard::select_spendable_orchard_notes(
-            self.conn.borrow(),
-            &self.params,
-            account,
-            target_value,
-            anchor_height,
-            exclude,
-        )?);
-        Ok(received_iter.collect())
+    ) -> Result<SpendableNotes<Self::NoteRef>, Self::Error> {
+        Ok(SpendableNotes::new(
+            wallet::sapling::select_spendable_sapling_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+            #[cfg(feature = "orchard")]
+            wallet::orchard::select_spendable_orchard_notes(
+                self.conn.borrow(),
+                &self.params,
+                account,
+                target_value,
+                anchor_height,
+                exclude,
+            )?,
+        ))
     }
 
     #[cfg(feature = "transparent-inputs")]
@@ -302,7 +312,7 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
 
     fn get_derived_account(
         &self,
-        seed: &HdSeedFingerprint,
+        seed: &SeedFingerprint,
         account_id: zip32::AccountId,
     ) -> Result<Option<Self::Account>, Self::Error> {
         wallet::get_derived_account(self.conn.borrow(), &self.params, seed, account_id)
@@ -314,38 +324,18 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         seed: &SecretVec<u8>,
     ) -> Result<bool, Self::Error> {
         if let Some(account) = self.get_account(account_id)? {
-            if let AccountKind::Derived {
+            if let AccountSource::Derived {
                 seed_fingerprint,
                 account_index,
-            } = account.kind()
+            } = account.source()
             {
-                let seed_fingerprint_match = HdSeedFingerprint::from_seed(seed) == seed_fingerprint;
-
-                let usk = UnifiedSpendingKey::from_seed(
+                wallet::seed_matches_derived_account(
                     &self.params,
-                    &seed.expose_secret()[..],
+                    seed,
+                    &seed_fingerprint,
                     account_index,
+                    &account.uivk(),
                 )
-                .map_err(|_| SqliteClientError::KeyDerivationError(account_index))?;
-
-                // Keys are not comparable with `Eq`, but addresses are, so we derive what should
-                // be equivalent addresses for each key and use those to check for key equality.
-                let ufvk_match = UnifiedAddressRequest::all().map_or(
-                    Ok::<_, Self::Error>(false),
-                    |ua_request| {
-                        Ok(usk
-                            .to_unified_full_viewing_key()
-                            .default_address(ua_request)?
-                            == account.default_address(ua_request)?)
-                    },
-                )?;
-
-                if seed_fingerprint_match != ufvk_match {
-                    // If these mismatch, it suggests database corruption.
-                    return Err(SqliteClientError::CorruptedData(format!("Seed fingerprint match: {seed_fingerprint_match}, ufvk match: {ufvk_match}")));
-                }
-
-                Ok(seed_fingerprint_match && ufvk_match)
             } else {
                 Err(SqliteClientError::UnknownZip32Derivation)
             }
@@ -353,6 +343,55 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
             // Missing account is documented to return false.
             Ok(false)
         }
+    }
+
+    fn seed_relevance_to_derived_accounts(
+        &self,
+        seed: &SecretVec<u8>,
+    ) -> Result<SeedRelevance<Self::AccountId>, Self::Error> {
+        let mut has_accounts = false;
+        let mut has_derived = false;
+        let mut relevant_account_ids = vec![];
+
+        for account_id in self.get_account_ids()? {
+            has_accounts = true;
+            let account = self.get_account(account_id)?.expect("account ID exists");
+
+            // If the account is imported, the seed _might_ be relevant, but the only
+            // way we could determine that is by brute-forcing the ZIP 32 account
+            // index space, which we're not going to do. The method name indicates to
+            // the caller that we only check derived accounts.
+            if let AccountSource::Derived {
+                seed_fingerprint,
+                account_index,
+            } = account.source()
+            {
+                has_derived = true;
+
+                if wallet::seed_matches_derived_account(
+                    &self.params,
+                    seed,
+                    &seed_fingerprint,
+                    account_index,
+                    &account.uivk(),
+                )? {
+                    // The seed is relevant to this account.
+                    relevant_account_ids.push(account_id);
+                }
+            }
+        }
+
+        Ok(
+            if let Some(account_ids) = NonEmpty::from_vec(relevant_account_ids) {
+                SeedRelevance::Relevant { account_ids }
+            } else if has_derived {
+                SeedRelevance::NotRelevant
+            } else if has_accounts {
+                SeedRelevance::NoDerivedAccounts
+            } else {
+                SeedRelevance::NoAccounts
+            },
+        )
     }
 
     fn get_account_for_ufvk(
@@ -454,8 +493,9 @@ impl<C: Borrow<rusqlite::Connection>, P: consensus::Parameters> WalletRead for W
         }
     }
 
-    fn get_transaction(&self, txid: TxId) -> Result<Transaction, Self::Error> {
-        wallet::get_transaction(self.conn.borrow(), &self.params, txid).map(|(_, tx)| tx)
+    fn get_transaction(&self, txid: TxId) -> Result<Option<Transaction>, Self::Error> {
+        wallet::get_transaction(self.conn.borrow(), &self.params, txid)
+            .map(|res| res.map(|(_, tx)| tx))
     }
 
     fn get_sapling_nullifiers(
@@ -497,10 +537,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     fn create_account(
         &mut self,
         seed: &SecretVec<u8>,
-        birthday: AccountBirthday,
+        birthday: &AccountBirthday,
     ) -> Result<(AccountId, UnifiedSpendingKey), Self::Error> {
         self.transactionally(|wdb| {
-            let seed_fingerprint = HdSeedFingerprint::from_seed(seed);
+            let seed_fingerprint =
+                SeedFingerprint::from_seed(seed.expose_secret()).ok_or_else(|| {
+                    SqliteClientError::BadAccountData(
+                        "Seed must be between 32 and 252 bytes in length.".to_owned(),
+                    )
+                })?;
             let account_index = wallet::max_zip32_account_index(wdb.conn.0, &seed_fingerprint)?
                 .map(|a| a.next().ok_or(SqliteClientError::AccountIdOutOfRange))
                 .transpose()?
@@ -514,7 +559,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             let account_id = wallet::add_account(
                 wdb.conn.0,
                 &wdb.params,
-                AccountKind::Derived {
+                AccountSource::Derived {
                     seed_fingerprint,
                     account_index,
                 },
@@ -569,7 +614,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height()))))]
+    #[tracing::instrument(skip_all, fields(height = blocks.first().map(|b| u32::from(b.height())), count = blocks.len()))]
     #[allow(clippy::type_complexity)]
     fn put_blocks(
         &mut self,
@@ -714,6 +759,26 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
 
                 last_scanned_height = Some(block.height());
                 let block_commitments = block.into_commitments();
+                trace!(
+                    "Sapling commitments for {:?}: {:?}",
+                    last_scanned_height,
+                    block_commitments
+                        .sapling
+                        .iter()
+                        .map(|(_, r)| *r)
+                        .collect::<Vec<_>>()
+                );
+                #[cfg(feature = "orchard")]
+                trace!(
+                    "Orchard commitments for {:?}: {:?}",
+                    last_scanned_height,
+                    block_commitments
+                        .orchard
+                        .iter()
+                        .map(|(_, r)| *r)
+                        .collect::<Vec<_>>()
+                );
+
                 sapling_commitments.extend(block_commitments.sapling.into_iter().map(Some));
                 #[cfg(feature = "orchard")]
                 orchard_commitments.extend(block_commitments.orchard.into_iter().map(Some));
@@ -795,7 +860,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 >(
                     // An iterator of checkpoints heights for which we wish to ensure that
                     // checkpoints exists.
-                    checkpoint_heights: I,
+                    ensure_heights: I,
                     // The map of checkpoint positions from which we will draw note commitment tree
                     // position information for the newly created checkpoints.
                     existing_checkpoint_positions: &BTreeMap<BlockHeight, Position>,
@@ -803,15 +868,15 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                     // there is no preceding checkpoint in existing_checkpoint_positions.
                     state_final_tree: &Frontier<H, DEPTH>,
                 ) -> Vec<(BlockHeight, Checkpoint)> {
-                    checkpoint_heights
-                        .flat_map(|from_checkpoint_height| {
+                    ensure_heights
+                        .flat_map(|ensure_height| {
                             existing_checkpoint_positions
-                                .range::<BlockHeight, _>(..=*from_checkpoint_height)
+                                .range::<BlockHeight, _>(..=*ensure_height)
                                 .last()
                                 .map_or_else(
                                     || {
                                         Some((
-                                            *from_checkpoint_height,
+                                            *ensure_height,
                                             state_final_tree
                                                 .value()
                                                 .map_or_else(Checkpoint::tree_empty, |t| {
@@ -819,10 +884,10 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                                 }),
                                         ))
                                     },
-                                    |(to_prev_height, position)| {
-                                        if *to_prev_height < *from_checkpoint_height {
+                                    |(existing_checkpoint_height, position)| {
+                                        if *existing_checkpoint_height < *ensure_height {
                                             Some((
-                                                *from_checkpoint_height,
+                                                *ensure_height,
                                                 Checkpoint::at_position(*position),
                                             ))
                                         } else {
@@ -838,22 +903,28 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 }
 
                 #[cfg(feature = "orchard")]
-                let missing_sapling_checkpoints = ensure_checkpoints(
-                    orchard_checkpoint_positions.keys(),
-                    &sapling_checkpoint_positions,
-                    from_state.final_sapling_tree(),
-                );
-                #[cfg(feature = "orchard")]
-                let missing_orchard_checkpoints = ensure_checkpoints(
-                    sapling_checkpoint_positions.keys(),
-                    &orchard_checkpoint_positions,
-                    from_state.final_orchard_tree(),
+                let (missing_sapling_checkpoints, missing_orchard_checkpoints) = (
+                    ensure_checkpoints(
+                        orchard_checkpoint_positions.keys(),
+                        &sapling_checkpoint_positions,
+                        from_state.final_sapling_tree(),
+                    ),
+                    ensure_checkpoints(
+                        sapling_checkpoint_positions.keys(),
+                        &orchard_checkpoint_positions,
+                        from_state.final_orchard_tree(),
+                    ),
                 );
 
                 // Update the Sapling note commitment tree with all newly read note commitments
                 {
                     let mut sapling_subtrees_iter = sapling_subtrees.into_iter();
                     wdb.with_sapling_tree_mut::<_, _, Self::Error>(|sapling_tree| {
+                        debug!(
+                            "Sapling initial tree size at {:?}: {:?}",
+                            from_state.block_height(),
+                            from_state.final_sapling_tree().tree_size()
+                        );
                         sapling_tree.insert_frontier(
                             from_state.final_sapling_tree().clone(),
                             Retention::Checkpoint {
@@ -866,13 +937,27 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             sapling_tree.insert_tree(tree, checkpoints)?;
                         }
 
-                        // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height
+                        // Ensure we have a Sapling checkpoint for each checkpointed Orchard block height.
+                        // We skip all checkpoints below the minimum retained checkpoint in the
+                        // Sapling tree, because branches below this height may be pruned.
                         #[cfg(feature = "orchard")]
-                        for (height, checkpoint) in &missing_sapling_checkpoints {
-                            sapling_tree
-                                .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
-                                .map_err(ShardTreeError::Storage)?;
+                        {
+                            let min_checkpoint_height = sapling_tree
+                                .store()
+                                .min_checkpoint_id()
+                                .map_err(ShardTreeError::Storage)?
+                                .expect(
+                                    "At least one checkpoint was inserted (by insert_frontier)",
+                                );
+
+                            for (height, checkpoint) in &missing_sapling_checkpoints {
+                                if *height > min_checkpoint_height {
+                                    sapling_tree
+                                        .store_mut()
+                                        .add_checkpoint(*height, checkpoint.clone())
+                                        .map_err(ShardTreeError::Storage)?;
+                                }
+                            }
                         }
 
                         Ok(())
@@ -884,6 +969,11 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 {
                     let mut orchard_subtrees = orchard_subtrees.into_iter();
                     wdb.with_orchard_tree_mut::<_, _, Self::Error>(|orchard_tree| {
+                        debug!(
+                            "Orchard initial tree size at {:?}: {:?}",
+                            from_state.block_height(),
+                            from_state.final_orchard_tree().tree_size()
+                        );
                         orchard_tree.insert_frontier(
                             from_state.final_orchard_tree().clone(),
                             Retention::Checkpoint {
@@ -896,19 +986,35 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             orchard_tree.insert_tree(tree, checkpoints)?;
                         }
 
-                        for (height, checkpoint) in &missing_orchard_checkpoints {
-                            orchard_tree
-                                .store_mut()
-                                .add_checkpoint(*height, checkpoint.clone())
-                                .map_err(ShardTreeError::Storage)?;
-                        }
+                        // Ensure we have an Orchard checkpoint for each checkpointed Sapling block height.
+                        // We skip all checkpoints below the minimum retained checkpoint in the
+                        // Orchard tree, because branches below this height may be pruned.
+                        {
+                            let min_checkpoint_height = orchard_tree
+                                .store()
+                                .min_checkpoint_id()
+                                .map_err(ShardTreeError::Storage)?
+                                .expect(
+                                    "At least one checkpoint was inserted (by insert_frontier)",
+                                );
 
+                            for (height, checkpoint) in &missing_orchard_checkpoints {
+                                if *height > min_checkpoint_height {
+                                    debug!(
+                                        "Adding missing Orchard checkpoint for height: {:?}: {:?}",
+                                        height,
+                                        checkpoint.position()
+                                    );
+                                    orchard_tree
+                                        .store_mut()
+                                        .add_checkpoint(*height, checkpoint.clone())
+                                        .map_err(ShardTreeError::Storage)?;
+                                }
+                            }
+                        }
                         Ok(())
                     })?;
                 }
-
-                // Update now-expired transactions that didn't get mined.
-                wallet::update_expired_notes(wdb.conn.0, last_scanned_height)?;
 
                 wallet::scanning::scan_complete(
                     wdb.conn.0,
@@ -944,19 +1050,39 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
     ) -> Result<(), Self::Error> {
         self.transactionally(|wdb| {
             let tx_ref = wallet::put_tx_data(wdb.conn.0, d_tx.tx(), None, None)?;
+            let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
+            let funding_account = funding_accounts.iter().next().copied();
+            if funding_accounts.len() > 1 {
+                warn!(
+                    "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
+                    d_tx.tx().txid(),
+                    funding_account.unwrap()
+                )
+            }
 
-            let mut spending_account_id: Option<AccountId> = None;
             for output in d_tx.sapling_outputs() {
                 match output.transfer_type() {
-                    TransferType::Outgoing | TransferType::WalletInternal => {
-                        let recipient = if output.transfer_type() == TransferType::Outgoing {
-                            //TODO: Recover the UA, if possible.
-                            Recipient::Sapling(output.note().recipient())
-                        } else {
-                            Recipient::InternalAccount(
-                                *output.account(),
-                                Note::Sapling(output.note().clone()),
-                            )
+                    TransferType::Outgoing => {
+                        //TODO: Recover the UA, if possible.
+                        let recipient = Recipient::Sapling(output.note().recipient());
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            &wdb.params,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
+                    }
+                    TransferType::WalletInternal => {
+                        wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        let recipient = Recipient::InternalAccount {
+                            receiving_account: *output.account(),
+                            external_address: None,
+                            note: Note::Sapling(output.note().clone()),
                         };
 
                         wallet::put_sent_output(
@@ -969,24 +1095,29 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             output.note_value(),
                             Some(output.memo()),
                         )?;
-
-                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-                        }
                     }
                     TransferType::Incoming => {
-                        match spending_account_id {
-                            Some(id) => {
-                                if id != *output.account() {
-                                    panic!("Unable to determine a unique account identifier for z->t spend.");
-                                }
-                            }
-                            None => {
-                                spending_account_id = Some(*output.account());
-                            }
-                        }
-
                         wallet::sapling::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        if let Some(account_id) = funding_account {
+                            let recipient = Recipient::InternalAccount {
+                                receiving_account: *output.account(),
+                                // TODO: recover the actual UA, if possible
+                                external_address: Some(Address::Sapling(output.note().recipient())),
+                                note: Note::Sapling(output.note().clone()),
+                            };
+
+                            wallet::put_sent_output(
+                                wdb.conn.0,
+                                &wdb.params,
+                                account_id,
+                                tx_ref,
+                                output.index(),
+                                &recipient,
+                                output.note_value(),
+                                Some(output.memo()),
+                            )?;
+                        }
                     }
                 }
             }
@@ -994,22 +1125,36 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
             #[cfg(feature = "orchard")]
             for output in d_tx.orchard_outputs() {
                 match output.transfer_type() {
-                    TransferType::Outgoing | TransferType::WalletInternal => {
-                        let recipient = if output.transfer_type() == TransferType::Outgoing {
-                            // TODO: Recover the actual UA, if possible.
-                            Recipient::Unified(
-                                UnifiedAddress::from_receivers(
-                                    Some(output.note().recipient()),
-                                    None,
-                                    None
-                                ).expect("UA has an Orchard receiver by construction."),
-                                PoolType::Shielded(ShieldedProtocol::Orchard)
+                    TransferType::Outgoing => {
+                        // TODO: Recover the actual UA, if possible.
+                        let recipient = Recipient::Unified(
+                            UnifiedAddress::from_receivers(
+                                Some(output.note().recipient()),
+                                None,
+                                None,
                             )
-                        } else {
-                            Recipient::InternalAccount(
-                                *output.account(),
-                                Note::Orchard(*output.note()),
-                            )
+                            .expect("UA has an Orchard receiver by construction."),
+                            PoolType::Shielded(ShieldedProtocol::Orchard),
+                        );
+
+                        wallet::put_sent_output(
+                            wdb.conn.0,
+                            &wdb.params,
+                            *output.account(),
+                            tx_ref,
+                            output.index(),
+                            &recipient,
+                            output.note_value(),
+                            Some(output.memo()),
+                        )?;
+                    }
+                    TransferType::WalletInternal => {
+                        wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        let recipient = Recipient::InternalAccount {
+                            receiving_account: *output.account(),
+                            external_address: None,
+                            note: Note::Orchard(*output.note()),
                         };
 
                         wallet::put_sent_output(
@@ -1022,56 +1167,78 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                             output.note_value(),
                             Some(output.memo()),
                         )?;
-
-                        if matches!(recipient, Recipient::InternalAccount(_, _)) {
-                            wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
-                        }
                     }
                     TransferType::Incoming => {
-                        match spending_account_id {
-                            Some(id) => {
-                                if id != *output.account() {
-                                    panic!("Unable to determine a unique account identifier for z->t spend.");
-                                }
-                            }
-                            None => {
-                                spending_account_id = Some(*output.account());
-                            }
-                        }
-
                         wallet::orchard::put_received_note(wdb.conn.0, output, tx_ref, None)?;
+
+                        if let Some(account_id) = funding_account {
+                            // Even if the recipient address is external, record the send as internal.
+                            let recipient = Recipient::InternalAccount {
+                                receiving_account: *output.account(),
+                                // TODO: recover the actual UA, if possible
+                                external_address: Some(Address::Unified(
+                                    UnifiedAddress::from_receivers(
+                                    Some(output.note().recipient()),
+                                    None,
+                                    None,
+                                ).expect("UA has an Orchard receiver by construction."))),
+                                note: Note::Orchard(*output.note()),
+                            };
+
+                            wallet::put_sent_output(
+                                wdb.conn.0,
+                                &wdb.params,
+                                account_id,
+                                tx_ref,
+                                output.index(),
+                                &recipient,
+                                output.note_value(),
+                                Some(output.memo()),
+                            )?;
+                        }
                     }
                 }
             }
 
             // If any of the utxos spent in the transaction are ours, mark them as spent.
             #[cfg(feature = "transparent-inputs")]
-            for txin in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vin.iter()) {
+            for txin in d_tx
+                .tx()
+                .transparent_bundle()
+                .iter()
+                .flat_map(|b| b.vin.iter())
+            {
                 wallet::mark_transparent_utxo_spent(wdb.conn.0, tx_ref, &txin.prevout)?;
             }
 
             // If we have some transparent outputs:
-            if d_tx.tx().transparent_bundle().iter().any(|b| !b.vout.is_empty()) {
+            if d_tx
+                .tx()
+                .transparent_bundle()
+                .iter()
+                .any(|b| !b.vout.is_empty())
+            {
                 // If the transaction contains spends from our wallet, we will store z->t
                 // transactions we observe in the same way they would be stored by
                 // create_spend_to_address.
-                let sapling_from_account = wdb.get_sapling_nullifiers(NullifierQuery::All)?.into_iter().find(
-                    |(_, nf)|
-                        d_tx.tx().sapling_bundle().into_iter().flat_map(|b| b.shielded_spends().iter())
-                        .any(|input| nf == input.nullifier())
-                ).map(|(account_id, _)| account_id);
+                let funding_accounts = wallet::get_funding_accounts(wdb.conn.0, d_tx.tx())?;
+                let funding_account = funding_accounts.iter().next().copied();
+                if let Some(account_id) = funding_account {
+                    if funding_accounts.len() > 1 {
+                        warn!(
+                            "More than one wallet account detected as funding transaction {:?}, selecting {:?}",
+                            d_tx.tx().txid(),
+                            account_id
+                        )
+                    }
 
-                #[cfg(feature = "orchard")]
-                let orchard_from_account = wdb.get_orchard_nullifiers(NullifierQuery::All)?.into_iter().find(
-                    |(_, nf)|
-                        d_tx.tx().orchard_bundle().iter().flat_map(|b| b.actions().iter())
-                        .any(|input| nf == input.nullifier())
-                ).map(|(account_id, _)| account_id);
-                #[cfg(not(feature = "orchard"))]
-                let orchard_from_account = None;
-
-                if let Some(account_id) = orchard_from_account.or(sapling_from_account) {
-                    for (output_index, txout) in d_tx.tx().transparent_bundle().iter().flat_map(|b| b.vout.iter()).enumerate() {
+                    for (output_index, txout) in d_tx
+                        .tx()
+                        .transparent_bundle()
+                        .iter()
+                        .flat_map(|b| b.vout.iter())
+                        .enumerate()
+                    {
                         if let Some(address) = txout.recipient_address() {
                             wallet::put_sent_output(
                                 wdb.conn.0,
@@ -1081,7 +1248,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                                 output_index,
                                 &Recipient::Transparent(address),
                                 txout.value,
-                                None
+                                None,
                             )?;
                         }
                     }
@@ -1147,13 +1314,17 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                 )?;
 
                 match output.recipient() {
-                    Recipient::InternalAccount(account, Note::Sapling(note)) => {
+                    Recipient::InternalAccount {
+                        receiving_account,
+                        note: Note::Sapling(note),
+                        ..
+                    } => {
                         wallet::sapling::put_received_note(
                             wdb.conn.0,
                             &DecryptedOutput::new(
                                 output.output_index(),
                                 note.clone(),
-                                *account,
+                                *receiving_account,
                                 output
                                     .memo()
                                     .map_or_else(MemoBytes::empty, |memo| memo.clone()),
@@ -1164,13 +1335,17 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         )?;
                     }
                     #[cfg(feature = "orchard")]
-                    Recipient::InternalAccount(account, Note::Orchard(note)) => {
+                    Recipient::InternalAccount {
+                        receiving_account,
+                        note: Note::Orchard(note),
+                        ..
+                    } => {
                         wallet::orchard::put_received_note(
                             wdb.conn.0,
                             &DecryptedOutput::new(
                                 output.output_index(),
                                 *note,
-                                *account,
+                                *receiving_account,
                                 output
                                     .memo()
                                     .map_or_else(MemoBytes::empty, |memo| memo.clone()),
@@ -1652,7 +1827,8 @@ extern crate assert_matches;
 #[cfg(test)]
 mod tests {
     use secrecy::SecretVec;
-    use zcash_client_backend::data_api::{AccountBirthday, WalletRead, WalletWrite};
+    use zcash_client_backend::data_api::{WalletRead, WalletWrite};
+    use zcash_primitives::block::BlockHash;
 
     use crate::{testing::TestBuilder, AccountId, DEFAULT_UA_REQUEST};
 
@@ -1665,29 +1841,28 @@ mod tests {
     #[test]
     fn validate_seed() {
         let st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
+        let account = st.test_account().unwrap();
 
         assert!({
-            let account = st.test_account().unwrap().0;
             st.wallet()
-                .validate_seed(account, st.test_seed().unwrap())
+                .validate_seed(account.account_id(), st.test_seed().unwrap())
                 .unwrap()
         });
 
         // check that passing an invalid account results in a failure
         assert!({
-            let account = AccountId(3);
+            let wrong_account_index = AccountId(3);
             !st.wallet()
-                .validate_seed(account, st.test_seed().unwrap())
+                .validate_seed(wrong_account_index, st.test_seed().unwrap())
                 .unwrap()
         });
 
         // check that passing an invalid seed results in a failure
         assert!({
-            let account = st.test_account().unwrap().0;
             !st.wallet()
-                .validate_seed(account, &SecretVec::new(vec![1u8; 32]))
+                .validate_seed(account.account_id(), &SecretVec::new(vec![1u8; 32]))
                 .unwrap()
         });
     }
@@ -1695,22 +1870,28 @@ mod tests {
     #[test]
     pub(crate) fn get_next_available_address() {
         let mut st = TestBuilder::new()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
-        let account = st.test_account().unwrap();
+        let account = st.test_account().cloned().unwrap();
 
-        let current_addr = st.wallet().get_current_address(account.0).unwrap();
+        let current_addr = st
+            .wallet()
+            .get_current_address(account.account_id())
+            .unwrap();
         assert!(current_addr.is_some());
 
         // TODO: Add Orchard
         let addr2 = st
             .wallet_mut()
-            .get_next_available_address(account.0, DEFAULT_UA_REQUEST)
+            .get_next_available_address(account.account_id(), DEFAULT_UA_REQUEST)
             .unwrap();
         assert!(addr2.is_some());
         assert_ne!(current_addr, addr2);
 
-        let addr2_cur = st.wallet().get_current_address(account.0).unwrap();
+        let addr2_cur = st
+            .wallet()
+            .get_current_address(account.account_id())
+            .unwrap();
         assert_eq!(addr2, addr2_cur);
     }
 
@@ -1720,15 +1901,16 @@ mod tests {
         // Add an account to the wallet.
         let st = TestBuilder::new()
             .with_block_cache()
-            .with_test_account(AccountBirthday::from_sapling_activation)
+            .with_account_from_sapling_activation(BlockHash([0; 32]))
             .build();
         let account = st.test_account().unwrap();
+        let ufvk = account.usk().to_unified_full_viewing_key();
+        let (taddr, _) = account.usk().default_transparent_address();
 
-        let (_, usk, _) = st.test_account().unwrap();
-        let ufvk = usk.to_unified_full_viewing_key();
-        let (taddr, _) = usk.default_transparent_address();
-
-        let receivers = st.wallet().get_transparent_receivers(account.0).unwrap();
+        let receivers = st
+            .wallet()
+            .get_transparent_receivers(account.account_id())
+            .unwrap();
 
         // The receiver for the default UA should be in the set.
         assert!(receivers.contains_key(
@@ -1756,8 +1938,8 @@ mod tests {
 
         // Generate some fake CompactBlocks.
         let seed = [0u8; 32];
-        let account = zip32::AccountId::ZERO;
-        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), account);
+        let hd_account_index = zip32::AccountId::ZERO;
+        let extsk = sapling::spending_key(&seed, st.wallet().params.coin_type(), hd_account_index);
         let dfvk = extsk.to_diversifiable_full_viewing_key();
         let (h1, meta1, _) = st.generate_next_block(
             &dfvk,

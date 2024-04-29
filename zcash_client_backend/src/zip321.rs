@@ -131,6 +131,18 @@ pub struct Payment {
 }
 
 impl Payment {
+    /// Constructs a new [`Payment`] paying the given address the specified amount.
+    pub fn without_memo(recipient_address: Address, amount: NonNegativeAmount) -> Self {
+        Self {
+            recipient_address,
+            amount,
+            memo: None,
+            label: None,
+            message: None,
+            other_params: vec![],
+        }
+    }
+
     /// A utility for use in tests to help check round-trip serialization properties.
     #[cfg(any(test, feature = "test-dependencies"))]
     pub(in crate::zip321) fn normalize(&mut self) {

@@ -605,9 +605,10 @@ where
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
+    unimplemented!();
     let mut step_results = Vec::with_capacity(proposal.steps().len());
     for step in proposal.steps() {
-        let step_result = create_proposed_transaction(
+        let step_result = calculate_proposed_transaction(
             wallet_db,
             params,
             spend_prover,
@@ -631,9 +632,10 @@ where
     .expect("proposal.steps is NonEmpty"))
 }
 
+/// Zingo uses calculate_proposed_transaction to create the transaction, and then stores it ASYNCRONOUSLY
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
+pub fn calculate_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     wallet_db: &mut DbT,
     params: &ParamsT,
     spend_prover: &impl SpendProver,
@@ -654,7 +656,7 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     >,
 >
 where
-    DbT: WalletWrite + WalletCommitmentTrees,
+    DbT: WalletRead + WalletCommitmentTrees,
     ParamsT: consensus::Parameters + Clone,
     FeeRuleT: FeeRule,
 {
@@ -935,10 +937,6 @@ where
         Some(sapling_dfvk.to_ovk(Scope::Internal))
     };
 
-    #[cfg(feature = "orchard")]
-    let mut orchard_output_meta = vec![];
-    let mut sapling_output_meta = vec![];
-    let mut transparent_output_meta = vec![];
     for (payment, output_pool) in proposal_step
         .payment_pools()
         .iter()
@@ -973,14 +971,6 @@ where
                             payment.amount.into(),
                             memo.clone(),
                         )?;
-                        orchard_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
-                                PoolType::Shielded(ShieldedProtocol::Orchard),
-                            ),
-                            payment.amount,
-                            Some(memo),
-                        ));
                     }
 
                     PoolType::Shielded(ShieldedProtocol::Sapling) => {
@@ -990,14 +980,6 @@ where
                             payment.amount,
                             memo.clone(),
                         )?;
-                        sapling_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
-                                PoolType::Shielded(ShieldedProtocol::Sapling),
-                            ),
-                            payment.amount,
-                            Some(memo),
-                        ));
                     }
 
                     PoolType::Transparent => {
@@ -1023,7 +1005,6 @@ where
                     payment.amount,
                     memo.clone(),
                 )?;
-                sapling_output_meta.push((Recipient::Sapling(*addr), payment.amount, Some(memo)));
             }
             Address::Transparent(to) => {
                 if payment.memo.is_some() {
@@ -1031,7 +1012,6 @@ where
                 } else {
                     builder.add_transparent_output(to, payment.amount)?;
                 }
-                transparent_output_meta.push((to, payment.amount));
             }
         }
     }
@@ -1048,14 +1028,6 @@ where
                     change_value.value(),
                     memo.clone(),
                 )?;
-                sapling_output_meta.push((
-                    Recipient::InternalAccount(
-                        account,
-                        PoolType::Shielded(ShieldedProtocol::Sapling),
-                    ),
-                    change_value.value(),
-                    Some(memo),
-                ))
             }
             ShieldedProtocol::Orchard => {
                 #[cfg(not(feature = "orchard"))]
@@ -1067,18 +1039,10 @@ where
                 {
                     builder.add_orchard_output(
                         orchard_internal_ovk(),
-                        orchard_fvk.address_at(0u32, orchard::keys::Scope::Internal),
+                        orchard_fvk.address_at(0u32, orchard::keys::Scope::External),
                         change_value.value().into(),
                         memo.clone(),
                     )?;
-                    orchard_output_meta.push((
-                        Recipient::InternalAccount(
-                            account,
-                            PoolType::Shielded(ShieldedProtocol::Orchard),
-                        ),
-                        change_value.value(),
-                        Some(memo),
-                    ))
                 }
             }
         }
@@ -1086,105 +1050,6 @@ where
 
     // Build the transaction with the specified fee rule
     let build_result = builder.build(OsRng, spend_prover, output_prover, fee_rule)?;
-
-    #[cfg(feature = "orchard")]
-    let orchard_internal_ivk = orchard_fvk.to_ivk(orchard::keys::Scope::Internal);
-    #[cfg(feature = "orchard")]
-    let orchard_outputs =
-        orchard_output_meta
-            .into_iter()
-            .enumerate()
-            .map(|(i, (recipient, value, memo))| {
-                let output_index = build_result
-                    .orchard_meta()
-                    .output_action_index(i)
-                    .expect("An action should exist in the transaction for each Orchard output.");
-
-                let recipient = recipient
-                    .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Orchard));
-                        build_result
-                            .transaction()
-                            .orchard_bundle()
-                            .and_then(|bundle| {
-                                bundle
-                                    .decrypt_output_with_key(output_index, &orchard_internal_ivk)
-                                    .map(|(note, _, _)| Note::Orchard(note))
-                            })
-                    })
-                    .internal_account_note_transpose_option()
-                    .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
-
-                SentTransactionOutput::from_parts(output_index, recipient, value, memo)
-            });
-
-    let sapling_internal_ivk =
-        PreparedIncomingViewingKey::new(&sapling_dfvk.to_ivk(Scope::Internal));
-    let sapling_outputs =
-        sapling_output_meta
-            .into_iter()
-            .enumerate()
-            .map(|(i, (recipient, value, memo))| {
-                let output_index = build_result
-                    .sapling_meta()
-                    .output_index(i)
-                    .expect("An output should exist in the transaction for each Sapling payment.");
-
-                let recipient = recipient
-                    .map_internal_account_note(|pool| {
-                        assert!(pool == PoolType::Shielded(ShieldedProtocol::Sapling));
-                        build_result
-                            .transaction()
-                            .sapling_bundle()
-                            .and_then(|bundle| {
-                                try_sapling_note_decryption(
-                                    &sapling_internal_ivk,
-                                    &bundle.shielded_outputs()[output_index],
-                                    zip212_enforcement(params, min_target_height),
-                                )
-                                .map(|(note, _, _)| Note::Sapling(note))
-                            })
-                    })
-                    .internal_account_note_transpose_option()
-                    .expect("Wallet-internal outputs must be decryptable with the wallet's IVK");
-
-                SentTransactionOutput::from_parts(output_index, recipient, value, memo)
-            });
-
-    let transparent_outputs = transparent_output_meta.into_iter().map(|(addr, value)| {
-        let script = addr.script();
-        let output_index = build_result
-            .transaction()
-            .transparent_bundle()
-            .and_then(|b| {
-                b.vout
-                    .iter()
-                    .enumerate()
-                    .find(|(_, tx_out)| tx_out.script_pubkey == script)
-            })
-            .map(|(index, _)| index)
-            .expect("An output should exist in the transaction for each transparent payment.");
-
-        SentTransactionOutput::from_parts(output_index, Recipient::Transparent(*addr), value, None)
-    });
-
-    let mut outputs = vec![];
-    #[cfg(feature = "orchard")]
-    outputs.extend(orchard_outputs);
-    outputs.extend(sapling_outputs);
-    outputs.extend(transparent_outputs);
-
-    wallet_db
-        .store_sent_tx(&SentTransaction {
-            tx: build_result.transaction(),
-            created: time::OffsetDateTime::now_utc(),
-            account,
-            outputs,
-            fee_amount: proposal_step.balance().fee_required(),
-            #[cfg(feature = "transparent-inputs")]
-            utxos_spent,
-        })
-        .map_err(Error::DataSource)?;
 
     Ok(build_result)
 }

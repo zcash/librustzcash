@@ -7,6 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.12.1] - 2024-03-27
+
+### Fixed
+- This release fixes a problem in note selection when sending to a transparent
+  recipient, whereby available funds were being incorrectly excluded from 
+  input selection.
+
+## [0.12.0] - 2024-03-25
+
 ### Added
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies. Additions and
@@ -16,17 +25,21 @@ and this library adheres to Rust's notion of
   - `Account`
   - `AccountBalance::with_orchard_balance_mut`
   - `AccountBirthday::orchard_frontier`
-  - `AccountKind`
+  - `AccountSource`
   - `BlockMetadata::orchard_tree_size`
   - `DecryptedTransaction::{new, tx(), orchard_outputs()}`
+  - `NoteRetention`
   - `ScannedBlock::orchard`
   - `ScannedBlockCommitments::orchard`
+  - `SeedRelevance`
   - `SentTransaction::new`
+  - `SpendableNotes`
   - `ORCHARD_SHARD_HEIGHT`
   - `BlockMetadata::orchard_tree_size`
   - `WalletSummary::next_orchard_subtree_index`
   - `chain::ChainState`
   - `chain::ScanSummary::{spent_orchard_note_count, received_orchard_note_count}`
+  - `impl Debug for chain::CommitmentTreeRoot`
 - `zcash_client_backend::fees`:
   - `orchard`
   - `ChangeValue::orchard`
@@ -46,6 +59,10 @@ and this library adheres to Rust's notion of
   - `WalletOrchardSpend`
   - `WalletOrchardOutput`
   - `WalletTx::{orchard_spends, orchard_outputs}`
+  - `ReceivedNote::map_note`
+  - `ReceivedNote<_, sapling::Note>::note_value`
+  - `ReceivedNote<_, orchard::note::Note>::note_value`
+- `zcash_client_backend::zip321::Payment::without_memo`
 
 ### Changed
 - `zcash_client_backend::data_api`:
@@ -54,15 +71,22 @@ and this library adheres to Rust's notion of
   - Arguments to `ScannedBlock::from_parts` have changed.
   - Changes to the `WalletRead` trait:
     - Added `Account` associated type.
+    - Added `validate_seed` method.
+    - Added `is_seed_relevant_to_any_derived_accounts` method.
     - Added `get_account` method.
     - Added `get_derived_account` method.
     - `get_account_for_ufvk` now returns `Self::Account` instead of a bare
       `AccountId`.
     - Added `get_orchard_nullifiers` method.
+    - `get_transaction` now returns `Result<Option<Transaction>, _>` rather
+      than returning an `Err` if the `txid` parameter does not correspond to
+      a transaction in the database.
+  - `WalletWrite::create_account` now takes its `AccountBirthday` argument by 
+    reference.
   - Changes to the `InputSource` trait:
     - `select_spendable_notes` now takes its `target_value` argument as a
-      `NonNegativeAmount`. Also, the values of the returned map are also
-      `NonNegativeAmount`s instead of `Amount`s.
+      `NonNegativeAmount`. Also, it now returns a `SpendableNotes` data 
+      structure instead of a vector.
   - Fields of `DecryptedTransaction` are now private. Use `DecryptedTransaction::new`
     and the newly provided accessors instead.
   - Fields of `SentTransaction` are now private. Use `SentTransaction::new`
@@ -72,7 +96,6 @@ and this library adheres to Rust's notion of
     - `type OrchardShardStore`
     - `fn with_orchard_tree_mut`
     - `fn put_orchard_subtree_roots`
-  - Added method `WalletRead::validate_seed`
   - Removed `Error::AccountNotFound` variant.
   - `WalletSummary::new` now takes an additional `next_orchard_subtree_index`
     argument when the `orchard` feature flag is enabled.
@@ -89,6 +112,8 @@ and this library adheres to Rust's notion of
     feature flag.
 - `zcash_client_backend::proto`:
   - `ProposalDecodingError` has a new variant `TransparentMemo`.
+- `zcash_client_backend::wallet::Recipient::InternalAccount` is now a structured
+  variant with an additional `external_address` field.
 - `zcash_client_backend::zip321::render::amount_str` now takes a
   `NonNegativeAmount` rather than a signed `Amount` as its argument.
 - `zcash_client_backend::zip321::parse::parse_amount` now parses a
