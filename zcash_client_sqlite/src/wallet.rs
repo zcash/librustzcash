@@ -2838,7 +2838,7 @@ mod tests {
     use zcash_primitives::{block::BlockHash, transaction::components::amount::NonNegativeAmount};
 
     use crate::{
-        testing::{AddressType, BlockCache, TestBuilder, TestState},
+        testing::{AddressType, BlockCache, FakeCompactOutput, TestBuilder, TestState},
         AccountId,
     };
 
@@ -3209,8 +3209,10 @@ mod tests {
             start_height,
             BlockHash([0; 32]),
             &not_our_key,
-            AddressType::DefaultExternal,
-            not_our_value,
+            &[FakeCompactOutput::new(
+                AddressType::DefaultExternal,
+                not_our_value,
+            )],
             0,
             0,
             false,

@@ -52,7 +52,10 @@ use zcash_protocol::consensus::BlockHeight;
 use super::TestFvk;
 use crate::{
     error::SqliteClientError,
-    testing::{input_selector, AddressType, BlockCache, InitialChainState, TestBuilder, TestState},
+    testing::{
+        input_selector, AddressType, BlockCache, FakeCompactOutput, InitialChainState, TestBuilder,
+        TestState,
+    },
     wallet::{block_max_scanned, commitment_tree, parse_scope, truncate_to_height},
     AccountId, NoteId, ReceivedNoteId,
 };
@@ -1374,8 +1377,10 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         account.birthday().height() + 10,
         BlockHash([0; 32]),
         &not_our_key,
-        AddressType::DefaultExternal,
-        not_our_value,
+        &[FakeCompactOutput::new(
+            AddressType::DefaultExternal,
+            not_our_value,
+        )],
         st.latest_cached_block().unwrap().sapling_end_size,
         st.latest_cached_block().unwrap().orchard_end_size,
         false,
@@ -1956,8 +1961,10 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
         disconnect_height,
         BlockHash([1; 32]),
         &dfvk,
-        AddressType::DefaultExternal,
-        NonNegativeAmount::const_from_u64(8),
+        &[FakeCompactOutput::new(
+            AddressType::DefaultExternal,
+            NonNegativeAmount::const_from_u64(8),
+        )],
         2,
         2,
         true,

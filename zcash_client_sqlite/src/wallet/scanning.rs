@@ -598,8 +598,8 @@ pub(crate) mod tests {
     use crate::{
         error::SqliteClientError,
         testing::{
-            pool::ShieldedPoolTester, AddressType, BlockCache, InitialChainState, TestBuilder,
-            TestState,
+            pool::ShieldedPoolTester, AddressType, BlockCache, FakeCompactOutput,
+            InitialChainState, TestBuilder, TestState,
         },
         wallet::{
             sapling::tests::SaplingPoolTester,
@@ -695,8 +695,7 @@ pub(crate) mod tests {
             initial_height,
             prior_block_hash,
             &dfvk,
-            AddressType::DefaultExternal,
-            value,
+            &[FakeCompactOutput::new(AddressType::DefaultExternal, value)],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
             false,
@@ -1103,9 +1102,11 @@ pub(crate) mod tests {
             max_scanned,
             BlockHash([1u8; 32]),
             &dfvk,
-            AddressType::DefaultExternal,
-            // 1235 notes into into the second shard
-            NonNegativeAmount::const_from_u64(10000),
+            &[FakeCompactOutput::new(
+                AddressType::DefaultExternal,
+                // 1235 notes into into the second shard
+                NonNegativeAmount::const_from_u64(10000),
+            )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
             false,
@@ -1291,8 +1292,10 @@ pub(crate) mod tests {
             max_scanned,
             BlockHash([1; 32]),
             &dfvk,
-            AddressType::DefaultExternal,
-            NonNegativeAmount::const_from_u64(10000),
+            &[FakeCompactOutput::new(
+                AddressType::DefaultExternal,
+                NonNegativeAmount::const_from_u64(10000),
+            )],
             frontier_tree_size + 10,
             frontier_tree_size + 10,
             false,
