@@ -471,14 +471,35 @@ where
         let (res, nfs) = self.generate_block_at(
             height,
             prior_cached_block.chain_state.block_hash(),
-            fvk,
-            &[FakeCompactOutput::new(address_type, value)],
+            &[FakeCompactOutput::new(fvk, address_type, value)],
             prior_cached_block.sapling_end_size,
             prior_cached_block.orchard_end_size,
             false,
         );
 
         (height, res, nfs[0])
+    }
+
+    /// Creates a fake block at the expected next height containing multiple outputs
+    /// and inserts it into the cache.
+    pub(crate) fn generate_next_block_multi<Fvk: TestFvk>(
+        &mut self,
+        outputs: &[FakeCompactOutput<Fvk>],
+    ) -> (BlockHeight, Cache::InsertResult, Vec<Fvk::Nullifier>) {
+        let pre_activation_block = CachedBlock::none(self.sapling_activation_height() - 1);
+        let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
+        let height = prior_cached_block.height() + 1;
+
+        let (res, nfs) = self.generate_block_at(
+            height,
+            prior_cached_block.chain_state.block_hash(),
+            outputs,
+            prior_cached_block.sapling_end_size,
+            prior_cached_block.orchard_end_size,
+            false,
+        );
+
+        (height, res, nfs)
     }
 
     /// Adds an empty block to the cache, advancing the simulated chain height.
@@ -526,8 +547,7 @@ where
         &mut self,
         height: BlockHeight,
         prev_hash: BlockHash,
-        fvk: &Fvk,
-        outputs: &[FakeCompactOutput],
+        outputs: &[FakeCompactOutput<Fvk>],
         initial_sapling_tree_size: u32,
         initial_orchard_tree_size: u32,
         allow_broken_hash_chain: bool,
@@ -589,7 +609,6 @@ where
             &self.network(),
             height,
             prev_hash,
-            fvk,
             outputs,
             initial_sapling_tree_size,
             initial_orchard_tree_size,
@@ -1333,6 +1352,76 @@ pub(crate) trait TestFvk {
     ) -> Self::Nullifier;
 }
 
+impl<'a, A: TestFvk> TestFvk for &'a A {
+    type Nullifier = A::Nullifier;
+
+    fn sapling_ovk(&self) -> Option<sapling::keys::OutgoingViewingKey> {
+        (*self).sapling_ovk()
+    }
+
+    #[cfg(feature = "orchard")]
+    fn orchard_ovk(&self, scope: zip32::Scope) -> Option<orchard::keys::OutgoingViewingKey> {
+        (*self).orchard_ovk(scope)
+    }
+
+    fn add_spend<R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        nf: Self::Nullifier,
+        rng: &mut R,
+    ) {
+        (*self).add_spend(ctx, nf, rng)
+    }
+
+    fn add_output<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        req: AddressType,
+        value: Zatoshis,
+        initial_sapling_tree_size: u32,
+        // we don't require an initial Orchard tree size because we don't need it to compute
+        // the nullifier.
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        (*self).add_output(
+            ctx,
+            params,
+            height,
+            req,
+            value,
+            initial_sapling_tree_size,
+            rng,
+        )
+    }
+
+    fn add_logical_action<P: consensus::Parameters, R: RngCore + CryptoRng>(
+        &self,
+        ctx: &mut CompactTx,
+        params: &P,
+        height: BlockHeight,
+        nf: Self::Nullifier,
+        req: AddressType,
+        value: Zatoshis,
+        initial_sapling_tree_size: u32,
+        // we don't require an initial Orchard tree size because we don't need it to compute
+        // the nullifier.
+        rng: &mut R,
+    ) -> Self::Nullifier {
+        (*self).add_logical_action(
+            ctx,
+            params,
+            height,
+            nf,
+            req,
+            value,
+            initial_sapling_tree_size,
+            rng,
+        )
+    }
+}
+
 impl TestFvk for DiversifiableFullViewingKey {
     type Nullifier = Nullifier;
 
@@ -1591,14 +1680,17 @@ fn fake_compact_tx<R: RngCore + CryptoRng>(rng: &mut R) -> CompactTx {
     ctx
 }
 
-pub(crate) struct FakeCompactOutput {
+#[derive(Clone)]
+pub(crate) struct FakeCompactOutput<Fvk> {
+    fvk: Fvk,
     address_type: AddressType,
     value: NonNegativeAmount,
 }
 
-impl FakeCompactOutput {
-    pub(crate) fn new(address_type: AddressType, value: NonNegativeAmount) -> Self {
+impl<Fvk> FakeCompactOutput<Fvk> {
+    pub(crate) fn new(fvk: Fvk, address_type: AddressType, value: NonNegativeAmount) -> Self {
         Self {
+            fvk,
             address_type,
             value,
         }
@@ -1614,8 +1706,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     params: &P,
     height: BlockHeight,
     prev_hash: BlockHash,
-    fvk: &Fvk,
-    outputs: &[FakeCompactOutput],
+    outputs: &[FakeCompactOutput<Fvk>],
     initial_sapling_tree_size: u32,
     initial_orchard_tree_size: u32,
     mut rng: impl RngCore + CryptoRng,
@@ -1624,7 +1715,7 @@ fn fake_compact_block<P: consensus::Parameters, Fvk: TestFvk>(
     let mut ctx = fake_compact_tx(&mut rng);
     let mut nfs = vec![];
     for output in outputs {
-        let nf = fvk.add_output(
+        let nf = output.fvk.add_output(
             &mut ctx,
             params,
             height,

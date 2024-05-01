@@ -3208,8 +3208,8 @@ mod tests {
         let _ = st.generate_block_at(
             start_height,
             BlockHash([0; 32]),
-            &not_our_key,
             &[FakeCompactOutput::new(
+                &not_our_key,
                 AddressType::DefaultExternal,
                 not_our_value,
             )],

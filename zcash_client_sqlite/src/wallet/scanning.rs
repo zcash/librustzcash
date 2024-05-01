@@ -694,8 +694,11 @@ pub(crate) mod tests {
         st.generate_block_at(
             initial_height,
             prior_block_hash,
-            &dfvk,
-            &[FakeCompactOutput::new(AddressType::DefaultExternal, value)],
+            &[FakeCompactOutput::new(
+                &dfvk,
+                AddressType::DefaultExternal,
+                value,
+            )],
             initial_sapling_tree_size,
             initial_orchard_tree_size,
             false,
@@ -1101,8 +1104,8 @@ pub(crate) mod tests {
         st.generate_block_at(
             max_scanned,
             BlockHash([1u8; 32]),
-            &dfvk,
             &[FakeCompactOutput::new(
+                &dfvk,
                 AddressType::DefaultExternal,
                 // 1235 notes into into the second shard
                 NonNegativeAmount::const_from_u64(10000),
@@ -1291,8 +1294,8 @@ pub(crate) mod tests {
         st.generate_block_at(
             max_scanned,
             BlockHash([1; 32]),
-            &dfvk,
             &[FakeCompactOutput::new(
+                &dfvk,
                 AddressType::DefaultExternal,
                 NonNegativeAmount::const_from_u64(10000),
             )],

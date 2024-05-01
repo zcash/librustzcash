@@ -1376,8 +1376,8 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
     st.generate_block_at(
         account.birthday().height() + 10,
         BlockHash([0; 32]),
-        &not_our_key,
         &[FakeCompactOutput::new(
+            &not_our_key,
             AddressType::DefaultExternal,
             not_our_value,
         )],
@@ -1960,8 +1960,8 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     st.generate_block_at(
         disconnect_height,
         BlockHash([1; 32]),
-        &dfvk,
         &[FakeCompactOutput::new(
+            &dfvk,
             AddressType::DefaultExternal,
             NonNegativeAmount::const_from_u64(8),
         )],
