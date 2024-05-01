@@ -1,6 +1,8 @@
 //! Structs representing transaction data scanned from the block chain by a wallet or
 //! light client.
 
+use std::fmt;
+
 use incrementalmerkletree::Position;
 use zcash_keys::address::Address;
 use zcash_note_encryption::EphemeralKeyBytes;
@@ -59,6 +61,18 @@ impl NoteId {
     /// shielded outputs.
     pub fn output_index(&self) -> u16 {
         self.output_index
+    }
+}
+
+impl fmt::Display for NoteId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "txid {} protocol {:?} output_index {}",
+            self.txid(),
+            self.protocol(),
+            self.output_index()
+        )
     }
 }
 
