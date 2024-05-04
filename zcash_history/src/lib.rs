@@ -35,7 +35,7 @@ impl std::fmt::Display for Error {
     }
 }
 
-/// Reference to to the tree node.
+/// Reference to the tree node.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub enum EntryLink {

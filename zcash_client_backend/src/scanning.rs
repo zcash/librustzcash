@@ -1100,7 +1100,7 @@ fn find_received<
     {
         // Collect block note commitments
         let node = extract_note_commitment(output);
-        // If the commitment is the last in the block, ensure that is is retained as a checkpoint
+        // If the commitment is the last in the block, ensure that is retained as a checkpoint
         let is_checkpoint = output_idx + 1 == decoded.len() && last_commitments_in_block;
         let retention = match (decrypted_note.is_some(), is_checkpoint) {
             (is_marked, true) => Retention::Checkpoint {
