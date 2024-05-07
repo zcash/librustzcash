@@ -72,7 +72,7 @@ impl<V: Version> Tree<V> {
         }
     }
 
-    /// New view into the the tree array representation
+    /// New view into the tree array representation
     ///
     /// `length` is total length of the array representation (is generally not a sum of
     ///     peaks.len + extra.len)
