@@ -3080,6 +3080,7 @@ dependencies = [
  "zcash_proofs",
  "zcash_protocol",
  "zip32",
+ "zip321",
 ]
 
 [[package]]

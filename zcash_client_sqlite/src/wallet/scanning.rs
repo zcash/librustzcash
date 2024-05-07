@@ -609,7 +609,18 @@ pub(crate) mod tests {
     };
 
     #[cfg(feature = "orchard")]
-    use {crate::wallet::orchard::tests::OrchardPoolTester, orchard::tree::MerkleHashOrchard};
+    use {
+        crate::wallet::orchard::tests::OrchardPoolTester,
+        incrementalmerkletree::Level,
+        orchard::tree::MerkleHashOrchard,
+        std::{convert::Infallible, num::NonZeroU32},
+        zcash_client_backend::{
+            data_api::{wallet::input_selection::GreedyInputSelector, WalletCommitmentTrees},
+            fees::{standard, DustOutputPolicy},
+            wallet::OvkPolicy,
+        },
+        zcash_primitives::{memo::Memo, transaction::fees::StandardFeeRule},
+    };
 
     #[test]
     fn sapling_scan_complete() {
@@ -1480,5 +1491,353 @@ pub(crate) mod tests {
 
         let actual = suggest_scan_ranges(&st.wallet().conn, Ignored).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// This tests the case wherein:
+    /// * The wallet birthday is in the shard prior to the chain tip
+    /// * The user receives funds in the last complete block in the birthday shard,
+    ///   in the last note in that block.
+    /// * The next block crosses the shard boundary, with two notes in the prior
+    ///   shard and two blocks in the subsequent shard
+    /// * An additional 100 blocks are scanned, to ensure that the checkpoint
+    ///   is pruned.
+    ///
+    /// The diagram below shows the arrangement. the position of the X indicates the
+    /// note commitment for the note belonging to our wallet.
+    /// ```
+    /// blocks:      |<---- 5000 ---->|<----- 10 ---->|<--- 11 --->|<- 1  ->|<- 1 ->|<----- 110 ----->|
+    ///       nu5_activation                       birthday                                       chain_tip
+    /// commitments: |<---- 2^16 ---->|<--(2^16-50)-->|<--- 44 --->|<-___X->|<- 4 ->|<----- 114 ------|
+    /// shards:      |<--- shard0 --->|<---------------- shard1 --------------->|<-------- shard2 -------->...
+    /// ```
+    ///
+    /// # Parameters:
+    /// - `with_birthday_subtree_root`: When this is set to `true`, the wallet state will be
+    ///   initialized such that the subtree root containing the wallet birthday has been inserted
+    ///   into the note commitment tree.
+    #[cfg(feature = "orchard")]
+    fn prepare_orchard_block_spanning_test(
+        with_birthday_subtree_root: bool,
+    ) -> TestState<BlockCache> {
+        let birthday_nu5_offset = 5000;
+        let birthday_prior_block_hash = BlockHash([0; 32]);
+        // We set the Sapling and Orchard frontiers at the birthday block initial state to 50
+        // notes back from the end of the second shard.
+        let birthday_tree_size: u32 = (0x1 << 17) - 50;
+        let mut st = TestBuilder::new()
+            .with_block_cache()
+            .with_initial_chain_state(|rng, network| {
+                let birthday_height =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_nu5_offset;
+
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        birthday_tree_size.into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
+
+                // There will only be one prior root. The completion height of the first shard will
+                // be 10 blocks prior to the wallet birthday height. This isn't actually enough
+                // block space to fit in 2^16-50 note commitments, but that's irrelevant here since
+                // we never need to look at those blocks or those notes.
+                let prior_orchard_roots = prior_orchard_roots
+                    .into_iter()
+                    .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 10, root))
+                    .collect::<Vec<_>>();
+
+                InitialChainState {
+                    chain_state: ChainState::new(
+                        birthday_height - 1,
+                        birthday_prior_block_hash,
+                        Frontier::empty(), // the Sapling tree is unused in this test
+                        orchard_initial_tree,
+                    ),
+                    prior_sapling_roots: vec![],
+                    prior_orchard_roots,
+                }
+            })
+            .with_account_having_current_birthday()
+            .build();
+
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        let ofvk = OrchardPoolTester::random_fvk(st.rng_mut());
+        let dfvk = OrchardPoolTester::test_account_fvk(&st);
+
+        // Create the cache by adding:
+        // * 11 blocks each containing 4 Orchard notes that are not for this wallet
+        // * 1 block containing 4 Orchard notes, the last of which belongs to this wallet
+        // * 1 block containing 4 Orchard notes not for this wallet, this will cross the shard
+        //   boundary
+        // * another 110 blocks each containing a single note not for this wallet
+        {
+            let fake_output = |for_this_wallet| {
+                FakeCompactOutput::new(
+                    if for_this_wallet {
+                        dfvk.clone()
+                    } else {
+                        ofvk.clone()
+                    },
+                    AddressType::DefaultExternal,
+                    NonNegativeAmount::const_from_u64(100000),
+                )
+            };
+
+            let mut final_orchard_tree = birthday.orchard_frontier().clone();
+            // Generate the birthday block plus 10 more
+            for _ in 0..11 {
+                let (_, res, _) = st.generate_next_block_multi(&vec![fake_output(false); 4]);
+                for c in res.orchard() {
+                    final_orchard_tree.append(*c);
+                }
+            }
+
+            // Generate a block with the last note in the block belonging to the wallet
+            let (_, res, _) = st.generate_next_block_multi(&vec![
+                // 3 Orchard notes not for this wallet
+                fake_output(false),
+                fake_output(false),
+                fake_output(false),
+                // One Orchard note for this wallet
+                fake_output(true),
+            ]);
+            for c in res.orchard() {
+                final_orchard_tree.append(*c);
+            }
+
+            // Generate one block spanning the shard boundary
+            let (spanning_block_height, res, _) =
+                st.generate_next_block_multi(&vec![fake_output(false); 4]);
+
+            // Add two note commitments to the Orchard frontier to complete the 2^16 subtree. We
+            // can then add that subtree root to the Orchard frontier, so that we can compute the
+            // root of the completed subtree.
+            for c in res.orchard().iter().take(2) {
+                final_orchard_tree.append(*c);
+            }
+
+            assert_eq!(final_orchard_tree.tree_size(), 0x1 << 17);
+            assert_eq!(spanning_block_height, birthday.height() + 12);
+
+            // Insert the root of the completed subtree if `with_birthday_subtree_root` is set.
+            // This simulates the situation where the subtree roots have all bee inserted prior
+            // to scanning.
+            if with_birthday_subtree_root {
+                st.wallet_mut()
+                    .put_orchard_subtree_roots(
+                        1,
+                        &[CommitmentTreeRoot::from_parts(
+                            spanning_block_height,
+                            final_orchard_tree
+                                .value()
+                                .unwrap()
+                                .root(Some(Level::from(16))),
+                        )],
+                    )
+                    .unwrap();
+            }
+
+            // Add blocks up to the chain tip.
+            let mut chain_tip_height = spanning_block_height;
+            for _ in 0..110 {
+                let (h, res, _) = st.generate_next_block_multi(&vec![fake_output(false)]);
+                for c in res.orchard() {
+                    final_orchard_tree.append(*c);
+                }
+                chain_tip_height = h;
+            }
+
+            assert_eq!(chain_tip_height, birthday.height() + 122);
+        }
+
+        st
+    }
+
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn orchard_block_spanning_tip_boundary() {
+        let mut st = prepare_orchard_block_spanning_test(true);
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        // set the chain tip to the final block height we expect
+        let new_tip = birthday.height() + 122;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+
+        // Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
+        // priority, and that the range from the wallet birthday to the end of the birthday shard
+        // has Historic priority.
+        let birthday_height = birthday.height().into();
+        let expected = vec![
+            scan_range(
+                (birthday_height + 12)..(new_tip + 1).into(),
+                ScanPriority::ChainTip,
+            ),
+            scan_range(
+                birthday_height..(birthday_height + 12),
+                ScanPriority::Historic,
+            ),
+            scan_range(
+                st.sapling_activation_height().into()..birthday.height().into(),
+                ScanPriority::Ignored,
+            ),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, ScanPriority::Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Scan the chain-tip range.
+        st.scan_cached_blocks(birthday.height() + 12, 112);
+
+        // We haven't yet discovered our note, so balances should still be zero
+        assert_eq!(
+            st.get_total_balance(account.account_id()),
+            NonNegativeAmount::ZERO
+        );
+
+        // Now scan the historic range; this should discover our note, which should now be
+        // spendable.
+        st.scan_cached_blocks(birthday.height(), 12);
+        assert_eq!(
+            st.get_total_balance(account.account_id()),
+            NonNegativeAmount::const_from_u64(100000)
+        );
+        assert_eq!(
+            st.get_spendable_balance(account.account_id(), 10),
+            NonNegativeAmount::const_from_u64(100000)
+        );
+
+        // Spend the note.
+        let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to = OrchardPoolTester::sk_default_address(&to_extsk);
+        let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
+            to.to_zcash_address(&st.network()),
+            NonNegativeAmount::const_from_u64(10000),
+        )])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.into()),
+            OrchardPoolTester::SHIELDED_PROTOCOL,
+        );
+        let input_selector =
+            &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
+
+        let proposal = st
+            .propose_transfer(
+                account.account_id(),
+                input_selector,
+                request,
+                NonZeroU32::new(10).unwrap(),
+            )
+            .unwrap();
+
+        let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+            account.usk(),
+            OvkPolicy::Sender,
+            &proposal,
+        );
+        assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+    }
+
+    /// This test verifies that missing a single block that is required for computing a witness is
+    /// sufficient to prevent witness construction.
+    #[test]
+    #[cfg(feature = "orchard")]
+    fn orchard_block_spanning_tip_boundary_incomplete() {
+        let mut st = prepare_orchard_block_spanning_test(false);
+        let account = st.test_account().cloned().unwrap();
+        let birthday = account.birthday();
+
+        // set the chain tip to the final position we expect
+        let new_tip = birthday.height() + 122;
+        st.wallet_mut().update_chain_tip(new_tip).unwrap();
+
+        // Verify that the suggested scan ranges includes only the chain-tip range with ChainTip
+        // priority, and that the range from the wallet birthday to the end of the birthday shard
+        // has Historic priority.
+        let birthday_height = birthday.height().into();
+        let expected = vec![
+            scan_range(
+                birthday_height..(new_tip + 1).into(),
+                ScanPriority::ChainTip,
+            ),
+            scan_range(
+                st.sapling_activation_height().into()..birthday_height,
+                ScanPriority::Ignored,
+            ),
+        ];
+
+        let actual = suggest_scan_ranges(&st.wallet().conn, ScanPriority::Ignored).unwrap();
+        assert_eq!(actual, expected);
+
+        // Scan the chain-tip range, but omitting the spanning block.
+        st.scan_cached_blocks(birthday.height() + 13, 112);
+
+        // We haven't yet discovered our note, so balances should still be zero
+        assert_eq!(
+            st.get_total_balance(account.account_id()),
+            NonNegativeAmount::ZERO
+        );
+
+        // Now scan the historic range; this should discover our note but not
+        // complete the tree. The note should not be considered spendable.
+        st.scan_cached_blocks(birthday.height(), 12);
+        assert_eq!(
+            st.get_total_balance(account.account_id()),
+            NonNegativeAmount::const_from_u64(100000)
+        );
+        assert_eq!(
+            st.get_spendable_balance(account.account_id(), 10),
+            NonNegativeAmount::ZERO
+        );
+
+        // Attempting to spend the note should fail to generate a proposal
+        let to_extsk = OrchardPoolTester::sk(&[0xf5; 32]);
+        let to = OrchardPoolTester::sk_default_address(&to_extsk);
+        let request = zip321::TransactionRequest::new(vec![zip321::Payment::without_memo(
+            to.to_zcash_address(&st.network()),
+            NonNegativeAmount::const_from_u64(10000),
+        )])
+        .unwrap();
+
+        let fee_rule = StandardFeeRule::Zip317;
+
+        let change_memo = "Test change memo".parse::<Memo>().unwrap();
+        let change_strategy = standard::SingleOutputChangeStrategy::new(
+            fee_rule,
+            Some(change_memo.into()),
+            OrchardPoolTester::SHIELDED_PROTOCOL,
+        );
+        let input_selector =
+            &GreedyInputSelector::new(change_strategy, DustOutputPolicy::default());
+
+        let proposal = st.propose_transfer(
+            account.account_id(),
+            input_selector,
+            request.clone(),
+            NonZeroU32::new(10).unwrap(),
+        );
+
+        assert_matches!(proposal, Err(_));
+
+        // Scan the missing block
+        st.scan_cached_blocks(birthday.height() + 12, 1);
+
+        // Verify that it's now possible to create the proposal
+        let proposal = st.propose_transfer(
+            account.account_id(),
+            input_selector,
+            request,
+            NonZeroU32::new(10).unwrap(),
+        );
+
+        assert_matches!(proposal, Ok(_));
     }
 }

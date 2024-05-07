@@ -1939,22 +1939,66 @@ impl BlockCache {
     }
 }
 
+pub(crate) struct NoteCommitments {
+    sapling: Vec<sapling::Node>,
+    #[cfg(feature = "orchard")]
+    orchard: Vec<MerkleHashOrchard>,
+}
+
+impl NoteCommitments {
+    pub(crate) fn from_compact_block(cb: &CompactBlock) -> Self {
+        NoteCommitments {
+            sapling: cb
+                .vtx
+                .iter()
+                .flat_map(|tx| {
+                    tx.outputs
+                        .iter()
+                        .map(|out| sapling::Node::from_cmu(&out.cmu().unwrap()))
+                })
+                .collect(),
+            #[cfg(feature = "orchard")]
+            orchard: cb
+                .vtx
+                .iter()
+                .flat_map(|tx| {
+                    tx.actions
+                        .iter()
+                        .map(|act| MerkleHashOrchard::from_cmx(&act.cmx().unwrap()))
+                })
+                .collect(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn sapling(&self) -> &[sapling::Node] {
+        self.sapling.as_ref()
+    }
+
+    #[cfg(feature = "orchard")]
+    pub(crate) fn orchard(&self) -> &[MerkleHashOrchard] {
+        self.orchard.as_ref()
+    }
+}
+
 impl TestCache for BlockCache {
     type BlockSource = BlockDb;
-    type InsertResult = ();
+    type InsertResult = NoteCommitments;
 
     fn block_source(&self) -> &Self::BlockSource {
         &self.db_cache
     }
 
-    fn insert(&self, cb: &CompactBlock) {
+    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
         let cb_bytes = cb.encode_to_vec();
+        let res = NoteCommitments::from_compact_block(cb);
         self.db_cache
             .0
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(params![u32::from(cb.height()), cb_bytes,])
             .unwrap();
+        res
     }
 }
 
