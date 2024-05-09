@@ -71,7 +71,7 @@ use zcash_primitives::{
     consensus::{self, BlockHeight},
     memo::{Memo, MemoBytes},
     transaction::{components::amount::NonNegativeAmount, Transaction, TxId},
-    zip32::{self, DiversifierIndex, Scope},
+    zip32::{self, DiversifierIndex},
 };
 use zip32::fingerprint::SeedFingerprint;
 
@@ -686,7 +686,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         let spent_in = output
                             .nf()
                             .map(|nf| {
-                                wallet::query_nullifier_map::<_, Scope>(
+                                wallet::query_nullifier_map(
                                     wdb.conn.0,
                                     ShieldedProtocol::Sapling,
                                     nf,
@@ -704,7 +704,7 @@ impl<P: consensus::Parameters> WalletWrite for WalletDb<rusqlite::Connection, P>
                         let spent_in = output
                             .nf()
                             .map(|nf| {
-                                wallet::query_nullifier_map::<_, Scope>(
+                                wallet::query_nullifier_map(
                                     wdb.conn.0,
                                     ShieldedProtocol::Orchard,
                                     &nf.to_bytes(),

@@ -28,7 +28,7 @@ use crate::fees::orchard as orchard_fees;
 use zcash_primitives::legacy::keys::{NonHardenedChildIndex, TransparentKeyScope};
 
 /// A unique identifier for a shielded transaction output
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NoteId {
     txid: TxId,
     protocol: ShieldedProtocol,
@@ -113,6 +113,7 @@ impl<AccountId, N> Recipient<AccountId, Option<N>> {
 /// The shielded subset of a [`Transaction`]'s data that is relevant to a particular wallet.
 ///
 /// [`Transaction`]: zcash_primitives::transaction::Transaction
+#[derive(Clone)]
 pub struct WalletTx<AccountId> {
     txid: TxId,
     block_index: usize,
@@ -242,6 +243,7 @@ impl transparent_fees::InputView for WalletTransparentOutput {
 }
 
 /// A reference to a spent note belonging to the wallet within a transaction.
+#[derive(Clone)]
 pub struct WalletSpend<Nf, AccountId> {
     index: usize,
     nf: Nf,
@@ -281,6 +283,7 @@ pub type WalletSaplingSpend<AccountId> = WalletSpend<sapling::Nullifier, Account
 pub type WalletOrchardSpend<AccountId> = WalletSpend<orchard::note::Nullifier, AccountId>;
 
 /// An output that was successfully decrypted in the process of wallet scanning.
+#[derive(Clone)]
 pub struct WalletOutput<Note, Nullifier, AccountId> {
     index: usize,
     ephemeral_key: EphemeralKeyBytes,

@@ -1209,7 +1209,6 @@ mod tests {
 
         // introduce some roots
         let roots = (0u32..4)
-            .into_iter()
             .map(|idx| {
                 CommitmentTreeRoot::from_parts(
                     BlockHeight::from((idx + 1) * 3),
@@ -1228,7 +1227,7 @@ mod tests {
         let checkpoint_height = BlockHeight::from(3);
         tree.batch_insert(
             Position::from(24),
-            ('a'..='h').into_iter().map(|c| {
+            ('a'..='h').map(|c| {
                 (
                     c.to_string(),
                     match c {
