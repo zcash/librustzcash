@@ -1,5 +1,6 @@
 use blake2b_simd::{Hash as Blake2bHash, Params as Blake2bParams};
 use ff::PrimeField;
+use zcash_protocol::value::ZatBalance;
 
 use crate::{
     consensus::BranchId,
@@ -14,6 +15,7 @@ use super::{
         sapling as sapling_serialization,
         sprout::JsDescription,
         transparent::{self, TxIn, TxOut},
+        Sapling, SaplingPart, ShieldedBundle, Sprout, SproutPart, Transparent, TransparentPart,
     },
     sighash::{SignableInput, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE},
     Authorization, TransactionData,
@@ -35,6 +37,84 @@ macro_rules! update_hash {
             $h.update(&[0; 32]);
         }
     };
+}
+
+/// Trait representing the transparent parts of a [ZIP 143] or [ZIP 243] transaction digest.
+///
+/// [ZIP 143]: https://zips.z.cash/zip-0143
+/// [ZIP 243]: https://zips.z.cash/zip-0243
+pub trait TransparentSigDigester: TransparentPart {
+    fn digest_prevout(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash;
+    fn digest_sequence(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash;
+    fn digest_outputs(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash;
+    fn digest_single_output(
+        transparent_bundle: Option<&Self::Bundle>,
+        signable_input: &SignableInput<'_>,
+    ) -> [u8; 32];
+    fn digest_signable_input(
+        transparent_bundle: Option<&Self::Bundle>,
+        signable_input: &SignableInput<'_>,
+    ) -> Vec<u8>;
+}
+
+impl<A: transparent::Authorization> TransparentSigDigester for Transparent<A> {
+    fn digest_prevout(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash {
+        prevout_hash(transparent_bundle.map_or(&[], |b| b.vin.as_slice()))
+    }
+
+    fn digest_sequence(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash {
+        sequence_hash(transparent_bundle.map_or(&[], |b| b.vin.as_slice()))
+    }
+
+    fn digest_outputs(transparent_bundle: Option<&Self::Bundle>) -> Blake2bHash {
+        outputs_hash(transparent_bundle.map_or(&[], |b| b.vout.as_slice()))
+    }
+
+    fn digest_single_output(
+        transparent_bundle: Option<&Self::Bundle>,
+        signable_input: &SignableInput<'_>,
+    ) -> [u8; 32] {
+        match (transparent_bundle.as_ref(), signable_input) {
+            (Some(b), SignableInput::Transparent { index, .. }) if index < &b.vout.len() => {
+                single_output_hash(&b.vout[*index])
+                    .as_bytes()
+                    .try_into()
+                    .expect("correct length")
+            }
+            _ => [0; 32],
+        }
+    }
+
+    fn digest_signable_input(
+        transparent_bundle: Option<&Self::Bundle>,
+        signable_input: &SignableInput<'_>,
+    ) -> Vec<u8> {
+        match signable_input {
+            SignableInput::Shielded => vec![],
+            SignableInput::Transparent {
+                index,
+                script_code,
+                value,
+                ..
+            } => {
+                if let Some(bundle) = transparent_bundle {
+                    let mut data = vec![];
+                    bundle.vin[*index].prevout.write(&mut data).unwrap();
+                    script_code.write(&mut data).unwrap();
+                    data.extend_from_slice(&value.to_i64_le_bytes());
+                    data.extend_from_slice(&bundle.vin[*index].sequence.to_le_bytes());
+                    data
+                } else {
+                    panic!("A request has been made to sign a transparent input, but none are present.");
+                }
+            }
+
+            #[cfg(zcash_unstable = "zfuture")]
+            SignableInput::Tze { .. } => {
+                panic!("A request has been made to sign a TZE input, but the transaction version is not ZFuture");
+            }
+        }
+    }
 }
 
 fn prevout_hash<TA: transparent::Authorization>(vin: &[TxIn<TA>]) -> Blake2bHash {
@@ -79,6 +159,38 @@ fn single_output_hash(tx_out: &TxOut) -> Blake2bHash {
         .hash(&data)
 }
 
+/// Trait representing the Sprout parts of a [ZIP 143] or [ZIP 243] transaction digest.
+///
+/// [ZIP 143]: https://zips.z.cash/zip-0143
+/// [ZIP 243]: https://zips.z.cash/zip-0243
+pub trait SproutSigDigester: SproutPart {
+    fn digest_joinsplits(
+        consensus_branch_id: BranchId,
+        sprout_bundle: Option<&Self::Bundle>,
+    ) -> [u8; 32];
+}
+
+impl SproutSigDigester for Sprout {
+    fn digest_joinsplits(
+        consensus_branch_id: BranchId,
+        sprout_bundle: Option<&Self::Bundle>,
+    ) -> [u8; 32] {
+        if !sprout_bundle.map_or(true, |b| b.joinsplits.is_empty()) {
+            let bundle = sprout_bundle.unwrap();
+            joinsplits_hash(
+                consensus_branch_id,
+                &bundle.joinsplits,
+                &bundle.joinsplit_pubkey,
+            )
+            .as_bytes()
+            .try_into()
+            .expect("correct length")
+        } else {
+            [0; 32]
+        }
+    }
+}
+
 fn joinsplits_hash(
     consensus_branch_id: BranchId,
     joinsplits: &[JsDescription],
@@ -100,6 +212,41 @@ fn joinsplits_hash(
         .hash_length(32)
         .personal(ZCASH_JOINSPLITS_HASH_PERSONALIZATION)
         .hash(&data)
+}
+
+/// Trait representing the Sapling parts of a [ZIP 243] transaction digest.
+///
+/// [ZIP 243]: https://zips.z.cash/zip-0243
+pub trait SaplingSigDigester: SaplingPart {
+    fn digest_spends(sapling_bundle: Option<&Self::Bundle>) -> [u8; 32];
+    fn digest_outputs(sapling_bundle: Option<&Self::Bundle>) -> [u8; 32];
+}
+
+impl<A> SaplingSigDigester for Sapling<A>
+where
+    A: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+{
+    fn digest_spends(sapling_bundle: Option<&Self::Bundle>) -> [u8; 32] {
+        if !sapling_bundle.map_or(true, |b| b.shielded_spends().is_empty()) {
+            shielded_spends_hash(sapling_bundle.unwrap().shielded_spends())
+                .as_bytes()
+                .try_into()
+                .expect("correct length")
+        } else {
+            [0; 32]
+        }
+    }
+
+    fn digest_outputs(sapling_bundle: Option<&Self::Bundle>) -> [u8; 32] {
+        if !sapling_bundle.map_or(true, |b| b.shielded_outputs().is_empty()) {
+            shielded_outputs_hash(sapling_bundle.unwrap().shielded_outputs())
+                .as_bytes()
+                .try_into()
+                .expect("correct length")
+        } else {
+            [0; 32]
+        }
+    }
 }
 
 fn shielded_spends_hash<
@@ -132,13 +279,14 @@ fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]
         .hash(&data)
 }
 
-pub fn v4_signature_hash<
-    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
-    A: Authorization<SaplingAuth = SA>,
->(
+pub fn v4_signature_hash<SA, A>(
     tx: &TransactionData<A>,
     signable_input: &SignableInput<'_>,
-) -> Blake2bHash {
+) -> Blake2bHash
+where
+    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
+    A: Authorization<SaplingAuth = SA>,
+{
     let hash_type = signable_input.hash_type();
     if tx.version.has_overwinter() {
         let mut personal = [0; 16];
@@ -155,104 +303,57 @@ pub fn v4_signature_hash<
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0,
-            prevout_hash(
-                tx.transparent_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            Transparent::digest_prevout(tx.transparent_bundle.as_ref())
         );
         update_hash!(
             h,
             (hash_type & SIGHASH_ANYONECANPAY) == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
-            sequence_hash(
-                tx.transparent_bundle
-                    .as_ref()
-                    .map_or(&[], |b| b.vin.as_slice())
-            )
+            Transparent::digest_sequence(tx.transparent_bundle.as_ref())
         );
 
         if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
-            h.update(
-                outputs_hash(
-                    tx.transparent_bundle
-                        .as_ref()
-                        .map_or(&[], |b| b.vout.as_slice()),
-                )
-                .as_bytes(),
-            );
+            h.update(Transparent::digest_outputs(tx.transparent_bundle.as_ref()).as_bytes());
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
-            match (tx.transparent_bundle.as_ref(), signable_input) {
-                (Some(b), SignableInput::Transparent { index, .. }) if index < &b.vout.len() => {
-                    h.update(single_output_hash(&b.vout[*index]).as_bytes())
-                }
-                _ => h.update(&[0; 32]),
-            };
+            h.update(&Transparent::digest_single_output(
+                tx.transparent_bundle.as_ref(),
+                signable_input,
+            ));
         } else {
             h.update(&[0; 32]);
         };
 
-        update_hash!(
-            h,
-            !tx.sprout_bundle
-                .as_ref()
-                .map_or(true, |b| b.joinsplits.is_empty()),
-            {
-                let bundle = tx.sprout_bundle.as_ref().unwrap();
-                joinsplits_hash(
-                    tx.consensus_branch_id,
-                    &bundle.joinsplits,
-                    &bundle.joinsplit_pubkey,
-                )
-            }
-        );
+        h.update(&Sprout::digest_joinsplits(
+            tx.consensus_branch_id,
+            tx.sprout_bundle.as_ref(),
+        ));
 
         if tx.version.has_sapling() {
-            update_hash!(
-                h,
-                !tx.sapling_bundle
-                    .as_ref()
-                    .map_or(true, |b| b.shielded_spends().is_empty()),
-                shielded_spends_hash(tx.sapling_bundle.as_ref().unwrap().shielded_spends())
-            );
-            update_hash!(
-                h,
-                !tx.sapling_bundle
-                    .as_ref()
-                    .map_or(true, |b| b.shielded_outputs().is_empty()),
-                shielded_outputs_hash(tx.sapling_bundle.as_ref().unwrap().shielded_outputs())
-            );
+            h.update(&Sapling::digest_spends(tx.sapling_bundle.as_ref()));
+            h.update(&Sapling::digest_outputs(tx.sapling_bundle.as_ref()));
         }
         h.update(&tx.lock_time.to_le_bytes());
         h.update(&u32::from(tx.expiry_height).to_le_bytes());
         if tx.version.has_sapling() {
-            h.update(&tx.sapling_value_balance().to_i64_le_bytes());
+            h.update(
+                &tx.sapling_bundle
+                    .as_ref()
+                    .map_or(ZatBalance::zero(), ShieldedBundle::value_balance)
+                    .to_i64_le_bytes(),
+            );
         }
         h.update(&u32::from(hash_type).to_le_bytes());
 
         match signable_input {
             SignableInput::Shielded => (),
-            SignableInput::Transparent {
-                index,
-                script_code,
-                value,
-                ..
-            } => {
-                if let Some(bundle) = tx.transparent_bundle.as_ref() {
-                    let mut data = vec![];
-                    bundle.vin[*index].prevout.write(&mut data).unwrap();
-                    script_code.write(&mut data).unwrap();
-                    data.extend_from_slice(&value.to_i64_le_bytes());
-                    data.extend_from_slice(&bundle.vin[*index].sequence.to_le_bytes());
-                    h.update(&data);
-                } else {
-                    panic!(
-                        "A request has been made to sign a transparent input, but none are present."
-                    );
-                }
+            SignableInput::Transparent { .. } => {
+                h.update(&Transparent::digest_signable_input(
+                    tx.transparent_bundle.as_ref(),
+                    signable_input,
+                ));
             }
 
             #[cfg(zcash_unstable = "zfuture")]
