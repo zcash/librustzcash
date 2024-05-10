@@ -2,7 +2,7 @@
 
 use std::io::{self, Read, Write};
 
-use super::{amount::Amount, GROTH_PROOF_SIZE};
+use super::{amount::Amount, AuthorizedSproutPart, Sprout, GROTH_PROOF_SIZE};
 
 // π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
 const PHGR_PROOF_SIZE: usize = 33 + 33 + 65 + 33 + 33 + 33 + 33 + 33;
@@ -28,6 +28,8 @@ impl Bundle {
             .try_fold(Amount::zero(), |total, js| total + js.net_value())
     }
 }
+
+impl AuthorizedSproutPart for Sprout {}
 
 #[derive(Clone)]
 #[allow(clippy::upper_case_acronyms)]
