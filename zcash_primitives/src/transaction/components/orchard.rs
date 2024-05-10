@@ -13,7 +13,7 @@ use orchard::{
 };
 use zcash_encoding::{Array, CompactSize, Vector};
 
-use super::Amount;
+use super::{Amount, AuthorizedOrchardPart, Orchard};
 use crate::transaction::Transaction;
 
 pub const FLAG_SPENDS_ENABLED: u8 = 0b0000_0001;
@@ -43,6 +43,8 @@ impl MapAuth<Authorized, Authorized> for () {
         a
     }
 }
+
+impl AuthorizedOrchardPart for Orchard<orchard::bundle::Authorized> {}
 
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(

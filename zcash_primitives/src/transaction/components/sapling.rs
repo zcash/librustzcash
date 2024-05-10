@@ -21,7 +21,7 @@ use crate::{
     transaction::Transaction,
 };
 
-use super::{Amount, GROTH_PROOF_SIZE};
+use super::{Amount, AuthorizedSaplingPart, Sapling, GROTH_PROOF_SIZE};
 
 /// Returns the enforcement policy for ZIP 212 at the given height.
 pub fn zip212_enforcement(params: &impl Parameters, height: BlockHeight) -> Zip212Enforcement {
@@ -83,6 +83,8 @@ impl MapAuth<Authorized, Authorized> for () {
         a
     }
 }
+
+impl AuthorizedSaplingPart for Sapling<sapling::bundle::Authorized> {}
 
 /// Consensus rules (§4.4) & (§4.5):
 /// - Canonical encoding is enforced here.
