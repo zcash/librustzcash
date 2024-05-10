@@ -21,6 +21,7 @@ use crate::{
         components::{
             amount::{Amount, BalanceError},
             transparent::{self, builder::TransparentBuilder, TxOut},
+            AllBundles,
         },
         fees::{
             transparent::{InputView, OutputView},
@@ -288,7 +289,7 @@ pub struct Builder<'a, P, U: sapling::builder::ProverProgress> {
     sapling_asks: Vec<sapling::keys::SpendAuthorizingKey>,
     orchard_saks: Vec<orchard::keys::SpendAuthorizingKey>,
     #[cfg(zcash_unstable = "zfuture")]
-    tze_builder: TzeBuilder<'a, TransactionData<Unauthorized>>,
+    tze_builder: TzeBuilder<'a, TransactionData<AllBundles<Unauthorized>>>,
     #[cfg(not(zcash_unstable = "zfuture"))]
     tze_builder: std::marker::PhantomData<&'a ()>,
     progress_notifier: U,
@@ -746,7 +747,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         #[cfg(zcash_unstable = "zfuture")]
         let (tze_bundle, tze_signers) = self.tze_builder.build();
 
-        let unauthed_tx: TransactionData<Unauthorized> = TransactionData {
+        let unauthed_tx: TransactionData<AllBundles<Unauthorized>> = TransactionData {
             version,
             consensus_branch_id: BranchId::for_height(&self.params, self.target_height),
             lock_time: 0,
@@ -765,7 +766,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
         let txid_parts = unauthed_tx.digest(TxIdDigester);
 
         let transparent_bundle = unauthed_tx.transparent_bundle.clone().map(|b| {
-            b.apply_signatures(
+            b.apply_signatures::<_, _, AllBundles<Unauthorized>>(
                 #[cfg(feature = "transparent-inputs")]
                 &unauthed_tx,
                 #[cfg(feature = "transparent-inputs")]
@@ -841,7 +842,7 @@ impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<
 impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> ExtensionTxBuilder<'a>
     for Builder<'a, P, U>
 {
-    type BuildCtx = TransactionData<Unauthorized>;
+    type BuildCtx = TransactionData<AllBundles<Unauthorized>>;
     type BuildError = tze::builder::Error;
 
     fn add_tze_input<WBuilder, W: ToPayload>(

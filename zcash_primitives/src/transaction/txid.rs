@@ -19,10 +19,10 @@ use super::{
     components::{
         amount::Amount,
         transparent::{self, TxIn, TxOut},
-        AuthorizedOrchardPart, AuthorizedSaplingPart, AuthorizedTransparentPart, Orchard,
+        AuthorizedOrchardPart, AuthorizedSaplingPart, AuthorizedTransparentPart, Bundles, Orchard,
         OrchardPart, Sapling, SaplingPart, Transparent, TransparentPart,
     },
-    Authorization, Authorized, TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
+    TransactionDigest, TransparentDigests, TxDigests, TxId, TxVersion,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -338,6 +338,25 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
     h.finalize()
 }
 
+/// Trait marker for bounds that are not yet required by consensus rules.
+#[cfg(not(zcash_unstable = "zfuture"))]
+pub trait FutureBundles {}
+#[cfg(not(zcash_unstable = "zfuture"))]
+impl<B: Bundles> FutureBundles for B {}
+
+#[cfg(zcash_unstable = "zfuture")]
+pub trait FutureBundles: Bundles<Tze = Self::FutureTze> {
+    type FutureTze: TzeDigester;
+}
+#[cfg(zcash_unstable = "zfuture")]
+impl<B> FutureBundles for B
+where
+    B: Bundles,
+    B::Tze: TzeDigester,
+{
+    type FutureTze = B::Tze;
+}
+
 /// A TransactionDigest implementation that commits to all of the effecting
 /// data of a transaction to produce a nonmalleable transaction identifier.
 ///
@@ -347,7 +366,13 @@ fn hash_tze_txid_data(tze_digests: Option<&TzeDigests<Blake2bHash>>) -> Blake2bH
 /// This implements the [TxId Digest section of ZIP 244](https://zips.z.cash/zip-0244#txid-digest)
 pub struct TxIdDigester;
 
-impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
+impl<B> TransactionDigest<B> for TxIdDigester
+where
+    B: Bundles + FutureBundles,
+    B::Transparent: TransparentDigester,
+    B::Sapling: SaplingDigester,
+    B::Orchard: OrchardDigester,
+{
     type HeaderDigest = Blake2bHash;
     type TransparentDigest = Option<TransparentDigests<Blake2bHash>>;
     type SaplingDigest = Option<Blake2bHash>;
@@ -370,28 +395,28 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<&<B::Transparent as TransparentPart>::Bundle>,
     ) -> Self::TransparentDigest {
-        Transparent::digest(transparent_bundle)
+        B::Transparent::digest(transparent_bundle)
     }
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
+        sapling_bundle: Option<&<B::Sapling as SaplingPart>::Bundle>,
     ) -> Self::SaplingDigest {
-        Sapling::digest(sapling_bundle)
+        B::Sapling::digest(sapling_bundle)
     }
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
+        orchard_bundle: Option<&<B::Orchard as OrchardPart>::Bundle>,
     ) -> Self::OrchardDigest {
-        Orchard::digest(orchard_bundle)
+        B::Orchard::digest(orchard_bundle)
     }
 
     #[cfg(zcash_unstable = "zfuture")]
-    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<A::TzeAuth>>) -> Self::TzeDigest {
-        Tze::digest(tze_bundle)
+    fn digest_tze(&self, tze_bundle: Option<&<B::Tze as TzePart>::Bundle>) -> Self::TzeDigest {
+        B::Tze::digest(tze_bundle)
     }
 
     fn combine(
@@ -546,13 +571,38 @@ impl TzeWitnessDigester for Tze<tze::Authorized> {
     }
 }
 
+/// Trait marker for bounds that are not yet required by consensus rules.
+#[cfg(not(zcash_unstable = "zfuture"))]
+pub trait FutureWitnesses {}
+#[cfg(not(zcash_unstable = "zfuture"))]
+impl<B: Bundles> FutureWitnesses for B {}
+
+#[cfg(zcash_unstable = "zfuture")]
+pub trait FutureWitnesses: Bundles<Tze = Self::FutureTze> {
+    type FutureTze: TzeWitnessDigester;
+}
+#[cfg(zcash_unstable = "zfuture")]
+impl<B> FutureWitnesses for B
+where
+    B: Bundles,
+    B::Tze: TzeWitnessDigester,
+{
+    type FutureTze = B::Tze;
+}
+
 /// Digester which constructs a digest of only the witness data.
 /// This does not internally commit to the txid, so if that is
 /// desired it should be done using the result of this digest
 /// function.
 pub struct BlockTxCommitmentDigester;
 
-impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
+impl<B> TransactionDigest<B> for BlockTxCommitmentDigester
+where
+    B: Bundles + FutureWitnesses,
+    B::Transparent: TransparentWitnessDigester,
+    B::Sapling: SaplingWitnessDigester,
+    B::Orchard: OrchardWitnessDigester,
+{
     /// We use the header digest to pass the transaction ID into
     /// where it needs to be used for personalization string construction.
     type HeaderDigest = BranchId;
@@ -577,28 +627,28 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<transparent::Authorized>>,
-    ) -> Blake2bHash {
-        Transparent::witness_digest(transparent_bundle)
+        transparent_bundle: Option<&<B::Transparent as TransparentPart>::Bundle>,
+    ) -> Self::TransparentDigest {
+        B::Transparent::witness_digest(transparent_bundle)
     }
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, Amount>>,
-    ) -> Blake2bHash {
-        Sapling::witness_digest(sapling_bundle)
+        sapling_bundle: Option<&<B::Sapling as SaplingPart>::Bundle>,
+    ) -> Self::SaplingDigest {
+        B::Sapling::witness_digest(sapling_bundle)
     }
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<orchard::Authorized, Amount>>,
+        orchard_bundle: Option<&<B::Orchard as OrchardPart>::Bundle>,
     ) -> Self::OrchardDigest {
-        Orchard::witness_digest(orchard_bundle)
+        B::Orchard::witness_digest(orchard_bundle)
     }
 
     #[cfg(zcash_unstable = "zfuture")]
-    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<tze::Authorized>>) -> Blake2bHash {
-        Tze::witness_digest(tze_bundle)
+    fn digest_tze(&self, tze_bundle: Option<&<B::Tze as TzePart>::Bundle>) -> Blake2bHash {
+        B::Tze::witness_digest(tze_bundle)
     }
 
     fn combine(

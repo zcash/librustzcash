@@ -15,10 +15,11 @@ use super::{
         sapling as sapling_serialization,
         sprout::JsDescription,
         transparent::{self, TxIn, TxOut},
-        Sapling, SaplingPart, ShieldedBundle, Sprout, SproutPart, Transparent, TransparentPart,
+        Bundles, Sapling, SaplingPart, ShieldedBundle, Sprout, SproutPart, Transparent,
+        TransparentPart,
     },
     sighash::{SignableInput, SIGHASH_ANYONECANPAY, SIGHASH_MASK, SIGHASH_NONE, SIGHASH_SINGLE},
-    Authorization, TransactionData,
+    TransactionData,
 };
 
 const ZCASH_SIGHASH_PERSONALIZATION_PREFIX: &[u8; 12] = b"ZcashSigHash";
@@ -279,13 +280,15 @@ fn shielded_outputs_hash(shielded_outputs: &[OutputDescription<GrothProofBytes>]
         .hash(&data)
 }
 
-pub fn v4_signature_hash<SA, A>(
-    tx: &TransactionData<A>,
+pub fn v4_signature_hash<B>(
+    tx: &TransactionData<B>,
     signable_input: &SignableInput<'_>,
 ) -> Blake2bHash
 where
-    SA: sapling::bundle::Authorization<SpendProof = GrothProofBytes, OutputProof = GrothProofBytes>,
-    A: Authorization<SaplingAuth = SA>,
+    B: Bundles,
+    B::Transparent: TransparentSigDigester,
+    B::Sprout: SproutSigDigester,
+    B::Sapling: SaplingSigDigester,
 {
     let hash_type = signable_input.hash_type();
     if tx.version.has_overwinter() {
@@ -303,22 +306,22 @@ where
         update_hash!(
             h,
             hash_type & SIGHASH_ANYONECANPAY == 0,
-            Transparent::digest_prevout(tx.transparent_bundle.as_ref())
+            B::Transparent::digest_prevout(tx.transparent_bundle.as_ref())
         );
         update_hash!(
             h,
             (hash_type & SIGHASH_ANYONECANPAY) == 0
                 && (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
                 && (hash_type & SIGHASH_MASK) != SIGHASH_NONE,
-            Transparent::digest_sequence(tx.transparent_bundle.as_ref())
+            B::Transparent::digest_sequence(tx.transparent_bundle.as_ref())
         );
 
         if (hash_type & SIGHASH_MASK) != SIGHASH_SINGLE
             && (hash_type & SIGHASH_MASK) != SIGHASH_NONE
         {
-            h.update(Transparent::digest_outputs(tx.transparent_bundle.as_ref()).as_bytes());
+            h.update(B::Transparent::digest_outputs(tx.transparent_bundle.as_ref()).as_bytes());
         } else if (hash_type & SIGHASH_MASK) == SIGHASH_SINGLE {
-            h.update(&Transparent::digest_single_output(
+            h.update(&B::Transparent::digest_single_output(
                 tx.transparent_bundle.as_ref(),
                 signable_input,
             ));
@@ -326,14 +329,14 @@ where
             h.update(&[0; 32]);
         };
 
-        h.update(&Sprout::digest_joinsplits(
+        h.update(&B::Sprout::digest_joinsplits(
             tx.consensus_branch_id,
             tx.sprout_bundle.as_ref(),
         ));
 
         if tx.version.has_sapling() {
-            h.update(&Sapling::digest_spends(tx.sapling_bundle.as_ref()));
-            h.update(&Sapling::digest_outputs(tx.sapling_bundle.as_ref()));
+            h.update(&B::Sapling::digest_spends(tx.sapling_bundle.as_ref()));
+            h.update(&B::Sapling::digest_outputs(tx.sapling_bundle.as_ref()));
         }
         h.update(&tx.lock_time.to_le_bytes());
         h.update(&u32::from(tx.expiry_height).to_le_bytes());
@@ -350,7 +353,7 @@ where
         match signable_input {
             SignableInput::Shielded => (),
             SignableInput::Transparent { .. } => {
-                h.update(&Transparent::digest_signable_input(
+                h.update(&B::Transparent::digest_signable_input(
                     tx.transparent_bundle.as_ref(),
                     signable_input,
                 ));

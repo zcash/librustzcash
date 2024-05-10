@@ -32,14 +32,18 @@ use self::{
         orchard as orchard_serialization, sapling as sapling_serialization,
         sprout::{self, JsDescription},
         transparent::{self, TxIn, TxOut},
-        OutPoint,
+        AllBundles, Bundles, Orchard, OrchardPart, OutPoint, Sapling, SaplingPart, ShieldedBundle,
+        Sprout, SproutPart, Transparent, TransparentPart,
     },
     txid::{to_txid, BlockTxCommitmentDigester, TxIdDigester},
     util::sha256d::{HashReader, HashWriter},
 };
 
 #[cfg(zcash_unstable = "zfuture")]
-use self::components::tze::{self, TzeIn, TzeOut};
+use self::components::{
+    tze::{self, TzeIn, TzeOut},
+    Tze, TzePart,
+};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
@@ -301,13 +305,13 @@ impl Authorization for Unauthorized {
 #[derive(Debug)]
 pub struct Transaction {
     txid: TxId,
-    data: TransactionData<Authorized>,
+    data: TransactionData<AllBundles<Authorized>>,
 }
 
 impl Deref for Transaction {
-    type Target = TransactionData<Authorized>;
+    type Target = TransactionData<AllBundles<Authorized>>;
 
-    fn deref(&self) -> &TransactionData<Authorized> {
+    fn deref(&self) -> &TransactionData<AllBundles<Authorized>> {
         &self.data
     }
 }
@@ -319,21 +323,70 @@ impl PartialEq for Transaction {
 }
 
 /// The information contained in a Zcash transaction.
-#[derive(Debug)]
-pub struct TransactionData<A: Authorization> {
+pub struct TransactionData<B: Bundles> {
     version: TxVersion,
     consensus_branch_id: BranchId,
     lock_time: u32,
     expiry_height: BlockHeight,
-    transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
-    sprout_bundle: Option<sprout::Bundle>,
-    sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
-    orchard_bundle: Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
+    transparent_bundle: Option<<B::Transparent as TransparentPart>::Bundle>,
+    sprout_bundle: Option<<B::Sprout as SproutPart>::Bundle>,
+    sapling_bundle: Option<<B::Sapling as SaplingPart>::Bundle>,
+    orchard_bundle: Option<<B::Orchard as OrchardPart>::Bundle>,
     #[cfg(zcash_unstable = "zfuture")]
-    tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+    tze_bundle: Option<<B::Tze as TzePart>::Bundle>,
 }
 
-impl<A: Authorization> TransactionData<A> {
+/// Trait marker for bounds that are not yet required by consensus rules.
+#[cfg(not(zcash_unstable = "zfuture"))]
+trait FutureDebug {}
+#[cfg(not(zcash_unstable = "zfuture"))]
+impl<B: Bundles> FutureDebug for B {}
+
+#[cfg(zcash_unstable = "zfuture")]
+trait FutureDebug: Bundles<Tze = Self::FutureTze> {
+    type FutureTze: TzePart<Bundle = Self::FutureTzeBundle> + fmt::Debug;
+    type FutureTzeBundle: fmt::Debug;
+}
+#[cfg(zcash_unstable = "zfuture")]
+impl<B> FutureDebug for B
+where
+    B: Bundles,
+    B::Tze: TzePart + fmt::Debug,
+    <B::Tze as TzePart>::Bundle: fmt::Debug,
+{
+    type FutureTze = B::Tze;
+    type FutureTzeBundle = <B::Tze as TzePart>::Bundle;
+}
+
+impl<B> fmt::Debug for TransactionData<B>
+where
+    B: Bundles + fmt::Debug + FutureDebug,
+    B::Transparent: TransparentPart + fmt::Debug,
+    B::Sprout: SproutPart + fmt::Debug,
+    B::Sapling: SaplingPart + fmt::Debug,
+    B::Orchard: OrchardPart + fmt::Debug,
+    <B::Transparent as TransparentPart>::Bundle: fmt::Debug,
+    <B::Sprout as SproutPart>::Bundle: fmt::Debug,
+    <B::Sapling as SaplingPart>::Bundle: fmt::Debug,
+    <B::Orchard as OrchardPart>::Bundle: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut s = f.debug_struct("TransactionData");
+        s.field("version", &self.version)
+            .field("consensus_branch_id", &self.consensus_branch_id)
+            .field("lock_time", &self.lock_time)
+            .field("expiry_height", &self.expiry_height)
+            .field("transparent_bundle", &self.transparent_bundle)
+            .field("sprout_bundle", &self.sprout_bundle)
+            .field("sapling_bundle", &self.sapling_bundle)
+            .field("orchard_bundle", &self.orchard_bundle);
+        #[cfg(zcash_unstable = "zfuture")]
+        s.field("tze_bundle", &self.tze_bundle);
+        s.finish()
+    }
+}
+
+impl<B: Bundles> TransactionData<B> {
     /// Constructs a `TransactionData` from its constituent parts.
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
@@ -341,10 +394,10 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
-        sprout_bundle: Option<sprout::Bundle>,
-        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
-        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
+        transparent_bundle: Option<<B::Transparent as TransparentPart>::Bundle>,
+        sprout_bundle: Option<<B::Sprout as SproutPart>::Bundle>,
+        sapling_bundle: Option<<B::Sapling as SaplingPart>::Bundle>,
+        orchard_bundle: Option<<B::Orchard as OrchardPart>::Bundle>,
     ) -> Self {
         TransactionData {
             version,
@@ -369,11 +422,11 @@ impl<A: Authorization> TransactionData<A> {
         consensus_branch_id: BranchId,
         lock_time: u32,
         expiry_height: BlockHeight,
-        transparent_bundle: Option<transparent::Bundle<A::TransparentAuth>>,
-        sprout_bundle: Option<sprout::Bundle>,
-        sapling_bundle: Option<sapling::Bundle<A::SaplingAuth, Amount>>,
-        orchard_bundle: Option<orchard::Bundle<A::OrchardAuth, Amount>>,
-        tze_bundle: Option<tze::Bundle<A::TzeAuth>>,
+        transparent_bundle: Option<<B::Transparent as TransparentPart>::Bundle>,
+        sprout_bundle: Option<<B::Sprout as SproutPart>::Bundle>,
+        sapling_bundle: Option<<B::Sapling as SaplingPart>::Bundle>,
+        orchard_bundle: Option<<B::Orchard as OrchardPart>::Bundle>,
+        tze_bundle: Option<<B::Tze as TzePart>::Bundle>,
     ) -> Self {
         TransactionData {
             version,
@@ -405,28 +458,40 @@ impl<A: Authorization> TransactionData<A> {
     pub fn expiry_height(&self) -> BlockHeight {
         self.expiry_height
     }
+}
 
-    pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<A::TransparentAuth>> {
+impl<TA: transparent::Authorization, B: Bundles<Transparent = Transparent<TA>>> TransactionData<B> {
+    pub fn transparent_bundle(&self) -> Option<&transparent::Bundle<TA>> {
         self.transparent_bundle.as_ref()
     }
+}
 
+impl<B: Bundles<Sprout = Sprout>> TransactionData<B> {
     pub fn sprout_bundle(&self) -> Option<&sprout::Bundle> {
         self.sprout_bundle.as_ref()
     }
+}
 
-    pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<A::SaplingAuth, Amount>> {
+impl<SA: sapling::bundle::Authorization, B: Bundles<Sapling = Sapling<SA>>> TransactionData<B> {
+    pub fn sapling_bundle(&self) -> Option<&sapling::Bundle<SA, Amount>> {
         self.sapling_bundle.as_ref()
     }
+}
 
-    pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<A::OrchardAuth, Amount>> {
+impl<OA: orchard::bundle::Authorization, B: Bundles<Orchard = Orchard<OA>>> TransactionData<B> {
+    pub fn orchard_bundle(&self) -> Option<&orchard::Bundle<OA, Amount>> {
         self.orchard_bundle.as_ref()
     }
+}
 
-    #[cfg(zcash_unstable = "zfuture")]
-    pub fn tze_bundle(&self) -> Option<&tze::Bundle<A::TzeAuth>> {
+#[cfg(zcash_unstable = "zfuture")]
+impl<TA: tze::Authorization, B: Bundles<Tze = Tze<TA>>> TransactionData<B> {
+    pub fn tze_bundle(&self) -> Option<&tze::Bundle<TA>> {
         self.tze_bundle.as_ref()
     }
+}
 
+impl<B: Bundles> TransactionData<B> {
     /// Returns the total fees paid by the transaction, given a function that can be used to
     /// retrieve the value of previous transactions' transparent outputs that are being spent in
     /// this transaction.
@@ -436,19 +501,19 @@ impl<A: Authorization> TransactionData<A> {
         F: FnMut(&OutPoint) -> Result<Amount, E>,
     {
         let value_balances = [
-            self.transparent_bundle
-                .as_ref()
-                .map_or_else(|| Ok(Amount::zero()), |b| b.value_balance(get_prevout))?,
-            self.sprout_bundle.as_ref().map_or_else(
+            self.transparent_bundle.as_ref().map_or_else(
                 || Ok(Amount::zero()),
-                |b| b.value_balance().ok_or(BalanceError::Overflow),
+                |b| B::Transparent::value_balance(b, get_prevout),
             )?,
+            self.sprout_bundle
+                .as_ref()
+                .map_or_else(Amount::zero, |b| b.value_balance()),
             self.sapling_bundle
                 .as_ref()
-                .map_or_else(Amount::zero, |b| *b.value_balance()),
+                .map_or_else(Amount::zero, |b| b.value_balance()),
             self.orchard_bundle
                 .as_ref()
-                .map_or_else(Amount::zero, |b| *b.value_balance()),
+                .map_or_else(Amount::zero, |b| b.value_balance()),
         ];
 
         value_balances
@@ -457,7 +522,7 @@ impl<A: Authorization> TransactionData<A> {
             .ok_or_else(|| BalanceError::Overflow.into())
     }
 
-    pub fn digest<D: TransactionDigest<A>>(&self, digester: D) -> D::Digest {
+    pub fn digest<D: TransactionDigest<B>>(&self, digester: D) -> D::Digest {
         digester.combine(
             digester.digest_header(
                 self.version,
@@ -477,43 +542,48 @@ impl<A: Authorization> TransactionData<A> {
     ///
     /// This shouldn't be necessary for most use cases; it is provided for handling the
     /// cross-FFI builder logic in `zcashd`.
-    pub fn map_bundles<B: Authorization>(
+    pub fn map_bundles<BB: Bundles>(
         self,
         f_transparent: impl FnOnce(
-            Option<transparent::Bundle<A::TransparentAuth>>,
-        ) -> Option<transparent::Bundle<B::TransparentAuth>>,
+            Option<<B::Transparent as TransparentPart>::Bundle>,
+        ) -> Option<<BB::Transparent as TransparentPart>::Bundle>,
+        f_sprout: impl FnOnce(
+            Option<<B::Sprout as SproutPart>::Bundle>,
+        ) -> Option<<BB::Sprout as SproutPart>::Bundle>,
         f_sapling: impl FnOnce(
-            Option<sapling::Bundle<A::SaplingAuth, Amount>>,
-        ) -> Option<sapling::Bundle<B::SaplingAuth, Amount>>,
+            Option<<B::Sapling as SaplingPart>::Bundle>,
+        ) -> Option<<BB::Sapling as SaplingPart>::Bundle>,
         f_orchard: impl FnOnce(
-            Option<orchard::bundle::Bundle<A::OrchardAuth, Amount>>,
-        ) -> Option<orchard::bundle::Bundle<B::OrchardAuth, Amount>>,
+            Option<<B::Orchard as OrchardPart>::Bundle>,
+        ) -> Option<<BB::Orchard as OrchardPart>::Bundle>,
         #[cfg(zcash_unstable = "zfuture")] f_tze: impl FnOnce(
-            Option<tze::Bundle<A::TzeAuth>>,
+            Option<<B::Tze as TzePart>::Bundle>,
         )
-            -> Option<tze::Bundle<B::TzeAuth>>,
-    ) -> TransactionData<B> {
+            -> Option<<BB::Tze as TzePart>::Bundle>,
+    ) -> TransactionData<BB> {
         TransactionData {
             version: self.version,
             consensus_branch_id: self.consensus_branch_id,
             lock_time: self.lock_time,
             expiry_height: self.expiry_height,
             transparent_bundle: f_transparent(self.transparent_bundle),
-            sprout_bundle: self.sprout_bundle,
+            sprout_bundle: f_sprout(self.sprout_bundle),
             sapling_bundle: f_sapling(self.sapling_bundle),
             orchard_bundle: f_orchard(self.orchard_bundle),
             #[cfg(zcash_unstable = "zfuture")]
             tze_bundle: f_tze(self.tze_bundle),
         }
     }
+}
 
-    pub fn map_authorization<B: Authorization>(
+impl<A: Authorization> TransactionData<AllBundles<A>> {
+    pub fn map_authorization<AB: Authorization>(
         self,
-        f_transparent: impl transparent::MapAuth<A::TransparentAuth, B::TransparentAuth>,
-        mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, B::SaplingAuth>,
-        mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, B::OrchardAuth>,
-        #[cfg(zcash_unstable = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, B::TzeAuth>,
-    ) -> TransactionData<B> {
+        f_transparent: impl transparent::MapAuth<A::TransparentAuth, AB::TransparentAuth>,
+        mut f_sapling: impl sapling_serialization::MapAuth<A::SaplingAuth, AB::SaplingAuth>,
+        mut f_orchard: impl orchard_serialization::MapAuth<A::OrchardAuth, AB::OrchardAuth>,
+        #[cfg(zcash_unstable = "zfuture")] f_tze: impl tze::MapAuth<A::TzeAuth, AB::TzeAuth>,
+    ) -> TransactionData<AllBundles<AB>> {
         TransactionData {
             version: self.version,
             consensus_branch_id: self.consensus_branch_id,
@@ -545,7 +615,7 @@ impl<A: Authorization> TransactionData<A> {
     }
 }
 
-impl<A: Authorization> TransactionData<A> {
+impl<SA: sapling::bundle::Authorization, B: Bundles<Sapling = Sapling<SA>>> TransactionData<B> {
     pub fn sapling_value_balance(&self) -> Amount {
         self.sapling_bundle
             .as_ref()
@@ -553,14 +623,14 @@ impl<A: Authorization> TransactionData<A> {
     }
 }
 
-impl TransactionData<Authorized> {
+impl TransactionData<AllBundles<Authorized>> {
     pub fn freeze(self) -> io::Result<Transaction> {
         Transaction::from_data(self)
     }
 }
 
 impl Transaction {
-    fn from_data(data: TransactionData<Authorized>) -> io::Result<Self> {
+    fn from_data(data: TransactionData<AllBundles<Authorized>>) -> io::Result<Self> {
         match data.version {
             TxVersion::Sprout(_) | TxVersion::Overwinter | TxVersion::Sapling => {
                 Self::from_data_v4(data)
@@ -571,7 +641,7 @@ impl Transaction {
         }
     }
 
-    fn from_data_v4(data: TransactionData<Authorized>) -> io::Result<Self> {
+    fn from_data_v4(data: TransactionData<AllBundles<Authorized>>) -> io::Result<Self> {
         let mut tx = Transaction {
             txid: TxId([0; 32]),
             data,
@@ -582,7 +652,7 @@ impl Transaction {
         Ok(tx)
     }
 
-    fn from_data_v5(data: TransactionData<Authorized>) -> Self {
+    fn from_data_v5(data: TransactionData<AllBundles<Authorized>>) -> Self {
         let txid = to_txid(
             data.version,
             data.consensus_branch_id,
@@ -592,7 +662,7 @@ impl Transaction {
         Transaction { txid, data }
     }
 
-    pub fn into_data(self) -> TransactionData<Authorized> {
+    pub fn into_data(self) -> TransactionData<AllBundles<Authorized>> {
         self.data
     }
 
@@ -923,7 +993,7 @@ pub struct TxDigests<A> {
     pub tze_digests: Option<TzeDigests<A>>,
 }
 
-pub trait TransactionDigest<A: Authorization> {
+pub trait TransactionDigest<B: Bundles> {
     type HeaderDigest;
     type TransparentDigest;
     type SaplingDigest;
@@ -944,21 +1014,21 @@ pub trait TransactionDigest<A: Authorization> {
 
     fn digest_transparent(
         &self,
-        transparent_bundle: Option<&transparent::Bundle<A::TransparentAuth>>,
+        transparent_bundle: Option<&<B::Transparent as TransparentPart>::Bundle>,
     ) -> Self::TransparentDigest;
 
     fn digest_sapling(
         &self,
-        sapling_bundle: Option<&sapling::Bundle<A::SaplingAuth, Amount>>,
+        sapling_bundle: Option<&<B::Sapling as SaplingPart>::Bundle>,
     ) -> Self::SaplingDigest;
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&orchard::Bundle<A::OrchardAuth, Amount>>,
+        orchard_bundle: Option<&<B::Orchard as OrchardPart>::Bundle>,
     ) -> Self::OrchardDigest;
 
     #[cfg(zcash_unstable = "zfuture")]
-    fn digest_tze(&self, tze_bundle: Option<&tze::Bundle<A::TzeAuth>>) -> Self::TzeDigest;
+    fn digest_tze(&self, tze_bundle: Option<&<B::Tze as TzePart>::Bundle>) -> Self::TzeDigest;
 
     fn combine(
         &self,
@@ -985,6 +1055,7 @@ pub mod testing {
             orchard::testing::{self as orchard},
             sapling::testing::{self as sapling},
             transparent::testing::{self as transparent},
+            AllBundles,
         },
         Authorized, Transaction, TransactionData, TxId, TxVersion,
     };
@@ -1021,7 +1092,7 @@ pub mod testing {
             sapling_bundle in sapling::arb_bundle_for_version(version),
             orchard_bundle in orchard::arb_bundle_for_version(version),
             version in Just(version)
-        ) -> TransactionData<Authorized> {
+        ) -> TransactionData<AllBundles<Authorized>> {
             TransactionData {
                 version,
                 consensus_branch_id,
@@ -1047,7 +1118,7 @@ pub mod testing {
             orchard_bundle in orchard::arb_bundle_for_version(version),
             tze_bundle in tze::arb_bundle(consensus_branch_id),
             version in Just(version)
-        ) -> TransactionData<Authorized> {
+        ) -> TransactionData<AllBundles<Authorized>> {
             TransactionData {
                 version,
                 consensus_branch_id,

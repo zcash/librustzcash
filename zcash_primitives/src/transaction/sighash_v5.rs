@@ -6,7 +6,7 @@ use zcash_encoding::Array;
 use crate::transaction::{
     components::{
         transparent::{self, TxOut},
-        Transparent, TransparentPart,
+        Bundles, Transparent, TransparentPart,
     },
     sighash::{
         SignableInput, TransparentAuthorizingContext, SIGHASH_ANYONECANPAY, SIGHASH_MASK,
@@ -16,7 +16,7 @@ use crate::transaction::{
         hash_transparent_txid_data, to_hash, transparent_outputs_hash, transparent_prevout_hash,
         transparent_sequence_hash, ZCASH_TRANSPARENT_HASH_PERSONALIZATION,
     },
-    Authorization, TransactionData, TransparentDigests, TxDigests,
+    TransactionData, TransparentDigests, TxDigests,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -210,15 +210,34 @@ fn tze_input_sigdigests<A: tze::Authorization>(
     }
 }
 
+/// Trait marker for bounds that are not yet required by consensus rules.
+#[cfg(not(zcash_unstable = "zfuture"))]
+pub trait FutureBundles {}
+#[cfg(not(zcash_unstable = "zfuture"))]
+impl<B: Bundles> FutureBundles for B {}
+
+#[cfg(zcash_unstable = "zfuture")]
+pub trait FutureBundles: Bundles<Tze = Self::FutureTze> {
+    type FutureTze: TzeSigDigester;
+}
+#[cfg(zcash_unstable = "zfuture")]
+impl<B> FutureBundles for B
+where
+    B: Bundles,
+    B::Tze: TzeSigDigester,
+{
+    type FutureTze = B::Tze;
+}
+
 /// Implements the [Signature Digest section of ZIP 244](https://zips.z.cash/zip-0244#signature-digest)
-pub fn v5_signature_hash<TA, A>(
-    tx: &TransactionData<A>,
+pub fn v5_signature_hash<B>(
+    tx: &TransactionData<B>,
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
 ) -> Blake2bHash
 where
-    TA: TransparentAuthorizingContext,
-    A: Authorization<TransparentAuth = TA>,
+    B: Bundles + FutureBundles,
+    B::Transparent: TransparentSigDigester,
 {
     // The caller must provide the transparent digests if and only if the transaction has a
     // transparent component.
@@ -231,7 +250,7 @@ where
         tx.version,
         tx.consensus_branch_id,
         txid_parts.header_digest,
-        Transparent::digest(
+        B::Transparent::digest(
             tx.transparent_bundle
                 .as_ref()
                 .zip(txid_parts.transparent_digests.as_ref()),
@@ -240,7 +259,7 @@ where
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
         #[cfg(zcash_unstable = "zfuture")]
-        Tze::digest(
+        B::Tze::digest(
             tx.tze_bundle.as_ref().zip(txid_parts.tze_digests.as_ref()),
             signable_input,
         )
