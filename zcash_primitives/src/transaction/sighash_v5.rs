@@ -4,7 +4,10 @@ use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use zcash_encoding::Array;
 
 use crate::transaction::{
-    components::transparent::{self, TxOut},
+    components::{
+        transparent::{self, TxOut},
+        Transparent, TransparentPart,
+    },
     sighash::{
         SignableInput, TransparentAuthorizingContext, SIGHASH_ANYONECANPAY, SIGHASH_MASK,
         SIGHASH_NONE, SIGHASH_SINGLE,
@@ -18,7 +21,10 @@ use crate::transaction::{
 
 #[cfg(zcash_unstable = "zfuture")]
 use {
-    crate::transaction::{components::tze, TzeDigests},
+    crate::transaction::{
+        components::{tze, Tze, TzePart},
+        TzeDigests,
+    },
     byteorder::WriteBytesExt,
     zcash_encoding::{CompactSize, Vector},
 };
@@ -32,6 +38,25 @@ const ZCASH_TZE_INPUT_HASH_PERSONALIZATION: &[u8; 16] = b"Zcash__TzeInHash";
 
 fn hasher(personal: &[u8; 16]) -> State {
     Params::new().hash_length(32).personal(personal).to_state()
+}
+
+/// Trait representing the transparent part of a [ZIP 244] transaction digest.
+///
+/// [ZIP 244]: https://zips.z.cash/zip-0244
+pub trait TransparentSigDigester: TransparentPart {
+    fn digest(
+        tx_data: Option<(&Self::Bundle, &TransparentDigests<Blake2bHash>)>,
+        input: &SignableInput<'_>,
+    ) -> Blake2bHash;
+}
+
+impl<A: TransparentAuthorizingContext> TransparentSigDigester for Transparent<A> {
+    fn digest(
+        tx_data: Option<(&Self::Bundle, &TransparentDigests<Blake2bHash>)>,
+        input: &SignableInput<'_>,
+    ) -> Blake2bHash {
+        transparent_sig_digest(tx_data, input)
+    }
 }
 
 /// Implements [ZIP 244 section S.2](https://zips.z.cash/zip-0244#s-2-transparent-sig-digest).
@@ -139,6 +164,24 @@ fn transparent_sig_digest<A: TransparentAuthorizingContext>(
 }
 
 #[cfg(zcash_unstable = "zfuture")]
+pub trait TzeSigDigester: TzePart {
+    fn digest(
+        tx_data: Option<(&Self::Bundle, &TzeDigests<Blake2bHash>)>,
+        input: &SignableInput<'_>,
+    ) -> Option<TzeDigests<Blake2bHash>>;
+}
+
+#[cfg(zcash_unstable = "zfuture")]
+impl<A: tze::Authorization> TzeSigDigester for Tze<A> {
+    fn digest(
+        tx_data: Option<(&Self::Bundle, &TzeDigests<Blake2bHash>)>,
+        input: &SignableInput<'_>,
+    ) -> Option<TzeDigests<Blake2bHash>> {
+        tx_data.map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, input, tze_digests))
+    }
+}
+
+#[cfg(zcash_unstable = "zfuture")]
 fn tze_input_sigdigests<A: tze::Authorization>(
     bundle: &tze::Bundle<A>,
     input: &SignableInput<'_>,
@@ -168,14 +211,15 @@ fn tze_input_sigdigests<A: tze::Authorization>(
 }
 
 /// Implements the [Signature Digest section of ZIP 244](https://zips.z.cash/zip-0244#signature-digest)
-pub fn v5_signature_hash<
-    TA: TransparentAuthorizingContext,
-    A: Authorization<TransparentAuth = TA>,
->(
+pub fn v5_signature_hash<TA, A>(
     tx: &TransactionData<A>,
     signable_input: &SignableInput<'_>,
     txid_parts: &TxDigests<Blake2bHash>,
-) -> Blake2bHash {
+) -> Blake2bHash
+where
+    TA: TransparentAuthorizingContext,
+    A: Authorization<TransparentAuth = TA>,
+{
     // The caller must provide the transparent digests if and only if the transaction has a
     // transparent component.
     assert_eq!(
@@ -187,7 +231,7 @@ pub fn v5_signature_hash<
         tx.version,
         tx.consensus_branch_id,
         txid_parts.header_digest,
-        transparent_sig_digest(
+        Transparent::digest(
             tx.transparent_bundle
                 .as_ref()
                 .zip(txid_parts.transparent_digests.as_ref()),
@@ -196,10 +240,10 @@ pub fn v5_signature_hash<
         txid_parts.sapling_digest,
         txid_parts.orchard_digest,
         #[cfg(zcash_unstable = "zfuture")]
-        tx.tze_bundle
-            .as_ref()
-            .zip(txid_parts.tze_digests.as_ref())
-            .map(|(bundle, tze_digests)| tze_input_sigdigests(bundle, signable_input, tze_digests))
-            .as_ref(),
+        Tze::digest(
+            tx.tze_bundle.as_ref().zip(txid_parts.tze_digests.as_ref()),
+            signable_input,
+        )
+        .as_ref(),
     )
 }
