@@ -18,7 +18,7 @@ use super::{
     testing::arb_tx,
     transparent::{self},
     txid::TxIdDigester,
-    Authorization, Transaction, TransactionData, TxDigests, TxIn,
+    AllBundles, Authorization, Transaction, TransactionData, TxDigests, TxIn,
 };
 
 #[cfg(zcash_unstable = "zfuture")]
@@ -206,11 +206,13 @@ impl Authorization for TestUnauthorized {
     type TzeAuth = tze::Authorized;
 }
 
+type TestUnauthorizedTransactionData = TransactionData<AllBundles<TestUnauthorized>>;
+
 #[test]
 fn zip_0244() {
     fn to_test_txdata(
         tv: &self::data::zip_0244::TestVector,
-    ) -> (TransactionData<TestUnauthorized>, TxDigests<Blake2bHash>) {
+    ) -> (TestUnauthorizedTransactionData, TxDigests<Blake2bHash>) {
         let tx = Transaction::read(&tv.tx[..], BranchId::Nu5).unwrap();
 
         assert_eq!(tx.txid.as_ref(), &tv.txid);

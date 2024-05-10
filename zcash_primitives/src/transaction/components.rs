@@ -34,8 +34,37 @@ pub use crate::sapling::bundle::{OutputDescription, SpendDescription};
 #[cfg(zcash_unstable = "zfuture")]
 pub use self::tze::{TzeIn, TzeOut};
 
+use super::Authorization;
+
 // π_A + π_B + π_C
 pub const GROTH_PROOF_SIZE: usize = 48 + 96 + 48;
+
+/// The protocol-specific bundles of data within a transaction.
+pub trait Bundles {
+    type Transparent: TransparentPart;
+    type Sprout: SproutPart;
+    type Sapling: SaplingPart;
+    type Orchard: OrchardPart;
+
+    #[cfg(zcash_unstable = "zfuture")]
+    type Tze: TzePart;
+}
+
+/// Marker type for a transaction that may contain payments within any Zcash protocol.
+#[derive(Debug)]
+pub struct AllBundles<A: Authorization> {
+    _auth: PhantomData<A>,
+}
+
+impl<A: Authorization> Bundles for AllBundles<A> {
+    type Transparent = Transparent<A::TransparentAuth>;
+    type Sprout = Sprout;
+    type Sapling = Sapling<A::SaplingAuth>;
+    type Orchard = Orchard<A::OrchardAuth>;
+
+    #[cfg(zcash_unstable = "zfuture")]
+    type Tze = Tze<A::TzeAuth>;
+}
 
 /// The protocol-agnostic parts of a shielded bundle.
 ///
