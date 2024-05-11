@@ -1,6 +1,7 @@
 //! Structs representing the components within Zcash transactions.
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use zcash_encoding::{CompactSize, Vector};
 
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
@@ -216,7 +217,33 @@ impl TxOut {
     }
 }
 
-impl AuthorizedTransparentPart for Transparent<Authorized> {}
+impl AuthorizedTransparentPart for Transparent<Authorized> {
+    fn read_bundle<R: Read>(mut reader: R) -> io::Result<Option<Self::Bundle>> {
+        let vin = Vector::read(&mut reader, TxIn::read)?;
+        let vout = Vector::read(&mut reader, TxOut::read)?;
+        Ok(if vin.is_empty() && vout.is_empty() {
+            None
+        } else {
+            Some(Bundle {
+                vin,
+                vout,
+                authorization: Authorized,
+            })
+        })
+    }
+
+    fn write_bundle<W: Write>(bundle: Option<&Self::Bundle>, mut writer: W) -> io::Result<()> {
+        if let Some(bundle) = bundle {
+            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
+            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
+        } else {
+            CompactSize::write(&mut writer, 0)?;
+            CompactSize::write(&mut writer, 0)?;
+        }
+
+        Ok(())
+    }
+}
 
 #[cfg(any(test, feature = "test-dependencies"))]
 pub mod testing {

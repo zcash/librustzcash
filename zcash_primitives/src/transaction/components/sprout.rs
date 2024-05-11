@@ -2,6 +2,8 @@
 
 use std::io::{self, Read, Write};
 
+use zcash_encoding::{CompactSize, Vector};
+
 use super::{amount::Amount, AuthorizedSproutPart, Sprout, GROTH_PROOF_SIZE};
 
 // π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
@@ -29,7 +31,50 @@ impl Bundle {
     }
 }
 
-impl AuthorizedSproutPart for Sprout {}
+impl AuthorizedSproutPart for Sprout {
+    fn read_v4_bundle<R: io::Read>(
+        mut reader: R,
+        tx_has_sprout: bool,
+        use_groth: bool,
+    ) -> io::Result<Option<Self::Bundle>> {
+        if tx_has_sprout {
+            let joinsplits = Vector::read(&mut reader, |r| JsDescription::read(r, use_groth))?;
+
+            if !joinsplits.is_empty() {
+                let mut bundle = Bundle {
+                    joinsplits,
+                    joinsplit_pubkey: [0; 32],
+                    joinsplit_sig: [0; 64],
+                };
+                reader.read_exact(&mut bundle.joinsplit_pubkey)?;
+                reader.read_exact(&mut bundle.joinsplit_sig)?;
+                Ok(Some(bundle))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn write_v4_bundle<W: io::Write>(
+        bundle: Option<&Self::Bundle>,
+        mut writer: W,
+        tx_has_sprout: bool,
+    ) -> io::Result<()> {
+        if tx_has_sprout {
+            if let Some(bundle) = bundle {
+                Vector::write(&mut writer, &bundle.joinsplits, |w, e| e.write(w))?;
+                writer.write_all(&bundle.joinsplit_pubkey)?;
+                writer.write_all(&bundle.joinsplit_sig)?;
+            } else {
+                CompactSize::write(&mut writer, 0)?;
+            }
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
 #[allow(clippy::upper_case_acronyms)]

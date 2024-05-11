@@ -16,9 +16,9 @@ use super::{
     sighash_v4::v4_signature_hash,
     sighash_v5::v5_signature_hash,
     testing::arb_tx,
-    transparent::{self},
+    transparent::{self, TxIn},
     txid::TxIdDigester,
-    AllBundles, Authorization, Transaction, TransactionData, TxDigests, TxIn,
+    AllBundles, Authorization, Transaction, TransactionData, TxDigests,
 };
 
 #[cfg(zcash_unstable = "zfuture")]

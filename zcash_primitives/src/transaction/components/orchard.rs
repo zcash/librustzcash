@@ -44,7 +44,15 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
-impl AuthorizedOrchardPart for Orchard<orchard::bundle::Authorized> {}
+impl AuthorizedOrchardPart for Orchard<orchard::bundle::Authorized> {
+    fn read_v5_bundle<R: Read>(reader: R) -> io::Result<Option<Self::Bundle>> {
+        read_v5_bundle(reader)
+    }
+
+    fn write_v5_bundle<W: Write>(bundle: Option<&Self::Bundle>, writer: W) -> io::Result<()> {
+        write_v5_bundle(bundle, writer)
+    }
+}
 
 /// Reads an [`orchard::Bundle`] from a v5 transaction format.
 pub fn read_v5_bundle<R: Read>(

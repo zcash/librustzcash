@@ -84,7 +84,74 @@ impl MapAuth<Authorized, Authorized> for () {
     }
 }
 
-impl AuthorizedSaplingPart for Sapling<sapling::bundle::Authorized> {}
+impl AuthorizedSaplingPart for Sapling<sapling::bundle::Authorized> {
+    type V4Components = (
+        Amount,
+        Vec<sapling::bundle::SpendDescription<sapling::bundle::Authorized>>,
+        Vec<sapling::bundle::OutputDescription<sapling::bundle::GrothProofBytes>>,
+    );
+
+    fn read_v4_components<R: Read>(
+        reader: R,
+        tx_has_sapling: bool,
+    ) -> io::Result<Self::V4Components> {
+        read_v4_components(reader, tx_has_sapling)
+    }
+
+    fn read_v4_binding_sig<R: Read>(
+        mut reader: R,
+        tx_has_sapling: bool,
+        (value_balance, shielded_spends, shielded_outputs): Self::V4Components,
+    ) -> io::Result<Option<Self::Bundle>> {
+        let binding_sig =
+            if tx_has_sapling && !(shielded_spends.is_empty() && shielded_outputs.is_empty()) {
+                let mut sig = [0; 64];
+                reader.read_exact(&mut sig)?;
+                Some(redjubjub::Signature::from(sig))
+            } else {
+                None
+            };
+
+        Ok(binding_sig.and_then(|binding_sig| {
+            sapling::Bundle::from_parts(
+                shielded_spends,
+                shielded_outputs,
+                value_balance,
+                sapling::bundle::Authorized { binding_sig },
+            )
+        }))
+    }
+
+    fn write_v4_components<W: Write>(
+        bundle: Option<&Self::Bundle>,
+        writer: W,
+        tx_has_sapling: bool,
+    ) -> io::Result<()> {
+        write_v4_components(writer, bundle, tx_has_sapling)
+    }
+
+    fn write_v4_binding_sig<W: Write>(
+        bundle: Option<&Self::Bundle>,
+        mut writer: W,
+        tx_has_sapling: bool,
+    ) -> io::Result<()> {
+        if tx_has_sapling {
+            if let Some(bundle) = bundle {
+                writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn read_v5_bundle<R: Read>(reader: R) -> io::Result<Option<Self::Bundle>> {
+        read_v5_bundle(reader)
+    }
+
+    fn write_v5_bundle<W: Write>(bundle: Option<&Self::Bundle>, writer: W) -> io::Result<()> {
+        write_v5_bundle(writer, bundle)
+    }
+}
 
 /// Consensus rules (§4.4) & (§4.5):
 /// - Canonical encoding is enforced here.
