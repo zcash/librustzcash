@@ -951,7 +951,7 @@ mod tests {
     #[cfg(feature = "transparent-inputs")]
     use crate::{
         legacy::keys::{AccountPrivKey, IncomingViewingKey},
-        transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, OutPoint, TxOut},
+        transaction::{builder::DEFAULT_TX_EXPIRY_DELTA, transparent::TxOut, OutPoint},
         zip32::AccountId,
     };
 

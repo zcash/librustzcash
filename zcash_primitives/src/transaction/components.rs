@@ -1,5 +1,6 @@
 //! Types representing the components within Zcash transactions.
 
+use std::io;
 use std::marker::PhantomData;
 
 use zcash_protocol::value::BalanceError;
@@ -184,17 +185,74 @@ impl<A: tze::Authorization> TzePart for Tze<A> {
 }
 
 /// The Transparent part of an authorized transaction.
-pub trait AuthorizedTransparentPart: TransparentPart {}
+pub trait AuthorizedTransparentPart: TransparentPart {
+    fn read_bundle<R: io::Read>(reader: R) -> io::Result<Option<Self::Bundle>>;
+
+    fn write_bundle<W: io::Write>(bundle: Option<&Self::Bundle>, writer: W) -> io::Result<()>;
+}
 
 /// The Sprout part of an authorized transaction.
-pub trait AuthorizedSproutPart: SproutPart {}
+pub trait AuthorizedSproutPart: SproutPart {
+    fn read_v4_bundle<R: io::Read>(
+        reader: R,
+        tx_has_sprout: bool,
+        use_groth: bool,
+    ) -> io::Result<Option<Self::Bundle>>;
+
+    fn write_v4_bundle<W: io::Write>(
+        bundle: Option<&Self::Bundle>,
+        writer: W,
+        tx_has_sprout: bool,
+    ) -> io::Result<()>;
+}
 
 /// The Sapling part of an authorized transaction.
-pub trait AuthorizedSaplingPart: SaplingPart {}
+pub trait AuthorizedSaplingPart: SaplingPart {
+    type V4Components;
+
+    fn read_v4_components<R: io::Read>(
+        reader: R,
+        tx_has_sapling: bool,
+    ) -> io::Result<Self::V4Components>;
+
+    fn read_v4_binding_sig<R: io::Read>(
+        reader: R,
+        tx_has_sapling: bool,
+        components: Self::V4Components,
+    ) -> io::Result<Option<Self::Bundle>>;
+
+    fn write_v4_components<W: io::Write>(
+        bundle: Option<&Self::Bundle>,
+        writer: W,
+        tx_has_sapling: bool,
+    ) -> io::Result<()>;
+
+    fn write_v4_binding_sig<W: io::Write>(
+        bundle: Option<&Self::Bundle>,
+        writer: W,
+        tx_has_sapling: bool,
+    ) -> io::Result<()>;
+
+    fn read_v5_bundle<R: io::Read>(reader: R) -> io::Result<Option<Self::Bundle>>;
+
+    fn write_v5_bundle<W: io::Write>(bundle: Option<&Self::Bundle>, writer: W) -> io::Result<()>;
+}
 
 /// The Orchard part of an authorized transaction.
-pub trait AuthorizedOrchardPart: OrchardPart {}
+pub trait AuthorizedOrchardPart: OrchardPart {
+    fn read_v5_bundle<R: io::Read>(reader: R) -> io::Result<Option<Self::Bundle>>;
+
+    fn write_v5_bundle<W: io::Write>(bundle: Option<&Self::Bundle>, writer: W) -> io::Result<()>;
+}
 
 /// The TZE part of an authorized transaction.
 #[cfg(zcash_unstable = "zfuture")]
-pub trait AuthorizedTzePart: TzePart {}
+pub trait AuthorizedTzePart: TzePart {
+    fn read_bundle<R: io::Read>(reader: R, tx_has_tze: bool) -> io::Result<Option<Self::Bundle>>;
+
+    fn write_bundle<W: io::Write>(
+        bundle: Option<&Self::Bundle>,
+        writer: W,
+        tx_has_tze: bool,
+    ) -> io::Result<()>;
+}

@@ -19,31 +19,27 @@ use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
-use zcash_encoding::{CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::{self, builder as sapling_builder},
 };
 
+use self::components::AuthorizedSproutPart;
 use self::{
     components::{
         amount::{Amount, BalanceError},
-        orchard as orchard_serialization, sapling as sapling_serialization,
-        sprout::{self, JsDescription},
-        transparent::{self, TxIn, TxOut},
-        AllBundles, Bundles, Orchard, OrchardPart, OutPoint, Sapling, SaplingPart, ShieldedBundle,
-        Sprout, SproutPart, Transparent, TransparentPart,
+        orchard as orchard_serialization, sapling as sapling_serialization, sprout, transparent,
+        AllBundles, AuthorizedOrchardPart, AuthorizedSaplingPart, AuthorizedTransparentPart,
+        Bundles, Orchard, OrchardPart, OutPoint, Sapling, SaplingPart, ShieldedBundle, Sprout,
+        SproutPart, Transparent, TransparentPart,
     },
     txid::{to_txid, BlockTxCommitmentDigester, TxIdDigester},
     util::sha256d::{HashReader, HashWriter},
 };
 
 #[cfg(zcash_unstable = "zfuture")]
-use self::components::{
-    tze::{self, TzeIn, TzeOut},
-    Tze, TzePart,
-};
+use self::components::{tze, AuthorizedTzePart, Tze, TzePart};
 
 const OVERWINTER_VERSION_GROUP_ID: u32 = 0x03C48270;
 const OVERWINTER_TX_VERSION: u32 = 3;
@@ -690,7 +686,7 @@ impl Transaction {
         version: TxVersion,
         consensus_branch_id: BranchId,
     ) -> io::Result<Self> {
-        let transparent_bundle = Self::read_transparent(&mut reader)?;
+        let transparent_bundle = Transparent::read_bundle(&mut reader)?;
 
         let lock_time = reader.read_u32::<LittleEndian>()?;
         let expiry_height: BlockHeight = if version.has_overwinter() {
@@ -699,39 +695,13 @@ impl Transaction {
             0u32.into()
         };
 
-        let (value_balance, shielded_spends, shielded_outputs) =
-            sapling_serialization::read_v4_components(&mut reader, version.has_sapling())?;
+        let components = Sapling::read_v4_components(&mut reader, version.has_sapling())?;
 
-        let sprout_bundle = if version.has_sprout() {
-            let joinsplits = Vector::read(&mut reader, |r| {
-                JsDescription::read(r, version.has_sapling())
-            })?;
+        let sprout_bundle =
+            Sprout::read_v4_bundle(&mut reader, version.has_sprout(), version.has_sapling())?;
 
-            if !joinsplits.is_empty() {
-                let mut bundle = sprout::Bundle {
-                    joinsplits,
-                    joinsplit_pubkey: [0; 32],
-                    joinsplit_sig: [0; 64],
-                };
-                reader.read_exact(&mut bundle.joinsplit_pubkey)?;
-                reader.read_exact(&mut bundle.joinsplit_sig)?;
-                Some(bundle)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let binding_sig = if version.has_sapling()
-            && !(shielded_spends.is_empty() && shielded_outputs.is_empty())
-        {
-            let mut sig = [0; 64];
-            reader.read_exact(&mut sig)?;
-            Some(redjubjub::Signature::from(sig))
-        } else {
-            None
-        };
+        let sapling_bundle =
+            Sapling::read_v4_binding_sig(&mut reader, version.has_sapling(), components)?;
 
         let mut txid = [0; 32];
         let hash_bytes = reader.into_hash();
@@ -746,34 +716,11 @@ impl Transaction {
                 expiry_height,
                 transparent_bundle,
                 sprout_bundle,
-                sapling_bundle: binding_sig.and_then(|binding_sig| {
-                    sapling::Bundle::from_parts(
-                        shielded_spends,
-                        shielded_outputs,
-                        value_balance,
-                        sapling::bundle::Authorized { binding_sig },
-                    )
-                }),
+                sapling_bundle,
                 orchard_bundle: None,
                 #[cfg(zcash_unstable = "zfuture")]
                 tze_bundle: None,
             },
-        })
-    }
-
-    fn read_transparent<R: Read>(
-        mut reader: R,
-    ) -> io::Result<Option<transparent::Bundle<transparent::Authorized>>> {
-        let vin = Vector::read(&mut reader, TxIn::read)?;
-        let vout = Vector::read(&mut reader, TxOut::read)?;
-        Ok(if vin.is_empty() && vout.is_empty() {
-            None
-        } else {
-            Some(transparent::Bundle {
-                vin,
-                vout,
-                authorization: transparent::Authorized,
-            })
         })
     }
 
@@ -787,16 +734,12 @@ impl Transaction {
     fn read_v5<R: Read>(mut reader: R, version: TxVersion) -> io::Result<Self> {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_v5_header_fragment(&mut reader)?;
-        let transparent_bundle = Self::read_transparent(&mut reader)?;
-        let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
-        let orchard_bundle = orchard_serialization::read_v5_bundle(&mut reader)?;
+        let transparent_bundle = Transparent::read_bundle(&mut reader)?;
+        let sapling_bundle = Sapling::read_v5_bundle(&mut reader)?;
+        let orchard_bundle = Orchard::read_v5_bundle(&mut reader)?;
 
         #[cfg(zcash_unstable = "zfuture")]
-        let tze_bundle = if version.has_tze() {
-            Self::read_tze(&mut reader)?
-        } else {
-            None
-        };
+        let tze_bundle = Tze::read_bundle(&mut reader, version.has_tze())?;
 
         let data = TransactionData {
             version,
@@ -832,22 +775,7 @@ impl Transaction {
     pub fn temporary_zcashd_read_v5_sapling<R: Read>(
         reader: R,
     ) -> io::Result<Option<sapling::Bundle<sapling::bundle::Authorized, Amount>>> {
-        sapling_serialization::read_v5_bundle(reader)
-    }
-
-    #[cfg(zcash_unstable = "zfuture")]
-    fn read_tze<R: Read>(mut reader: &mut R) -> io::Result<Option<tze::Bundle<tze::Authorized>>> {
-        let vin = Vector::read(&mut reader, TzeIn::read)?;
-        let vout = Vector::read(&mut reader, TzeOut::read)?;
-        Ok(if vin.is_empty() && vout.is_empty() {
-            None
-        } else {
-            Some(tze::Bundle {
-                vin,
-                vout,
-                authorization: tze::Authorized,
-            })
-        })
+        Sapling::read_v5_bundle(reader)
     }
 
     pub fn write<W: Write>(&self, writer: W) -> io::Result<()> {
@@ -870,27 +798,23 @@ impl Transaction {
             writer.write_u32::<LittleEndian>(u32::from(self.expiry_height))?;
         }
 
-        sapling_serialization::write_v4_components(
-            &mut writer,
+        Sapling::write_v4_components(
             self.sapling_bundle.as_ref(),
+            &mut writer,
             self.version.has_sapling(),
         )?;
 
-        if self.version.has_sprout() {
-            if let Some(bundle) = self.sprout_bundle.as_ref() {
-                Vector::write(&mut writer, &bundle.joinsplits, |w, e| e.write(w))?;
-                writer.write_all(&bundle.joinsplit_pubkey)?;
-                writer.write_all(&bundle.joinsplit_sig)?;
-            } else {
-                CompactSize::write(&mut writer, 0)?;
-            }
-        }
+        Sprout::write_v4_bundle(
+            self.sprout_bundle.as_ref(),
+            &mut writer,
+            self.version.has_sprout(),
+        )?;
 
-        if self.version.has_sapling() {
-            if let Some(bundle) = self.sapling_bundle.as_ref() {
-                writer.write_all(&<[u8; 64]>::from(bundle.authorization().binding_sig))?;
-            }
-        }
+        Sapling::write_v4_binding_sig(
+            self.sapling_bundle.as_ref(),
+            &mut writer,
+            self.version.has_sapling(),
+        )?;
 
         if self.orchard_bundle.is_some() {
             return Err(io::Error::new(
@@ -902,16 +826,8 @@ impl Transaction {
         Ok(())
     }
 
-    pub fn write_transparent<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = &self.transparent_bundle {
-            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
-        } else {
-            CompactSize::write(&mut writer, 0)?;
-            CompactSize::write(&mut writer, 0)?;
-        }
-
-        Ok(())
+    pub fn write_transparent<W: Write>(&self, writer: W) -> io::Result<()> {
+        Transparent::write_bundle(self.transparent_bundle.as_ref(), writer)
     }
 
     pub fn write_v5<W: Write>(&self, mut writer: W) -> io::Result<()> {
@@ -924,7 +840,7 @@ impl Transaction {
         self.write_v5_header(&mut writer)?;
         self.write_transparent(&mut writer)?;
         self.write_v5_sapling(&mut writer)?;
-        orchard_serialization::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
+        Orchard::write_v5_bundle(self.orchard_bundle.as_ref(), &mut writer)?;
         #[cfg(zcash_unstable = "zfuture")]
         self.write_tze(&mut writer)?;
         Ok(())
@@ -943,24 +859,16 @@ impl Transaction {
         sapling_bundle: Option<&sapling::Bundle<sapling::bundle::Authorized, Amount>>,
         writer: W,
     ) -> io::Result<()> {
-        sapling_serialization::write_v5_bundle(writer, sapling_bundle)
+        Sapling::write_v5_bundle(sapling_bundle, writer)
     }
 
     pub fn write_v5_sapling<W: Write>(&self, writer: W) -> io::Result<()> {
-        sapling_serialization::write_v5_bundle(writer, self.sapling_bundle.as_ref())
+        Sapling::write_v5_bundle(self.sapling_bundle.as_ref(), writer)
     }
 
     #[cfg(zcash_unstable = "zfuture")]
-    pub fn write_tze<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        if let Some(bundle) = &self.tze_bundle {
-            Vector::write(&mut writer, &bundle.vin, |w, e| e.write(w))?;
-            Vector::write(&mut writer, &bundle.vout, |w, e| e.write(w))?;
-        } else {
-            CompactSize::write(&mut writer, 0)?;
-            CompactSize::write(&mut writer, 0)?;
-        }
-
-        Ok(())
+    pub fn write_tze<W: Write>(&self, writer: W) -> io::Result<()> {
+        Tze::write_bundle(self.tze_bundle.as_ref(), writer, self.version.has_tze())
     }
 
     // TODO: should this be moved to `from_data` and stored?
