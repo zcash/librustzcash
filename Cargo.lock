@@ -460,7 +460,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "defaa24ecc093c77630e6c15e17c51f5e187bf35ee514f4e2d67baaa96dae22b"
 dependencies = [
  "ciborium-io",
- "half",
+ "half 1.8.2",
 ]
 
 [[package]]
@@ -974,9 +974,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 
 [[package]]
+name = "half"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02b4af3693f1b705df946e9fe5631932443781d0aabb423b62fcd4d73f6d2fd0"
+dependencies = [
+ "crunchy",
+]
+
+[[package]]
 name = "halo2_gadgets"
 version = "0.3.0"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#5f436dc3387665fe3201d381791a62a8233b2171"
+source = "git+https://github.com/QED-it/halo2?branch=orchardzsa-backward-compatability#4cc147385e7cf106b9fab6d6951d66a343899e38"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -999,7 +1008,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_proofs"
 version = "0.3.0"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#5f436dc3387665fe3201d381791a62a8233b2171"
+source = "git+https://github.com/QED-it/halo2?branch=orchardzsa-backward-compatability#4cc147385e7cf106b9fab6d6951d66a343899e38"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -1572,7 +1581,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "orchard"
 version = "0.8.0"
-source = "git+https://github.com/QED-it/orchard?branch=zsa1#78c8efc23a37dc1d64ded53fab231098681966c0"
+source = "git+https://github.com/QED-it/orchard?branch=orchardzsa-backward-compatability-0.8.0#c99c043d0705a8d12264ca03303163f9850a70b5"
 dependencies = [
  "aes",
  "bitvec",
@@ -1580,6 +1589,7 @@ dependencies = [
  "ff",
  "fpe",
  "group",
+ "half 2.2.1",
  "halo2_gadgets",
  "halo2_proofs",
  "hex",

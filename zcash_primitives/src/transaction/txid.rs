@@ -5,7 +5,8 @@ use std::io::Write;
 use blake2b_simd::{Hash as Blake2bHash, Params, State};
 use byteorder::{LittleEndian, WriteBytesExt};
 use ff::PrimeField;
-use orchard::{bundle, note_encryption_vanilla::OrchardDomainVanilla};
+use orchard::bundle;
+use orchard::orchard_flavor::OrchardVanilla;
 
 use crate::{
     consensus::{BlockHeight, BranchId},
@@ -335,7 +336,7 @@ impl<A: Authorization> TransactionDigest<A> for TxIdDigester {
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&bundle::Bundle<A::OrchardAuth, Amount, OrchardDomainVanilla>>,
+        orchard_bundle: Option<&bundle::Bundle<A::OrchardAuth, Amount, OrchardVanilla>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map(|b| b.commitment().0)
     }
@@ -492,7 +493,7 @@ impl TransactionDigest<Authorized> for BlockTxCommitmentDigester {
 
     fn digest_orchard(
         &self,
-        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, OrchardDomainVanilla>>,
+        orchard_bundle: Option<&bundle::Bundle<bundle::Authorized, Amount, OrchardVanilla>>,
     ) -> Self::OrchardDigest {
         orchard_bundle.map_or_else(bundle::commitments::hash_bundle_auth_empty, |b| {
             b.authorizing_commitment().0
