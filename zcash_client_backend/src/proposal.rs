@@ -490,57 +490,37 @@ impl<NoteRef> Step<NoteRef> {
         self.is_shielding
     }
 
-    /// Returns whether or not this proposal requires interaction with the specified pool
+    /// Returns whether or not this proposal requires interaction with the specified pool.
     pub fn involves(&self, pool_type: PoolType) -> bool {
-        match pool_type {
-            PoolType::Transparent => {
-                self.is_shielding
-                    || !self.transparent_inputs.is_empty()
-                    || self
-                        .payment_pools()
-                        .values()
-                        .any(|pool| matches!(pool, PoolType::Transparent))
-            }
+        let input_in_this_pool = || match pool_type {
+            PoolType::Transparent => self.is_shielding || !self.transparent_inputs.is_empty(),
             PoolType::Shielded(ShieldedProtocol::Sapling) => {
-                let sapling_in = self.shielded_inputs.iter().any(|s_in| {
+                self.shielded_inputs.iter().any(|s_in| {
                     s_in.notes()
                         .iter()
                         .any(|note| matches!(note.note(), Note::Sapling(_)))
-                });
-                let sapling_out = self
-                    .payment_pools()
-                    .values()
-                    .any(|pool| matches!(pool, PoolType::Shielded(ShieldedProtocol::Sapling)));
-                let sapling_change = self
-                    .balance
-                    .proposed_change()
-                    .iter()
-                    .any(|c| c.output_pool() == ShieldedProtocol::Sapling);
-
-                sapling_in || sapling_out || sapling_change
+                })
             }
+            #[cfg(feature = "orchard")]
             PoolType::Shielded(ShieldedProtocol::Orchard) => {
-                #[cfg(not(feature = "orchard"))]
-                let orchard_in = false;
-                #[cfg(feature = "orchard")]
-                let orchard_in = self.shielded_inputs.iter().any(|s_in| {
+                self.shielded_inputs.iter().any(|s_in| {
                     s_in.notes()
                         .iter()
                         .any(|note| matches!(note.note(), Note::Orchard(_)))
-                });
-                let orchard_out = self
-                    .payment_pools()
-                    .values()
-                    .any(|pool| matches!(pool, PoolType::Shielded(ShieldedProtocol::Orchard)));
-                let orchard_change = self
-                    .balance
-                    .proposed_change()
-                    .iter()
-                    .any(|c| c.output_pool() == ShieldedProtocol::Orchard);
-
-                orchard_in || orchard_out || orchard_change
+                })
             }
-        }
+            #[cfg(not(feature = "orchard"))]
+            PoolType::Shielded(ShieldedProtocol::Orchard) => false,
+        };
+        let output_in_this_pool = || self.payment_pools().values().any(|pool| *pool == pool_type);
+        let change_in_this_pool = || {
+            self.balance
+                .proposed_change()
+                .iter()
+                .any(|c| c.output_pool() == pool_type)
+        };
+
+        input_in_this_pool() || output_in_this_pool() || change_in_this_pool()
     }
 }
 

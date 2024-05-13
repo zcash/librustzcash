@@ -1051,8 +1051,9 @@ where
         let memo = change_value
             .memo()
             .map_or_else(MemoBytes::empty, |m| m.clone());
-        match change_value.output_pool() {
-            ShieldedProtocol::Sapling => {
+        let output_pool = change_value.output_pool();
+        match output_pool {
+            PoolType::Shielded(ShieldedProtocol::Sapling) => {
                 builder.add_sapling_output(
                     sapling_internal_ovk(),
                     sapling_dfvk.change_address().1,
@@ -1063,17 +1064,15 @@ where
                     Recipient::InternalAccount {
                         receiving_account: account,
                         external_address: None,
-                        note: PoolType::Shielded(ShieldedProtocol::Sapling),
+                        note: output_pool,
                     },
                     change_value.value(),
                     Some(memo),
                 ))
             }
-            ShieldedProtocol::Orchard => {
+            PoolType::Shielded(ShieldedProtocol::Orchard) => {
                 #[cfg(not(feature = "orchard"))]
-                return Err(Error::UnsupportedChangeType(PoolType::Shielded(
-                    ShieldedProtocol::Orchard,
-                )));
+                return Err(Error::UnsupportedChangeType(output_pool));
 
                 #[cfg(feature = "orchard")]
                 {
@@ -1087,12 +1086,15 @@ where
                         Recipient::InternalAccount {
                             receiving_account: account,
                             external_address: None,
-                            note: PoolType::Shielded(ShieldedProtocol::Orchard),
+                            note: output_pool,
                         },
                         change_value.value(),
                         Some(memo),
                     ))
                 }
+            }
+            PoolType::Transparent => {
+                return Err(Error::UnsupportedChangeType(output_pool));
             }
         }
     }

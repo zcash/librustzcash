@@ -63,10 +63,13 @@ use crate::{
 #[cfg(feature = "transparent-inputs")]
 use {
     zcash_client_backend::{
-        fees::TransactionBalance, proposal::Step, wallet::WalletTransparentOutput, PoolType,
+        fees::TransactionBalance, proposal::Step, wallet::WalletTransparentOutput,
     },
     zcash_primitives::transaction::components::{OutPoint, TxOut},
 };
+
+#[cfg(any(feature = "transparent-inputs", feature = "orchard"))]
+use zcash_client_backend::PoolType;
 
 pub(crate) type OutputRecoveryError = Error<
     SqliteClientError,
@@ -1485,7 +1488,10 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     // Since this is a cross-pool transfer, change will be sent to the preferred pool.
     assert_eq!(
         change_output.output_pool(),
-        std::cmp::max(ShieldedProtocol::Sapling, ShieldedProtocol::Orchard)
+        PoolType::Shielded(std::cmp::max(
+            ShieldedProtocol::Sapling,
+            ShieldedProtocol::Orchard
+        ))
     );
     assert_eq!(change_output.value(), expected_change);
 
@@ -1574,7 +1580,10 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     let change_output = proposed_change.get(0).unwrap();
     // Since there are sufficient funds in either pool, change is kept in the same pool as
     // the source note (the target pool), and does not necessarily follow preference order.
-    assert_eq!(change_output.output_pool(), P1::SHIELDED_PROTOCOL);
+    assert_eq!(
+        change_output.output_pool(),
+        PoolType::Shielded(P1::SHIELDED_PROTOCOL)
+    );
     assert_eq!(change_output.value(), expected_change);
 
     let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
@@ -1661,7 +1670,10 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     // Since there are sufficient funds in either pool, change is kept in the same pool as
     // the source note (the target pool), and does not necessarily follow preference order.
     // The source note will always be sapling, as we spend Sapling funds preferentially.
-    assert_eq!(change_output.output_pool(), ShieldedProtocol::Sapling);
+    assert_eq!(
+        change_output.output_pool(),
+        PoolType::Shielded(ShieldedProtocol::Sapling)
+    );
     assert_eq!(change_output.value(), expected_change);
 
     let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
