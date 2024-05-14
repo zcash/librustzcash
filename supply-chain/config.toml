@@ -112,20 +112,12 @@ criteria = "safe-to-deploy"
 version = "0.3.69"
 criteria = "safe-to-deploy"
 
-[[exemptions.base64ct]]
-version = "1.0.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.bech32]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bellman]]
 version = "0.14.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.bip0039]]
-version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bitflags]]
@@ -151,10 +143,6 @@ criteria = "safe-to-deploy"
 [[exemptions.bs58]]
 version = "0.5.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.bytemuck]]
-version = "1.14.0"
-criteria = "safe-to-run"
 
 [[exemptions.byteorder]]
 version = "1.5.0"
@@ -229,7 +217,7 @@ version = "0.9.15"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-utils]]
-version = "0.8.16"
+version = "0.8.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.daggy]]
@@ -238,10 +226,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.digest]]
 version = "0.10.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.errno]]
-version = "0.3.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.fallible-iterator]]
@@ -301,7 +285,7 @@ version = "0.2.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.gimli]]
-version = "0.28.0"
+version = "0.28.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.group]]
@@ -369,7 +353,7 @@ version = "1.9.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.indexmap]]
-version = "2.1.0"
+version = "2.2.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.inferno]]
@@ -377,11 +361,7 @@ version = "0.11.17"
 criteria = "safe-to-run"
 
 [[exemptions.itertools]]
-version = "0.11.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.itoa]]
-version = "1.0.9"
+version = "0.10.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.js-sys]]
@@ -393,7 +373,7 @@ version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libc]]
-version = "0.2.150"
+version = "0.2.154"
 criteria = "safe-to-deploy"
 
 [[exemptions.libm]]
@@ -405,7 +385,7 @@ version = "0.26.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.linux-raw-sys]]
-version = "0.4.11"
+version = "0.4.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.lock_api]]
@@ -424,10 +404,6 @@ criteria = "safe-to-deploy"
 version = "0.5.10"
 criteria = "safe-to-run"
 
-[[exemptions.memoffset]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.memuse]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
@@ -445,7 +421,7 @@ version = "2.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.mio]]
-version = "0.8.9"
+version = "0.8.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.multimap]]
@@ -484,32 +460,20 @@ criteria = "safe-to-deploy"
 version = "0.9.9"
 criteria = "safe-to-run"
 
-[[exemptions.password-hash]]
-version = "0.3.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.pasta_curves]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.pbkdf2]]
-version = "0.10.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.petgraph]]
-version = "0.6.4"
+version = "0.6.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.pin-project]]
-version = "1.1.3"
+version = "1.1.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.pin-project-internal]]
 version = "1.1.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.pkg-config]]
-version = "0.3.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.plotters]]
@@ -586,7 +550,7 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
 version = "0.4.1"
-criteria = "safe-to-deploy"
+criteria = "safe-to-run"
 
 [[exemptions.regex]]
 version = "1.10.2"
@@ -609,7 +573,7 @@ version = "0.16.20"
 criteria = "safe-to-deploy"
 
 [[exemptions.ring]]
-version = "0.17.5"
+version = "0.17.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.ripemd]]
@@ -621,7 +585,7 @@ version = "0.29.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustix]]
-version = "0.38.21"
+version = "0.38.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls]]
@@ -648,10 +612,6 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.scopeguard]]
-version = "1.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.sct]]
 version = "0.7.1"
 criteria = "safe-to-deploy"
@@ -668,14 +628,6 @@ criteria = "safe-to-deploy"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde]]
-version = "1.0.192"
-criteria = "safe-to-deploy"
-
-[[exemptions.serde_derive]]
-version = "1.0.192"
-criteria = "safe-to-deploy"
-
 [[exemptions.sha2]]
 version = "0.10.8"
 criteria = "safe-to-deploy"
@@ -686,10 +638,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.smallvec]]
 version = "1.11.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.socket2]]
-version = "0.4.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.socket2]]
@@ -707,10 +655,6 @@ criteria = "safe-to-deploy"
 [[exemptions.str_stack]]
 version = "0.1.0"
 criteria = "safe-to-run"
-
-[[exemptions.subtle]]
-version = "2.4.1"
-criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]
 version = "10.2.1"
@@ -735,10 +679,6 @@ criteria = "safe-to-deploy"
 [[exemptions.time]]
 version = "0.3.23"
 criteria = "safe-to-deploy"
-
-[[exemptions.tinytemplate]]
-version = "1.2.1"
-criteria = "safe-to-run"
 
 [[exemptions.tokio]]
 version = "1.35.1"
@@ -801,7 +741,7 @@ version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
-version = "1.5.0"
+version = "1.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.wait-timeout]]
@@ -817,7 +757,7 @@ version = "0.11.0+wasi-snapshot-preview1"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen]]
-version = "0.2.88"
+version = "0.2.92"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-backend]]
@@ -825,14 +765,6 @@ version = "0.2.88"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-macro]]
-version = "0.2.88"
-criteria = "safe-to-deploy"
-
-[[exemptions.wasm-bindgen-macro-support]]
-version = "0.2.88"
-criteria = "safe-to-deploy"
-
-[[exemptions.wasm-bindgen-shared]]
 version = "0.2.88"
 criteria = "safe-to-deploy"
 
@@ -862,14 +794,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.xdg]]
 version = "2.5.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.zerocopy]]
-version = "0.7.25"
-criteria = "safe-to-deploy"
-
-[[exemptions.zerocopy-derive]]
-version = "0.7.25"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize]]
