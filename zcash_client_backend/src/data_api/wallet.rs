@@ -647,7 +647,10 @@ fn create_proposed_transaction<DbT, ParamsT, InputsErrT, FeeRuleT, N>(
     prior_step_results: &[(&proposal::Step<N>, BuildResult)],
     proposal_step: &proposal::Step<N>,
     usk_to_tkey: Option<
-        fn(&UnifiedSpendingKey, &TransparentAddressMetadata) -> hdwallet::secp256k1::SecretKey,
+        fn(
+            &UnifiedSpendingKey,
+            &TransparentAddressMetadata,
+        ) -> Result<hdwallet::secp256k1::SecretKey, hdwallet::secp256k1::Error>,
     >,
 ) -> Result<
     BuildResult,
@@ -830,13 +833,11 @@ where
             let secret_key = usk_to_tkey
                 .map(|f| f(usk, &address_metadata))
                 .unwrap_or_else(|| {
-                    usk.transparent()
-                        .derive_secret_key(
-                            address_metadata.scope(),
-                            address_metadata.address_index(),
-                        )
-                        .unwrap()
-                });
+                    usk.transparent().derive_secret_key(
+                        address_metadata.scope(),
+                        address_metadata.address_index(),
+                    )
+                })?;
 
             utxos_spent.push(outpoint.clone());
             builder.add_transparent_input(secret_key, outpoint, utxo)?;
