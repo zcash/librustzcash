@@ -355,7 +355,7 @@ impl Parameters for MainNetwork {
             NetworkUpgrade::Canopy => Some(BlockHeight(1_046_400)),
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_687_104)),
             // #[cfg(zcash_unstable = "nu6")]
-            NetworkUpgrade::Nu6 => Some(BlockHeight(1_687_104)),
+            NetworkUpgrade::Nu6 => Some(BlockHeight(1_687_105)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -385,7 +385,7 @@ impl Parameters for TestNetwork {
             NetworkUpgrade::Canopy => Some(BlockHeight(1_028_500)),
             NetworkUpgrade::Nu5 => Some(BlockHeight(1_842_420)),
             // #[cfg(zcash_unstable = "nu6")]
-            NetworkUpgrade::Nu6 => Some(BlockHeight(1_842_420)),
+            NetworkUpgrade::Nu6 => Some(BlockHeight(1_842_421)),
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => None,
         }
@@ -797,7 +797,7 @@ mod tests {
         );
         assert_eq!(
             BranchId::for_height(&MAIN_NETWORK, BlockHeight(5_000_000)),
-            BranchId::Nu5,
+            BranchId::Nu6,
         );
     }
 }
