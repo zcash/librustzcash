@@ -58,7 +58,7 @@ sapling = { package = "sapling-crypto", version = "0.1.3" }
 
 # - Orchard
 nonempty = "0.7"
-orchard = { version = "0.8.0", default-features = false, git = "https://github.com/QED-it/orchard", branch = "orchardzsa-backward-compatability-0.8.0" }
+orchard = { version = "0.8.0", default-features = false, git = "https://github.com/QED-it/orchard", branch = "orchardzsa-backward-compatability-0.8.0-ak" }
 pasta_curves = "0.5"
 
 # - Transparent

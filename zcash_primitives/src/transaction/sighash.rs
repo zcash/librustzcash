@@ -12,7 +12,6 @@ use crate::{
     sapling::{self, bundle::GrothProofBytes},
 };
 
-use crate::transaction::sighash_v5::v6_signature_hash;
 #[cfg(zcash_unstable = "zfuture")]
 use {super::components::Amount, crate::extensions::transparent::Precondition};
 use crate::transaction::sighash_v6::v6_signature_hash;

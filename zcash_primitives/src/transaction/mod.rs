@@ -23,19 +23,13 @@ use std::fmt;
 use std::fmt::Debug;
 use std::io::{self, Read, Write};
 use std::ops::Deref;
-use zcash_encoding::{Array, CompactSize, Vector};
-use orchard::orchard_flavor::OrchardVanilla;
+use zcash_encoding::{CompactSize, Vector};
 
 use crate::{
     consensus::{BlockHeight, BranchId},
     sapling::{self, builder as sapling_builder},
 };
-use crate::{consensus::{BlockHeight, BranchId}, sapling::redjubjub};
 use crate::transaction::components::issuance;
-use crate::{
-    consensus::{BlockHeight, BranchId},
-    sapling::redjubjub,
-};
 
 use self::{
     components::{
@@ -275,7 +269,7 @@ impl TxVersion {
                 TxVersion::Sapling
             }
             BranchId::Nu5 => TxVersion::Zip225,
-            #[cfg(zcash_unstable = "nu6")]
+            // #[cfg(zcash_unstable = "nu6")]
             BranchId::Nu6 => TxVersion::Zsa,
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => TxVersion::ZFuture,
@@ -316,7 +310,8 @@ pub struct Unauthorized;
 
 impl Authorization for Unauthorized {
     type TransparentAuth = transparent::builder::Unauthorized;
-    type SaplingAuth = sapling::builder::Unauthorized;
+    type SaplingAuth =
+        sapling_builder::InProgress<sapling_builder::Proven, sapling_builder::Unsigned>;
     type OrchardAuth =
         orchard::builder::InProgress<Unproven<OrchardVanilla>, orchard::builder::Unauthorized>;
     type OrchardZsaAuth =
@@ -852,7 +847,7 @@ impl Transaction {
         let (consensus_branch_id, lock_time, expiry_height) =
             Self::read_v5_header_fragment(&mut reader)?;
         let transparent_bundle = Self::read_transparent(&mut reader)?;
-        let sapling_bundle = Self::read_v5_sapling(&mut reader)?;
+        let sapling_bundle = sapling_serialization::read_v5_bundle(&mut reader)?;
         let orchard_zsa_bundle = orchard_serialization::read_v6_bundle(&mut reader)?;
         let issue_bundle = issuance::read_v6_bundle(&mut reader)?;
 
@@ -1151,7 +1146,7 @@ pub mod testing {
                 Just(TxVersion::Sapling).boxed()
             }
             BranchId::Nu5 => Just(TxVersion::Zip225).boxed(),
-            BranchId::V6 => Just(TxVersion::Zsa).boxed(),
+            BranchId::Nu6 => Just(TxVersion::Zsa).boxed(),
             #[cfg(zcash_unstable = "zfuture")]
             BranchId::ZFuture => Just(TxVersion::ZFuture).boxed(),
         }

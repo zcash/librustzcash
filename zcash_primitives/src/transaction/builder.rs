@@ -36,8 +36,6 @@ use crate::transaction::components::transparent::builder::TransparentInputInfo;
 use orchard::note::AssetBase;
 #[cfg(not(feature = "transparent-inputs"))]
 use std::convert::Infallible;
-use orchard::note::AssetBase;
-use orchard::orchard_flavor::OrchardVanilla;
 
 #[cfg(zcash_unstable = "zfuture")]
 use crate::{
@@ -58,6 +56,7 @@ use orchard::issuance::{IssueBundle, IssueInfo};
 use orchard::keys::{IssuanceAuthorizingKey, IssuanceValidatingKey};
 use orchard::note::AssetBase;
 use orchard::orchard_flavor::{OrchardVanilla, OrchardZSA};
+use rand_core::OsRng;
 
 /// Since Blossom activation, the default transaction expiry delta should be 40 blocks.
 /// <https://zips.z.cash/zip-0203#changes-for-blossom>
@@ -360,37 +359,16 @@ impl<'a, P: consensus::Parameters> Builder<'a, P, ()> {
     pub fn new(
         params: P,
         target_height: BlockHeight,
-        orchard_anchor: Option<orchard::tree::Anchor>,
+        build_config: BuildConfig,
     ) -> Self {
-        Builder::new_with_rng(params, target_height, orchard_anchor, OsRng)
-    }
-}
 
-impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
-    /// Creates a new `Builder` targeted for inclusion in the block with the given height
-    /// and randomness source, using default values for general transaction fields.
-    ///
-    /// # Default values
-    ///
-    /// The expiry height will be set to the given height plus the default transaction
-    /// expiry delta (20 blocks).
-    pub fn new_with_rng(
-        params: P,
-        target_height: BlockHeight,
-        orchard_anchor: Option<orchard::tree::Anchor>,
-        rng: R,
-    ) -> Builder<'a, P, R> {
-        let is_orchard_zsa_enabled = params.is_nu_active(NetworkUpgrade::V6, target_height);
-        let is_orchard_enabled =
-            params.is_nu_active(NetworkUpgrade::Nu5, target_height) || is_orchard_zsa_enabled;
+        let is_orchard_zsa_enabled = params.is_nu_active(NetworkUpgrade::Nu6, target_height);
+        let is_orchard_enabled = params.is_nu_active(NetworkUpgrade::Nu5, target_height);
 
-        let orchard_builder = if is_orchard_enabled {
-            orchard_anchor.map(|anchor| {
-                orchard::builder::Builder::new(
-                    orchard::bundle::Flags::from_parts(true, true, is_orchard_zsa_enabled),
-                    anchor,
-                )
-            })
+        let orchard_builder = if is_orchard_enabled || is_orchard_zsa_enabled {
+            build_config
+                .orchard_builder_config()
+                .map(|(bundle_type, anchor)| orchard::builder::Builder::new(bundle_type, anchor))
         } else {
             None
         };
@@ -443,6 +421,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             transparent_builder: self.transparent_builder,
             sapling_builder: self.sapling_builder,
             orchard_builder: self.orchard_builder,
+            issuance_builder: self.issuance_builder,
+            issuance_key: self.issuance_key,
             sapling_asks: self.sapling_asks,
             orchard_saks: self.orchard_saks,
             tze_builder: self.tze_builder,
@@ -470,8 +450,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
                 Some(IssueInfo { recipient, value }),
                 OsRng,
             )
-            .map_err(IssuanceBundle)?
-            .0,
+                .map_err(IssuanceBundle)?
+                .0,
         );
         self.issuance_key = Some(ik);
 
@@ -504,7 +484,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ) -> Result<(), Error<FE>> {
         self.orchard_builder
             .as_mut()
-            .ok_or(Error::OrchardAnchorNotAvailable)?
+            .ok_or(Error::OrchardBuilderNotAvailable)?
             .add_burn(asset, orchard::value::NoteValue::from_raw(value))
             .map_err(Error::OrchardBuild)?;
 
@@ -517,7 +497,7 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     /// the given note.
     pub fn add_orchard_zsa_spend<FE>(
         &mut self,
-        sk: orchard::keys::SpendingKey,
+        sk: &orchard::keys::SpendingKey,
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
@@ -535,8 +515,8 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
     ) -> Result<(), Error<FE>> {
         self.orchard_builder
             .as_mut()
-            .ok_or(Error::OrchardAnchorNotAvailable)?
-            .add_recipient(
+            .ok_or(Error::OrchardBuilderNotAvailable)?
+            .add_output(
                 ovk,
                 recipient,
                 orchard::value::NoteValue::from_raw(value),
@@ -545,7 +525,9 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             )
             .map_err(Error::OrchardRecipient)
     }
+}
 
+impl<'a, P: consensus::Parameters, U: sapling::builder::ProverProgress> Builder<'a, P, U> {
     /// Adds an Orchard note to be spent in this bundle.
     ///
     /// Returns an error if the given Merkle path does not have the required anchor for
@@ -562,23 +544,20 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
 
     fn add_orchard_spend_impl<FE>(
         &mut self,
-        sk: orchard::keys::SpendingKey,
+        sk: &orchard::keys::SpendingKey,
         note: orchard::Note,
         merkle_path: orchard::tree::MerklePath,
     ) -> Result<(), Error<FE>> {
         self.orchard_builder
             .as_mut()
-            .ok_or(Error::OrchardAnchorNotAvailable)?
-            .add_spend(orchard::keys::FullViewingKey::from(&sk), note, merkle_path)
+            .ok_or(Error::OrchardBuilderNotAvailable)?
+            .add_spend(orchard::keys::FullViewingKey::from(sk), note, merkle_path)
             .map_err(Error::OrchardSpend)?;
 
             self.orchard_saks
                 .push(orchard::keys::SpendAuthorizingKey::from(sk));
 
             Ok(())
-        } else {
-            Err(Error::OrchardBuilderNotAvailable)
-        }
     }
 
     /// Adds an Orchard recipient to the transaction.
@@ -876,22 +855,21 @@ impl<'a, P: consensus::Parameters, R: RngCore + CryptoRng> Builder<'a, P, R> {
             None => (None, SaplingMetadata::empty()),
         };
 
-        let (unproven_orchard_bundle, unproven_orchard_zsa_bundle) =
-            if let Some(builder) = self.orchard_builder {
-                if version.has_zsa() {
-                    (
-                        None,
-                        Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?),
-                    )
-                } else {
-                    (
-                        Some(builder.build(&mut rng).map_err(Error::OrchardBuild)?),
-                        None,
-                    )
-                }
+        let mut unproven_orchard_bundle = None;
+        let mut unproven_orchard_zsa_bundle = None;
+        let mut orchard_meta = orchard::builder::BundleMetadata::empty();
+
+        if let Some(builder) = self.orchard_builder {
+            if version.has_zsa() {
+                let (bundle, meta) = builder.build(&mut rng).map_err(Error::OrchardBuild)?.unwrap();
+                unproven_orchard_zsa_bundle = Some(bundle);
+                orchard_meta = meta;
             } else {
-                (None, None)
-            };
+                let (bundle, meta) = builder.build(&mut rng).map_err(Error::OrchardBuild)?.unwrap();
+                unproven_orchard_bundle = Some(bundle);
+                orchard_meta = meta;
+            }
+        };
 
         let unauthorized_issue_bundle = self.issuance_builder;
 

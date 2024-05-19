@@ -12,7 +12,6 @@ pub mod amount {
         };
     }
 }
-pub mod amount;
 pub mod issuance;
 pub mod orchard;
 pub mod sapling;

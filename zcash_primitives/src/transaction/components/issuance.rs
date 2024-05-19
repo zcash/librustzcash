@@ -1,10 +1,8 @@
-use crate::transaction::components::orchard::read_nullifier;
-use bitvec::macros::internal::funty::Fundamental;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use nonempty::NonEmpty;
 use orchard::issuance::{IssueAction, IssueBundle, Signed};
 use orchard::keys::IssuanceValidatingKey;
-use orchard::note::{AssetBase, Nullifier, RandomSeed};
+use orchard::note::{AssetBase, RandomSeed, Rho};
 use orchard::value::NoteValue;
 use orchard::{Address, Note};
 /// Functions for parsing & serialization of the issuance bundle components.
@@ -43,7 +41,7 @@ fn read_authorization<R: Read>(mut reader: R) -> io::Result<Signed> {
 }
 
 fn read_action<R: Read>(mut reader: R) -> io::Result<IssueAction> {
-    let finalize = reader.read_u8()?.as_bool();
+    let finalize = reader.read_u8()? != 0;
     let notes = Vector::read(&mut reader, |r| read_note(r))?;
     let asset_descr_bytes = Vector::read(&mut reader, |r| r.read_u8())?;
     let asset_descr: String = String::from_utf8(asset_descr_bytes).unwrap();
@@ -54,7 +52,7 @@ pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
     let recipient = read_recipient(&mut reader)?;
     let value = reader.read_u64::<LittleEndian>()?;
     let asset = read_asset(&mut reader)?;
-    let rho = read_nullifier(&mut reader)?;
+    let rho = read_rho(&mut reader)?;
     let rseed = read_rseed(&mut reader, &rho)?;
     Ok(Option::from(Note::from_parts(
         recipient,
@@ -64,6 +62,20 @@ pub fn read_note<R: Read>(mut reader: R) -> io::Result<Note> {
         rseed,
     ))
     .unwrap())
+}
+
+fn read_rho<R: Read>(mut reader: R) -> io::Result<Rho> {
+    let mut bytes = [0u8; 32];
+    reader.read_exact(&mut bytes)?;
+    let rho_ctopt = Rho::from_bytes(&bytes);
+    if rho_ctopt.is_none().into() {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid Pallas point for rho".to_owned(),
+        ))
+    } else {
+        Ok(rho_ctopt.unwrap())
+    }
 }
 
 fn read_recipient<R: Read>(mut reader: R) -> io::Result<Address> {
@@ -78,7 +90,7 @@ pub fn read_asset<R: Read>(reader: &mut R) -> io::Result<AssetBase> {
     Ok(Option::from(AssetBase::from_bytes(&bytes)).unwrap())
 }
 
-fn read_rseed<R: Read>(mut reader: R, nullifier: &Nullifier) -> io::Result<RandomSeed> {
+fn read_rseed<R: Read>(mut reader: R, nullifier: &Rho) -> io::Result<RandomSeed> {
     let mut bytes = [0u8; 32];
     reader.read_exact(&mut bytes)?;
     Ok(Option::from(RandomSeed::from_bytes(bytes, nullifier)).unwrap())
@@ -102,7 +114,8 @@ pub fn write_v6_bundle<W: Write>(
 }
 
 fn write_action<W: Write>(action: &IssueAction, mut writer: W) -> io::Result<()> {
-    writer.write_u8(action.is_finalized().as_u8())?;
+    let is_finalized_u8 :u8 = if action.is_finalized() { 1 } else { 0 };
+    writer.write_u8(is_finalized_u8)?;
     Vector::write(&mut writer, action.notes(), |w, note| write_note(note, w))?;
     Vector::write(&mut writer, action.asset_desc().as_bytes(), |w, b| {
         w.write_u8(*b)
