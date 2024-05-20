@@ -9,7 +9,7 @@ use std::sync::{
 
 use memuse::DynamicUsage;
 use zcash_note_encryption::{
-    batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE, ENC_CIPHERTEXT_SIZE,
+    batch, BatchDomain, Domain, ShieldedOutput,
 };
 use zcash_primitives::{block::BlockHash, transaction::TxId};
 
@@ -58,7 +58,7 @@ pub(crate) trait Decryptor<D: BatchDomain, Output> {
 /// A decryptor of outputs as encoded in transactions.
 pub(crate) struct FullDecryptor;
 
-impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D, Output>
+impl<D: BatchDomain, Output: ShieldedOutput<D>> Decryptor<D, Output>
     for FullDecryptor
 {
     type Memo = D::Memo;
@@ -85,7 +85,7 @@ impl<D: BatchDomain, Output: ShieldedOutput<D, ENC_CIPHERTEXT_SIZE>> Decryptor<D
 /// A decryptor of outputs as encoded in compact blocks.
 pub(crate) struct CompactDecryptor;
 
-impl<D: BatchDomain, Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>> Decryptor<D, Output>
+impl<D: BatchDomain, Output: ShieldedOutput<D>> Decryptor<D, Output>
     for CompactDecryptor
 {
     type Memo = ();

@@ -14,7 +14,7 @@ use subtle::{ConditionallySelectable, ConstantTimeEq, CtOption};
 
 use tracing::{debug, trace};
 use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput, COMPACT_NOTE_SIZE};
+use zcash_note_encryption::{batch, BatchDomain, Domain, ShieldedOutput};
 use zcash_primitives::{
     consensus::{self, BlockHeight, NetworkUpgrade},
     transaction::{components::sapling::zip212_enforcement, TxId},
@@ -1038,7 +1038,7 @@ fn find_received<
     Nf,
     IvkTag: Copy + std::hash::Hash + Eq + Send + 'static,
     SK: ScanningKeyOps<D, AccountId, Nf>,
-    Output: ShieldedOutput<D, COMPACT_NOTE_SIZE>,
+    Output: ShieldedOutput<D>,
     NoteCommitment,
 >(
     block_height: BlockHeight,
