@@ -72,6 +72,7 @@ jobs:
           --release
           --workspace
           ${{ steps.prepare.outputs.feature-flags }}
+          --features expensive-tests
           -- --ignored
       - name: Verify working directory is clean
         run: git diff --exit-code
@@ -283,7 +284,9 @@ jobs:
           --timeout 600
           --out xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.1.5
+        uses: codecov/codecov-action@v4.3.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   doc-links:
     name: Intra-doc links
@@ -317,7 +320,7 @@ jobs:
       - id: prepare
         uses: ./.github/actions/prepare
       - name: Install protoc
-        uses: supplypike/setup-bin@v3
+        uses: supplypike/setup-bin@v4
         with:
           uri: 'https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip'
           name: 'protoc'

@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_backend"
 description = "APIs for creating shielded Zcash light clients"
-version = "0.11.1"
+version = "0.12.1"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -41,6 +41,7 @@ zcash_note_encryption.workspace = true
 zcash_primitives.workspace = true
 zcash_protocol.workspace = true
 zip32.workspace = true
+zip321.workspace = true
 
 # Dependencies exposed in a public API:
 # (Breaking upgrades to these require a breaking upgrade to this crate.)
@@ -66,7 +67,7 @@ tracing.workspace = true
 # - Protobuf interfaces and gRPC bindings
 hex.workspace = true
 prost.workspace = true
-tonic = { workspace = true, optional = true, features = ["prost", "codegen"]}
+tonic = { workspace = true, optional = true, features = ["prost", "codegen"] }
 
 # - Secret management
 secrecy.workspace = true
@@ -78,12 +79,17 @@ group.workspace = true
 orchard = { workspace = true, optional = true }
 sapling.workspace = true
 
+# - Sync engine
+async-trait = { version = "0.1", optional = true }
+futures-util = { version = "0.3", optional = true }
+
 # - Note commitment trees
 incrementalmerkletree.workspace = true
 shardtree.workspace = true
 
 # - Test dependencies
 proptest = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
 
 # - ZIP 321
 nom = "7"
@@ -102,7 +108,7 @@ crossbeam-channel.workspace = true
 rayon.workspace = true
 
 [build-dependencies]
-tonic-build = { workspace = true, features = ["prost"]}
+tonic-build = { workspace = true, features = ["prost"] }
 which = "4"
 
 [dev-dependencies]
@@ -116,6 +122,7 @@ shardtree = { workspace = true, features = ["test-dependencies"] }
 zcash_proofs.workspace = true
 zcash_address = { workspace = true, features = ["test-dependencies"] }
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
+tokio = { version = "1.21.0", features = ["rt-multi-thread"] }
 
 time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 
@@ -136,9 +143,17 @@ transparent-inputs = [
 ## Enables receiving and spending Orchard funds.
 orchard = ["dep:orchard", "zcash_keys/orchard"]
 
+## Exposes a wallet synchronization function that implements the necessary state machine.
+sync = [
+    "lightwalletd-tonic",
+    "dep:async-trait",
+    "dep:futures-util",
+]
+
 ## Exposes APIs that are useful for testing, such as `proptest` strategies.
 test-dependencies = [
     "dep:proptest",
+    "dep:jubjub",
     "orchard?/test-dependencies",
     "zcash_keys/test-dependencies",
     "zcash_primitives/test-dependencies",

@@ -305,7 +305,8 @@ mod tests {
         let network = Network::TestNetwork;
         let data_file = NamedTempFile::new().unwrap();
         let mut db_data = WalletDb::for_path(data_file.path(), network).unwrap();
-        init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[addresses_table::MIGRATION_ID], false)
+            .unwrap();
         let usk = UnifiedSpendingKey::from_seed(&network, &[0u8; 32][..], AccountId::ZERO).unwrap();
         let ufvk = usk.to_unified_full_viewing_key();
 
@@ -336,7 +337,7 @@ mod tests {
             VALUES (0, 4, 0, '', 7, '', 'c', true, X'63');",
         ).unwrap();
 
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         let mut q = db_data
             .conn
@@ -407,6 +408,7 @@ mod tests {
             &mut db_data,
             None,
             &[utxos_table::MIGRATION_ID, ufvk_support::MIGRATION_ID],
+            false,
         )
         .unwrap();
 
@@ -479,7 +481,7 @@ mod tests {
             )
             .unwrap();
 
-        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID]).unwrap();
+        init_wallet_db_internal(&mut db_data, None, &[super::MIGRATION_ID], false).unwrap();
 
         let fee = db_data
             .conn

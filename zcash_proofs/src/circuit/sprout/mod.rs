@@ -335,6 +335,7 @@ where
 
 #[test]
 #[ignore]
+#[cfg(feature = "expensive-tests")]
 fn test_sprout_constraints() {
     use bellman::gadgets::test::*;
     use bls12_381::Scalar;

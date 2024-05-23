@@ -1,0 +1,51 @@
+# Configuration file for cargo-deny
+
+[graph]
+targets = [
+    # Targets used by zcashd
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "x86_64-pc-windows-gnu" },
+    { triple = "x86_64-unknown-freebsd" },
+    { triple = "x86_64-unknown-linux-gnu" },
+    # Targets used by zcash-android-wallet-sdk
+    { triple = "aarch64-linux-android" },
+    { triple = "armv7-linux-androideabi" },
+    { triple = "i686-linux-android" },
+    { triple = "x86_64-linux-android" },
+    # Targets used by zcash-swift-wallet-sdk
+    { triple = "aarch64-apple-darwin" },
+    { triple = "aarch64-apple-ios" },
+    { triple = "aarch64-apple-ios-sim" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "x86_64-apple-ios" },
+]
+all-features = true
+exclude-dev = true
+
+[licenses]
+version = 2
+allow = [
+    "Apache-2.0",
+    "MIT",
+]
+exceptions = [
+    { name = "arrayref", allow = ["BSD-2-Clause"] },
+    { name = "matchit", allow = ["BSD-3-Clause"] },
+    { name = "minreq", allow = ["ISC"] },
+    { name = "ring", allow = ["LicenseRef-ring"] },
+    { name = "rustls-webpki", allow = ["ISC"] },
+    { name = "secp256k1", allow = ["CC0-1.0"] },
+    { name = "secp256k1-sys", allow = ["CC0-1.0"] },
+    { name = "subtle", allow = ["BSD-3-Clause"] },
+    { name = "unicode-ident", allow = ["Unicode-DFS-2016"] },
+    { name = "untrusted", allow = ["ISC"] },
+    { name = "webpki-roots", allow = ["MPL-2.0"] },
+]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "LicenseRef-ring"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 },
+]

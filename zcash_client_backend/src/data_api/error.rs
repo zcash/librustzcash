@@ -4,6 +4,7 @@ use std::error;
 use std::fmt::{self, Debug, Display};
 
 use shardtree::error::ShardTreeError;
+use zcash_address::ConversionError;
 use zcash_primitives::transaction::components::amount::NonNegativeAmount;
 use zcash_primitives::transaction::{
     builder,
@@ -81,6 +82,9 @@ pub enum Error<DataSourceError, CommitmentTreeError, SelectionError, FeeError> {
     /// full viewing key for an account.
     NoteMismatch(NoteId),
 
+    /// An error occurred parsing the address from a payment request.
+    Address(ConversionError<&'static str>),
+
     #[cfg(feature = "transparent-inputs")]
     AddressNotRecognized(TransparentAddress),
 }
@@ -145,6 +149,9 @@ where
             Error::NoSpendingKey(addr) => write!(f, "No spending key available for address: {}", addr),
             Error::NoteMismatch(n) => write!(f, "A note being spent ({:?}) does not correspond to either the internal or external full viewing key for the provided spending key.", n),
 
+            Error::Address(e) => {
+                write!(f, "An error occurred decoding the address from a payment request: {}.", e)
+            }
             #[cfg(feature = "transparent-inputs")]
             Error::AddressNotRecognized(_) => {
                 write!(f, "The specified transparent address was not recognized as belonging to the wallet.")
@@ -184,6 +191,12 @@ impl<DE, CE, SE, FE> From<BalanceError> for Error<DE, CE, SE, FE> {
     }
 }
 
+impl<DE, CE, SE, FE> From<ConversionError<&'static str>> for Error<DE, CE, SE, FE> {
+    fn from(value: ConversionError<&'static str>) -> Self {
+        Error::Address(value)
+    }
+}
+
 impl<DE, CE, SE, FE> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE> {
     fn from(e: InputSelectorError<DE, SE>) -> Self {
         match e {
@@ -198,6 +211,7 @@ impl<DE, CE, SE, FE> From<InputSelectorError<DE, SE>> for Error<DE, CE, SE, FE> 
                 required,
             },
             InputSelectorError::SyncRequired => Error::ScanRequired,
+            InputSelectorError::Address(e) => Error::Address(e),
         }
     }
 }

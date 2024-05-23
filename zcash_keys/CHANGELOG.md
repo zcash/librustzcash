@@ -5,13 +5,20 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_keys::address::Address::try_from_zcash_address`
+- `zcash_keys::address::Receiver`
+
+## [0.2.0] - 2024-03-25
 
 ### Added
 - `zcash_keys::address::Address::has_receiver`
 - `impl Display for zcash_keys::keys::AddressGenerationError`
 - `impl std::error::Error for zcash_keys::keys::AddressGenerationError`
+- `impl From<hdwallet::error::Error> for zcash_keys::keys::DerivationError`
+  when the `transparent-inputs` feature is enabled.
 - `zcash_keys::keys::DecodingError`
-- `zcash_keys::keys::UnifiedFullViewingKey::to_unified_incoming_viewing_key`
+- `zcash_keys::keys::UnifiedFullViewingKey::{parse, to_unified_incoming_viewing_key}`
 - `zcash_keys::keys::UnifiedIncomingViewingKey`
 
 ### Changed
@@ -22,6 +29,7 @@ and this library adheres to Rust's notion of
   - Added `DiversifierSpaceExhausted` variant.
 - At least one of the `orchard`, `sapling`, or `transparent-inputs` features
   must be enabled for the `keys` module to be accessible.
+- Updated to `zcash_primitives-0.15.0`
 
 ### Removed
 - `UnifiedFullViewingKey::new` has been placed behind the `test-dependencies`
@@ -60,6 +68,7 @@ The entries below are relative to the `zcash_client_backend` crate as of
   - `UnifiedAddressRequest`
 - A new `orchard` feature flag has been added to make it possible to
   build client code without `orchard` dependendencies.
+- `zcash_keys::address::Address::to_zcash_address`
 
 ### Changed
 - The following methods and enum variants have been placed behind an `orchard`

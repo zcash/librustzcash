@@ -6,6 +6,8 @@ and this library adheres to Rust's notion of
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `zcash_protocol::PoolType::{TRANSPARENT, SAPLING, ORCHARD}`
 
 ## [0.1.1] - 2024-03-25
 ### Added

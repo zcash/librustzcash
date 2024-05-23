@@ -2,16 +2,19 @@
 //!
 //! Generalised for sharing across the Sapling and Orchard implementations.
 
-use std::{convert::Infallible, num::NonZeroU32};
+use std::{
+    convert::Infallible,
+    num::{NonZeroU32, NonZeroU8},
+};
 
-use incrementalmerkletree::Level;
+use incrementalmerkletree::{frontier::Frontier, Level};
 use rand_core::RngCore;
 use rusqlite::params;
 use secrecy::Secret;
 use shardtree::error::ShardTreeError;
 use zcash_primitives::{
     block::BlockHash,
-    consensus::BranchId,
+    consensus::{BranchId, NetworkUpgrade, Parameters},
     legacy::TransparentAddress,
     memo::{Memo, MemoBytes},
     transaction::{
@@ -28,9 +31,12 @@ use zcash_client_backend::{
     address::Address,
     data_api::{
         self,
-        chain::{self, CommitmentTreeRoot, ScanSummary},
+        chain::{self, ChainState, CommitmentTreeRoot, ScanSummary},
         error::Error,
-        wallet::input_selection::{GreedyInputSelector, GreedyInputSelectorError},
+        wallet::{
+            decrypt_and_store_transaction,
+            input_selection::{GreedyInputSelector, GreedyInputSelectorError},
+        },
         AccountBirthday, DecryptedTransaction, Ratio, WalletRead, WalletSummary, WalletWrite,
     },
     decrypt_transaction,
@@ -46,11 +52,8 @@ use zcash_protocol::consensus::BlockHeight;
 use super::TestFvk;
 use crate::{
     error::SqliteClientError,
-    testing::{input_selector, AddressType, BlockCache, TestBuilder, TestState},
-    wallet::{
-        block_max_scanned, commitment_tree, parse_scope,
-        scanning::tests::test_with_nu5_birthday_offset, truncate_to_height,
-    },
+    testing::{input_selector, AddressType, BlockCache, InitialChainState, TestBuilder, TestState},
+    wallet::{block_max_scanned, commitment_tree, parse_scope, truncate_to_height},
     AccountId, NoteId, ReceivedNoteId,
 };
 
@@ -165,14 +168,10 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let to_extsk = T::sk(&[0xf5; 32]);
     let to: Address = T::sk_default_address(&to_extsk);
-    let request = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to,
-        amount: NonNegativeAmount::const_from_u64(10000),
-        memo: None, // this should result in the creation of an empty memo
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let request = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to.to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(10000),
+    )])
     .unwrap();
 
     // TODO: This test was originally written to use the pre-zip-313 fee rule
@@ -235,23 +234,25 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     assert!(found_tx_empty_memo);
 
     // Verify that the stored sent notes match what we're expecting
-    let mut stmt_sent_notes = st
-        .wallet()
-        .conn
-        .prepare(
-            "SELECT output_index
-            FROM sent_notes
-            JOIN transactions ON transactions.id_tx = sent_notes.tx
-            WHERE transactions.txid = ?",
-        )
-        .unwrap();
+    let sent_note_ids = {
+        let mut stmt_sent_notes = st
+            .wallet()
+            .conn
+            .prepare(
+                "SELECT output_index
+                FROM sent_notes
+                JOIN transactions ON transactions.id_tx = sent_notes.tx
+                WHERE transactions.txid = ?",
+            )
+            .unwrap();
 
-    let sent_note_ids = stmt_sent_notes
-        .query(rusqlite::params![sent_tx_id.as_ref()])
-        .unwrap()
-        .mapped(|row| Ok(NoteId::new(sent_tx_id, T::SHIELDED_PROTOCOL, row.get(0)?)))
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+        stmt_sent_notes
+            .query(rusqlite::params![sent_tx_id.as_ref()])
+            .unwrap()
+            .mapped(|row| Ok(NoteId::new(sent_tx_id, T::SHIELDED_PROTOCOL, row.get(0)?)))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
 
     assert_eq!(sent_note_ids.len(), 2);
 
@@ -288,6 +289,11 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let tx_history = st.get_tx_history().unwrap();
     assert_eq!(tx_history.len(), 2);
+
+    assert_matches!(
+        decrypt_and_store_transaction(&st.network(), st.wallet_mut(), &tx),
+        Ok(_)
+    );
 }
 
 #[cfg(feature = "transparent-inputs")]
@@ -327,14 +333,10 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // The first step will deshield to the wallet's default transparent address
     let to0 = Address::Transparent(account.usk().default_transparent_address().0);
-    let request0 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to0,
-        amount: NonNegativeAmount::const_from_u64(50000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let request0 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to0.to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(50000),
+    )])
     .unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -372,14 +374,10 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
             .default_address()
             .0,
     );
-    let request1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to1,
-        amount: NonNegativeAmount::const_from_u64(40000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let request1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        to1.to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(40000),
+    )])
     .unwrap();
 
     let step1 = Step::from_parts(
@@ -730,7 +728,7 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
             value,
         );
     }
-    st.scan_cached_blocks(h1 + 1, 41);
+    st.scan_cached_blocks(h1 + 1, 40);
 
     // Second proposal still fails
     assert_matches!(
@@ -1032,23 +1030,9 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     let addr2 = T::fvk_default_address(&dfvk2);
     let req = TransactionRequest::new(vec![
         // payment to an external recipient
-        Payment {
-            recipient_address: addr2,
-            amount: amount_sent,
-            memo: None,
-            label: None,
-            message: None,
-            other_params: vec![],
-        },
+        Payment::without_memo(addr2.to_zcash_address(&st.network()), amount_sent),
         // payment back to the originating wallet, simulating legacy change
-        Payment {
-            recipient_address: addr,
-            amount: amount_legacy_change,
-            memo: None,
-            label: None,
-            message: None,
-            other_params: vec![],
-        },
+        Payment::without_memo(addr.to_zcash_address(&st.network()), amount_legacy_change),
     ])
     .unwrap();
 
@@ -1104,6 +1088,7 @@ pub(crate) fn external_address_change_spends_detected_in_restore_from_seed<
     assert_eq!(st.get_total_balance(account_id), amount_left);
 }
 
+#[allow(dead_code)]
 pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -1140,14 +1125,10 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
     let input_selector = input_selector(StandardFeeRule::Zip317, None, T::SHIELDED_PROTOCOL);
 
     // This first request will fail due to insufficient non-dust funds
-    let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk),
-        amount: NonNegativeAmount::const_from_u64(50000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(50000),
+    )])
     .unwrap();
 
     assert_matches!(
@@ -1165,14 +1146,10 @@ pub(crate) fn zip317_spend<T: ShieldedPoolTester>() {
 
     // This request will succeed, spending a single dust input to pay the 10000
     // ZAT fee in addition to the 41000 ZAT output to the recipient
-    let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk),
-        amount: NonNegativeAmount::const_from_u64(41000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(41000),
+    )])
     .unwrap();
 
     let txid = st
@@ -1260,66 +1237,75 @@ pub(crate) fn shield_transparent<T: ShieldedPoolTester>() {
 // FIXME: This requires fixes to the test framework.
 #[allow(dead_code)]
 pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
-    // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
-    let (mut st, dfvk, birthday, _) = test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
-
     // Set up the following situation:
     //
     //        |<------ 500 ------->|<--- 10 --->|<--- 10 --->|
     // last_shard_start   wallet_birthday  received_tx  anchor_height
     //
-    // Set up some shard root history before the wallet birthday.
-    let prev_shard_start = birthday.height() - 500;
-    T::put_subtree_roots(
-        &mut st,
-        0,
-        &[CommitmentTreeRoot::from_parts(
-            prev_shard_start,
-            // fake a hash, the value doesn't matter
-            T::empty_tree_leaf(),
-        )],
-    )
-    .unwrap();
+    // We set the Sapling and Orchard frontiers at the birthday block initial state to 1234
+    // notes beyond the end of the first shard.
+    let frontier_tree_size: u32 = (0x1 << 16) + 1234;
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_initial_chain_state(|rng, network| {
+            let birthday_height = network.activation_height(NetworkUpgrade::Nu5).unwrap() + 1000;
 
-    let received_tx_height = birthday.height() + 10;
+            // Construct a fake chain state for the end of the block with the given
+            // birthday_offset from the Nu5 birthday.
+            let (prior_sapling_roots, sapling_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    frontier_tree_size.into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
+            // There will only be one prior root
+            let prior_sapling_roots = prior_sapling_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
 
-    let initial_sapling_tree_size = birthday
-        .sapling_frontier()
-        .value()
-        .map(|f| u64::from(f.position() + 1))
-        .unwrap_or(0)
-        .try_into()
-        .unwrap();
-    #[cfg(feature = "orchard")]
-    let initial_orchard_tree_size = birthday
-        .orchard_frontier()
-        .value()
-        .map(|f| u64::from(f.position() + 1))
-        .unwrap_or(0)
-        .try_into()
-        .unwrap();
-    #[cfg(not(feature = "orchard"))]
-    let initial_orchard_tree_size = 0;
+            #[cfg(feature = "orchard")]
+            let (prior_orchard_roots, orchard_initial_tree) =
+                Frontier::random_with_prior_subtree_roots(
+                    rng,
+                    frontier_tree_size.into(),
+                    NonZeroU8::new(16).unwrap(),
+                );
+            // There will only be one prior root
+            #[cfg(feature = "orchard")]
+            let prior_orchard_roots = prior_orchard_roots
+                .into_iter()
+                .map(|root| CommitmentTreeRoot::from_parts(birthday_height - 500, root))
+                .collect::<Vec<_>>();
+
+            InitialChainState {
+                chain_state: ChainState::new(
+                    birthday_height - 1,
+                    BlockHash([5; 32]),
+                    sapling_initial_tree,
+                    #[cfg(feature = "orchard")]
+                    orchard_initial_tree,
+                ),
+                prior_sapling_roots,
+                #[cfg(feature = "orchard")]
+                prior_orchard_roots,
+            }
+        })
+        .with_account_having_current_birthday()
+        .build();
 
     // Generate 9 blocks that have no value for us, starting at the birthday height.
-    let not_our_key = T::sk_to_fvk(&T::sk(&[0xf5; 32]));
     let not_our_value = NonNegativeAmount::const_from_u64(10000);
-    st.generate_block_at(
-        birthday.height(),
-        BlockHash([0; 32]),
-        &not_our_key,
-        AddressType::DefaultExternal,
-        not_our_value,
-        initial_sapling_tree_size,
-        initial_orchard_tree_size,
-    );
+    let not_our_key = T::random_fvk(st.rng_mut());
+    let (initial_height, _, _) =
+        st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
     for _ in 1..9 {
         st.generate_next_block(&not_our_key, AddressType::DefaultExternal, not_our_value);
     }
 
     // Now, generate a block that belongs to our wallet
-    st.generate_next_block(
-        &dfvk,
+    let (received_tx_height, _, _) = st.generate_next_block(
+        &T::test_account_fvk(&st),
         AddressType::DefaultExternal,
         NonNegativeAmount::const_from_u64(500000),
     );
@@ -1331,7 +1317,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
 
     // Scan a block range that includes our received note, but skips some blocks we need to
     // make it spendable.
-    st.scan_cached_blocks(birthday.height() + 5, 20);
+    st.scan_cached_blocks(initial_height + 5, 20);
 
     // Verify that the received note is not considered spendable
     let account = st.test_account().unwrap();
@@ -1348,7 +1334,7 @@ pub(crate) fn birthday_in_anchor_shard<T: ShieldedPoolTester>() {
     assert_eq!(spendable.len(), 0);
 
     // Scan the blocks we skipped
-    st.scan_cached_blocks(birthday.height(), 5);
+    st.scan_cached_blocks(initial_height, 5);
 
     // Verify that the received note is now considered spendable
     let spendable = T::select_spendable_notes(
@@ -1392,6 +1378,7 @@ pub(crate) fn checkpoint_gaps<T: ShieldedPoolTester>() {
         not_our_value,
         st.latest_cached_block().unwrap().sapling_end_size,
         st.latest_cached_block().unwrap().orchard_end_size,
+        false,
     );
 
     // Scan the block
@@ -1458,14 +1445,10 @@ pub(crate) fn pool_crossing_required<P0: ShieldedPoolTester, P1: ShieldedPoolTes
     );
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
-    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: p1_to,
-        amount: transfer_amount,
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        p1_to.to_zcash_address(&st.network()),
+        transfer_amount,
+    )])
     .unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -1549,14 +1532,10 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
     );
 
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
-    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: p1_to,
-        amount: transfer_amount,
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        p1_to.to_zcash_address(&st.network()),
+        transfer_amount,
+    )])
     .unwrap();
 
     let fee_rule = StandardFeeRule::Zip317;
@@ -1614,6 +1593,93 @@ pub(crate) fn fully_funded_fully_private<P0: ShieldedPoolTester, P1: ShieldedPoo
 }
 
 #[cfg(feature = "orchard")]
+pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+    let mut st = TestBuilder::new()
+        .with_block_cache()
+        .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
+        // activation after Sapling
+        .build();
+
+    let account = st.test_account().cloned().unwrap();
+
+    let p0_fvk = P0::test_account_fvk(&st);
+    let p1_fvk = P1::test_account_fvk(&st);
+    let (p1_to, _) = account.usk().default_transparent_address();
+
+    let note_value = NonNegativeAmount::const_from_u64(350000);
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
+    st.scan_cached_blocks(account.birthday().height(), 2);
+
+    let initial_balance = (note_value * 2).unwrap();
+    assert_eq!(st.get_total_balance(account.account_id()), initial_balance);
+    assert_eq!(
+        st.get_spendable_balance(account.account_id(), 1),
+        initial_balance
+    );
+
+    let transfer_amount = NonNegativeAmount::const_from_u64(200000);
+    let p0_to_p1 = zip321::TransactionRequest::new(vec![Payment::without_memo(
+        Address::Transparent(p1_to).to_zcash_address(&st.network()),
+        transfer_amount,
+    )])
+    .unwrap();
+
+    let fee_rule = StandardFeeRule::Zip317;
+    let input_selector = GreedyInputSelector::new(
+        // We set the default change output pool to P0, because we want to verify later that
+        // change is actually sent to P1 (as the transaction is fully fundable from P1).
+        standard::SingleOutputChangeStrategy::new(fee_rule, None, P0::SHIELDED_PROTOCOL),
+        DustOutputPolicy::default(),
+    );
+    let proposal0 = st
+        .propose_transfer(
+            account.account_id(),
+            &input_selector,
+            p0_to_p1,
+            NonZeroU32::new(1).unwrap(),
+        )
+        .unwrap();
+
+    let _min_target_height = proposal0.min_target_height();
+    assert_eq!(proposal0.steps().len(), 1);
+    let step0 = &proposal0.steps().head;
+
+    // We expect 3 logical actions, one for the transparent output and two for the source pool.
+    let expected_fee = NonNegativeAmount::const_from_u64(15000);
+    assert_eq!(step0.balance().fee_required(), expected_fee);
+
+    let expected_change = (note_value - transfer_amount - expected_fee).unwrap();
+    let proposed_change = step0.balance().proposed_change();
+    assert_eq!(proposed_change.len(), 1);
+    let change_output = proposed_change.get(0).unwrap();
+    // Since there are sufficient funds in either pool, change is kept in the same pool as
+    // the source note (the target pool), and does not necessarily follow preference order.
+    // The source note will always be sapling, as we spend Sapling funds preferentially.
+    assert_eq!(change_output.output_pool(), ShieldedProtocol::Sapling);
+    assert_eq!(change_output.value(), expected_change);
+
+    let create_proposed_result = st.create_proposed_transactions::<Infallible, _>(
+        account.usk(),
+        OvkPolicy::Sender,
+        &proposal0,
+    );
+    assert_matches!(&create_proposed_result, Ok(txids) if txids.len() == 1);
+
+    let (h, _) = st.generate_next_block_including(create_proposed_result.unwrap()[0]);
+    st.scan_cached_blocks(h, 1);
+
+    assert_eq!(
+        st.get_total_balance(account.account_id()),
+        (initial_balance - transfer_amount - expected_fee).unwrap()
+    );
+    assert_eq!(
+        st.get_spendable_balance(account.account_id(), 1),
+        (initial_balance - transfer_amount - expected_fee).unwrap()
+    );
+}
+
+#[cfg(feature = "orchard")]
 pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
@@ -1665,7 +1731,7 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     // First, send funds just to P0
     let transfer_amount = NonNegativeAmount::const_from_u64(200000);
     let p0_transfer = zip321::TransactionRequest::new(vec![Payment::without_memo(
-        P0::random_address(&mut st.rng),
+        P0::random_address(&mut st.rng).to_zcash_address(&st.network()),
         transfer_amount,
     )])
     .unwrap();
@@ -1690,8 +1756,14 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
 
     // In the next block, send funds to both P0 and P1
     let both_transfer = zip321::TransactionRequest::new(vec![
-        Payment::without_memo(P0::random_address(&mut st.rng), transfer_amount),
-        Payment::without_memo(P1::random_address(&mut st.rng), transfer_amount),
+        Payment::without_memo(
+            P0::random_address(&mut st.rng).to_zcash_address(&st.network()),
+            transfer_amount,
+        ),
+        Payment::without_memo(
+            P1::random_address(&mut st.rng).to_zcash_address(&st.network()),
+            transfer_amount,
+        ),
     ])
     .unwrap();
     let res = st
@@ -1888,6 +1960,7 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
         NonNegativeAmount::const_from_u64(8),
         2,
         2,
+        true,
     );
     st.generate_next_block(
         &dfvk,
@@ -1927,20 +2000,20 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
     // Scan the cache
     st.scan_cached_blocks(h, 2);
 
-    // Account balance should reflect both received notes
+    // Spendable balance should reflect both received notes
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_spendable_balance(account.account_id(), 1),
         (value + value2).unwrap()
     );
 
-    // "Rewind" to height of last scanned block
+    // "Rewind" to height of last scanned block (this is a no-op)
     st.wallet_mut()
         .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h + 1))
         .unwrap();
 
-    // Account balance should be unaltered
+    // Spendable balance should be unaltered
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_spendable_balance(account.account_id(), 1),
         (value + value2).unwrap()
     );
 
@@ -1949,15 +2022,20 @@ pub(crate) fn data_db_truncation<T: ShieldedPoolTester>() {
         .transactionally(|wdb| truncate_to_height(wdb.conn.0, &wdb.params, h))
         .unwrap();
 
-    // Account balance should only contain the first received note
-    assert_eq!(st.get_total_balance(account.account_id()), value);
+    // Spendable balance should only contain the first received note;
+    // the rest should be pending.
+    assert_eq!(st.get_spendable_balance(account.account_id(), 1), value);
+    assert_eq!(
+        st.get_pending_shielded_balance(account.account_id(), 1),
+        value2
+    );
 
     // Scan the cache again
     st.scan_cached_blocks(h, 2);
 
     // Account balance should again reflect both received notes
     assert_eq!(
-        st.get_total_balance(account.account_id()),
+        st.get_spendable_balance(account.account_id(), 1),
         (value + value2).unwrap()
     );
 }
@@ -1991,14 +2069,10 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
     );
 
     // We can spend the received notes
-    let req = TransactionRequest::new(vec![Payment {
-        recipient_address: T::fvk_default_address(&dfvk),
-        amount: NonNegativeAmount::const_from_u64(110_000),
-        memo: None,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+    let req = TransactionRequest::new(vec![Payment::without_memo(
+        T::fvk_default_address(&dfvk).to_zcash_address(&st.network()),
+        NonNegativeAmount::const_from_u64(110_000),
+    )])
     .unwrap();
 
     #[allow(deprecated)]

@@ -1,4 +1,4 @@
-use crate::verify::Params;
+use crate::params::Params;
 
 pub(crate) struct TestVector {
     pub(crate) params: Params,

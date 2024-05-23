@@ -7,6 +7,11 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Removed
+- The `zcash_primitives::zip339` module, which reexported parts of the API of
+  the `bip0039` crate, has been removed. Use the `bip0039` crate directly
+  instead.
+
 ## [0.15.1] - 2024-05-23
 
 - Fixed `sapling-crypto` dependency to not enable its `multicore` feature flag

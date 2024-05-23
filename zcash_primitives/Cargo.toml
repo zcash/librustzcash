@@ -63,9 +63,6 @@ hdwallet = { workspace = true, optional = true }
 #   - `SecretKey` and `PublicKey` types exposed
 secp256k1 = { workspace = true, optional = true }
 
-# - ZIP 339
-bip0039 = { version = "0.10", features = ["std", "all-languages"] }
-
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
 # - Documentation
@@ -122,6 +119,9 @@ test-dependencies = [
     "sapling/test-dependencies",
     "zcash_protocol/test-dependencies",
 ]
+
+## A feature used to isolate tests that are expensive to run. Test-only.
+expensive-tests = []
 
 [lib]
 bench = false

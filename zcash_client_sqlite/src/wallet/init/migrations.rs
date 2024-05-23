@@ -2,6 +2,7 @@ mod add_account_birthdays;
 mod add_transaction_views;
 mod add_utxo_account;
 mod addresses_table;
+mod ensure_orchard_ua_receiver;
 mod full_account_ids;
 mod initial_setup;
 mod nullifier_map;
@@ -56,12 +57,14 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
     //       v_sapling_shard_unscanned_ranges    \           |       v_tx_outputs_use_legacy_false
     //                        |                   \          |                     |
     //                wallet_summaries             \         |      v_transactions_shielding_balance
-    //                                              \        |                     |
-    //                                               \       |       v_transactions_note_uniqueness
-    //                                                \      |        /
-    //                                                full_account_ids
+    //                        \                     \        |                     |
+    //                         \                     \       |       v_transactions_note_uniqueness
+    //                          \                     \      |        /
+    //                           -------------------- full_account_ids
     //                                                       |
     //                                             orchard_received_notes
+    //                                                       |
+    //                                           ensure_orchard_ua_receiver
     vec![
         Box::new(initial_setup::Migration {}),
         Box::new(utxos_table::Migration {}),
@@ -108,5 +111,8 @@ pub(super) fn all_migrations<P: consensus::Parameters + 'static>(
             params: params.clone(),
         }),
         Box::new(orchard_received_notes::Migration),
+        Box::new(ensure_orchard_ua_receiver::Migration {
+            params: params.clone(),
+        }),
     ]
 }

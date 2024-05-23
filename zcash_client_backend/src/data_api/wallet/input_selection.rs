@@ -8,6 +8,7 @@ use std::{
 };
 
 use nonempty::NonEmpty;
+use zcash_address::ConversionError;
 use zcash_primitives::{
     consensus::{self, BlockHeight},
     transaction::{
@@ -48,6 +49,8 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     Selection(SelectorErrT),
     /// Input selection attempted to generate an invalid transaction proposal.
     Proposal(ProposalError),
+    /// An error occurred parsing the address from a payment request.
+    Address(ConversionError<&'static str>),
     /// Insufficient funds were available to satisfy the payment request that inputs were being
     /// selected to attempt to satisfy.
     InsufficientFunds {
@@ -57,6 +60,12 @@ pub enum InputSelectorError<DbErrT, SelectorErrT> {
     /// The data source does not have enough information to choose an expiry height
     /// for the transaction.
     SyncRequired,
+}
+
+impl<E, S> From<ConversionError<&'static str>> for InputSelectorError<E, S> {
+    fn from(value: ConversionError<&'static str>) -> Self {
+        InputSelectorError::Address(value)
+    }
 }
 
 impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE, SE> {
@@ -76,6 +85,13 @@ impl<DE: fmt::Display, SE: fmt::Display> fmt::Display for InputSelectorError<DE,
                 write!(
                     f,
                     "Input selection attempted to generate an invalid proposal: {}",
+                    e
+                )
+            }
+            InputSelectorError::Address(e) => {
+                write!(
+                    f,
+                    "An error occurred decoding the address from a payment request: {}.",
                     e
                 )
             }
@@ -344,43 +360,48 @@ where
         let mut orchard_outputs = vec![];
         let mut payment_pools = BTreeMap::new();
         for (idx, payment) in transaction_request.payments() {
-            match &payment.recipient_address {
+            let recipient_address: Address = payment
+                .recipient_address()
+                .clone()
+                .convert_if_network(params.network_type())?;
+
+            match recipient_address {
                 Address::Transparent(addr) => {
                     payment_pools.insert(*idx, PoolType::Transparent);
                     transparent_outputs.push(TxOut {
-                        value: payment.amount,
+                        value: payment.amount(),
                         script_pubkey: addr.script(),
                     });
                 }
                 Address::Sapling(_) => {
                     payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
-                    sapling_outputs.push(SaplingPayment(payment.amount));
+                    sapling_outputs.push(SaplingPayment(payment.amount()));
                 }
                 Address::Unified(addr) => {
                     #[cfg(feature = "orchard")]
                     if addr.orchard().is_some() {
                         payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Orchard));
-                        orchard_outputs.push(OrchardPayment(payment.amount));
+                        orchard_outputs.push(OrchardPayment(payment.amount()));
                         continue;
                     }
 
                     if addr.sapling().is_some() {
                         payment_pools.insert(*idx, PoolType::Shielded(ShieldedProtocol::Sapling));
-                        sapling_outputs.push(SaplingPayment(payment.amount));
+                        sapling_outputs.push(SaplingPayment(payment.amount()));
                         continue;
                     }
 
                     if let Some(addr) = addr.transparent() {
                         payment_pools.insert(*idx, PoolType::Transparent);
                         transparent_outputs.push(TxOut {
-                            value: payment.amount,
+                            value: payment.amount(),
                             script_pubkey: addr.script(),
                         });
                         continue;
                     }
 
                     return Err(InputSelectorError::Selection(
-                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr.clone())),
+                        GreedyInputSelectorError::UnsupportedAddress(Box::new(addr)),
                     ));
                 }
             }
@@ -394,20 +415,25 @@ where
         // of funds selected is strictly increasing. The loop will either return a successful
         // result or the wallet will eventually run out of funds to select.
         loop {
-            #[cfg(feature = "orchard")]
-            let (sapling_input_total, orchard_input_total) = (
-                shielded_inputs.sapling_value()?,
-                shielded_inputs.orchard_value()?,
-            );
-
             #[cfg(not(feature = "orchard"))]
-            let orchard_input_total = NonNegativeAmount::ZERO;
-
-            let use_sapling =
-                !(sapling_outputs.is_empty() && orchard_input_total >= amount_required);
+            let use_sapling = true;
             #[cfg(feature = "orchard")]
-            let use_orchard =
-                !(orchard_outputs.is_empty() && sapling_input_total >= amount_required);
+            let (use_sapling, use_orchard) = {
+                let (sapling_input_total, orchard_input_total) = (
+                    shielded_inputs.sapling_value()?,
+                    shielded_inputs.orchard_value()?,
+                );
+
+                // Use Sapling inputs if there are no Orchard outputs or there are not sufficient
+                // Orchard outputs to cover the amount required.
+                let use_sapling =
+                    orchard_outputs.is_empty() || amount_required > orchard_input_total;
+                // Use Orchard inputs if there are insufficient Sapling funds to cover the amount
+                // reqiuired.
+                let use_orchard = !use_sapling || amount_required > sapling_input_total;
+
+                (use_sapling, use_orchard)
+            };
 
             let sapling_inputs = if use_sapling {
                 shielded_inputs

@@ -497,14 +497,15 @@ where
     >,
     DbT::NoteRef: Copy + Eq + Ord,
 {
-    let request = zip321::TransactionRequest::new(vec![Payment {
-        recipient_address: to.clone(),
+    let request = zip321::TransactionRequest::new(vec![Payment::new(
+        to.to_zcash_address(params),
         amount,
         memo,
-        label: None,
-        message: None,
-        other_params: vec![],
-    }])
+        None,
+        None,
+        vec![],
+    )
+    .ok_or(Error::MemoForbidden)?])
     .expect(
         "It should not be possible for this to violate ZIP 321 request construction invariants.",
     );
@@ -848,13 +849,16 @@ where
                     // the transaction in payment index order, so we can use dead reckoning to
                     // figure out which output it ended up being.
                     let (prior_step, result) = &prior_step_results[input_ref.step_index()];
-                    let recipient_address = match &prior_step
+                    let recipient_address = &prior_step
                         .transaction_request()
                         .payments()
                         .get(&i)
                         .expect("Payment step references are checked at construction")
-                        .recipient_address
-                    {
+                        .recipient_address()
+                        .clone()
+                        .convert_if_network(params.network_type())?;
+
+                    let recipient_taddr = match recipient_address {
                         Address::Transparent(t) => Some(t),
                         Address::Unified(uaddr) => uaddr.transparent(),
                         _ => None,
@@ -879,7 +883,7 @@ where
                         .ok_or(Error::Proposal(ProposalError::ReferenceError(*input_ref)))?
                         .vout[outpoint.n() as usize];
 
-                    add_transparent_input(recipient_address, outpoint, utxo.clone())?;
+                    add_transparent_input(recipient_taddr, outpoint, utxo.clone())?;
                 }
                 proposal::StepOutputIndex::Change(_) => unreachable!(),
             }
@@ -953,12 +957,14 @@ where
             (payment, output_pool)
         })
     {
-        match &payment.recipient_address {
+        let recipient_address: Address = payment
+            .recipient_address()
+            .clone()
+            .convert_if_network(params.network_type())?;
+
+        match recipient_address {
             Address::Unified(ua) => {
-                let memo = payment
-                    .memo
-                    .as_ref()
-                    .map_or_else(MemoBytes::empty, |m| m.clone());
+                let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
 
                 match output_pool {
                     #[cfg(not(feature = "orchard"))]
@@ -970,15 +976,15 @@ where
                         builder.add_orchard_output(
                             orchard_external_ovk.clone(),
                             *ua.orchard().expect("The mapping between payment pool and receiver is checked in step construction"),
-                            payment.amount.into(),
+                            payment.amount().into(),
                             memo.clone(),
                         )?;
                         orchard_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
+                            Recipient::External(
+                                payment.recipient_address().clone(),
                                 PoolType::Shielded(ShieldedProtocol::Orchard),
                             ),
-                            payment.amount,
+                            payment.amount(),
                             Some(memo),
                         ));
                     }
@@ -987,51 +993,56 @@ where
                         builder.add_sapling_output(
                             sapling_external_ovk,
                             *ua.sapling().expect("The mapping between payment pool and receiver is checked in step construction"),
-                            payment.amount,
+                            payment.amount(),
                             memo.clone(),
                         )?;
                         sapling_output_meta.push((
-                            Recipient::Unified(
-                                ua.clone(),
+                            Recipient::External(
+                                payment.recipient_address().clone(),
                                 PoolType::Shielded(ShieldedProtocol::Sapling),
                             ),
-                            payment.amount,
+                            payment.amount(),
                             Some(memo),
                         ));
                     }
 
                     PoolType::Transparent => {
-                        if payment.memo.is_some() {
+                        if payment.memo().is_some() {
                             return Err(Error::MemoForbidden);
                         } else {
                             builder.add_transparent_output(
                                 ua.transparent().expect("The mapping between payment pool and receiver is checked in step construction."),
-                                payment.amount
+                                payment.amount()
                             )?;
                         }
                     }
                 }
             }
             Address::Sapling(addr) => {
-                let memo = payment
-                    .memo
-                    .as_ref()
-                    .map_or_else(MemoBytes::empty, |m| m.clone());
+                let memo = payment.memo().map_or_else(MemoBytes::empty, |m| m.clone());
                 builder.add_sapling_output(
                     sapling_external_ovk,
-                    *addr,
-                    payment.amount,
+                    addr,
+                    payment.amount(),
                     memo.clone(),
                 )?;
-                sapling_output_meta.push((Recipient::Sapling(*addr), payment.amount, Some(memo)));
+                sapling_output_meta.push((
+                    Recipient::External(payment.recipient_address().clone(), PoolType::SAPLING),
+                    payment.amount(),
+                    Some(memo),
+                ));
             }
             Address::Transparent(to) => {
-                if payment.memo.is_some() {
+                if payment.memo().is_some() {
                     return Err(Error::MemoForbidden);
                 } else {
-                    builder.add_transparent_output(to, payment.amount)?;
+                    builder.add_transparent_output(&to, payment.amount())?;
                 }
-                transparent_output_meta.push((to, payment.amount));
+                transparent_output_meta.push((
+                    Recipient::External(payment.recipient_address().clone(), PoolType::TRANSPARENT),
+                    to,
+                    payment.amount(),
+                ));
             }
         }
     }
@@ -1049,10 +1060,11 @@ where
                     memo.clone(),
                 )?;
                 sapling_output_meta.push((
-                    Recipient::InternalAccount(
-                        account,
-                        PoolType::Shielded(ShieldedProtocol::Sapling),
-                    ),
+                    Recipient::InternalAccount {
+                        receiving_account: account,
+                        external_address: None,
+                        note: PoolType::Shielded(ShieldedProtocol::Sapling),
+                    },
                     change_value.value(),
                     Some(memo),
                 ))
@@ -1072,10 +1084,11 @@ where
                         memo.clone(),
                     )?;
                     orchard_output_meta.push((
-                        Recipient::InternalAccount(
-                            account,
-                            PoolType::Shielded(ShieldedProtocol::Orchard),
-                        ),
+                        Recipient::InternalAccount {
+                            receiving_account: account,
+                            external_address: None,
+                            note: PoolType::Shielded(ShieldedProtocol::Orchard),
+                        },
                         change_value.value(),
                         Some(memo),
                     ))
@@ -1151,22 +1164,27 @@ where
                 SentTransactionOutput::from_parts(output_index, recipient, value, memo)
             });
 
-    let transparent_outputs = transparent_output_meta.into_iter().map(|(addr, value)| {
-        let script = addr.script();
-        let output_index = build_result
-            .transaction()
-            .transparent_bundle()
-            .and_then(|b| {
-                b.vout
-                    .iter()
-                    .enumerate()
-                    .find(|(_, tx_out)| tx_out.script_pubkey == script)
-            })
-            .map(|(index, _)| index)
-            .expect("An output should exist in the transaction for each transparent payment.");
+    let transparent_outputs =
+        transparent_output_meta
+            .into_iter()
+            .map(|(recipient, addr, value)| {
+                let script = addr.script();
+                let output_index = build_result
+                    .transaction()
+                    .transparent_bundle()
+                    .and_then(|b| {
+                        b.vout
+                            .iter()
+                            .enumerate()
+                            .find(|(_, tx_out)| tx_out.script_pubkey == script)
+                    })
+                    .map(|(index, _)| index)
+                    .expect(
+                        "An output should exist in the transaction for each transparent payment.",
+                    );
 
-        SentTransactionOutput::from_parts(output_index, Recipient::Transparent(*addr), value, None)
-    });
+                SentTransactionOutput::from_parts(output_index, recipient, value, None)
+            });
 
     let mut outputs = vec![];
     #[cfg(feature = "orchard")]

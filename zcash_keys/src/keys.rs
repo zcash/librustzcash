@@ -197,7 +197,6 @@ impl Era {
 
 /// A set of spending keys that are all associated with a single ZIP-0032 account identifier.
 #[derive(Clone, Debug)]
-#[doc(hidden)]
 pub struct UnifiedSpendingKey {
     #[cfg(feature = "transparent-inputs")]
     transparent: legacy::AccountPrivKey,
@@ -207,7 +206,6 @@ pub struct UnifiedSpendingKey {
     orchard: orchard::keys::SpendingKey,
 }
 
-#[doc(hidden)]
 impl UnifiedSpendingKey {
     pub fn from_seed<P: consensus::Parameters>(
         _params: &P,
@@ -283,7 +281,7 @@ impl UnifiedSpendingKey {
         &self.orchard
     }
 
-    /// Returns a binary encoding of this key suitable for decoding with [`decode`].
+    /// Returns a binary encoding of this key suitable for decoding with [`Self::from_bytes`].
     ///
     /// The encoded form of a unified spending key is only intended for use
     /// within wallets when required for storage and/or crossing FFI boundaries;
@@ -332,7 +330,7 @@ impl UnifiedSpendingKey {
 
     /// Decodes a [`UnifiedSpendingKey`] value from its serialized representation.
     ///
-    /// See [`to_bytes`] for additional detail about the encoded form.
+    /// See [`Self::to_bytes`] for additional detail about the encoded form.
     #[allow(clippy::unnecessary_unwrap)]
     #[cfg(feature = "unstable")]
     pub fn from_bytes(era: Era, encoded: &[u8]) -> Result<Self, DecodingError> {
@@ -624,7 +622,6 @@ pub struct UnifiedFullViewingKey {
     unknown: Vec<(u32, Vec<u8>)>,
 }
 
-#[doc(hidden)]
 impl UnifiedFullViewingKey {
     /// Construct a new unified full viewing key.
     ///
