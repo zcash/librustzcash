@@ -7,6 +7,8 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+## [0.15.1] - 2024-05-23
+
 - Fixed `sapling-crypto` dependency to not enable its `multicore` feature flag
   when the default features of `zcash_primitives` are disabled.
 
