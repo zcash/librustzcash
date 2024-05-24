@@ -12,6 +12,11 @@ and this library adheres to Rust's notion of
   the `bip0039` crate, has been removed. Use the `bip0039` crate directly
   instead.
 
+## [0.15.1] - 2024-05-23
+
+- Fixed `sapling-crypto` dependency to not enable its `multicore` feature flag
+  when the default features of `zcash_primitives` are disabled.
+
 ## [0.15.0] - 2024-03-25
 
 ### Added
