@@ -791,46 +791,65 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn test_with_nu5_birthday_offset<T: ShieldedPoolTester>(
+        initial_shard_blocks: u32,
         birthday_offset: u32,
         prior_block_hash: BlockHash,
+        insert_prior_roots: bool,
     ) -> (TestState<BlockCache>, T::Fvk, AccountBirthday, u32) {
         let st = TestBuilder::new()
             .with_block_cache()
-            .with_account_birthday(|rng, network, initial_chain_state| {
-                // We're constructing the birthday without adding any chain data.
-                assert!(initial_chain_state.is_none());
-
+            .with_initial_chain_state(|rng, network| {
                 // We set the Sapling and Orchard frontiers at the birthday height to be
                 // 1234 notes into the second shard.
                 let frontier_position = Position::from((0x1 << 16) + 1234);
-                let birthday_height =
-                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + birthday_offset;
+                let initial_shard_end =
+                    network.activation_height(NetworkUpgrade::Nu5).unwrap() + initial_shard_blocks;
+                let birthday_height = initial_shard_end + birthday_offset;
 
                 // Construct a fake chain state for the end of the block with the given
-                // birthday_offset from the Nu5 birthday.
-                let (_, sapling_initial_tree) = Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    (frontier_position + 1).into(),
-                    NonZeroU8::new(16).unwrap(),
-                );
+                // birthday_offset from the end of the last shard.
+                let (prior_sapling_roots, sapling_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        (frontier_position + 1).into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
                 #[cfg(feature = "orchard")]
-                let (_, orchard_initial_tree) = Frontier::random_with_prior_subtree_roots(
-                    rng,
-                    (frontier_position + 1).into(),
-                    NonZeroU8::new(16).unwrap(),
-                );
+                let (prior_orchard_roots, orchard_initial_tree) =
+                    Frontier::random_with_prior_subtree_roots(
+                        rng,
+                        (frontier_position + 1).into(),
+                        NonZeroU8::new(16).unwrap(),
+                    );
 
-                AccountBirthday::from_parts(
-                    ChainState::new(
+                InitialChainState {
+                    chain_state: ChainState::new(
                         birthday_height,
                         prior_block_hash,
                         sapling_initial_tree,
                         #[cfg(feature = "orchard")]
                         orchard_initial_tree,
                     ),
-                    None,
-                )
+                    prior_sapling_roots: if insert_prior_roots {
+                        prior_sapling_roots
+                            .into_iter()
+                            .map(|root| CommitmentTreeRoot::from_parts(initial_shard_end, root))
+                            .collect()
+                    } else {
+                        vec![]
+                    },
+                    #[cfg(feature = "orchard")]
+                    prior_orchard_roots: if insert_prior_roots {
+                        prior_orchard_roots
+                            .into_iter()
+                            .map(|root| CommitmentTreeRoot::from_parts(initial_shard_end, root))
+                            .collect()
+                    } else {
+                        vec![]
+                    },
+                }
             })
+            .with_account_having_current_birthday()
             .build();
 
         let birthday = st.test_account().unwrap().birthday().clone();
@@ -856,7 +875,7 @@ pub(crate) mod tests {
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (st, _, birthday, sap_active) =
-            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
+            test_with_nu5_birthday_offset::<T>(50, 26, BlockHash([0; 32]), true);
         let birthday_height = birthday.height().into();
 
         let expected = vec![
@@ -924,7 +943,7 @@ pub(crate) mod tests {
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (mut st, _, birthday, sap_active) =
-            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
+            test_with_nu5_birthday_offset::<T>(50, 26, BlockHash([0; 32]), false);
 
         // Set up the following situation:
         //
@@ -969,7 +988,7 @@ pub(crate) mod tests {
 
         // Use a non-zero birthday offset because Sapling and NU5 are activated at the same height.
         let (mut st, _, birthday, sap_active) =
-            test_with_nu5_birthday_offset::<T>(76, BlockHash([0; 32]));
+            test_with_nu5_birthday_offset::<T>(76, 1000, BlockHash([0; 32]), true);
 
         // Set up the following situation:
         //
@@ -977,19 +996,6 @@ pub(crate) mod tests {
         //        |<----- 1000 ----->|<--- 500 --->|
         //                    wallet_birthday
         let prior_tip_height = birthday.height();
-
-        // Set up some shard root history before the wallet birthday.
-        let last_shard_start = birthday.height() - 1000;
-        T::put_subtree_roots(
-            &mut st,
-            0,
-            &[CommitmentTreeRoot::from_parts(
-                last_shard_start,
-                // fake a hash, the value doesn't matter
-                T::empty_tree_leaf(),
-            )],
-        )
-        .unwrap();
 
         // Update the chain tip.
         let tip_height = prior_tip_height + 500;
@@ -1499,7 +1505,7 @@ pub(crate) mod tests {
     ///   in the last note in that block.
     /// * The next block crosses the shard boundary, with two notes in the prior
     ///   shard and two blocks in the subsequent shard
-    /// * An additional 100 blocks are scanned, to ensure that the checkpoint
+    /// * An additional 110 blocks are scanned, to ensure that the checkpoint
     ///   is pruned.
     ///
     /// The diagram below shows the arrangement. the position of the X indicates the
@@ -1657,7 +1663,7 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "orchard")]
-    fn orchard_block_spanning_tip_boundary() {
+    fn orchard_block_spanning_tip_boundary_complete() {
         let mut st = prepare_orchard_block_spanning_test(true);
         let account = st.test_account().cloned().unwrap();
         let birthday = account.birthday();

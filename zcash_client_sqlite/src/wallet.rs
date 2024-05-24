@@ -64,7 +64,7 @@
 //!   wallet.
 //! - `memo` the shielded memo associated with the output, if any.
 
-use incrementalmerkletree::Retention;
+use incrementalmerkletree::{Marking, Retention};
 use rusqlite::{self, named_params, OptionalExtension};
 use secrecy::{ExposeSecret, SecretVec};
 use shardtree::{error::ShardTreeError, store::ShardStore, ShardTree};
@@ -450,7 +450,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 // there exists a prior block for which frontier is the tree state at the end of
                 // the block.
                 id: birthday.height() - 1,
-                is_marked: false,
+                marking: Marking::Reference,
             },
         )?;
     }
@@ -477,7 +477,7 @@ pub(crate) fn add_account<P: consensus::Parameters>(
                 // there exists a prior block for which frontier is the tree state at the end of
                 // the block.
                 id: birthday.height() - 1,
-                is_marked: false,
+                marking: Marking::Reference,
             },
         )?;
     }

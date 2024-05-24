@@ -13,6 +13,7 @@ const SER_V1: u8 = 1;
 const NIL_TAG: u8 = 0;
 const LEAF_TAG: u8 = 1;
 const PARENT_TAG: u8 = 2;
+const PRUNED_TAG: u8 = 3;
 
 /// Writes a [`PrunableTree`] to the provided [`Write`] instance.
 ///
@@ -41,6 +42,10 @@ pub fn write_shard<H: HashSer, W: Write>(writer: &mut W, tree: &PrunableTree<H>)
             }
             Node::Nil => {
                 writer.write_u8(NIL_TAG)?;
+                Ok(())
+            }
+            Node::Pruned => {
+                writer.write_u8(PRUNED_TAG)?;
                 Ok(())
             }
         }
@@ -74,6 +79,7 @@ fn read_shard_v1<H: HashSer, R: Read>(mut reader: &mut R) -> io::Result<Prunable
             Ok(Tree::leaf((value, flags)))
         }
         NIL_TAG => Ok(Tree::empty()),
+        PRUNED_TAG => Ok(Tree::empty_pruned()),
         other => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Node tag not recognized: {}", other),

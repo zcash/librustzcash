@@ -45,7 +45,7 @@ zcash_proofs = { version = "0.15", path = "zcash_proofs", default-features = fal
 ff = "0.13"
 group = "0.13"
 incrementalmerkletree = "0.5.1"
-shardtree = "0.3"
+shardtree = "0.3.1"
 zcash_spec = "0.1"
 
 # Payment protocols
@@ -122,3 +122,7 @@ zip32 = "0.1.1"
 lto = true
 panic = 'abort'
 codegen-units = 1
+
+[patch.crates-io]
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "8b4b1315d64d171bcf701e5de59d0707dc029f9c" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "8b4b1315d64d171bcf701e5de59d0707dc029f9c" }

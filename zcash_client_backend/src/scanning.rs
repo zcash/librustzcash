@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
 
-use incrementalmerkletree::{Position, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 use sapling::{
     note_encryption::{CompactOutputDescription, SaplingDomain},
     SaplingIvk,
@@ -1105,7 +1105,11 @@ fn find_received<
         let retention = match (decrypted_note.is_some(), is_checkpoint) {
             (is_marked, true) => Retention::Checkpoint {
                 id: block_height,
-                is_marked,
+                marking: if is_marked {
+                    Marking::Marked
+                } else {
+                    Marking::None
+                },
             },
             (true, false) => Retention::Marked,
             (false, false) => Retention::Ephemeral,
@@ -1297,7 +1301,7 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use incrementalmerkletree::{Position, Retention};
+    use incrementalmerkletree::{Marking, Position, Retention};
     use sapling::Nullifier;
     use zcash_keys::keys::UnifiedSpendingKey;
     use zcash_primitives::{
@@ -1390,7 +1394,7 @@ mod tests {
                     Retention::Ephemeral,
                     Retention::Checkpoint {
                         id: scanned_block.height(),
-                        is_marked: true
+                        marking: Marking::Marked
                     }
                 ]
             );
@@ -1466,7 +1470,7 @@ mod tests {
                     Retention::Marked,
                     Retention::Checkpoint {
                         id: scanned_block.height(),
-                        is_marked: false
+                        marking: Marking::None
                     }
                 ]
             );
@@ -1525,7 +1529,7 @@ mod tests {
                 Retention::Ephemeral,
                 Retention::Checkpoint {
                     id: scanned_block.height(),
-                    is_marked: false
+                    marking: Marking::None
                 }
             ]
         );

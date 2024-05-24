@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, convert::Infallible};
 use std::fs::File;
 
 use group::ff::Field;
-use incrementalmerkletree::{Position, Retention};
+use incrementalmerkletree::{Marking, Position, Retention};
 use nonempty::NonEmpty;
 use prost::Message;
 use rand_chacha::ChaChaRng;
@@ -181,23 +181,6 @@ impl<Cache> TestBuilder<Cache> {
         self
     }
 
-    pub(crate) fn with_account_birthday(
-        mut self,
-        birthday: impl FnOnce(
-            &mut ChaChaRng,
-            &LocalNetwork,
-            Option<&InitialChainState>,
-        ) -> AccountBirthday,
-    ) -> Self {
-        assert!(self.account_birthday.is_none());
-        self.account_birthday = Some(birthday(
-            &mut self.rng,
-            &self.network,
-            self.initial_chain_state.as_ref(),
-        ));
-        self
-    }
-
     pub(crate) fn with_account_from_sapling_activation(mut self, prev_hash: BlockHash) -> Self {
         assert!(self.account_birthday.is_none());
         self.account_birthday = Some(AccountBirthday::from_parts(
@@ -245,7 +228,7 @@ impl<Cache> TestBuilder<Cache> {
                         initial_state.chain_state.final_sapling_tree().clone(),
                         Retention::Checkpoint {
                             id: initial_state.chain_state.block_height(),
-                            is_marked: false,
+                            marking: Marking::Reference,
                         },
                     )
                 })
@@ -262,7 +245,7 @@ impl<Cache> TestBuilder<Cache> {
                             initial_state.chain_state.final_orchard_tree().clone(),
                             Retention::Checkpoint {
                                 id: initial_state.chain_state.block_height(),
-                                is_marked: false,
+                                marking: Marking::Reference,
                             },
                         )
                     })
