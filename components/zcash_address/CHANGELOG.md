@@ -13,9 +13,6 @@ and this library adheres to Rust's notion of
 - Module `zcash_address::unified::address::testing` under the 
   `test-dependencies` feature.
 
-### Changed
-- MSRV is now 1.66.0.
-
 ## [0.3.2] - 2024-03-06
 ### Added
 - `zcash_address::convert`:

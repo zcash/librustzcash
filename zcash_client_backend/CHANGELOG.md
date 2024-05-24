@@ -29,7 +29,8 @@ and this library adheres to Rust's notion of
   wrapping protocol-address types, the `Recipient` type now wraps a
   `zcash_address::ZcashAddress`. This simplifies the process of tracking the
   original address to which value was sent.
-- MSRV is now 1.66.0.
+- MSRV is now 1.66.0 (except for the `lightwalletd-tonic` feature flag which
+  requires 1.70.0).
 
 ## [0.12.1] - 2024-03-27
 
