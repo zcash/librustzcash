@@ -2939,7 +2939,7 @@ mod tests {
                 height_1,
                 &[]
             ).as_deref(),
-            Ok(&[ref ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
+            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_1)
         );
         assert_matches!(
             st.wallet().get_unspent_transparent_output(utxo.outpoint()),
@@ -2972,7 +2972,7 @@ mod tests {
             st.wallet()
                 .get_unspent_transparent_outputs(taddr, height_2, &[])
                 .as_deref(),
-            Ok(&[ref ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_2)
+            Ok([ret]) if (ret.outpoint(), ret.txout(), ret.height()) == (utxo.outpoint(), utxo.txout(), height_2)
         );
 
         assert_matches!(

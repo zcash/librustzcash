@@ -9,6 +9,9 @@ and this library adheres to Rust's notion of
 - `zcash_keys::address::Address::try_from_zcash_address`
 - `zcash_keys::address::Receiver`
 
+### Changed
+- MSRV is now 1.66.0.
+
 ## [0.2.0] - 2024-03-25
 
 ### Added

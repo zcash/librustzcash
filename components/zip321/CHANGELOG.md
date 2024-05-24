@@ -32,3 +32,4 @@ The entries below are relative to the `zcash_client_backend` crate as of
   - `zip321::parse::{lead_addr, zcashparam}`
 - `zip321::Param::Memo` now boxes its argument.
 - `zip321::Param::Addr` now wraps a `zcash_address::ZcashAddress`
+- MSRV is now 1.66.0.
