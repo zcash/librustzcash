@@ -281,6 +281,11 @@ impl BuildResult {
     pub fn orchard_meta(&self) -> &orchard::builder::BundleMetadata {
         &self.orchard_meta
     }
+
+    /// Consumes BuildResult and returns the transaction that was constructed by the builder.
+    pub fn into_transaction(self) -> Transaction {
+        self.transaction
+    }
 }
 
 /// Generates a [`Transaction`] from its inputs and outputs.
