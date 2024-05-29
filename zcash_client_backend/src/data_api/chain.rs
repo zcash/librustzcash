@@ -591,7 +591,7 @@ where
     ParamsT: consensus::Parameters + Send + 'static,
     BlockSourceT: BlockSource,
     DbT: WalletWrite,
-    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + 'static,
+    <DbT as WalletRead>::AccountId: ConditionallySelectable + Default + Send + Sync + 'static,
 {
     assert_eq!(from_height, from_state.block_height + 1);
 

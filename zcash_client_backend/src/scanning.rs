@@ -52,7 +52,7 @@ use std::marker::PhantomData;
 /// [`CompactSaplingOutput`]: crate::proto::compact_formats::CompactSaplingOutput
 /// [`CompactOrchardAction`]: crate::proto::compact_formats::CompactOrchardAction
 /// [`scan_block`]: crate::scanning::scan_block
-pub trait ScanningKeyOps<D: Domain, AccountId, Nf> {
+pub trait ScanningKeyOps<D: Domain, AccountId, Nf>: Send + Sync {
     /// Prepare the key for use in batch trial decryption.
     fn prepare(&self) -> D::IncomingViewingKey;
 
@@ -72,8 +72,8 @@ pub trait ScanningKeyOps<D: Domain, AccountId, Nf> {
     fn nf(&self, note: &D::Note, note_position: Position) -> Option<Nf>;
 }
 
-impl<D: Domain, AccountId, Nf, K: ScanningKeyOps<D, AccountId, Nf>> ScanningKeyOps<D, AccountId, Nf>
-    for &K
+impl<D: Domain, AccountId, Nf, K: ScanningKeyOps<D, AccountId, Nf> + Send + Sync>
+    ScanningKeyOps<D, AccountId, Nf> for &K
 {
     fn prepare(&self) -> D::IncomingViewingKey {
         (*self).prepare()
@@ -120,7 +120,7 @@ pub struct ScanningKey<Ivk, Nk, AccountId> {
     key_scope: Option<Scope>,
 }
 
-impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
+impl<AccountId: Send + Sync> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
     for ScanningKey<sapling::SaplingIvk, sapling::NullifierDerivingKey, AccountId>
 {
     fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
@@ -140,7 +140,7 @@ impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
     }
 }
 
-impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
+impl<AccountId: Send + Sync> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
     for (AccountId, SaplingIvk)
 {
     fn prepare(&self) -> sapling::note_encryption::PreparedIncomingViewingKey {
@@ -161,7 +161,7 @@ impl<AccountId> ScanningKeyOps<SaplingDomain, AccountId, sapling::Nullifier>
 }
 
 #[cfg(feature = "orchard")]
-impl<AccountId> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
+impl<AccountId: Send + Sync> ScanningKeyOps<OrchardDomain, AccountId, orchard::note::Nullifier>
     for ScanningKey<orchard::keys::IncomingViewingKey, orchard::keys::FullViewingKey, AccountId>
 {
     fn prepare(&self) -> orchard::keys::PreparedIncomingViewingKey {
@@ -241,7 +241,9 @@ impl<AccountId, IvkTag> ScanningKeys<AccountId, IvkTag> {
     }
 }
 
-impl<AccountId: Copy + Eq + Hash + 'static> ScanningKeys<AccountId, (AccountId, Scope)> {
+impl<AccountId: Copy + Eq + Hash + 'static + Send + Sync>
+    ScanningKeys<AccountId, (AccountId, Scope)>
+{
     /// Constructs a [`ScanningKeys`] from an iterator of [`UnifiedFullViewingKey`]s,
     /// along with the account identifiers corresponding to those UFVKs.
     pub fn from_account_ufvks(
