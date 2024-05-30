@@ -465,6 +465,7 @@ where
 
     /// Creates a fake block at the expected next height containing multiple outputs
     /// and inserts it into the cache.
+    #[allow(dead_code)]
     pub(crate) fn generate_next_block_multi<Fvk: TestFvk>(
         &mut self,
         outputs: &[FakeCompactOutput<Fvk>],
